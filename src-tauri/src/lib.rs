@@ -821,6 +821,7 @@ pub fn run() {
                     enabled: prefs.clipboard.enabled,
                     keep_images: prefs.clipboard.keep_images,
                     ignored_apps: prefs.clipboard.ignored_apps.clone(),
+                    secrets: prefs.clipboard.secrets,
                 });
                 if prefs.clipboard.enabled {
                     clipboard::monitor::watch(&handle, &history);
@@ -902,6 +903,8 @@ pub fn run() {
             clipboard::commands::clipboard_delete,
             clipboard::commands::clipboard_clear,
             clipboard::commands::clipboard_count,
+            clipboard::commands::clipboard_keep_current,
+            clipboard::commands::clipboard_last_skipped,
             commands::settings::list_own_settings,
             snippets::commands::list_snippets,
             snippets::commands::save_snippet,

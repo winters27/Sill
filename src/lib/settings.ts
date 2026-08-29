@@ -61,6 +61,8 @@ export interface ClipboardHistorySettings {
   keepImages: boolean;
   /** Applications whose copies are never recorded. */
   ignoredApps: string[];
+  /** What to do with something that looks like a credential. */
+  secrets: "skip" | "redact" | "keep";
 }
 
 export interface SnippetSettings {

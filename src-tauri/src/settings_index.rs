@@ -310,6 +310,12 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "clipboard",
         "Clipboard History",
+        "Things that look like passwords",
+        "secret token api key credential password redact skip private",
+    ),
+    s(
+        "clipboard",
+        "Clipboard History",
         "Keep images",
         "screenshots pictures clipboard",
     ),

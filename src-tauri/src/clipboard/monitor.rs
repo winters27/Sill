@@ -13,10 +13,12 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::clipboard::kind::{classify, Kind};
+use crate::clipboard::sensitive;
 use crate::clipboard::store::Store;
 
 /// Longest text kept.
@@ -59,6 +61,18 @@ pub struct Clipboard {
     /// wrong either records Sill's own writes as though the user had copied
     /// them or swallows the next thing the user really does copy.
     suspended: Arc<AtomicBool>,
+    /// The most recent thing that was not recorded because it looked like a
+    /// credential.
+    ///
+    /// Held here rather than announced and forgotten, because the launcher is
+    /// hidden when almost every copy happens. An event alone would arrive with
+    /// nobody listening, and the user would open the history later to find
+    /// something quietly missing.
+    ///
+    /// Memory only, and never the value itself: what it looked like and how
+    /// long it was. The value is still on the clipboard, which is what makes
+    /// keeping it afterwards possible without storing it twice.
+    skipped: Arc<Mutex<Option<Skipped>>>,
     watching: Arc<AtomicBool>,
     /// The settings the watcher needs, cached here because it runs on its own
     /// thread with no route back to the preference store.
@@ -77,6 +91,8 @@ pub struct Rules {
     pub enabled: bool,
     pub keep_images: bool,
     pub ignored_apps: Vec<String>,
+    /// What to do with something that looks like a credential.
+    pub secrets: crate::clipboard::sensitive::Policy,
 }
 
 impl Clipboard {
@@ -100,6 +116,7 @@ impl Clipboard {
             store: Arc::new(Mutex::new(Store::open(&path).expect("a temp store opens"))),
             ignoring: Arc::new(AtomicUsize::new(0)),
             suspended: Arc::new(AtomicBool::new(false)),
+            skipped: Arc::new(Mutex::new(None)),
             watching: Arc::new(AtomicBool::new(false)),
             rules: Arc::new(Mutex::new(Rules::default())),
         }
@@ -113,11 +130,13 @@ impl Clipboard {
                 store: Arc::new(Mutex::new(store)),
                 ignoring: Arc::new(AtomicUsize::new(0)),
                 suspended: Arc::new(AtomicBool::new(false)),
+                skipped: Arc::new(Mutex::new(None)),
                 watching: Arc::new(AtomicBool::new(false)),
                 rules: Arc::new(Mutex::new(Rules {
                     enabled: true,
                     keep_images: true,
                     ignored_apps: Vec::new(),
+                    secrets: sensitive::Policy::default(),
                 })),
             }),
             Err(err) => {
@@ -194,6 +213,17 @@ impl Clipboard {
                 current.checked_sub(1)
             })
             .is_ok()
+    }
+
+    /// What was last declined, if it has not been superseded.
+    pub fn last_skipped(&self) -> Option<Skipped> {
+        self.skipped.lock().ok().and_then(|s| s.clone())
+    }
+
+    fn note_skipped(&self, skipped: Option<Skipped>) {
+        if let Ok(mut slot) = self.skipped.lock() {
+            *slot = skipped;
+        }
     }
 
     pub fn set_rules(&self, rules: Rules) {
@@ -284,8 +314,42 @@ impl clipboard_master::ClipboardHandler for Handler {
     }
 }
 
+/// An entry that was not recorded, and why.
+///
+/// Carries the length rather than any part of the value, so the notice can say
+/// something useful without the thing it declined to store passing through
+/// another layer.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Skipped {
+    pub what: String,
+    pub length: usize,
+}
+
 /// Reads whatever is on the clipboard now and records it.
 fn capture(app: &AppHandle, clipboard: &Clipboard) -> Result<(), String> {
+    let policy = clipboard.rules().secrets;
+    capture_with(app, clipboard, policy)
+}
+
+/// Records what is on the clipboard now, keeping it whatever it looks like.
+///
+/// The way back from a false positive. The entry is still on the clipboard, so
+/// nothing had to be held anywhere to make this possible: the notice says one
+/// was skipped, and this reads the same clipboard again and stores it.
+///
+/// A password manager's exclusion is still honoured. That is the application
+/// saying so about its own data, not a guess, and no button in Sill overrides
+/// somebody else's stated intent.
+pub fn keep_current(app: &AppHandle, clipboard: &Clipboard) -> Result<(), String> {
+    capture_with(app, clipboard, sensitive::Policy::Keep)
+}
+
+fn capture_with(
+    app: &AppHandle,
+    clipboard: &Clipboard,
+    policy: sensitive::Policy,
+) -> Result<(), String> {
     if is_confidential() {
         // A password manager said so. Nothing is read, so nothing can leak.
         return Ok(());
@@ -318,6 +382,32 @@ fn capture(app: &AppHandle, clipboard: &Clipboard) -> Result<(), String> {
             return Ok(());
         }
 
+        // Before anything is written. The history is a plain file on disk, so
+        // the decision has to happen here rather than at read time: an entry
+        // that reaches the database has already leaked.
+        let mut text = text;
+        if let Some(what) = crate::clipboard::sensitive::classify(&text).secret() {
+            match policy {
+                sensitive::Policy::Skip => {
+                    // Said out loud rather than dropped quietly. Silently
+                    // losing an entry is indistinguishable from the history
+                    // being broken, and the user is the only one who can tell
+                    // whether the guess was right.
+                    let notice = Skipped {
+                        what: what.to_string(),
+                        length: text.chars().count(),
+                    };
+                    clipboard.note_skipped(Some(notice.clone()));
+                    let _ = app.emit("clipboard:skipped", notice);
+                    return Ok(());
+                }
+                sensitive::Policy::Redact => {
+                    text = crate::clipboard::sensitive::redacted(what, text.chars().count());
+                }
+                sensitive::Policy::Keep => {}
+            }
+        }
+
         let kind = classify(&text);
         let store = clipboard.store();
         store
@@ -332,6 +422,11 @@ fn capture(app: &AppHandle, clipboard: &Clipboard) -> Result<(), String> {
             )
             .map_err(|e| e.to_string())?;
         drop(store);
+
+        // Something was recorded, so the last refusal is no longer the most
+        // recent thing that happened and its offer to keep it is stale: the
+        // clipboard has moved on and there is nothing left to keep.
+        clipboard.note_skipped(None);
 
         let _ = app.emit("clipboard:changed", ());
         return Ok(());

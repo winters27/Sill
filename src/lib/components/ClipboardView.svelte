@@ -17,6 +17,9 @@
     type ClipDetail,
     type ClipEntry,
     type ClipKind,
+    clipboardLastSkipped,
+    clipboardKeepCurrent,
+    type Skipped,
   } from "$lib/clipboard";
 
   interface Props {
@@ -162,21 +165,66 @@
     return out;
   });
 
+  /**
+   * The last thing declined for looking like a credential.
+   *
+   * Shown here rather than as a notification, because here is where a missing
+   * entry is noticed. It costs nothing when nothing was skipped, and there is
+   * no notification to dismiss when the guess was right.
+   */
+  let skipped = $state<Skipped | null>(null);
+
+  async function keepSkipped() {
+    try {
+      await clipboardKeepCurrent();
+      skipped = null;
+      await refresh();
+    } catch (err) {
+      // The clipboard has usually moved on by the time this fails, which is
+      // the honest thing to say rather than a generic failure.
+      skipped = null;
+      console.error(err);
+    }
+  }
+
   onMount(() => {
     let unlisten: UnlistenFn | undefined;
+    let refused: UnlistenFn | undefined;
 
     (async () => {
       await refresh();
+      skipped = await clipboardLastSkipped();
+
       // Something copied while this is open has to appear, or the history
       // looks broken at the exact moment it is being watched.
-      unlisten = await listen("clipboard:changed", () => void refresh());
+      unlisten = await listen("clipboard:changed", () => {
+        skipped = null;
+        void refresh();
+      });
+
+      refused = await listen<Skipped>("clipboard:skipped", ({ payload }) => {
+        skipped = payload;
+      });
     })();
 
-    return () => unlisten?.();
+    return () => {
+      unlisten?.();
+      refused?.();
+    };
   });
 </script>
 
 <div class="clipboard">
+  {#if skipped}
+    <!-- Above the list, because it is about something that is not in it. -->
+    <div class="skipped">
+      <span class="said">
+        A {skipped.what} was not saved, {skipped.length.toLocaleString()} characters.
+      </span>
+      <button class="keep" onclick={keepSkipped}>Save it anyway</button>
+    </div>
+  {/if}
+
   <div class="bar">
     <span class="count">
       {entries.length.toLocaleString()}
@@ -304,6 +352,43 @@
 </div>
 
 <style>
+  /* Stated once, quietly, and gone as soon as anything else is copied. It is
+     information rather than an alarm: most of the time the guess is right and
+     the right response is to read it and carry on. */
+  .skipped {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+    background: rgba(var(--accent-rgb), 0.07);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .said {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .keep {
+    flex: none;
+    padding: 3px 9px;
+    font: inherit;
+    font-size: 11px;
+    color: var(--text);
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .keep:hover {
+    color: var(--accent-bright);
+  }
+
   .clipboard {
     display: flex;
     flex-direction: column;

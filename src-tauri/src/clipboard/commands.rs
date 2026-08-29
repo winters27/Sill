@@ -167,3 +167,23 @@ pub fn clipboard_clear(clipboard: State<'_, Clipboard>, everything: bool) -> Res
 pub fn clipboard_count(clipboard: State<'_, Clipboard>) -> Result<i64, String> {
     clipboard.store().count().map_err(|e| e.to_string())
 }
+
+/// What was last declined for looking like a credential, if anything.
+#[tauri::command]
+pub fn clipboard_last_skipped(
+    clipboard: State<'_, Clipboard>,
+) -> Option<crate::clipboard::monitor::Skipped> {
+    clipboard.last_skipped()
+}
+
+/// Records what is on the clipboard now, credential-looking or not.
+///
+/// The way back when the detector was wrong. Nothing was held anywhere to make
+/// this work: the entry is still on the clipboard, so this reads it again.
+#[tauri::command]
+pub fn clipboard_keep_current(
+    app: tauri::AppHandle,
+    clipboard: State<'_, Clipboard>,
+) -> Result<(), String> {
+    crate::clipboard::monitor::keep_current(&app, &clipboard)
+}

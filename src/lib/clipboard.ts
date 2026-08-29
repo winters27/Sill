@@ -142,3 +142,32 @@ export function preview(text: string): string {
   const line = text.trim().split("\n", 1)[0] ?? "";
   return line.length > 160 ? `${line.slice(0, 160)}…` : line;
 }
+
+/** Something that was not recorded because it looked like a credential. */
+export interface Skipped {
+  /** What it appeared to be, in the vendor's words: "GitHub personal access token". */
+  what: string;
+  length: number;
+}
+
+/**
+ * The last thing declined for looking like a credential.
+ *
+ * Asked for on mount rather than only listened for. Almost every copy happens
+ * while the launcher is hidden, so an event alone would arrive with nobody
+ * there and the entry would be quietly missing when the history is next
+ * opened.
+ */
+export function clipboardLastSkipped(): Promise<Skipped | null> {
+  return invoke<Skipped | null>("clipboard_last_skipped").catch(() => null);
+}
+
+/**
+ * Records what is on the clipboard now, whatever it looks like.
+ *
+ * The way back from a wrong guess. Nothing was held to make this possible: the
+ * entry is still on the clipboard, so this simply reads it again.
+ */
+export function clipboardKeepCurrent(): Promise<void> {
+  return invoke("clipboard_keep_current");
+}

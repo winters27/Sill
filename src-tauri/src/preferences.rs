@@ -194,6 +194,13 @@ pub struct ClipboardHistory {
     /// this is for everything else worth keeping out: a terminal, a banking
     /// site's browser profile, a note where the secrets live.
     pub ignored_apps: Vec<String>,
+    /// What to do with something that looks like a credential.
+    ///
+    /// Defaults to not storing it. The clipboard database is a plain file that
+    /// any process running as the user can read, and that whatever backs up
+    /// `%APPDATA%` will copy, so a token that lands in it has already leaked.
+    #[serde(default)]
+    pub secrets: crate::clipboard::sensitive::Policy,
 }
 
 impl Default for ClipboardHistory {
@@ -203,6 +210,7 @@ impl Default for ClipboardHistory {
             retain_days: 30,
             keep_images: true,
             ignored_apps: Vec::new(),
+            secrets: crate::clipboard::sensitive::Policy::default(),
         }
     }
 }

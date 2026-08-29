@@ -17,6 +17,18 @@
 
   let { prefs, commit }: Props = $props();
 
+  /**
+   * What happens to something that looks like a credential.
+   *
+   * Worded as outcomes rather than as policy names. "Skip" says nothing about
+   * what the user gets; "Do not store" does.
+   */
+  const SECRETS = [
+    { value: "skip", label: "Do not store" },
+    { value: "redact", label: "Note it only" },
+    { value: "keep", label: "Store it" },
+  ];
+
   let count = $state(0);
   let status = $state("");
   let confirming = $state(false);
@@ -83,6 +95,23 @@
         options={RETENTION}
         onchange={(next) => {
           prefs.clipboard.retainDays = Number(next);
+          commit();
+        }}
+      />
+    {/snippet}
+  </Row>
+
+  <Row
+    title="Things that look like passwords"
+    description="Tokens, API keys and private keys are recognised by their published shapes, so a value that carries no such marker is never guessed at. The history is a plain file that anything running as you can read, which is why not storing it is the default."
+    disabled={!prefs.clipboard.enabled}
+  >
+    {#snippet control()}
+      <Segmented
+        value={prefs.clipboard.secrets}
+        options={SECRETS}
+        onchange={(next) => {
+          prefs.clipboard.secrets = next as "skip" | "redact" | "keep";
           commit();
         }}
       />

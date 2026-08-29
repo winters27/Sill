@@ -66,6 +66,7 @@ pub(crate) async fn set_preferences(
             enabled: prefs.clipboard.enabled,
             keep_images: prefs.clipboard.keep_images,
             ignored_apps: prefs.clipboard.ignored_apps.clone(),
+            secrets: prefs.clipboard.secrets,
         });
         // Watching starts on demand and never stops: the listener owns a
         // thread, and turning the setting off simply stops it recording.

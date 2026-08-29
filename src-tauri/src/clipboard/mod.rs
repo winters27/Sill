@@ -7,4 +7,5 @@
 pub mod commands;
 pub mod kind;
 pub mod monitor;
+pub mod sensitive;
 pub mod store;
