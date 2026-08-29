@@ -72,11 +72,16 @@ pub struct SearchResult {
     pub id: String,
     pub extension: String,
     pub extension_title: String,
-    pub command: String,
     pub title: String,
     pub subtitle: String,
     pub mode: String,
     pub entrypoint: String,
+    /// Only when it differs from `entrypoint`.
+    ///
+    /// Most entries take their icon from the thing they launch, and the window
+    /// already falls back to `entrypoint` when this is absent. Sending the
+    /// same path twice per row was the single largest field in the payload,
+    /// and paths are the longest strings a result carries.
     pub icon: Option<String>,
     pub panel: Option<String>,
     /// Indices into `title` that matched, so the UI can highlight them.
@@ -94,16 +99,20 @@ impl From<RankedCommand> for SearchResult {
             score: _,
         } = ranked;
 
+        // `command.command` is not here on purpose. It is the manifest name a
+        // command was declared under, which matching uses and nothing in the
+        // window ever reads.
+        let icon = command.icon.filter(|icon| *icon != command.entrypoint);
+
         Self {
             id: command.id,
             extension: command.extension,
             extension_title: command.extension_title,
-            command: command.command,
             title: command.title,
             subtitle: command.subtitle,
             mode: command.mode,
             entrypoint: command.entrypoint,
-            icon: command.icon,
+            icon,
             panel: command.panel,
             matched,
         }

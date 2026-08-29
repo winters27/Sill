@@ -11,7 +11,6 @@ export interface RankedCommand {
   id: string;
   extension: string;
   extensionTitle: string;
-  command: string;
   title: string;
   subtitle: string;
   /**
@@ -142,7 +141,6 @@ export function fileAsCommand(hit: FileHit): RankedCommand {
     id: `file:${hit.path}`,
     extension: "file",
     extensionTitle: hit.isDir ? "Folder" : "File",
-    command: hit.name,
     title: hit.name,
     subtitle: hit.path,
     mode: "file",
