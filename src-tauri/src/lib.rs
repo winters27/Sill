@@ -90,27 +90,84 @@ fn now_seconds() -> i64 {
         .unwrap_or(0)
 }
 
-/// Where built extensions register themselves during development.
-fn dev_index_path() -> PathBuf {
+/// The repository root, as it was when this binary was compiled.
+///
+/// Only meaningful on the machine that built it, which is exactly what makes
+/// it a development path and nothing else. An installed copy is somewhere
+/// else entirely and its `CARGO_MANIFEST_DIR` points at a directory that
+/// almost certainly does not exist.
+fn dev_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("src-tauri has a parent")
-        .join("extensions")
-        .join("build")
-        .join("index.json")
+        .to_path_buf()
 }
 
-/// Where the bundled extension host lives during development.
+/// Where the extensions Sill can run are listed.
 ///
-/// Release builds will ship it as a resource; resolving that is M2 work, so
-/// this deliberately fails loudly rather than guessing.
-fn dev_host_js() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("src-tauri has a parent")
-        .join("host")
-        .join("dist")
-        .join("host.js")
+/// Two places, and both count. Installed extensions live under the user's data
+/// directory, because they are installed rather than shipped. Extensions built
+/// from the repository live in the working tree. A developer has both, and
+/// preferring one would make the other invisible for no reason.
+fn index_paths(app: &AppHandle) -> Vec<PathBuf> {
+    let mut paths = vec![data_dir(app).join("extensions").join("index.json")];
+
+    let dev = dev_root().join("extensions").join("build").join("index.json");
+    if dev.exists() {
+        paths.push(dev);
+    }
+
+    paths
+}
+
+/// Where the extension host bundle is.
+///
+/// This used to be the development path and only the development path, which
+/// meant **an installed Sill could never run an extension**: the resolved
+/// location was a directory on whichever machine compiled the binary.
+///
+/// Three candidates, in order, and each is there for a reason:
+///
+/// 1. `SILL_HOST_JS`, so a rebuilt host can be pointed at without reinstalling.
+/// 2. The bundled resource, which is what an installed copy uses.
+/// 3. The repository's build output, which is what `cargo run` uses.
+///
+/// Only a candidate that exists is returned. Handing back a path that is not
+/// there produces "could not spawn node" several steps later, which says
+/// nothing about which of three places was looked at.
+fn host_js(app: &AppHandle) -> PathBuf {
+    let bundled = app
+        .path()
+        .resolve("host/host.js", tauri::path::BaseDirectory::Resource)
+        .unwrap_or_else(|_| PathBuf::from("host/host.js"));
+
+    let candidates = [
+        (
+            "SILL_HOST_JS",
+            std::env::var_os("SILL_HOST_JS").map(PathBuf::from),
+        ),
+        ("bundled resource", Some(bundled.clone())),
+        (
+            "development build",
+            Some(dev_root().join("host").join("dist").join("host.js")),
+        ),
+    ];
+
+    for (source, candidate) in candidates {
+        let Some(path) = candidate else { continue };
+        if path.exists() {
+            println!("[sill] extension host: {} ({source})", path.display());
+            return path;
+        }
+    }
+
+    // Nothing found. The resource location is the one an installed copy is
+    // missing, so it is the useful thing to name when a launch fails.
+    crate::say!(
+        "no extension host found. Expected it at {} or built at host/dist/host.js",
+        bundled.display()
+    );
+    bundled
 }
 
 /// How long the host may sit unused before it is shut down.
@@ -847,6 +904,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
 
     let state = handle.state::<RegistryState>().inner().clone();
     let sources = handle.state::<PrefsState>().inner.blocking_lock().sources.clone();
+    let index_paths = index_paths(&handle);
 
     tauri::async_runtime::spawn(async move {
         // Last run's index, shown immediately. Discovery costs a PowerShell
@@ -865,7 +923,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
         // The scan then rebuilds the index from scratch and replaces it
         // wholesale. Merging into the cache instead would mean an uninstalled
         // application never disappeared.
-        let fresh = tokio::task::spawn_blocking(move || scan_everything(&sources))
+        let fresh = tokio::task::spawn_blocking(move || scan_everything(&sources, &index_paths))
             .await
             .unwrap_or_default();
 
@@ -907,11 +965,24 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
 /// Blocking on purpose. It is a PowerShell round trip plus a few thousand
 /// filesystem calls, so it runs on a blocking task rather than holding an
 /// async worker.
-fn scan_everything(sources: &preferences::Sources) -> Vec<registry::CommandRecord> {
+fn scan_everything(
+    sources: &preferences::Sources,
+    index_paths: &[PathBuf],
+) -> Vec<registry::CommandRecord> {
     // Sill's own commands are never optional; they are how the launcher is
     // configured and repaired.
     let mut out = registry::builtins();
-    out.extend(registry::load_index(&dev_index_path()));
+    // Every index that exists, deduplicated by id: an extension installed
+    // under the data directory and the same one built from the repository are
+    // the same command, and the installed copy is the one that wins.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for path in index_paths {
+        for command in registry::load_index(path) {
+            if seen.insert(command.id.clone()) {
+                out.push(command);
+            }
+        }
+    }
 
     // Settings pages are not files, so no scan finds them.
     if sources.windows_settings {
@@ -1259,9 +1330,10 @@ fn reload_index(app: &AppHandle) {
     let handle = app.clone();
     let state = app.state::<RegistryState>().inner().clone();
     let sources = app.state::<PrefsState>().inner.blocking_lock().sources.clone();
+    let index_paths = index_paths(app);
 
     tauri::async_runtime::spawn(async move {
-        let fresh = tokio::task::spawn_blocking(move || scan_everything(&sources))
+        let fresh = tokio::task::spawn_blocking(move || scan_everything(&sources, &index_paths))
             .await
             .unwrap_or_default();
 
@@ -1506,7 +1578,7 @@ pub fn run() {
                     host_bridge::SillBridge::new(handle.clone()),
                     Arc::new(storage),
                 )),
-                host_js: Arc::new(dev_host_js()),
+                host_js: Arc::new(host_js(&handle)),
                 last_used: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
             });
 
