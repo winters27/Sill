@@ -269,6 +269,10 @@
         return "Settings";
       case "file":
         return "Files";
+      case "window":
+        return "Open Windows";
+      case "window":
+        return "Open Windows";
       case "exe":
         return "Developer";
       default:

@@ -39,7 +39,12 @@ pub fn builtins() -> ActionRegistry {
         Box::new(CopyClipboardEntry),
     ];
 
-    ActionRegistry::new(core.into_iter().chain(transforms()).collect())
+    ActionRegistry::new(
+        core.into_iter()
+            .chain(transforms())
+            .chain(window_actions())
+            .collect(),
+    )
 }
 
 /// Replaces what is on the clipboard, remembering what was there.
@@ -663,4 +668,248 @@ impl Action for CopyClipboardEntry {
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
         copy_with_undo(ctx, &object.target, "Copied")
     }
+}
+
+// ------------------------------------------------------------------ windows
+
+/// The handle behind a window object, or a reason it is no longer one.
+fn window_handle(object: &Object) -> Result<isize, String> {
+    object
+        .target
+        .parse::<isize>()
+        .map_err(|_| format!("{} is not a window", object.title))
+}
+
+/// What a window looked like before an action moved it.
+///
+/// Read before the move rather than reconstructed after, because after the
+/// move the old rectangle is gone and there is nothing to reconstruct it from.
+fn window_undo(id: isize) -> Option<Undo> {
+    let window = crate::windowing::find(id)?;
+    Some(Undo::RestoreWindow {
+        id,
+        rect: window.rect,
+        maximized: window.maximized,
+        title: window.title.clone(),
+    })
+}
+
+/// Brings a window to the front.
+struct FocusWindow;
+
+#[async_trait]
+impl Action for FocusWindow {
+    fn id(&self) -> &'static str {
+        "sill.window.focus"
+    }
+
+    fn title(&self) -> &'static str {
+        "Switch To"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Window
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        crate::windowing::focus(window_handle(object)?)?;
+        Ok(Outcome::done(format!("Switched to {}", object.title)))
+    }
+}
+
+/// Asks a window to close, the way its own close button does.
+struct CloseWindow;
+
+#[async_trait]
+impl Action for CloseWindow {
+    fn id(&self) -> &'static str {
+        "sill.window.close"
+    }
+
+    fn title(&self) -> &'static str {
+        "Close Window"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Window
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    /// No undo, and there must not be one.
+    ///
+    /// A closed window cannot be reopened, and offering an undo that reopens
+    /// the *application* would be a lie about what was restored. The
+    /// application gets to prompt about unsaved work; Sill does not second
+    /// guess that.
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        crate::windowing::close(window_handle(object)?)?;
+        Ok(Outcome::done(format!("Asked {} to close", object.title)))
+    }
+}
+
+/// Minimize, maximize and restore, which are one action with three settings.
+struct WindowState {
+    id: &'static str,
+    title: &'static str,
+    apply: fn(isize) -> Result<(), String>,
+    said: &'static str,
+}
+
+#[async_trait]
+impl Action for WindowState {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+
+    fn title(&self) -> &'static str {
+        self.title
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Window
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let id = window_handle(object)?;
+        let undo = window_undo(id);
+
+        (self.apply)(id)?;
+
+        let message = format!("{} {}", object.title, self.said);
+        Ok(match undo {
+            Some(undo) => Outcome::undoable(message, undo),
+            None => Outcome::done(message),
+        })
+    }
+}
+
+/// Sends a window to a named position on the display it is already on.
+struct SnapWindow {
+    slot: crate::windowing::Slot,
+}
+
+#[async_trait]
+impl Action for SnapWindow {
+    fn id(&self) -> &'static str {
+        self.slot.action_id()
+    }
+
+    fn title(&self) -> &'static str {
+        self.slot.title()
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Window
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let id = window_handle(object)?;
+
+        // Read before the move. Afterwards the old rectangle is gone.
+        let undo = window_undo(id);
+        crate::windowing::snap(id, self.slot)?;
+
+        let message = format!("{} sent to the {}", object.title, self.slot.title());
+        Ok(match undo {
+            Some(undo) => Outcome::undoable(message, undo),
+            None => Outcome::done(message),
+        })
+    }
+}
+
+/// Moves a window to the next display, keeping its position proportionally.
+struct NextDisplay;
+
+#[async_trait]
+impl Action for NextDisplay {
+    fn id(&self) -> &'static str {
+        "sill.window.nextDisplay"
+    }
+
+    fn title(&self) -> &'static str {
+        "Move to Next Display"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Window
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let id = window_handle(object)?;
+        let window =
+            crate::windowing::find(id).ok_or_else(|| format!("{} has closed", object.title))?;
+
+        let undo = window_undo(id);
+        crate::windowing::send_to_monitor(id, window.monitor + 1)?;
+
+        let message = format!("{} moved to the next display", object.title);
+        Ok(match undo {
+            Some(undo) => Outcome::undoable(message, undo),
+            None => Outcome::done(message),
+        })
+    }
+}
+
+/// Everything that can be done to a window.
+///
+/// Switch first because it is what a window in a result list is for. The
+/// layout slots come after the states, in the order [`Slot::ALL`] lists them,
+/// so the panel reads halves, quarters, thirds rather than alphabetically.
+fn window_actions() -> Vec<Box<dyn Action>> {
+    let mut actions: Vec<Box<dyn Action>> = vec![
+        Box::new(FocusWindow),
+        Box::new(WindowState {
+            id: "sill.window.minimize",
+            title: "Minimize",
+            apply: crate::windowing::minimize,
+            said: "minimized",
+        }),
+        Box::new(WindowState {
+            id: "sill.window.maximize",
+            title: "Maximize",
+            apply: crate::windowing::maximize,
+            said: "maximized",
+        }),
+        Box::new(WindowState {
+            id: "sill.window.restore",
+            title: "Restore",
+            apply: crate::windowing::restore,
+            said: "restored",
+        }),
+    ];
+
+    actions.extend(
+        crate::windowing::Slot::ALL
+            .into_iter()
+            .map(|slot| Box::new(SnapWindow { slot }) as Box<dyn Action>),
+    );
+
+    actions.push(Box::new(NextDisplay));
+    // Last on purpose. Closing is the one thing here that cannot be undone,
+    // and it should not sit next to the arrow keys.
+    actions.push(Box::new(CloseWindow));
+    actions
 }

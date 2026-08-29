@@ -44,6 +44,13 @@ pub enum ObjectKind {
     ClipboardEntry,
     /// Loose text: a selection, or whatever an action produced.
     Text,
+    /// A window that is open right now.
+    ///
+    /// The first kind that is not in the index and never will be. The desktop
+    /// changes faster than any scan could keep up with, so a window is
+    /// enumerated at the moment it is searched for and its identity is a
+    /// handle that stops being valid when it closes.
+    Window,
 }
 
 impl ObjectKind {
@@ -65,6 +72,7 @@ impl ObjectKind {
         Self::Answer,
         Self::ClipboardEntry,
         Self::Text,
+        Self::Window,
     ];
 
     /// The kind behind an index entry's `mode`.
@@ -94,6 +102,7 @@ impl ObjectKind {
             // and they still need a name to be dispatched on.
             "clipboard" => Self::ClipboardEntry,
             "text" => Self::Text,
+            "window" => Self::Window,
             _ => return None,
         })
     }
@@ -106,7 +115,14 @@ impl ObjectKind {
     pub fn hands_over_the_screen(self) -> bool {
         matches!(
             self,
-            Self::Application | Self::File | Self::Folder | Self::SystemSetting | Self::Quicklink
+            Self::Application
+                | Self::File
+                | Self::Folder
+                | Self::SystemSetting
+                | Self::Quicklink
+                // Switching to a window is the clearest case of all: the whole
+                // point is that something else ends up in front.
+                | Self::Window
         )
     }
 }
@@ -136,6 +152,28 @@ pub struct Object {
 }
 
 impl Object {
+    /// The object an open window stands for.
+    ///
+    /// The title is what the window calls itself and the application name goes
+    /// beside it, because a window titled "Untitled" is not findable and a
+    /// window titled "index.ts" could belong to any of four editors.
+    pub fn from_window(window: &crate::windowing::Window) -> Self {
+        Self {
+            kind: ObjectKind::Window,
+            id: format!("window:{}", window.id),
+            // The handle, as the string every action parses back. Not the
+            // title: two windows of one application routinely share a title,
+            // and acting on the wrong one is indistinguishable from a bug.
+            target: window.id.to_string(),
+            title: if window.title.is_empty() {
+                window.app.clone()
+            } else {
+                window.title.clone()
+            },
+            mode: "window".to_string(),
+        }
+    }
+
     /// The object an index entry stands for.
     pub fn from_record(record: &CommandRecord) -> Option<Self> {
         Some(Self {
@@ -177,6 +215,53 @@ mod tests {
                 "{mode} has no kind, so nothing can be done with it"
             );
         }
+    }
+
+    #[test]
+    fn a_window_is_identified_by_its_handle_and_not_its_title() {
+        // Two windows of one application share a title constantly: two File
+        // Explorer windows on the same folder, two documents called Untitled.
+        // Identifying by title closes the wrong one.
+        let a = crate::windowing::Window {
+            id: 1234,
+            title: "Downloads - File Explorer".into(),
+            app: "File Explorer".into(),
+            app_path: "C:/Windows/explorer.exe".into(),
+            pid: 42,
+            minimized: false,
+            maximized: false,
+            rect: crate::windowing::Rect::new(0, 0, 100, 100),
+            monitor: 0,
+        };
+        let b = crate::windowing::Window { id: 5678, ..a.clone() };
+
+        let first = Object::from_window(&a);
+        let second = Object::from_window(&b);
+
+        assert_eq!(first.title, second.title, "the titles really are the same");
+        assert_ne!(first.id, second.id, "but they are not the same window");
+        assert_eq!(first.target, "1234");
+        assert_eq!(second.target, "5678");
+        assert_eq!(first.kind, ObjectKind::Window);
+    }
+
+    #[test]
+    fn a_window_with_no_title_falls_back_to_its_application() {
+        // Better than an empty row. It is still selectable and still says
+        // enough to be worth pressing Enter on.
+        let nameless = crate::windowing::Window {
+            id: 9,
+            title: String::new(),
+            app: "Steam".into(),
+            app_path: String::new(),
+            pid: 1,
+            minimized: false,
+            maximized: false,
+            rect: crate::windowing::Rect::new(0, 0, 10, 10),
+            monitor: 0,
+        };
+
+        assert_eq!(Object::from_window(&nameless).title, "Steam");
     }
 
     #[test]

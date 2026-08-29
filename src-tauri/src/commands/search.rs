@@ -3,7 +3,7 @@
 use tauri::State;
 
 use crate::state::{now_seconds, PrefsState, RegistryState};
-use crate::{calculator, files, registry};
+use crate::{calculator, files, registry, windowing};
 
 /// The root list, or what matches a query.
 #[tauri::command]
@@ -41,6 +41,50 @@ pub(crate) async fn search_commands(
     // form carries the fields matching needs, which is most of the bytes and
     // none of the use once ranking is over.
     Ok(results.into_iter().map(Into::into).collect())
+}
+
+/// The open windows matching a query.
+///
+/// Separate from `search_commands` for the reason file search is separate: it
+/// is a different corpus with a different lifetime. The index is scanned once
+/// and cached; the desktop is enumerated fresh every time, because a window
+/// list is wrong the moment anything is opened or closed.
+///
+/// Ranked by the same function as everything else. A window is a
+/// `CommandRecord` for exactly as long as the ranking takes, so "chrome"
+/// finds Chrome windows by the same rules that make it find Chrome.
+#[tauri::command]
+pub(crate) async fn search_windows(
+    state: State<'_, RegistryState>,
+    query: String,
+) -> Result<Vec<registry::SearchResult>, String> {
+    // Blocking: enumeration is synchronous Win32 and touches every top-level
+    // window on the desktop.
+    let records = tokio::task::spawn_blocking(windowing::records)
+        .await
+        .unwrap_or_default();
+
+    let registry = state.inner.lock().await;
+
+    // No exclusion terms. Those hide things from the index, and a window that
+    // is open is a fact rather than a preference: hiding it would mean the
+    // switcher cannot reach something the taskbar shows.
+    let results = registry::search_excluding(
+        records.iter(),
+        &query,
+        &registry.frecency,
+        now_seconds(),
+        registry::SEARCH_LIMIT,
+        &[],
+    );
+
+    Ok(results.into_iter().map(Into::into).collect())
+}
+
+/// Every display, for laying windows out.
+#[tauri::command]
+pub(crate) async fn list_monitors() -> Result<Vec<windowing::Monitor>, String> {
+    Ok(windowing::monitors())
 }
 
 /// Files matching a query, from Everything.

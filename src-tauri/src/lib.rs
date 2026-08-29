@@ -28,6 +28,7 @@ pub mod state;
 pub mod summon;
 pub mod synthetic;
 pub mod text;
+pub mod windowing;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -772,6 +773,8 @@ pub fn run() {
             commands::system::quit_app,
             commands::search::search_commands,
             commands::search::search_files,
+            commands::search::search_windows,
+            commands::search::list_monitors,
             commands::search::open_path,
             commands::launch::launch_command,
             commands::launch::actions_for,

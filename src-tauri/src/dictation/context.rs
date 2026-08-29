@@ -34,11 +34,6 @@ pub fn foreground_app() -> Option<String> {
 /// perfectly well without knowing where it is going.
 #[cfg(windows)]
 pub fn foreground_app_full() -> Option<App> {
-    use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
-    use windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
-        PROCESS_QUERY_LIMITED_INFORMATION,
-    };
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
     // SAFETY: the handle is closed on every path out, and the buffer's length
@@ -51,10 +46,30 @@ pub fn foreground_app_full() -> Option<App> {
 
         let mut pid = 0u32;
         GetWindowThreadProcessId(window, Some(&mut pid));
-        if pid == 0 {
-            return None;
-        }
+        of_pid(pid)
+    }
+}
 
+/// The application a process id belongs to.
+///
+/// Split out from the foreground lookup because the window list wants the same
+/// answer for every window on the desktop, and there is no reason for two
+/// copies of the `OpenProcess` dance.
+#[cfg(windows)]
+pub fn of_pid(pid: u32) -> Option<App> {
+    use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    if pid == 0 {
+        return None;
+    }
+
+    // SAFETY: the handle is closed on every path out, and the buffer's length
+    // is passed as an in-out parameter exactly as the API requires.
+    unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
 
         let mut buffer = [0u16; MAX_PATH as usize];
@@ -78,6 +93,11 @@ pub fn foreground_app_full() -> Option<App> {
             path,
         })
     }
+}
+
+#[cfg(not(windows))]
+pub fn of_pid(_pid: u32) -> Option<App> {
+    None
 }
 
 #[cfg(not(windows))]

@@ -18,6 +18,7 @@
     unloadExtension,
     performBuiltin,
     searchFiles,
+    searchWindows,
     openPath,
     fileAsCommand,
     actionsFor,
@@ -319,6 +320,17 @@
 
     if (!current.trim()) return;
 
+    // Open windows, above files and below the index. Not debounced: this is
+    // a Win32 enumeration and a rank in Rust, on the same order as the command
+    // search rather than the file one.
+    try {
+      const open = await searchWindows(current);
+      if (id !== searchId) return;
+      if (open.length) commands = [...commands, ...open];
+    } catch (err) {
+      if (id === searchId) status = `window search failed: ${err}`;
+    }
+
     // Files are appended after the commands, so a slower file query can never
     // reorder or delay what is already shown.
     fileTimer = setTimeout(async () => {
@@ -376,6 +388,19 @@
         mode = "argument";
         selected = 0;
         query = "";
+        return;
+      }
+
+      // A window is not in the index, so there is nothing to launch. It is
+      // switched to through the action registry, the same way the action
+      // panel would do it, so there is one implementation of "switch to".
+      if (command.mode === "window") {
+        try {
+          await runObjectAction("sill.window.focus", asTarget(command));
+          await dismiss();
+        } catch (err) {
+          status = `${err}`;
+        }
         return;
       }
 

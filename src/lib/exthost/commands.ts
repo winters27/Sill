@@ -33,7 +33,9 @@ export interface RankedCommand {
     /** A quicklink that opens straight away. */
     | "quicklink"
     /** A quicklink with `{query}` in it, which takes over the field first. */
-    | "quicklink-arg";
+    | "quicklink-arg"
+    /** A window that is open right now. Never from the index. */
+    | "window";
   entrypoint: string;
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;
@@ -69,7 +71,9 @@ export interface LaunchedCommand {
     /** A quicklink that opens straight away. */
     | "quicklink"
     /** A quicklink with `{query}` in it, which takes over the field first. */
-    | "quicklink-arg";
+    | "quicklink-arg"
+    /** A window that is open right now. Never from the index. */
+    | "window";
 }
 
 export function searchCommands(query: string): Promise<RankedCommand[]> {
@@ -123,6 +127,39 @@ export interface FileHit {
 
 export function searchFiles(query: string): Promise<FileHit[]> {
   return invoke<FileHit[]>("search_files", { query }).catch(() => []);
+}
+
+/**
+ * The open windows matching a query.
+ *
+ * A third corpus beside the index and the filesystem, and the one with the
+ * shortest life: it is enumerated fresh on every call, because a window list
+ * is wrong the moment anything is opened, closed or renamed. Nothing here is
+ * cached for the same reason.
+ *
+ * Ranked in Rust by the same function as everything else, so these arrive
+ * already in order and merge straight into the list.
+ */
+export function searchWindows(query: string): Promise<RankedCommand[]> {
+  return invoke<RankedCommand[]>("search_windows", { query }).catch(() => []);
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface MonitorInfo {
+  index: number;
+  full: Rect;
+  work: Rect;
+  primary: boolean;
+}
+
+export function listMonitors(): Promise<MonitorInfo[]> {
+  return invoke<MonitorInfo[]>("list_monitors").catch(() => []);
 }
 
 export function openPath(path: string): Promise<void> {

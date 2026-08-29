@@ -39,6 +39,12 @@ pub enum Capability {
     Network,
     /// Opens or changes one of Sill's own windows.
     Ui,
+    /// Moves, resizes, focuses or closes somebody else's window.
+    ///
+    /// Separate from `Ui`, which is Sill's own surface. Reaching into another
+    /// application's windows is a different thing to ask for and the two must
+    /// not be grantable together by accident.
+    WindowControl,
 }
 
 /// How to take an action back.
@@ -57,6 +63,18 @@ pub enum Capability {
 pub enum Undo {
     /// Put back what was on the clipboard before.
     RestoreClipboard { text: String },
+    /// Put a window back where it was, and back how it was.
+    ///
+    /// The state matters as much as the rectangle: a window that was maximized
+    /// and got snapped to a half has to be maximized again, not merely
+    /// restored to the size it would have had. Restoring only the rectangle
+    /// leaves it looking almost right, which is worse than leaving it alone.
+    RestoreWindow {
+        id: isize,
+        rect: crate::windowing::Rect,
+        maximized: bool,
+        title: String,
+    },
 }
 
 /// What happened, and whether it can be reversed.
@@ -243,6 +261,28 @@ pub fn undo(ctx: &ActionCtx, undo: &Undo) -> Result<String, String> {
                 .write_text(text.clone())
                 .map_err(|err| format!("could not restore the clipboard: {err}"))?;
             Ok("Clipboard restored".to_string())
+        }
+
+        Undo::RestoreWindow {
+            id,
+            rect,
+            maximized,
+            title,
+        } => {
+            // The window may have closed since. That is not a failure worth
+            // an error dialog, but it is worth saying, because otherwise undo
+            // silently appears to have worked.
+            if crate::windowing::find(*id).is_none() {
+                return Err(format!("{title} has closed"));
+            }
+
+            if *maximized {
+                crate::windowing::maximize(*id)?;
+            } else {
+                crate::windowing::place(*id, *rect)?;
+            }
+
+            Ok(format!("{title} put back"))
         }
     }
 }

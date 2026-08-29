@@ -157,7 +157,7 @@ pub fn restore_foreground() {
 /// duration of the call makes Windows treat the change as user-driven, which
 /// is the standard approach and what every launcher on this platform does.
 #[cfg(windows)]
-fn force_foreground(hwnd: HWND) {
+pub(crate) fn force_foreground(hwnd: HWND) {
     // SAFETY: all handles and thread ids come from Win32 itself, and the
     // attach is unwound before returning in every path.
     unsafe {
