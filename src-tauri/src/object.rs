@@ -233,7 +233,10 @@ mod tests {
             rect: crate::windowing::Rect::new(0, 0, 100, 100),
             monitor: 0,
         };
-        let b = crate::windowing::Window { id: 5678, ..a.clone() };
+        let b = crate::windowing::Window {
+            id: 5678,
+            ..a.clone()
+        };
 
         let first = Object::from_window(&a);
         let second = Object::from_window(&b);

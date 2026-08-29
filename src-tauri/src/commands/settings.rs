@@ -1,7 +1,8 @@
 //! Reading and writing Sill's own preferences, and the window that edits them.
 
 use crate::{
-    apply_autostart, apply_dictation, apply_tray, apply_window_size, rebind_summon, same_dictation,
+    apply_autostart, apply_dictation, apply_tray, apply_window_size, rebind_summon,
+    rebind_switcher, same_dictation,
 };
 
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -85,6 +86,10 @@ pub(crate) async fn set_preferences(
         rebind_summon(&app, &previous.hotkey.summon, &prefs.hotkey.summon);
     }
 
+    if previous.hotkey.switcher != prefs.hotkey.switcher {
+        rebind_switcher(&app, &previous.hotkey.switcher, &prefs.hotkey.switcher);
+    }
+
     if previous.appearance.backdrop != prefs.appearance.backdrop
         || previous.appearance.tint_alpha != prefs.appearance.tint_alpha
     {
@@ -160,4 +165,16 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
 #[tauri::command]
 pub(crate) fn list_own_settings() -> Vec<settings_index::Setting> {
     settings_index::SETTINGS.to_vec()
+}
+
+/// Accelerators another application already owns.
+///
+/// Read by the settings window so a key that could not be bound says so, in
+/// the row that set it, rather than working silently in the log and nowhere
+/// else. Windows does not say which application took it, so neither does this.
+#[tauri::command]
+pub(crate) async fn hotkey_conflicts(app: AppHandle) -> Vec<String> {
+    app.try_state::<crate::HotkeyConflicts>()
+        .map(|conflicts| conflicts.all())
+        .unwrap_or_default()
 }

@@ -48,7 +48,9 @@
   const tree = new ViewTree();
 
   /** Root browses installed commands; command shows one that is running. */
-  let mode = $state<"root" | "command" | "clipboard" | "argument">("root");
+  let mode = $state<
+    "root" | "command" | "clipboard" | "argument" | "switcher"
+  >("root");
   /**
    * The quicklink waiting for something to be typed into it.
    *
@@ -131,7 +133,7 @@
   });
 
   const count = $derived.by(() => {
-    if (mode === "root") return commands.length;
+    if (mode === "root" || mode === "switcher") return commands.length;
     if (mode === "clipboard") return clipboardCount;
     return items.length;
   });
@@ -307,6 +309,22 @@
 
     clearTimeout(fileTimer);
 
+    // The switcher is windows and nothing else. Mixing applications in would
+    // mean "Chrome" the program sitting beside "Chrome" the window you are
+    // trying to get back to, and no way to tell which is which at a glance.
+    if (mode === "switcher") {
+      try {
+        const open = await searchWindows(current);
+        if (id !== searchId) return;
+
+        commands = open;
+        if (selected >= commands.length) selected = 0;
+      } catch (err) {
+        if (id === searchId) status = `window search failed: ${err}`;
+      }
+      return;
+    }
+
     try {
       const ranked = await searchCommands(current);
       if (id !== searchId) return;
@@ -357,6 +375,19 @@
       try {
         status = `opening ${link.title}`;
         await openQuicklink(link.id, query);
+        await dismiss();
+      } catch (err) {
+        status = `${err}`;
+      }
+      return;
+    }
+
+    if (mode === "switcher") {
+      const window = commands[selected];
+      if (!window) return;
+
+      try {
+        await runObjectAction("sill.window.focus", asTarget(window));
         await dismiss();
       } catch (err) {
         status = `${err}`;
@@ -585,6 +616,22 @@
     }
   }
 
+  /**
+   * Opens the window switcher.
+   *
+   * Whatever the launcher was showing is dropped, including a running
+   * extension: the key was pressed to get to another window, and arriving in
+   * a half-finished command instead is not that.
+   */
+  async function openSwitcher() {
+    panelOpen = false;
+    mode = "switcher";
+    selected = 0;
+    query = "";
+    commands = [];
+    await refreshRoot();
+  }
+
   /** Escape steps back to the root list, and only then out of the launcher. */
   async function goBack() {
     panelOpen = false;
@@ -603,6 +650,14 @@
       selected = 0;
       query = "";
       await refreshRoot();
+      return;
+    }
+
+    // Escape leaves the switcher rather than stepping back to the root list.
+    // It was opened by its own key to do one thing, and dropping into a
+    // general search on the way out is not what "never mind" means.
+    if (mode === "switcher") {
+      await dismiss();
       return;
     }
 
@@ -723,12 +778,13 @@
   // Typing at the root re-ranks; inside a command the query is the extension's.
   $effect(() => {
     query;
-    if (mode === "root") void refreshRoot();
+    if (mode === "root" || mode === "switcher") void refreshRoot();
   });
 
   onMount(() => {
     let unlisten: UnlistenFn | undefined;
     let shown: UnlistenFn | undefined;
+    let switcher: UnlistenFn | undefined;
     let indexed: UnlistenFn | undefined;
     let changed: UnlistenFn | undefined;
     let disposed = false;
@@ -802,6 +858,14 @@
         });
       });
 
+      // The switcher key, which shows the launcher already on the window
+      // list. A separate event rather than a flag read on show, because the
+      // page has to react to being opened this way even when it was already
+      // sitting on something else.
+      switcher = await listen("sill://switcher", () => {
+        void openSwitcher();
+      });
+
       // The settings window writes preferences in another webview, so the
       // launcher hears about them rather than re-reading on a timer.
       changed = await listen<Preferences>("sill://preferences-changed", ({ payload }) => {
@@ -823,6 +887,7 @@
       clearTimeout(fileTimer);
       unlisten?.();
       shown?.();
+      switcher?.();
       indexed?.();
       changed?.();
     };
@@ -838,6 +903,8 @@
       <span class="crumb">{awaiting.title}</span>
     {:else if mode === "clipboard"}
       <span class="crumb">Clipboard History</span>
+    {:else if mode === "switcher"}
+      <span class="crumb">Open Windows</span>
     {:else if running}
       <span class="crumb">{running.extensionTitle}</span>
     {/if}
@@ -848,7 +915,9 @@
         ? "Type what to search for, then Enter…"
         : mode === "clipboard"
           ? "Filter what you have copied…"
-          : mode === "root"
+          : mode === "switcher"
+            ? "Switch to a window…"
+            : mode === "root"
             ? "Search for apps and commands…"
             : String(view?.props.searchBarPlaceholder ?? "Search…")}
       spellcheck="false"
@@ -878,7 +947,7 @@
       onselect={(i) => (selected = i)}
       oncount={(n) => (clipboardCount = n)}
     />
-  {:else if mode === "root"}
+  {:else if mode === "root" || mode === "switcher"}
     <RootList
       {commands}
       {selected}

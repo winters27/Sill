@@ -187,9 +187,10 @@ pub(crate) fn actions_for(
     actions: State<'_, ActionRegistry>,
     mode: String,
 ) -> Vec<crate::action::ActionInfo> {
-    crate::object::ObjectKind::from_mode(&mode)
+    let out = crate::object::ObjectKind::from_mode(&mode)
         .map(|kind| actions.describe(kind))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    out
 }
 
 /// Runs one action against one object.
@@ -220,7 +221,17 @@ pub(crate) async fn run_action(
         ));
     }
 
-    chosen.run(&ActionCtx { app: app.clone() }, &object).await
+    let outcome = chosen.run(&ActionCtx { app: app.clone() }, &object).await?;
+
+    // The screen now belongs to something else, so the launcher must not put
+    // it back on the way out. Decided from the kind rather than from the
+    // action, because it is a fact about what was acted on: every way of
+    // reaching a window ends with that window in front.
+    if object.kind.hands_over_the_screen() {
+        crate::summon::forget_foreground();
+    }
+
+    Ok(outcome)
 }
 
 /// Reverses an action that said it could be reversed.

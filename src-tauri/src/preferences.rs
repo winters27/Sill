@@ -43,6 +43,13 @@ impl Default for General {
 pub struct Hotkey {
     /// An accelerator like "Alt+Space".
     pub summon: String,
+    /// Opens the launcher straight into the window switcher.
+    ///
+    /// Its own key rather than a mode you type into: the value of a switcher
+    /// is that one press puts the window you were last in under the cursor,
+    /// and a prefix you have to type first spends that. Empty turns it off.
+    #[serde(default = "default_switcher")]
+    pub switcher: String,
     /// Dismiss when the window loses focus.
     pub dismiss_on_blur: bool,
     /// Select the existing query on summon so typing replaces it.
@@ -51,12 +58,26 @@ pub struct Hotkey {
     pub reset_on_summon: bool,
 }
 
+/// W for window, and free where it was checked.
+///
+/// The obvious choices are not available. Alt+Tab and Ctrl+Alt+Tab belong to
+/// Windows and cannot be registered at all, and Ctrl+Alt+Space was refused on
+/// the first machine this was tried on: something already owned it, and
+/// Windows does not say what.
+///
+/// So this is a default rather than a guarantee, which is the reason a refused
+/// key is now reported in settings instead of failing into the log.
+fn default_switcher() -> String {
+    "Ctrl+Alt+W".to_string()
+}
+
 impl Default for Hotkey {
     fn default() -> Self {
         Self {
             // Matches Raycast on Windows, which is the muscle memory being
             // replaced.
             summon: "Alt+Space".to_string(),
+            switcher: default_switcher(),
             dismiss_on_blur: true,
             select_query_on_summon: true,
             reset_on_summon: false,
@@ -444,6 +465,11 @@ mod tests {
     fn defaults_are_sensible() {
         let p = Preferences::default();
         assert_eq!(p.hotkey.summon, "Alt+Space");
+        assert_eq!(p.hotkey.switcher, "Ctrl+Alt+W");
+        assert_ne!(
+            p.hotkey.switcher, p.hotkey.summon,
+            "two keys that mean different things cannot start out the same"
+        );
         assert!(p.sources.shortcuts);
         assert!(p.files.enabled);
     }
@@ -452,10 +478,16 @@ mod tests {
     fn a_partial_file_keeps_defaults_for_everything_else() {
         // The upgrade case: a file written by an older version knows nothing
         // about fields added since, and must not reset them.
+        // No switcher key in the stored file, which is every preferences
+        // file written before the switcher existed.
         let json = r#"{"hotkey":{"summon":"Ctrl+Space"}}"#;
         let parsed: Preferences = serde_json::from_str(json).expect("partial input parses");
 
         assert_eq!(parsed.hotkey.summon, "Ctrl+Space", "the stated value wins");
+        assert_eq!(
+            parsed.hotkey.switcher, "Ctrl+Alt+W",
+            "a field added later has to default rather than come back empty"
+        );
         assert!(
             parsed.hotkey.dismiss_on_blur,
             "an omitted field inside a nested struct keeps its default"

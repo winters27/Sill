@@ -22,6 +22,7 @@
     clearUsageHistory,
     getDiagnostics,
     getPreferences,
+    hotkeyConflicts,
     openDataFolder,
     openLog,
     rebuildIndex,
@@ -155,7 +156,16 @@
   let info = $state<Diagnostics | null>(null);
   let active = $state<PanelId>("general");
   let status = $state("");
-  let recording = $state(false);
+  /**
+   * Which key is being recorded, rather than whether one is.
+   *
+   * There is more than one now, and a shared boolean would send whatever the
+   * user pressed to the summon key regardless of which row they clicked.
+   */
+  let recording = $state<"summon" | "switcher" | null>(null);
+
+  /** Accelerators Windows refused because something else already has them. */
+  let conflicts = $state<string[]>([]);
   let filter = $state("");
   let clearing = $state(false);
   let rebuilding = $state(false);
@@ -187,6 +197,10 @@
       const next = $state.snapshot(prefs);
       await setPreferences(next);
       applyAppearance(next);
+      // A rebind is exactly when a key turns out to be taken, so this is
+      // asked again rather than read once at startup.
+      conflicts = await hotkeyConflicts();
+
       status = "Saved";
       setTimeout(() => (status = ""), 1200);
     } catch (err) {
@@ -199,15 +213,40 @@
     event.preventDefault();
 
     if (event.key === "Escape") {
-      recording = false;
+      recording = null;
+      return;
+    }
+
+    // Backspace clears rather than binds. The switcher is allowed to be off,
+    // and there has to be a way back to off once a key is set.
+    if (event.key === "Backspace" && recording === "switcher") {
+      prefs.hotkey.switcher = "";
+      recording = null;
+      void commit();
       return;
     }
 
     const accelerator = acceleratorFrom(event);
     if (!accelerator) return;
 
-    prefs.hotkey.summon = accelerator;
-    recording = false;
+    // One key cannot mean two things. Binding the switcher to the summon key
+    // would leave whichever registered second silently doing nothing.
+    const other =
+      recording === "summon" ? prefs.hotkey.switcher : prefs.hotkey.summon;
+    if (accelerator === other) {
+      status = `${accelerator.split("+").join(" ")} is already used`;
+      recording = null;
+      setTimeout(() => (status = ""), 1600);
+      return;
+    }
+
+    if (recording === "summon") {
+      prefs.hotkey.summon = accelerator;
+    } else {
+      prefs.hotkey.switcher = accelerator;
+    }
+
+    recording = null;
     void commit();
   }
 
@@ -267,6 +306,7 @@
 
       try {
         prefs = await getPreferences();
+        conflicts = await hotkeyConflicts();
         applyAppearance(prefs);
         index = await listOwnSettings();
         info = await getDiagnostics();
@@ -398,11 +438,42 @@
           >
             <Row
               title="Summon hotkey"
-              description="Press the combination you want, or Escape to keep the current one."
+              description={conflicts.includes(p.hotkey.summon)
+                ? "Another application already has this combination, so it does nothing. Choose a different one."
+                : "Press the combination you want, or Escape to keep the current one."}
             >
               {#snippet control()}
-                <button class="recorder" class:recording onclick={() => (recording = !recording)}>
-                  {recording ? "Press a combination" : p.hotkey.summon.split("+").join(" ")}
+                <button
+                  class="recorder"
+                  class:taken={conflicts.includes(p.hotkey.summon)}
+                  class:recording={recording === "summon"}
+                  onclick={() => (recording = recording === "summon" ? null : "summon")}
+                >
+                  {recording === "summon"
+                    ? "Press a combination"
+                    : p.hotkey.summon.split("+").join(" ")}
+                </button>
+              {/snippet}
+            </Row>
+
+            <Row
+              title="Window switcher hotkey"
+              description={p.hotkey.switcher && conflicts.includes(p.hotkey.switcher)
+                ? "Another application already has this combination, so it does nothing. Choose a different one."
+                : "Opens Sill straight onto the windows you have open, most recent first. Backspace turns it off."}
+            >
+              {#snippet control()}
+                <button
+                  class="recorder"
+                  class:taken={!!p.hotkey.switcher && conflicts.includes(p.hotkey.switcher)}
+                  class:recording={recording === "switcher"}
+                  onclick={() => (recording = recording === "switcher" ? null : "switcher")}
+                >
+                  {recording === "switcher"
+                    ? "Press a combination"
+                    : p.hotkey.switcher
+                      ? p.hotkey.switcher.split("+").join(" ")
+                      : "Off"}
                 </button>
               {/snippet}
             </Row>
@@ -1094,6 +1165,13 @@
 
   .recorder:hover {
     background: rgba(var(--accent-rgb), 0.18);
+  }
+
+  /* A key that Windows refused. Stated rather than merely styled: the colour
+     is a hint and the description above says what happened. */
+  .recorder.taken {
+    color: var(--danger, #d24b4b);
+    border-color: var(--danger, #d24b4b);
   }
 
   .recorder.recording {

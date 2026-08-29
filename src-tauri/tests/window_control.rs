@@ -108,18 +108,51 @@ fn work_area(id: isize) -> Rect {
 }
 
 #[test]
-fn a_window_the_test_owns_appears_in_the_list() {
-    let window = TestWindow::open(w!("Sill test: listed"));
+fn the_launcher_never_lists_its_own_windows() {
+    // Sill is the frontmost window whenever the switcher is open, and
+    // enumeration is in Z-order, so without this it would sit at the top of
+    // its own list offering to switch to where you already are.
+    //
+    // The test's window stands in for Sill's: same process, so the same rule
+    // applies to it.
+    let window = TestWindow::open(w!("Sill test: not listed"));
 
     let found = windowing::list();
-    let mine = found.iter().find(|w| w.id == window.id());
-
     assert!(
-        mine.is_some(),
-        "the test's own window is visible, titled and not a tool window, so it has to be listed"
+        !found.iter().any(|w| w.id == window.id()),
+        "a window from Sill's own process was listed"
     );
-    assert_eq!(mine.unwrap().title, "Sill test: listed");
-    assert_eq!(mine.unwrap().pid, std::process::id());
+    assert!(
+        found.iter().all(|w| w.pid != std::process::id()),
+        "some window from this process got through"
+    );
+
+    // Excluded from the list, not made unreachable. Every action still works
+    // on it, which is what lets the launcher act on a window it was handed.
+    let direct = windowing::find(window.id()).expect("still findable by handle");
+    assert_eq!(direct.title, "Sill test: not listed");
+}
+
+#[test]
+fn the_list_is_frontmost_first() {
+    // The switcher's whole value is that the first entry is the window you
+    // were last in. That order comes from EnumWindows walking the Z-order,
+    // so it survives only as long as nothing re-sorts it.
+    let found = windowing::list();
+    if found.len() < 2 {
+        // Nothing to order. Not a failure: the desktop is whatever is open.
+        return;
+    }
+
+    // The frontmost window, from Windows rather than from the list.
+    let front = windowing::foreground();
+    if let Some(front) = front {
+        assert_eq!(
+            found[0].id, front.id,
+            "the list starts with {:?} but the foreground window is {:?}",
+            found[0].title, front.title
+        );
+    }
 }
 
 #[test]

@@ -64,6 +64,22 @@ pub(crate) async fn search_windows(
         .await
         .unwrap_or_default();
 
+    // An empty query is the switcher, and its order is already right.
+    //
+    // Enumeration walks the Z-order from the front, which is what recency
+    // means for windows. Ranking an empty query sorts by frecency and then by
+    // title, which would replace "the window you were just in" with "the
+    // window with the shortest name". Alt-Tab's whole value is that first
+    // entry, so it is left alone.
+
+    if query.trim().is_empty() {
+        return Ok(records
+            .into_iter()
+            .take(registry::SEARCH_LIMIT)
+            .map(registry::SearchResult::from_record)
+            .collect());
+    }
+
     let registry = state.inner.lock().await;
 
     // No exclusion terms. Those hide things from the index, and a window that

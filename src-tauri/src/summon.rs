@@ -129,6 +129,28 @@ pub fn remember_foreground() {
     }
 }
 
+/// Drops the remembered window, so dismissal leaves focus where it is.
+///
+/// **Required after anything that deliberately focuses another window.**
+/// Dismissal restores whatever was in front before the launcher appeared, so
+/// without this, switching to a window works and is then immediately undone by
+/// the launcher getting out of the way. Measured: the switcher restored a
+/// minimized window, focused it, and control landed back on the window the
+/// user had summoned Sill from.
+///
+/// Launching an application usually survives this by accident, because the new
+/// process takes the foreground after the restore has already run. Focusing a
+/// window that already exists loses that race every time.
+pub fn forget_foreground() {
+    #[cfg(windows)]
+    {
+        let mut slot = PREVIOUS_FOREGROUND
+            .lock()
+            .expect("foreground slot poisoned");
+        *slot = None;
+    }
+}
+
 /// Hands focus back to whatever had it before the launcher appeared.
 pub fn restore_foreground() {
     #[cfg(windows)]
@@ -200,6 +222,24 @@ pub fn show(window: &WebviewWindow) {
      * is still hidden.
      */
     let _ = window.emit("sill://shown", ());
+}
+
+/// Shows the launcher already in the window switcher.
+///
+/// Always shows rather than toggling. A switcher key is pressed to get
+/// somewhere, and a second press meaning "put it away" would make holding the
+/// key to look through the list impossible.
+///
+/// The event goes out after the window is up, and the page decides what the
+/// switcher looks like. Rust knows which windows exist; it has no business
+/// knowing which screen the launcher is showing.
+pub fn show_switcher(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    show(&window);
+    let _ = window.emit("sill://switcher", ());
 }
 
 /// Hides the launcher and returns focus.

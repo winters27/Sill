@@ -75,6 +75,12 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "general",
         "General",
+        "Window switcher hotkey",
+        "alt tab window switch cycle shortcut keybind",
+    ),
+    s(
+        "general",
+        "General",
         "Hide when it loses focus",
         "blur dismiss escape close",
     ),

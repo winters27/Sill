@@ -188,4 +188,3 @@ fn the_visible_frame_is_not_wider_than_the_window() {
         );
     }
 }
-

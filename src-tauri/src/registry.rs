@@ -126,6 +126,31 @@ impl From<RankedCommand> for SearchResult {
     }
 }
 
+impl SearchResult {
+    /// A result for something that was never ranked.
+    ///
+    /// The switcher's empty query, where enumeration order is already the
+    /// answer. Going through `RankedCommand` would mean inventing a score to
+    /// throw away and claiming a match that never happened.
+    pub fn from_record(command: CommandRecord) -> Self {
+        let icon = command.icon.filter(|icon| *icon != command.entrypoint);
+
+        Self {
+            id: command.id,
+            extension: command.extension,
+            extension_title: command.extension_title,
+            title: command.title,
+            subtitle: command.subtitle,
+            mode: command.mode,
+            entrypoint: command.entrypoint,
+            icon,
+            panel: command.panel,
+            // Nothing was typed, so nothing matched.
+            matched: Vec::new(),
+        }
+    }
+}
+
 /// Turns a discovered application into a registry entry.
 ///
 /// An app is just another thing you can launch, so it is expressed as a

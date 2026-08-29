@@ -250,6 +250,48 @@ pub(crate) fn rebind_summon(app: &AppHandle, previous: &str, next: &str) {
     register_summon_shortcut(app, next);
 }
 
+/// Opens the launcher straight into the window switcher.
+///
+/// An empty accelerator means the feature is off, which is not the same as a
+/// bad one: registering "" fails and would log an error every launch.
+fn register_switcher_shortcut(app: &AppHandle, accelerator: &str) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    if accelerator.trim().is_empty() {
+        return;
+    }
+
+    let handle = app.clone();
+    let result = app
+        .global_shortcut()
+        .on_shortcut(accelerator, move |_, _, event| {
+            if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                summon::show_switcher(&handle);
+            }
+        });
+
+    if let Some(conflicts) = app.try_state::<HotkeyConflicts>() {
+        conflicts.note(accelerator, result.is_ok());
+    }
+
+    match result {
+        Ok(()) => println!("[sill] switcher key registered: {accelerator}"),
+        Err(err) => crate::say!("could not register {accelerator}: {err}"),
+    }
+}
+
+pub(crate) fn rebind_switcher(app: &AppHandle, previous: &str, next: &str) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    if !previous.trim().is_empty() {
+        if let Err(err) = app.global_shortcut().unregister(previous) {
+            crate::say!("could not release {previous}: {err}");
+        }
+    }
+
+    register_switcher_shortcut(app, next);
+}
+
 /// Registers or removes Sill from the user's startup entries.
 ///
 /// Reads the current state first, so this is safe to call on every launch to
@@ -517,6 +559,39 @@ pub(crate) fn reload_index(app: &AppHandle) {
 /// A failure here is reported rather than fatal: another app may already hold
 /// the combination, and a launcher that refuses to start because its hotkey is
 /// taken is worse than one you have to click into.
+/// Accelerators Sill asked for and did not get.
+///
+/// Registration fails when another application already owns the combination,
+/// and Windows gives no way to find out which. **Until this existed the
+/// failure was silent**: the settings window showed the key the user had
+/// chosen, the key did nothing, and only a log line said why. A shortcut that
+/// looks bound and is not is worse than one that is obviously off.
+#[derive(Default)]
+pub struct HotkeyConflicts {
+    taken: std::sync::Mutex<std::collections::HashSet<String>>,
+}
+
+impl HotkeyConflicts {
+    fn note(&self, accelerator: &str, ok: bool) {
+        let Ok(mut taken) = self.taken.lock() else {
+            return;
+        };
+
+        if ok {
+            taken.remove(accelerator);
+        } else {
+            taken.insert(accelerator.to_string());
+        }
+    }
+
+    pub fn all(&self) -> Vec<String> {
+        self.taken
+            .lock()
+            .map(|taken| taken.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+}
+
 fn register_summon_shortcut(app: &AppHandle, accelerator: &str) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
@@ -530,6 +605,10 @@ fn register_summon_shortcut(app: &AppHandle, accelerator: &str) {
                 summon::toggle_main(&handle);
             }
         });
+
+    if let Some(conflicts) = app.try_state::<HotkeyConflicts>() {
+        conflicts.note(accelerator, result.is_ok());
+    }
 
     match result {
         Ok(()) => println!("[sill] summon key registered: {accelerator}"),
@@ -625,6 +704,10 @@ pub fn run() {
             // Before anything that might have something to report.
             log::open(&data_dir);
 
+            // Before any shortcut is registered, so a refusal is recorded
+            // rather than dropped.
+            app.manage(HotkeyConflicts::default());
+
             // The host itself is not started here. Nothing has asked for an
             // extension yet, and starting Node on the chance that something
             // might is 38 MB resident for a session that usually never opens
@@ -668,6 +751,7 @@ pub fn run() {
 
             apply_window_size(&handle, &prefs.appearance);
             register_summon_shortcut(&handle, &prefs.hotkey.summon);
+            register_switcher_shortcut(&handle, &prefs.hotkey.switcher);
             // Nothing was bound before, so everything in the list is new.
             bindings::apply(&handle, &[], &prefs.bindings);
             apply_tray(&handle, prefs.general.show_in_tray);
@@ -774,6 +858,7 @@ pub fn run() {
             commands::search::search_commands,
             commands::search::search_files,
             commands::search::search_windows,
+            commands::settings::hotkey_conflicts,
             commands::search::list_monitors,
             commands::search::open_path,
             commands::launch::launch_command,

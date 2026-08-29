@@ -19,6 +19,8 @@ export interface General {
 
 export interface Hotkey {
   summon: string;
+  /** Opens straight onto the window list. Empty means off. */
+  switcher: string;
   dismissOnBlur: boolean;
   selectQueryOnSummon: boolean;
   resetOnSummon: boolean;
@@ -217,4 +219,16 @@ export function acceleratorFrom(event: KeyboardEvent): string | null {
   if (parts.length < 2) return null;
 
   return parts.join("+");
+}
+
+/**
+ * Accelerators another application already owns.
+ *
+ * Windows refuses a shortcut that is already taken and does not say by whom,
+ * so the settings row can only report that the key is unavailable. Reported
+ * at all, though: a shortcut that looks bound and does nothing is worse than
+ * one that is visibly off.
+ */
+export function hotkeyConflicts(): Promise<string[]> {
+  return invoke<string[]>("hotkey_conflicts").catch(() => []);
 }

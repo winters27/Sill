@@ -233,19 +233,9 @@ pub fn slot_rect(slot: Slot, work: Rect) -> Rect {
 
     match slot {
         Slot::Left => Rect::new(work.x, work.y, half_w, work.height),
-        Slot::Right => Rect::new(
-            work.x + half_w,
-            work.y,
-            work.width - half_w,
-            work.height,
-        ),
+        Slot::Right => Rect::new(work.x + half_w, work.y, work.width - half_w, work.height),
         Slot::Top => Rect::new(work.x, work.y, work.width, half_h),
-        Slot::Bottom => Rect::new(
-            work.x,
-            work.y + half_h,
-            work.width,
-            work.height - half_h,
-        ),
+        Slot::Bottom => Rect::new(work.x, work.y + half_h, work.width, work.height - half_h),
         Slot::TopLeft => Rect::new(work.x, work.y, half_w, half_h),
         Slot::TopRight => Rect::new(work.x + half_w, work.y, work.width - half_w, half_h),
         Slot::BottomLeft => Rect::new(work.x, work.y + half_h, half_w, work.height - half_h),
@@ -264,12 +254,7 @@ pub fn slot_rect(slot: Slot, work: Rect) -> Rect {
             work.height,
         ),
         Slot::FirstTwoThirds => Rect::new(work.x, work.y, two_thirds, work.height),
-        Slot::LastTwoThirds => Rect::new(
-            work.x + third,
-            work.y,
-            work.width - third,
-            work.height,
-        ),
+        Slot::LastTwoThirds => Rect::new(work.x + third, work.y, work.width - third, work.height),
         // Two thirds of the work area, centred. A "centre" that kept the
         // window's own size would do nothing at all to a maximized window,
         // which is the state people most often want out of.
@@ -453,12 +438,32 @@ mod platform {
         // SAFETY: the pointer is the Vec passed in by `list` below, which
         // outlives the enumeration because EnumWindows is synchronous.
         let found = unsafe { &mut *(lparam.0 as *mut Vec<isize>) };
-        if is_listable(hwnd) {
+        if is_listable(hwnd) && !is_ours(hwnd) {
             found.push(hwnd.0 as isize);
         }
         BOOL(1)
     }
 
+    /// Whether a window belongs to Sill itself.
+    ///
+    /// Excluded, because the launcher is in front whenever this runs. A
+    /// switcher that lists the switcher is offering to switch to where you
+    /// already are, and it would sit at the top of the list doing it, since
+    /// enumeration is in Z-order and Sill is the frontmost window.
+    fn is_ours(hwnd: HWND) -> bool {
+        let mut pid = 0u32;
+        // SAFETY: fills a u32 declared here.
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+        pid == std::process::id()
+    }
+
+    /// Every window, frontmost first.
+    ///
+    /// **The order is the answer to "which window did I use last".**
+    /// `EnumWindows` walks the Z-order from the top down, and for top-level
+    /// windows that is what recency means on this platform. There is no
+    /// separate list to keep, no hook to install and nothing to persist, so
+    /// the switcher gets Alt-Tab's ordering for free by not sorting.
     pub fn list() -> Vec<Window> {
         let mut handles: Vec<isize> = Vec::new();
 
@@ -638,21 +643,27 @@ mod platform {
     pub fn minimize(id: isize) -> Result<(), String> {
         let hwnd = alive(id)?;
         // SAFETY: the handle is checked live directly above.
-        unsafe { let _ = ShowWindow(hwnd, SW_MINIMIZE); };
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_MINIMIZE);
+        };
         Ok(())
     }
 
     pub fn maximize(id: isize) -> Result<(), String> {
         let hwnd = alive(id)?;
         // SAFETY: the handle is checked live directly above.
-        unsafe { let _ = ShowWindow(hwnd, SW_SHOWMAXIMIZED); };
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWMAXIMIZED);
+        };
         Ok(())
     }
 
     pub fn restore(id: isize) -> Result<(), String> {
         let hwnd = alive(id)?;
         // SAFETY: the handle is checked live directly above.
-        unsafe { let _ = ShowWindow(hwnd, SW_RESTORE); };
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        };
         Ok(())
     }
 
@@ -957,7 +968,10 @@ mod tests {
             slot_rect(Slot::BottomRight, WORK),
         ];
 
-        let covered: i64 = corners.iter().map(|r| r.width as i64 * r.height as i64).sum();
+        let covered: i64 = corners
+            .iter()
+            .map(|r| r.width as i64 * r.height as i64)
+            .sum();
         assert_eq!(covered, WORK.width as i64 * WORK.height as i64);
 
         for (a, b) in [(0, 1), (0, 2), (1, 3), (2, 3), (0, 3), (1, 2)] {
@@ -1093,9 +1107,19 @@ mod tests {
 
         let moved = rescale(Rect::new(3340, 1900, 500, 220), big, small);
 
-        assert!(moved.right() <= small.right(), "{moved:?} ran off the right");
-        assert!(moved.bottom() <= small.bottom(), "{moved:?} ran off the bottom");
-        assert_eq!(moved.right(), small.right(), "it was against the right edge");
+        assert!(
+            moved.right() <= small.right(),
+            "{moved:?} ran off the right"
+        );
+        assert!(
+            moved.bottom() <= small.bottom(),
+            "{moved:?} ran off the bottom"
+        );
+        assert_eq!(
+            moved.right(),
+            small.right(),
+            "it was against the right edge"
+        );
     }
 
     #[test]
@@ -1104,7 +1128,10 @@ mod tests {
         let small = Rect::new(3840, 0, 1920, 1040);
 
         let moved = rescale(big, big, small);
-        assert!(moved.width <= small.width && moved.height <= small.height, "{moved:?}");
+        assert!(
+            moved.width <= small.width && moved.height <= small.height,
+            "{moved:?}"
+        );
         assert!(moved.x >= small.x && moved.y >= small.y, "{moved:?}");
     }
 
