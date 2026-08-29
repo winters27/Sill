@@ -24,6 +24,7 @@ pub mod quicklinks;
 pub mod synthetic;
 pub mod snippets;
 pub mod summon;
+pub mod text;
 
 use std::path::PathBuf;
 use std::sync::Arc;

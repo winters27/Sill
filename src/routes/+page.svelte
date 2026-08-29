@@ -23,6 +23,7 @@
     actionsFor,
     // `runAction` here already means "run the panel entry at this index".
     runAction as runObjectAction,
+    asTarget,
     undoAction,
     type ActionInfo,
     type RankedCommand,
@@ -183,6 +184,22 @@
           props: {},
           shortcut: { modifiers: [], key: "delete" },
         },
+        // What can be done to the text itself, from the same registry the
+        // root list draws from. Paste, pin, filter and delete above act on
+        // the list; these act on the content.
+        //
+        // The registry's primary for a clipboard row is a plain Copy, which
+        // this view already offers above. Showing it twice under two
+        // shortcuts is worse than either.
+        ...clipboardActions
+          .filter((action) => !action.primary)
+          .map((action, index) => ({
+          id: -20 - index,
+          title: action.title,
+          tag: `Sill.Action:${action.id}`,
+          props: {},
+          shortcut: undefined,
+        })),
       ] as typeof extensionActions;
     }
 
@@ -224,6 +241,14 @@
    * opinion about what a result supports.
    */
   let rootActions = $state<ActionInfo[]>([]);
+
+  /**
+   * What can be done to a clipboard row.
+   *
+   * Fetched once rather than per selection: every row in the history is the
+   * same kind of thing, so the answer cannot differ between them.
+   */
+  let clipboardActions = $state<ActionInfo[]>([]);
 
   /**
    * How to reverse the last action, when it said it could be.
@@ -428,6 +453,26 @@
     // root list and the clipboard have actions of their own and no session,
     // so checking it up front made every one of them silently do nothing.
     if (mode === "clipboard") {
+      if (action.tag.startsWith("Sill.Action:")) {
+        const entry = clipboardView?.selection();
+        if (!entry) return;
+
+        try {
+          const outcome = await runObjectAction(action.tag.slice("Sill.Action:".length), {
+            id: String(entry.id),
+            mode: "clipboard",
+            target: entry.text,
+            // The row's own text, trimmed to something a status line can hold.
+            title: entry.text.slice(0, 40),
+          });
+          status = outcome.message;
+          lastUndo = outcome.undo ?? null;
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
       switch (action.tag) {
         case "Sill.ClipboardPaste":
           await clipboardView?.paste(true);
@@ -466,7 +511,7 @@
       }
 
       try {
-        const outcome = await runObjectAction(chosen, command);
+        const outcome = await runObjectAction(chosen, asTarget(command));
         status = outcome.message;
         lastUndo = outcome.undo ?? null;
       } catch (err) {
@@ -740,6 +785,7 @@
       });
 
       if (disposed) return;
+      clipboardActions = await actionsFor("clipboard");
       prefs = await getPreferences();
       applyAppearance(prefs);
       await refreshRoot();

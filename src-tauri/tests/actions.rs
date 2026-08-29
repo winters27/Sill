@@ -186,3 +186,75 @@ fn the_action_panel_has_something_to_show_for_every_result() {
         );
     }
 }
+
+/// Kinds that never come from a scan: the window hands these over directly.
+const LOOSE_KINDS: &[(&str, ObjectKind)] = &[
+    ("clipboard", ObjectKind::ClipboardEntry),
+    ("text", ObjectKind::Text),
+];
+
+#[test]
+fn text_and_clipboard_rows_are_the_same_thing_to_a_transform() {
+    // The reason transforms dispatch on a kind rather than on where the text
+    // came from: a clipboard row and a selection are both just text, and
+    // writing the operation twice is how the two versions drift apart.
+    let registry = builtins();
+
+    for (mode, kind) in LOOSE_KINDS {
+        assert_eq!(
+            ObjectKind::from_mode(mode),
+            Some(*kind),
+            "{mode} does not reach the window as a kind"
+        );
+
+        let offered: Vec<_> = registry.for_kind(*kind).into_iter().map(|a| a.id()).collect();
+
+        for wanted in [
+            "sill.text.upper",
+            "sill.text.lower",
+            "sill.text.base64Decode",
+            "sill.text.jsonPretty",
+        ] {
+            assert!(offered.contains(&wanted), "{mode} is missing {wanted}: {offered:?}");
+        }
+    }
+}
+
+#[test]
+fn loose_text_has_exactly_one_action_on_enter() {
+    // The same invariant the index kinds get. These reach the registry by a
+    // different route and are just as capable of ending up with none or two.
+    let registry = builtins();
+
+    for (mode, kind) in LOOSE_KINDS {
+        let claimants: Vec<_> = registry
+            .for_kind(*kind)
+            .into_iter()
+            .filter(|a| a.is_primary(*kind))
+            .map(|a| a.id())
+            .collect();
+
+        assert_eq!(claimants, vec!["sill.clipboard.copy"], "{mode} claimants wrong");
+        assert!(registry.describe(*kind)[0].primary, "{mode} draws a non-primary first");
+    }
+}
+
+#[test]
+fn a_transform_is_never_offered_on_something_that_is_not_text() {
+    // "Base64 Decode" on an installed application is nonsense, and an action
+    // panel full of nonsense is how people stop opening the action panel.
+    let registry = builtins();
+
+    for kind in [
+        ObjectKind::Application,
+        ObjectKind::File,
+        ObjectKind::ExtensionCommand,
+        ObjectKind::Builtin,
+    ] {
+        let offered: Vec<_> = registry.for_kind(kind).into_iter().map(|a| a.id()).collect();
+        assert!(
+            !offered.iter().any(|id| id.starts_with("sill.text.")),
+            "{kind:?} was offered a text transform: {offered:?}"
+        );
+    }
+}

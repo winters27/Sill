@@ -118,6 +118,11 @@
     onselect(Math.min(at, Math.max(0, entries.length - 1)));
   }
 
+  /** The row the actions apply to, for the panel the parent draws. */
+  export function selection(): { id: number; text: string; kind: string } | null {
+    return current && { id: current.id, text: current.text, kind: current.kind };
+  }
+
   export function cycleFilter(by: number) {
     const at = KIND_FILTERS.findIndex((f) => f.id === kind);
     kind = KIND_FILTERS[(at + by + KIND_FILTERS.length) % KIND_FILTERS.length].id;

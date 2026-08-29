@@ -181,23 +181,34 @@ export function actionsFor(mode: string): Promise<ActionInfo[]> {
   return invoke<ActionInfo[]>("actions_for", { mode });
 }
 
+/** The thing an action is being run against. */
+export interface ActionTarget {
+  id: string;
+  /** Which kind of thing it is. Rust maps this to a kind and dispatches. */
+  mode: string;
+  /** What the action acts on: a path, a panel, a stored id, or the text. */
+  target: string;
+  title: string;
+}
+
 /**
- * Runs one action against one result.
+ * Runs one action against one thing.
  *
- * The result's own fields go back as they arrived. Nothing here decides what
- * an action means or whether it applies; Rust owns both, and rejects a pairing
- * the window got wrong.
+ * Nothing here decides what an action means or whether it applies; Rust owns
+ * both, and rejects a pairing the window got wrong.
  */
-export function runAction(action: string, command: RankedCommand): Promise<ActionOutcome> {
-  return invoke<ActionOutcome>("run_action", {
-    action,
-    object: {
-      id: command.id,
-      mode: command.mode,
-      target: command.entrypoint,
-      title: command.title,
-    },
-  });
+export function runAction(action: string, object: ActionTarget): Promise<ActionOutcome> {
+  return invoke<ActionOutcome>("run_action", { action, object });
+}
+
+/** A search result, in the shape an action wants. */
+export function asTarget(command: RankedCommand): ActionTarget {
+  return {
+    id: command.id,
+    mode: command.mode,
+    target: command.entrypoint,
+    title: command.title,
+  };
 }
 
 export function undoAction(undo: UndoToken): Promise<string> {

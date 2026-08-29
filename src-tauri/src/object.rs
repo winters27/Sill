@@ -42,6 +42,8 @@ pub enum ObjectKind {
     Answer,
     /// A row of clipboard history.
     ClipboardEntry,
+    /// Loose text: a selection, or whatever an action produced.
+    Text,
 }
 
 impl ObjectKind {
@@ -62,6 +64,7 @@ impl ObjectKind {
         Self::Quicklink,
         Self::Answer,
         Self::ClipboardEntry,
+        Self::Text,
     ];
 
     /// The kind behind an index entry's `mode`.
@@ -86,6 +89,11 @@ impl ObjectKind {
             // to ask is a property of the link, not of what it is.
             "quicklink" | "quicklink-arg" => Self::Quicklink,
             "answer" => Self::Answer,
+            // Not index entries. A clipboard row and a piece of loose text
+            // reach an action through the window rather than through a scan,
+            // and they still need a name to be dispatched on.
+            "clipboard" => Self::ClipboardEntry,
+            "text" => Self::Text,
             _ => return None,
         })
     }

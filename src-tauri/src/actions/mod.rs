@@ -24,7 +24,7 @@ use crate::object::{Object, ObjectKind};
 /// for the kind is lifted to the front. So this list is a design decision, not
 /// bookkeeping: it is what the second and third entries will be.
 pub fn builtins() -> ActionRegistry {
-    ActionRegistry::new(vec![
+    let core: Vec<Box<dyn Action>> = vec![
         Box::new(Launch),
         Box::new(RunExtensionCommand),
         Box::new(OpenSystemSetting),
@@ -36,7 +36,10 @@ pub fn builtins() -> ActionRegistry {
         Box::new(CopyPath),
         Box::new(RevealInFolder),
         Box::new(CopyName),
-    ])
+        Box::new(CopyClipboardEntry),
+    ];
+
+    ActionRegistry::new(core.into_iter().chain(transforms()).collect())
 }
 
 /// Replaces what is on the clipboard, remembering what was there.
@@ -527,5 +530,118 @@ impl Action for CopyName {
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
         copy_with_undo(ctx, &object.title, "Copied the name")
+    }
+}
+
+// -------------------------------------------------------------- transforms
+
+/// One text transform, described rather than hand-written.
+///
+/// Every one of these is the same action with a different function in the
+/// middle: take the text, change it, put it back on the clipboard, offer to
+/// undo. Writing eleven near-identical impls would be eleven places to fix
+/// the day the undo behaviour changes.
+struct Transform {
+    id: &'static str,
+    title: &'static str,
+    apply: fn(&str) -> Result<String, String>,
+}
+
+#[async_trait]
+impl Action for Transform {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+
+    fn title(&self) -> &'static str {
+        self.title
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        // Anything that *is* text. A clipboard row and a selection are the
+        // same thing to a transform, which is the point of dispatching on a
+        // kind rather than on where the text came from.
+        matches!(kind, ObjectKind::ClipboardEntry | ObjectKind::Text)
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardRead, Capability::ClipboardWrite]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let changed = (self.apply)(&object.target)?;
+
+        if changed == object.target {
+            // Saying "Uppercased" over text that was already uppercase reads
+            // as the action having done nothing, which it did.
+            return Ok(Outcome::done("Already like that"));
+        }
+
+        copy_with_undo(ctx, &changed, self.title)
+    }
+}
+
+/// Every transform, in the order the action panel shows them.
+///
+/// Case first because it is what gets reached for most, then the encodings,
+/// then JSON. Deliberately a short list: a launcher that offers forty text
+/// operations has buried the four anybody uses.
+fn transforms() -> Vec<Box<dyn Action>> {
+    let entries: [(&'static str, &'static str, fn(&str) -> Result<String, String>); 9] = [
+        ("sill.text.upper", "Upper Case", |s| Ok(crate::text::upper(s))),
+        ("sill.text.lower", "Lower Case", |s| Ok(crate::text::lower(s))),
+        ("sill.text.title", "Title Case", |s| {
+            Ok(crate::text::title_case(s))
+        }),
+        ("sill.text.tidy", "Tidy Lines", |s| {
+            Ok(crate::text::tidy_lines(s))
+        }),
+        ("sill.text.base64Encode", "Base64 Encode", |s| {
+            Ok(crate::text::base64_encode(s))
+        }),
+        ("sill.text.base64Decode", "Base64 Decode", crate::text::base64_decode),
+        ("sill.text.urlEncode", "URL Encode", |s| {
+            Ok(crate::text::url_encode(s))
+        }),
+        ("sill.text.urlDecode", "URL Decode", crate::text::url_decode),
+        ("sill.text.jsonPretty", "Format JSON", crate::text::json_pretty),
+    ];
+
+    entries
+        .into_iter()
+        .map(|(id, title, apply)| Box::new(Transform { id, title, apply }) as Box<dyn Action>)
+        .collect()
+}
+
+/// Puts a clipboard row back on the clipboard, unchanged.
+///
+/// The primary action for a clipboard entry, and the one thing every other
+/// transform is a variation on.
+struct CopyClipboardEntry;
+
+#[async_trait]
+impl Action for CopyClipboardEntry {
+    fn id(&self) -> &'static str {
+        "sill.clipboard.copy"
+    }
+
+    fn title(&self) -> &'static str {
+        "Copy"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        matches!(kind, ObjectKind::ClipboardEntry | ObjectKind::Text)
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardRead, Capability::ClipboardWrite]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        copy_with_undo(ctx, &object.target, "Copied")
     }
 }
