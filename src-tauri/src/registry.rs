@@ -405,19 +405,26 @@ pub fn load_index(path: &Path) -> Vec<CommandRecord> {
 /// consecutive characters and word starts are worth far more than scattered
 /// hits, so "vh" finds "View History" ahead of anything that merely contains a
 /// v and an h.
-fn fuzzy(query: &str, haystack: &str) -> Option<(i64, Vec<usize>)> {
-    if query.is_empty() {
+/// The same, against a needle prepared once for the whole search.
+///
+/// Preparing it per candidate is what this exists to avoid. Lowercasing the
+/// query and collecting it into a vector is three allocations, and the old
+/// shape paid them **four times for every entry in the index**: once for the
+/// title, once for the extension name, once per keyword, and once more in the
+/// classifier. Across sixteen hundred entries that is thousands of
+/// allocations for a single keystroke.
+fn fuzzy_with(needle: &[char], haystack: &str) -> Option<(i64, Vec<usize>)> {
+    if needle.is_empty() {
         return Some((0, Vec::new()));
     }
 
     let hay: Vec<char> = haystack.chars().collect();
     let hay_lower: Vec<char> = haystack.to_lowercase().chars().collect();
-    let needle: Vec<char> = query.to_lowercase().chars().collect();
 
     // Guard: lowercasing can change length for some scripts, and the indices
     // below are handed to the UI to slice the original string.
     if hay_lower.len() != hay.len() {
-        return simple_subsequence(&needle, &hay);
+        return simple_subsequence(needle, &hay);
     }
 
     let mut score = 0i64;
@@ -425,7 +432,7 @@ fn fuzzy(query: &str, haystack: &str) -> Option<(i64, Vec<usize>)> {
     let mut hay_i = 0usize;
     let mut previous_match: Option<usize> = None;
 
-    for &want in &needle {
+    for &want in needle {
         let found = (hay_i..hay_lower.len()).find(|&i| hay_lower[i] == want)?;
 
         let mut points = 1i64;
@@ -586,6 +593,9 @@ pub enum MatchClass {
     TitleSubsequence,
     /// Nothing in the title. Matched the extension's name or a keyword.
     Elsewhere,
+    /// Nothing matched, but a word of the title is a near-miss for what was
+    /// typed. Last on purpose: a guess, offered only when nothing else fits.
+    TitleTypo,
 }
 
 /// Whether a character begins a word, by the same rule [`fuzzy`] scores.
@@ -607,8 +617,7 @@ fn find_run(hay: &[char], needle: &[char]) -> Option<usize> {
 ///
 /// `None` when it did not match at all, which is the answer for almost every
 /// entry on almost every query.
-fn classify(query: &str, command: &CommandRecord) -> Option<(MatchClass, Vec<usize>)> {
-    let needle: Vec<char> = query.to_lowercase().chars().collect();
+fn classify(needle: &[char], command: &CommandRecord) -> Option<(MatchClass, Vec<usize>)> {
     let hay: Vec<char> = command.title.chars().collect();
     let hay_lower: Vec<char> = command.title.to_lowercase().chars().collect();
 
@@ -620,12 +629,12 @@ fn classify(query: &str, command: &CommandRecord) -> Option<(MatchClass, Vec<usi
         if hay_lower == needle {
             return Some((MatchClass::ExactTitle, (0..needle.len()).collect()));
         }
-        if hay_lower.starts_with(&needle) {
+        if hay_lower.starts_with(needle) {
             return Some((MatchClass::TitlePrefix, (0..needle.len()).collect()));
         }
     }
 
-    let scattered = fuzzy(query, &command.title);
+    let scattered = fuzzy_with(needle, &command.title);
 
     // Checked before the substring case on purpose. Typing initials is a
     // deliberate act and `sc` should find Screen Capture ahead of Discord,
@@ -637,7 +646,7 @@ fn classify(query: &str, command: &CommandRecord) -> Option<(MatchClass, Vec<usi
     }
 
     if aligned {
-        if let Some(at) = find_run(&hay_lower, &needle) {
+        if let Some(at) = find_run(&hay_lower, needle) {
             return Some((MatchClass::TitleSubstring, (at..at + needle.len()).collect()));
         }
     }
@@ -648,10 +657,105 @@ fn classify(query: &str, command: &CommandRecord) -> Option<(MatchClass, Vec<usi
 
     // Nothing in the title. The other sources are searched but never
     // highlighted, since their indices would point into the wrong string.
-    let elsewhere = fuzzy(query, &command.extension_title).is_some()
-        || command.keywords.iter().any(|k| fuzzy(query, k).is_some());
+    if fuzzy_with(needle, &command.extension_title).is_some()
+        || command.keywords.iter().any(|k| fuzzy_with(needle, k).is_some())
+    {
+        return Some((MatchClass::Elsewhere, Vec::new()));
+    }
 
-    elsewhere.then(|| (MatchClass::Elsewhere, Vec::new()))
+    // Last resort. Nothing matched, so ask whether this was a slip of the
+    // fingers. No highlight comes back: the characters that were typed are
+    // not the characters in the title, and pointing at them would be a lie.
+    let budget = typo_budget(needle.len());
+    looks_like_a_typo_of(needle, &command.title, budget)
+        .then(|| (MatchClass::TitleTypo, Vec::new()))
+}
+
+/// How many single-character mistakes are forgiven at this query length.
+///
+/// Nothing under four characters, because at three a budget of one matches an
+/// enormous share of any index and the list fills with things the user did not
+/// ask for. The allowance grows with length because a longer word gives the
+/// distance more to work with before a match becomes a coincidence.
+fn typo_budget(length: usize) -> usize {
+    match length {
+        0..=3 => 0,
+        4..=6 => 1,
+        _ => 2,
+    }
+}
+
+/// Edit distance counting an adjacent swap as one mistake, not two.
+///
+/// Optimal string alignment rather than plain Levenshtein, and the difference
+/// is the whole point: **transposition is the typo people actually make.**
+/// `chorme` for `chrome` is one slip of the fingers and Levenshtein calls it
+/// two edits, which puts it outside any budget tight enough to be useful.
+///
+/// Returns `None` as soon as the distance cannot come in under `budget`, so
+/// the common case (two unrelated words) stops after a row or two.
+fn near_miss(a: &[char], b: &[char], budget: usize) -> Option<usize> {
+    // A length difference is already that many edits.
+    if a.len().abs_diff(b.len()) > budget {
+        return None;
+    }
+
+    // Three rows, rotated rather than reallocated. All three start at full
+    // width: the rotation below hands the oldest row back as scratch, and an
+    // empty one arrives at `current[0] = i` as an out-of-bounds write.
+    let mut prev2: Vec<usize> = vec![0; b.len() + 1];
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut current: Vec<usize> = vec![0; b.len() + 1];
+
+    for i in 1..=a.len() {
+        current[0] = i;
+        let mut best = current[0];
+
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            let mut value = (current[j - 1] + 1)
+                .min(prev[j] + 1)
+                .min(prev[j - 1] + cost);
+
+            // The transposition case: the two characters are swapped.
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                value = value.min(prev2[j - 2] + 1);
+            }
+
+            current[j] = value;
+            best = best.min(value);
+        }
+
+        // Every alignment through this row already costs more than allowed.
+        if best > budget {
+            return None;
+        }
+
+        std::mem::swap(&mut prev2, &mut prev);
+        std::mem::swap(&mut prev, &mut current);
+    }
+
+    (prev[b.len()] <= budget).then_some(prev[b.len()])
+}
+
+/// Whether some word of the title is a near-miss for what was typed.
+///
+/// Word by word rather than against the whole title, because a title is
+/// usually several words and the typo is in one of them: `chorme` should find
+/// Google Chrome, and comparing it against the whole name never will.
+fn looks_like_a_typo_of(needle: &[char], title: &str, budget: usize) -> bool {
+    if budget == 0 {
+        return false;
+    }
+
+    title
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .any(|word| {
+            let word: Vec<char> = word.chars().collect();
+            near_miss(needle, &word, budget).is_some()
+        })
 }
 
 /// How a query matched this command, if it did.
@@ -660,7 +764,8 @@ fn classify(query: &str, command: &CommandRecord) -> Option<(MatchClass, Vec<usi
 /// ranking: the tests assert stability against it, and grouping the list by
 /// it is the obvious next use.
 pub fn match_class(query: &str, command: &CommandRecord) -> Option<MatchClass> {
-    classify(query.trim(), command).map(|(class, _)| class)
+    let needle: Vec<char> = query.trim().to_lowercase().chars().collect();
+    classify(&needle, command).map(|(class, _)| class)
 }
 
 // ----------------------------------------------------------------- search
@@ -717,6 +822,10 @@ pub fn search_excluding<'a>(
 ) -> Vec<RankedCommand> {
     let query = query.trim();
 
+    // Lowercased and collected once for the whole search rather than once per
+    // candidate. See `fuzzy_with` for what that was costing.
+    let needle: Vec<char> = query.to_lowercase().chars().collect();
+
     // Scored by reference, cloned afterwards.
     //
     // The previous version cloned a whole `CommandRecord`, keywords vector and
@@ -724,6 +833,7 @@ pub fn search_excluding<'a>(
     // `limit` of them away. On an empty query that is fourteen hundred deep
     // clones to produce a hundred results. Borrowing until the truncation is
     // done means only the survivors are ever copied.
+    //
     // (class, weight, command, matched). See the sort below for why the
     // ordering is these four things and not a single score.
     let mut scored: Vec<(MatchClass, i64, &CommandRecord, Vec<usize>)> = Vec::new();
@@ -746,7 +856,7 @@ pub fn search_excluding<'a>(
         let (class, matched) = if query.is_empty() {
             (MatchClass::ExactTitle, Vec::new())
         } else {
-            match classify(query, command) {
+            match classify(&needle, command) {
                 Some(found) => found,
                 None => continue,
             }

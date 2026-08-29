@@ -967,3 +967,91 @@ fn realistic() -> Vec<CommandRecord> {
     .map(|(i, title)| command(&format!("app:{i}"), title, "Application"))
     .collect()
 }
+
+// ------------------------------------------------------------ typo tolerance
+
+#[test]
+fn a_transposed_pair_still_finds_what_was_meant() {
+    // The typo people actually make. Plain Levenshtein calls this two edits
+    // and would miss it at any budget tight enough to be useful, which is why
+    // the distance counts an adjacent swap as one.
+    let corpus = realistic();
+
+    for (typed, wanted) in [
+        ("chorme", "Google Chrome"),
+        ("dsicord", "Discord"),
+        ("sptoify", "Spotify"),
+        ("caluclator", "Calculator"),
+    ] {
+        let found = search(&corpus, typed, &Frecency::default(), NOW, 50);
+        let titles: Vec<&str> = found.iter().map(|r| r.command.title.as_str()).collect();
+        assert!(
+            titles.contains(&wanted),
+            "typing {typed:?} should still reach {wanted:?}, got {titles:?}"
+        );
+    }
+}
+
+#[test]
+fn a_guess_never_outranks_something_that_actually_matched() {
+    // Typo matching is a last resort, not a competitor. If anything matched
+    // for real, it leads and the near-misses follow.
+    let corpus = realistic();
+    let found = ids(&search(&corpus, "notepad", &Frecency::default(), NOW, 50));
+
+    let real = found
+        .iter()
+        .position(|id| class_of("notepad", &corpus, id) != Some(MatchClass::TitleTypo));
+    let guess = found
+        .iter()
+        .position(|id| class_of("notepad", &corpus, id) == Some(MatchClass::TitleTypo));
+
+    if let (Some(real), Some(guess)) = (real, guess) {
+        assert!(real < guess, "a guess was offered above a real match: {found:?}");
+    }
+
+    assert_eq!(
+        class_of("notepad", &corpus, "app:11"),
+        Some(MatchClass::ExactTitle),
+        "Notepad should match itself exactly"
+    );
+}
+
+#[test]
+fn short_queries_are_not_forgiven_anything() {
+    // At three characters a budget of one matches an enormous share of any
+    // index, and the list fills with things nobody asked for. The first
+    // keystrokes are also where a launcher is judged.
+    let corpus = realistic();
+
+    for typed in ["zzz", "qq", "x"] {
+        let found = ids(&search(&corpus, typed, &Frecency::default(), NOW, 50));
+        let guesses: Vec<&String> = found
+            .iter()
+            .filter(|id| class_of(typed, &corpus, id) == Some(MatchClass::TitleTypo))
+            .collect();
+
+        assert!(
+            guesses.is_empty(),
+            "{typed:?} produced typo matches: {guesses:?}"
+        );
+    }
+}
+
+#[test]
+fn a_word_of_a_longer_title_is_what_gets_compared() {
+    // Comparing against the whole title would never find this: "chorme" is
+    // nowhere near "Google Chrome" as a string, and very near one word of it.
+    assert_eq!(
+        class_of("chorme", &realistic(), "app:5"),
+        Some(MatchClass::TitleTypo)
+    );
+}
+
+#[test]
+fn a_guess_is_the_last_thing_offered() {
+    // The sort relies on the derived Ord, so where this sits in the enum is
+    // what keeps a near-miss below every real match including a keyword hit.
+    assert!(MatchClass::Elsewhere < MatchClass::TitleTypo);
+    assert!(MatchClass::TitleSubsequence < MatchClass::TitleTypo);
+}
