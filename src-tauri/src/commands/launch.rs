@@ -1,30 +1,30 @@
 //! Running whatever the user picked.
 //!
-//! One entry point over every kind of thing the index holds, which is why the
-//! body is a chain of modes: an application, a settings page, a snippet, a
-//! quicklink, a calculator answer and an extension command are all launched
-//! from the same list and have nothing else in common.
-
-use crate::commands::settings::open_settings;
-use crate::{dismiss_main, reload_index};
+//! This was a two-hundred-line chain comparing an index entry's `mode` string
+//! against eleven values. It is now a lookup: what kind of thing is this, what
+//! does Enter do to that kind, do it. The behaviours themselves moved to
+//! `crate::actions` unchanged.
+//!
+//! The point of the move is not tidiness. It is that pressing Enter, choosing
+//! from the action panel, binding a shortcut and (later) a workflow step or a
+//! tool an AI may call are now four ways into one implementation rather than
+//! four implementations that drift.
 
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 
-use crate::exthost::{self, LoadOptions};
-use crate::host::host_of;
-use crate::state::{now_seconds, HostState, RegistryState};
-use crate::{apps, dictation, quicklinks, settings_catalog, snippets};
+use crate::action::{ActionCtx, ActionRegistry};
+use crate::object::Object;
+use crate::state::{now_seconds, RegistryState};
 
 /// Runs a command from the root list.
 ///
-/// Frecency is recorded before the load rather than after, so a command that
-/// crashes on startup still counts as chosen. The user picked it; that is the
-/// signal being learned, not whether it worked.
+/// Frecency is recorded before the action runs rather than after, so a command
+/// that fails still counts as chosen. The user picked it; that is the signal
+/// being learned, not whether it worked.
 #[tauri::command]
 pub(crate) async fn launch_command(
     app: AppHandle,
-    hosts: State<'_, HostState>,
     state: State<'_, RegistryState>,
     id: String,
 ) -> Result<LaunchedCommand, String> {
@@ -46,165 +46,20 @@ pub(crate) async fn launch_command(
         record
     };
 
-    // One of Sill's own settings, which opens settings at its panel. The
-    // entrypoint IS the panel, so nothing has to be looked up.
-    if record.mode == "sill-setting" {
-        open_settings(app.clone(), Some(record.entrypoint.clone())).await?;
+    let object = Object::from_record(&record)
+        .ok_or_else(|| format!("{} is a kind of thing Sill cannot act on", record.title))?;
 
-        return Ok(LaunchedCommand {
-            session: String::new(),
-            title: record.title,
-            extension_title: record.extension_title,
-            mode: record.mode,
-        });
-    }
+    let actions = app.state::<ActionRegistry>();
+    let action = actions
+        .primary(object.kind)
+        .ok_or_else(|| format!("nothing is bound to Enter for {}", record.title))?;
 
-    // A snippet is expanded and pasted where the launcher was, so the
-    // launcher gets out of the way first.
-    if record.mode == "snippet" {
-        use tauri_plugin_clipboard_manager::ClipboardExt;
-
-        let expansion = snippets::commands::expand_snippet(app.clone(), record.entrypoint.clone())?;
-        app.clipboard()
-            .write_text(expansion.text)
-            .map_err(|e| format!("Could not copy the snippet: {e}"))?;
-
-        dictation::paste::deliver(&app);
-
-        return Ok(LaunchedCommand {
-            session: String::new(),
-            title: record.title,
-            extension_title: record.extension_title,
-            mode: record.mode,
-        });
-    }
-
-    // A quicklink with nothing to ask opens immediately. One that wants a
-    // query never reaches here: the frontend keeps it, collects the text and
-    // calls `open_quicklink` itself, because the asking is the feature.
-    if record.mode == "quicklink" {
-        quicklinks::commands::open_quicklink(app.clone(), record.entrypoint.clone(), String::new())?;
-        dismiss_main(&app);
-
-        return Ok(LaunchedCommand {
-            session: String::new(),
-            title: record.title,
-            extension_title: record.extension_title,
-            mode: record.mode,
-        });
-    }
-
-    // The answer's entrypoint is the result itself, so launching it is a
-    // copy. Nothing is spawned and nothing is indexed.
-    if record.mode == "answer" {
-        use tauri_plugin_clipboard_manager::ClipboardExt;
-
-        app.clipboard()
-            .write_text(record.entrypoint.clone())
-            .map_err(|e| format!("Could not copy the answer: {e}"))?;
-        dismiss_main(&app);
-
-        return Ok(LaunchedCommand {
-            session: String::new(),
-            title: record.title,
-            extension_title: record.extension_title,
-            mode: record.mode,
-        });
-    }
-
-    if record.mode == "builtin" {
-        match record.entrypoint.as_str() {
-            "settings" => open_settings(app.clone(), None).await?,
-            "reload" => reload_index(&app),
-            // Dismissed first: the launcher is frontmost right now, and a
-            // dictation started here has to land in whatever was in front
-            // before it, not in Sill.
-            "dictate" => {
-                dismiss_main(&app);
-                let service = app.state::<dictation::service::DictationService>();
-                service.start(&app).map_err(String::from)?;
-            }
-            "snippets" => open_settings(app.clone(), Some("snippets".into())).await?,
-            "quicklinks" => open_settings(app.clone(), Some("quicklinks".into())).await?,
-            "dictation-history" => open_settings(app.clone(), Some("history".into())).await?,
-            "vocabulary" => open_settings(app.clone(), Some("dictation".into())).await?,
-            "last-transcription" => {
-                use tauri_plugin_clipboard_manager::ClipboardExt;
-
-                let Some(entry) = dictation::history::last(&app) else {
-                    return Err("Nothing has been dictated yet".to_string());
-                };
-                app.clipboard()
-                    .write_text(entry.text)
-                    .map_err(|e| format!("Could not copy the transcript: {e}"))?;
-                dismiss_main(&app);
-            }
-            other => return Err(format!("unknown Sill command: {other}")),
-        }
-
-        return Ok(LaunchedCommand {
-            session: String::new(),
-            title: record.title,
-            extension_title: record.extension_title,
-            mode: record.mode,
-        });
-    }
-
-    if record.mode == "setting" {
-        settings_catalog::launch(&record.entrypoint)?;
-
-        return Ok(LaunchedCommand {
-            session: String::new(),
-            title: record.title,
-            extension_title: record.extension_title,
-            mode: record.mode,
-        });
-    }
-
-    // Applications and bare executables are launched by the shell, not by the
-    // extension host.
-    if record.mode == "app" || record.mode == "exe" {
-        if let Some(app_id) = record.entrypoint.strip_prefix(apps::APPS_FOLDER) {
-            // Packaged apps have no path to open. Explorer resolves an
-            // AppUserModelID through the Apps folder, which is how the Start
-            // Menu launches them too.
-            std::process::Command::new("explorer.exe")
-                .arg(format!("{}{}", apps::APPS_FOLDER, app_id))
-                .spawn()
-                .map_err(|e| format!("could not launch {}: {e}", record.title))?;
-        } else {
-            tauri_plugin_opener::open_path(&record.entrypoint, None::<&str>)
-                .map_err(|e| format!("could not launch {}: {e}", record.title))?;
-        }
-
-        return Ok(LaunchedCommand {
-            session: String::new(),
-            title: record.title,
-            extension_title: record.extension_title,
-            mode: record.mode,
-        });
-    }
-
-    // The manifest decides. A no-view command runs and exits without ever
-    // rendering, so loading it as a view would leave the UI waiting forever.
-    let mode = if record.mode == "no-view" {
-        exthost::CommandMode::NoView
-    } else {
-        exthost::CommandMode::View
-    };
-
-    let host = host_of(&hosts).await?;
-    let opts = LoadOptions::with_preferences(
-        record.entrypoint.clone(),
-        &record.extension,
-        &record.command,
-        mode,
-        record.preferences.clone(),
-    );
-    let session = host.load(&opts).await.map_err(|e| e.to_string())?;
+    let outcome = action.run(&ActionCtx { app: app.clone() }, &object).await?;
 
     Ok(LaunchedCommand {
-        session,
+        // Empty rather than absent: the window has always read this as a
+        // string and an extension command is the only thing that fills it.
+        session: outcome.session.unwrap_or_default(),
         title: record.title,
         extension_title: record.extension_title,
         mode: record.mode,
@@ -215,11 +70,11 @@ pub(crate) async fn launch_command(
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LaunchedCommand {
-    session: String,
-    title: String,
-    extension_title: String,
+    pub session: String,
+    pub title: String,
+    pub extension_title: String,
     /// "view" or "no-view"; the UI stays at the root list for no-view.
-    mode: String,
+    pub mode: String,
 }
 
 /// Performs an action Raycast implements itself rather than handing to the
@@ -283,7 +138,7 @@ pub(crate) async fn perform_builtin(
             // It said "paste injection is not built yet" and only copied,
             // which was honest at the time and is no longer true: the same
             // synthetic input dictation has always used does this.
-            dictation::paste::deliver(&app);
+            crate::dictation::paste::deliver(&app);
             Ok("Pasted".to_string())
         }
 

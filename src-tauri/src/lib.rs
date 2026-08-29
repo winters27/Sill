@@ -1,7 +1,10 @@
+pub mod action;
+pub mod actions;
 pub mod apps;
 pub mod icons;
 pub mod log;
 pub mod lnk;
+pub mod object;
 pub mod calculator;
 pub mod commands;
 pub mod clipboard;
@@ -583,6 +586,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(actions::builtins())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
                 commands: Vec::new(),
