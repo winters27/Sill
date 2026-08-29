@@ -13,7 +13,7 @@
  * Usage: node scripts/run-extension.mjs <entrypoint.js> [extensionName] [--seed key=json]
  */
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -199,6 +199,30 @@ child.stdout.on("data", (chunk) => {
   }
 });
 
+/**
+ * What Rust would send as `preferences` for this entrypoint.
+ *
+ * Read from the built index rather than hardcoded, because a hardcoded `{}`
+ * is what shipped: `getPreferenceValues()` answered with nothing for months
+ * while every manifest in the sample set declared defaults, and this harness
+ * agreed with the bug instead of catching it.
+ */
+function manifestPreferences() {
+  const indexPath = join(root, "extensions", "build", "index.json");
+  if (!existsSync(indexPath)) return {};
+
+  try {
+    const index = JSON.parse(readFileSync(indexPath, "utf8"));
+    const normalise = (p) => resolve(p).split("\\").join("/").toLowerCase();
+    const mine = normalise(entrypoint);
+    const record = index.find((entry) => normalise(entry.entrypoint) === mine);
+    return record?.preferences ?? {};
+  } catch {
+    // A fixture built outside the index is legitimate; it simply has none.
+    return {};
+  }
+}
+
 const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 
 send({
@@ -214,7 +238,7 @@ send({
       extension_id: extensionName,
       command_name: "cmd",
       is_raycast: true,
-      preferences: {},
+      preferences: manifestPreferences(),
       arguments: {},
       launch_type: "User",
     },

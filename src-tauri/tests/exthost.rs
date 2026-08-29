@@ -485,3 +485,74 @@ async fn every_method_the_host_calls_is_answered_or_declared_missing() {
         );
     }
 }
+
+#[test]
+fn a_command_carries_the_preferences_its_manifest_declared() {
+    // `LoadOptions::for_command` hardcoded `{}`, so `getPreferenceValues()`
+    // answered with nothing however many defaults a manifest declared. All
+    // four extensions in the sample set declare some, which meant all four ran
+    // with every setting undefined.
+    let opts = LoadOptions::with_preferences(
+        "entry.js",
+        "uuid-generator",
+        "generateV7",
+        sill_lib::exthost::CommandMode::View,
+        json!({ "defaultAction": "copy", "base32Encoding": false }),
+    );
+
+    assert_eq!(opts.preferences.get("defaultAction"), Some(&json!("copy")));
+    assert_eq!(opts.preferences.get("base32Encoding"), Some(&json!(false)));
+}
+
+#[test]
+fn preferences_are_always_an_object_on_the_wire() {
+    // The host spreads this into the bridge. Spreading null throws, where an
+    // empty object is simply empty, so a record with no preferences must not
+    // arrive as one.
+    let from_nothing = LoadOptions::with_preferences(
+        "entry.js",
+        "ext",
+        "cmd",
+        sill_lib::exthost::CommandMode::View,
+        Value::Null,
+    );
+    assert!(from_nothing.preferences.is_object());
+
+    let plain = LoadOptions::for_command(
+        "entry.js",
+        "ext",
+        "cmd",
+        sill_lib::exthost::CommandMode::View,
+    );
+    assert!(plain.preferences.is_object());
+}
+
+#[test]
+fn the_built_index_carries_preferences_through_to_the_record() {
+    // End of the pipeline that `scripts/build-extension.mjs` starts: a
+    // manifest default has to survive being written to index.json and read
+    // back as a `CommandRecord`, or none of the above matters.
+    let index = repo_root()
+        .join("extensions")
+        .join("build")
+        .join("index.json");
+
+    let commands = sill_lib::registry::load_index(&index);
+    if commands.is_empty() {
+        eprintln!("no built extensions; skipping");
+        return;
+    }
+
+    let with_preferences: Vec<_> = commands
+        .iter()
+        .filter(|command| command.preferences.as_object().is_some_and(|p| !p.is_empty()))
+        .collect();
+
+    assert!(
+        !with_preferences.is_empty(),
+        "not one of the {} built commands carries a preference. Every manifest \
+         in extensions/raycast-src declares some, so either the build script \
+         stopped emitting them or the record stopped reading them",
+        commands.len()
+    );
+}

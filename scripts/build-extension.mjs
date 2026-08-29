@@ -120,6 +120,32 @@ await build({
   minify: false,
 });
 
+/**
+ * What `getPreferenceValues()` should return before anyone has changed
+ * anything.
+ *
+ * A manifest declares preferences at the extension level and again per
+ * command, and a command sees both with its own winning. Nothing was reading
+ * either, so every extension ran with an empty object: `prefs.defaultAction`
+ * came back undefined in code that had no reason to expect it, which is the
+ * kind of failure that reads as an extension bug.
+ *
+ * Only preferences that declare a default appear. One that does not is
+ * genuinely unset until a person sets it, and inventing a value would be
+ * worse than the undefined the extension already guards against.
+ */
+function defaultPreferences(manifest, command) {
+  const collected = {};
+  for (const list of [manifest.preferences ?? [], command.preferences ?? []]) {
+    for (const preference of list) {
+      if (preference?.name && preference.default !== undefined) {
+        collected[preference.name] = preference.default;
+      }
+    }
+  }
+  return collected;
+}
+
 const record = {
   id: `${manifest.name}:${command.name}`,
   extension: manifest.name,
@@ -131,6 +157,7 @@ const record = {
   mode: command.mode,
   entrypoint: outfile.replace(/\\/g, "/"),
   keywords: command.keywords ?? [],
+  preferences: defaultPreferences(manifest, command),
 };
 
 // The registry Rust reads at startup. Rewritten rather than appended so a

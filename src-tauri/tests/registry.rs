@@ -23,6 +23,8 @@ fn command(id: &str, title: &str, extension_title: &str) -> CommandRecord {
         keywords: Vec::new(),
         icon: None,
         panel: None,
+        // Ranking never looks at these, so a fixture does not need any.
+        preferences: serde_json::Value::Null,
     }
 }
 

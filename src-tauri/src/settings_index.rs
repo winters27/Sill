@@ -167,6 +167,8 @@ pub fn records() -> Vec<CommandRecord> {
                 .collect(),
             icon: None,
             panel: Some(setting.panel.to_string()),
+            // Only extension commands carry any.
+            preferences: serde_json::Value::Null,
         })
         .collect()
 }

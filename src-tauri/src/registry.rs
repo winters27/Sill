@@ -42,6 +42,13 @@ pub struct CommandRecord {
     /// in two places that drift.
     #[serde(default)]
     pub panel: Option<String>,
+    /// What `getPreferenceValues()` answers with, from the manifest.
+    ///
+    /// Only extension commands have any, so it is skipped when empty rather
+    /// than writing `{}` beside every one of the thousand-odd applications in
+    /// the index cache.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub preferences: serde_json::Value,
 }
 
 /// A command plus why it placed where it did.
@@ -160,6 +167,8 @@ fn app_entry(
         icon,
         // A Windows application, not one of Sill's panels.
         panel: None,
+        // Only extension commands carry any.
+        preferences: serde_json::Value::Null,
     }
 }
 
@@ -277,6 +286,8 @@ fn builtin(id: &str, panel: &str, title: &str, subtitle: &str, keywords: &[&str]
         keywords: keywords.iter().map(|k| k.to_string()).collect(),
         icon: None,
         panel: Some(panel.to_string()),
+        // Only extension commands carry any.
+        preferences: serde_json::Value::Null,
     }
 }
 
@@ -316,6 +327,8 @@ pub fn quicklink_record(
         },
         icon: None,
         panel: Some("quicklinks".to_string()),
+        // Only extension commands carry any.
+        preferences: serde_json::Value::Null,
     }
 }
 
@@ -341,6 +354,8 @@ pub fn snippet_record(id: &str, name: &str, keyword: &str, preview: &str) -> Com
         keywords: vec![keyword.to_string(), preview.to_string()],
         icon: None,
         panel: None,
+        // Only extension commands carry any.
+        preferences: serde_json::Value::Null,
     }
 }
 
@@ -364,6 +379,8 @@ pub fn answer_record(text: &str, input: &str) -> RankedCommand {
             keywords: Vec::new(),
             icon: None,
             panel: None,
+            // Only extension commands carry any.
+            preferences: serde_json::Value::Null,
         },
         score: i64::MAX,
         matched: Vec::new(),

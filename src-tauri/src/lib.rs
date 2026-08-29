@@ -741,11 +741,12 @@ async fn launch_command(
     };
 
     let host = host_of(&hosts).await?;
-    let opts = LoadOptions::for_command(
+    let opts = LoadOptions::with_preferences(
         record.entrypoint.clone(),
         &record.extension,
         &record.command,
         mode,
+        record.preferences.clone(),
     );
     let session = host.load(&opts).await.map_err(|e| e.to_string())?;
 

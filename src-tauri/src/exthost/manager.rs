@@ -77,6 +77,22 @@ impl LoadOptions {
         command: &str,
         mode: CommandMode,
     ) -> Self {
+        Self::with_preferences(entrypoint, extension, command, mode, json!({}))
+    }
+
+    /// The same, carrying what `getPreferenceValues()` should answer with.
+    ///
+    /// Was always `{}`, so every extension ran as though the user had cleared
+    /// every setting, including the ones its manifest gives a default for.
+    /// That surfaces inside the extension as an undefined where it expected a
+    /// string, which reads as the extension being broken.
+    pub fn with_preferences(
+        entrypoint: impl Into<String>,
+        extension: &str,
+        command: &str,
+        mode: CommandMode,
+        preferences: Value,
+    ) -> Self {
         Self {
             mode,
             env: CommandEnv::Development,
@@ -88,7 +104,13 @@ impl LoadOptions {
             is_raycast: true,
             assets_path: String::new(),
             support_path: String::new(),
-            preferences: json!({}),
+            // An object, always. The host spreads this, and spreading null
+            // throws where an empty object is simply empty.
+            preferences: if preferences.is_object() {
+                preferences
+            } else {
+                json!({})
+            },
             arguments: json!({}),
             launch_type: LaunchType::User,
             capabilities: Capabilities::default(),
