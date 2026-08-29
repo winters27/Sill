@@ -125,6 +125,7 @@ impl ExtHost {
         // Manager-layer traffic coming up from the host.
         {
             let sessions = sessions.clone();
+            let api = api.clone();
             tokio::spawn(async move {
                 while let Some(work) = incoming.recv().await {
                     match work {
@@ -163,6 +164,10 @@ impl ExtHost {
                                 .and_then(Value::as_str)
                                 .unwrap_or("unknown");
                             crate::say!("extension crashed in session {session_id}: {reason}");
+                            // Told to the window as well as the log. Without
+                            // this it sits on an empty view waiting for a
+                            // first render that is never coming.
+                            api.report_crash(session_id, reason);
                         }
 
                         Incoming::Event { method, .. } => {

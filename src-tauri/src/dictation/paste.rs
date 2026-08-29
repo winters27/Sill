@@ -64,6 +64,35 @@ fn key(vk: VIRTUAL_KEY, up: bool) -> INPUT {
 #[cfg(not(windows))]
 pub fn chord() {}
 
+/// How long to wait between writing the clipboard and pressing Ctrl+V.
+///
+/// Writing and immediately pasting races the target application's read of the
+/// clipboard, and the symptom is the *previous* contents arriving instead of
+/// what was just put there. Long enough to lose that race reliably, short
+/// enough that nobody notices it happening.
+const SETTLE: std::time::Duration = std::time::Duration::from_millis(60);
+
+/// Puts the launcher away and pastes into whatever was in front of it.
+///
+/// Call this once the clipboard already holds what should land. It is the
+/// second half of every paste in Sill: a snippet expanding from the root list,
+/// an extension calling `Clipboard.paste`, and `Action.Paste`. All three used
+/// to spell it out for themselves, and one of them got it wrong by not doing
+/// it at all.
+///
+/// The launcher has to go first. Sill is frontmost while any of those run, so
+/// pasting without stepping aside delivers the text into the search field.
+pub fn deliver(app: &tauri::AppHandle) {
+    use tauri::Manager;
+
+    if let Some(window) = app.get_webview_window("main") {
+        crate::summon::hide(&window);
+    }
+
+    std::thread::sleep(SETTLE);
+    chord();
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;

@@ -44,6 +44,13 @@ pub enum UiEvent {
     SetSearchText { session: String, text: String },
     PopToRoot { session: String },
     CloseMainWindow { session: String },
+    /// A command died on its own.
+    ///
+    /// Was logged and dropped, which left the window waiting for a first
+    /// render that was never coming. An extension that crashes on load is
+    /// indistinguishable from one that is slow, and the user gets an empty
+    /// screen with no way to tell which.
+    Crashed { session: String, reason: String },
 }
 
 pub struct ApiLayer {
@@ -269,6 +276,17 @@ impl ApiLayer {
             .await
             .map_err(|err| RpcError::internal(format!("that call did not finish: {err}")))?
             .map_err(RpcError::internal)
+    }
+
+    /// Tells the window a command died.
+    ///
+    /// Not part of `dispatch`, because a crash is the one thing an extension
+    /// cannot report about itself.
+    pub fn report_crash(&self, session: &str, reason: &str) {
+        self.emit(UiEvent::Crashed {
+            session: session.to_string(),
+            reason: reason.to_string(),
+        });
     }
 
     fn emit(&self, event: UiEvent) {

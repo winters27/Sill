@@ -95,13 +95,7 @@ impl Bridge for SillBridge {
 
     fn clipboard_paste(&self, clip: &Clip) -> Result<(), String> {
         self.write(clip)?;
-        self.step_aside();
-
-        // The same settle every paste in Sill needs. Writing and immediately
-        // pasting races the target application's read of the clipboard, and
-        // the symptom is the previous contents arriving instead of the new.
-        std::thread::sleep(std::time::Duration::from_millis(60));
-        crate::dictation::paste::chord();
+        crate::dictation::paste::deliver(&self.app);
         Ok(())
     }
 

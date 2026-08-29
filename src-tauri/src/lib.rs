@@ -615,12 +615,8 @@ async fn launch_command(
         app.clipboard()
             .write_text(expansion.text)
             .map_err(|e| format!("Could not copy the snippet: {e}"))?;
-        dismiss_main(&app);
 
-        // The same settle every paste in Sill needs: writing and immediately
-        // pasting races the target application's read of the clipboard.
-        std::thread::sleep(std::time::Duration::from_millis(60));
-        dictation::paste::chord();
+        dictation::paste::deliver(&app);
 
         return Ok(LaunchedCommand {
             session: String::new(),
@@ -1385,15 +1381,18 @@ async fn perform_builtin(
             Ok("Opened".to_string())
         }
 
-        // Paste needs synthetic keyboard input, which is the Win32 work in M5.
-        // Copying is the honest half of it, and saying so beats pretending.
         "Action.Paste" => {
             let content = text_of(props.get("content"))
                 .ok_or_else(|| "that action carried nothing to paste".to_string())?;
             app.clipboard()
                 .write_text(content)
                 .map_err(|e| e.to_string())?;
-            Ok("Copied (paste injection is not built yet)".to_string())
+
+            // It said "paste injection is not built yet" and only copied,
+            // which was honest at the time and is no longer true: the same
+            // synthetic input dictation has always used does this.
+            dictation::paste::deliver(&app);
+            Ok("Pasted".to_string())
         }
 
         other => Err(format!("{other} is not a built-in Sill can perform")),

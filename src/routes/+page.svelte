@@ -34,7 +34,8 @@
     | { kind: "showHud"; session: string; text: string }
     | { kind: "setSearchText"; session: string; text: string }
     | { kind: "popToRoot"; session: string }
-    | { kind: "closeMainWindow"; session: string };
+    | { kind: "closeMainWindow"; session: string }
+    | { kind: "crashed"; session: string; reason: string };
 
   const tree = new ViewTree();
 
@@ -634,6 +635,17 @@
           case "closeMainWindow":
             void goBack();
             break;
+          case "crashed": {
+            // Read before goBack, which clears `running` synchronously on its
+            // way to the root list, so asking afterwards gets null.
+            const died = running?.title ?? "That command";
+            // Back to the root list rather than staying on a view whose
+            // extension is gone. Sitting there looks exactly like a slow
+            // load, and nothing would ever arrive to correct the impression.
+            void goBack();
+            status = `${died} stopped: ${payload.reason}`;
+            break;
+          }
         }
       });
 
