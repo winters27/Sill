@@ -1,0 +1,10 @@
+WindowsSettings.json
+
+Taken from Microsoft PowerToys, src/modules/launcher/Plugins/
+Microsoft.PowerToys.Run.Plugin.WindowsSettings/WindowsSettings.json
+
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT License.
+
+Windows settings pages are not files, so no filesystem or registry scan can
+find them. They exist only as a catalog, and this is Microsoft's own.

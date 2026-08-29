@@ -1,0 +1,282 @@
+//! Owns the extension host process and everything spoken over it.
+//!
+//! Layering matches `host/`: a Manager layer for process and session
+//! lifecycle, and an API layer per session carried inside it as an opaque
+//! payload. Each session therefore gets its own [`RpcPeer`] whose transport is
+//! `Manager/messageExtension`, exactly as the worker has one whose transport is
+//! `postMessage`.
+
+pub mod api;
+pub mod framing;
+pub mod manager;
+pub mod rpc;
+
+use std::collections::HashMap;
+use std::path::Path;
+use std::process::Stdio;
+use std::sync::{Arc, Mutex};
+
+use futures_util::{SinkExt, StreamExt};
+use serde_json::{json, Value};
+use tokio::process::{Child, Command};
+use tokio::sync::mpsc;
+use tokio_util::codec::{FramedRead, FramedWrite};
+
+pub use api::{ApiLayer, UiEvent};
+pub use manager::{Capabilities, CommandEnv, CommandMode, LaunchType, LoadOptions, ManagerClient};
+pub use rpc::{Incoming, RpcError, RpcPeer};
+
+/// A loaded command.
+struct Session {
+    /// Scopes storage and names the extension in logs.
+    extension: String,
+    /// The API-layer conversation with this extension.
+    peer: RpcPeer,
+}
+
+pub struct ExtHost {
+    manager: ManagerClient,
+    api: Arc<ApiLayer>,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    /// Kept so the host process is killed when this is dropped.
+    _child: Child,
+}
+
+impl ExtHost {
+    /// Spawns the bundled host and starts pumping both directions.
+    ///
+    /// `node_exe` is the interpreter and `host_js` the bundled artifact. The
+    /// host refuses to run on a TTY, so stdio must be piped.
+    ///
+    /// Async purely to encode a requirement: `tokio::process` registers the
+    /// child with the reactor, so this must run inside a Tokio runtime. It was
+    /// previously sync, which compiled fine and then panicked at startup with
+    /// "there is no reactor running" because Tauri's `setup` hook is not in
+    /// one. Making it async moves that mistake to compile time.
+    pub async fn spawn(
+        node_exe: &Path,
+        host_js: &Path,
+        events: mpsc::UnboundedSender<UiEvent>,
+    ) -> std::io::Result<Self> {
+        let mut child = Command::new(node_exe)
+            .arg(host_js)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+
+        let stdin = child.stdin.take().expect("stdin was piped");
+        let stdout = child.stdout.take().expect("stdout was piped");
+        let stderr = child.stderr.take().expect("stderr was piped");
+
+        let (peer, mut outbound, mut incoming) = RpcPeer::new();
+
+        // Outbound: framed writes to the host.
+        let mut writer = FramedWrite::new(stdin, framing::codec());
+        tokio::spawn(async move {
+            while let Some(text) = outbound.recv().await {
+                if writer.send(text.into()).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        // Inbound: framed reads fed to the peer.
+        let reader_peer = peer.clone();
+        let mut reader = FramedRead::new(stdout, framing::codec());
+        tokio::spawn(async move {
+            while let Some(frame) = reader.next().await {
+                match frame {
+                    Ok(bytes) => match std::str::from_utf8(&bytes) {
+                        Ok(text) => reader_peer.receive(text),
+                        Err(_) => crate::say!("extension host sent a non-UTF-8 frame"),
+                    },
+                    Err(err) => {
+                        crate::say!("extension host framing error: {err}");
+                        break;
+                    }
+                }
+            }
+        });
+
+        // The host's stderr is where extension console output and our own
+        // warnings surface, so it must not be swallowed.
+        tokio::spawn(async move {
+            let mut lines = tokio::io::AsyncBufReadExt::lines(tokio::io::BufReader::new(stderr));
+            while let Ok(Some(line)) = lines.next_line().await {
+                eprintln!("[host] {line}");
+            }
+        });
+
+        let manager = ManagerClient::new(peer);
+        let api = Arc::new(ApiLayer::new(events));
+        let sessions: Arc<Mutex<HashMap<String, Session>>> = Arc::new(Mutex::new(HashMap::new()));
+
+        // Manager-layer traffic coming up from the host.
+        {
+            let sessions = sessions.clone();
+            tokio::spawn(async move {
+                while let Some(work) = incoming.recv().await {
+                    match work {
+                        Incoming::Event { method, params } if method == "Manager/extensionMessage" => {
+                            let session_id = params
+                                .get("session_id")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default();
+                            let payload = params
+                                .get("payload")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default();
+
+                            // Hand it to that session's own conversation.
+                            let peer = sessions
+                                .lock()
+                                .expect("sessions poisoned")
+                                .get(session_id)
+                                .map(|s| s.peer.clone());
+
+                            match peer {
+                                Some(peer) => peer.receive(payload),
+                                None => eprintln!(
+                                    "[sill] message for unknown session {session_id}, dropped"
+                                ),
+                            }
+                        }
+
+                        Incoming::Event { method, params } if method == "Manager/extensionCrash" => {
+                            let session_id = params
+                                .get("session_id")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default();
+                            let reason = params
+                                .get("reason")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown");
+                            crate::say!("extension crashed in session {session_id}: {reason}");
+                        }
+
+                        Incoming::Event { method, .. } => {
+                            crate::say!("unhandled manager event: {method}");
+                        }
+
+                        Incoming::Request { method, .. } => {
+                            // The host never calls into Rust at the Manager
+                            // layer; everything it wants goes through the API
+                            // layer inside a payload.
+                            crate::say!("unexpected manager request: {method}");
+                        }
+                    }
+                }
+            });
+        }
+
+        Ok(Self {
+            manager,
+            api,
+            sessions,
+            _child: child,
+        })
+    }
+
+    /// Loads a command and performs the ready handshake.
+    ///
+    /// The session is registered before `ready` is sent, which is the whole
+    /// point of the handshake: the host buffers the extension's first messages
+    /// until there is somewhere to deliver them.
+    pub async fn load(&self, opts: &LoadOptions) -> Result<String, RpcError> {
+        let session_id = self.manager.load(opts).await?;
+
+        let (peer, mut outbound, mut incoming) = RpcPeer::new();
+
+        self.sessions.lock().expect("sessions poisoned").insert(
+            session_id.clone(),
+            Session {
+                extension: opts.extension_id.clone(),
+                peer: peer.clone(),
+            },
+        );
+
+        // This session's outbound API traffic, wrapped for the Manager layer.
+        {
+            let manager = self.manager.clone();
+            let session_id = session_id.clone();
+            tokio::spawn(async move {
+                while let Some(text) = outbound.recv().await {
+                    if manager.message_extension(&session_id, &text).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+
+        // This session's inbound API calls.
+        {
+            let api = self.api.clone();
+            let peer = peer.clone();
+            let session_id = session_id.clone();
+            let extension = opts.extension_id.clone();
+            tokio::spawn(async move {
+                while let Some(work) = incoming.recv().await {
+                    match work {
+                        Incoming::Request { id, method, params } => {
+                            let result = api.dispatch(&session_id, &extension, &method, &params);
+                            peer.respond(id, result);
+                        }
+                        Incoming::Event { method, params } => {
+                            // Notifications get dispatched too; the result is
+                            // simply discarded. UI/render arrives this way.
+                            if let Err(err) =
+                                api.dispatch(&session_id, &extension, &method, &params)
+                            {
+                                crate::say!("{method}: {err}");
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        self.manager.ready(&session_id).await?;
+        Ok(session_id)
+    }
+
+    /// Fires an extension callback by the handler id carried in its props.
+    pub async fn activate_handler(
+        &self,
+        session_id: &str,
+        handler_id: &str,
+        args: Value,
+    ) -> Result<Value, RpcError> {
+        let peer = self
+            .sessions
+            .lock()
+            .expect("sessions poisoned")
+            .get(session_id)
+            .map(|s| s.peer.clone())
+            .ok_or_else(|| RpcError::internal(format!("no such session: {session_id}")))?;
+
+        peer.request(
+            "EventCore/handlerActivated",
+            json!({ "id": handler_id, "args": args }),
+        )
+        .await
+    }
+
+    pub async fn unload(&self, session_id: &str) -> Result<bool, RpcError> {
+        self.sessions
+            .lock()
+            .expect("sessions poisoned")
+            .remove(session_id);
+        self.manager.unload(session_id).await
+    }
+
+    /// Name of the extension backing a session, if it is still loaded.
+    pub fn extension_of(&self, session_id: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .expect("sessions poisoned")
+            .get(session_id)
+            .map(|s| s.extension.clone())
+    }
+}

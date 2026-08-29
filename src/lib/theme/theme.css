@@ -1,0 +1,372 @@
+@import "@fontsource-variable/inter";
+
+/*
+ * Satoshi, bundled, and the default.
+ *
+ * Chosen because it is the face StreamNook uses and the one whose rendering
+ * Brandon already reads all day. That matters more than any argument about
+ * hinting: the window is transparent, so Chromium rasterises every glyph with
+ * flat greyscale coverage rather than across the display's subpixels, and the
+ * question is only which face survives that treatment best. Satoshi does,
+ * because its stems are even and it carries enough weight at 13px not to go
+ * anaemic when the subpixel resolution is taken away.
+ */
+@font-face {
+  font-family: "Satoshi";
+  src: url("./fonts/Satoshi-Variable.woff2") format("woff2-variations"),
+       url("./fonts/Satoshi-Variable.woff2") format("woff2");
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+
+/*
+ * Sill's default theme: StreamNook's "Winters' Glass" palette, expressed in
+ * Vicinae's token schema so Vicinae theme files still port directly.
+ *
+ *   [colors.core]                  -> --core-*
+ *   [colors.accents]               -> --accent-*
+ *   [colors.list.item.selection]   -> --list-selection-*
+ *   [colors.grid.item]             -> --grid-item-*
+ *
+ * Two things make this read as frosted glass rather than tinted plastic:
+ *
+ * 1. Nothing here is blue. The palette is neutral near-black and the accent is
+ *    a desaturated blue-grey, so any colour you see is the desktop showing
+ *    through the acrylic rather than a tint painted over it.
+ * 2. The bevel is a pair of opposing insets, light top-left and shadow
+ *    bottom-right, which is what gives an edge the thickness of glass.
+ *
+ * Outer shadows belong on tiles, not on the window. `main` IS the window, so
+ * anything outward is clipped; DWM draws the real drop shadow.
+ */
+
+:root {
+  /* Core. Neutral near-black; nothing here is blue. */
+  --core-background: #0c0c0d;
+  --core-secondary-background: #1a1a1b;
+  --core-foreground: #ffffff;
+  --core-border: rgba(151, 177, 185, 0.2);
+
+  /* The accent is a desaturated blue-grey, not a saturated blue. */
+  --core-accent: #97b1b9;
+  --accent-hover: #adc4cc;
+  --accent-bright: #c8e0e8;
+  --accent-rgb: 151, 177, 185;
+
+  /* Vicinae's accent slots, kept so ported themes still resolve. */
+  --accent-blue: #6b9dff;
+  --accent-green: #22c55e;
+  --accent-magenta: #d2a6ff;
+  --accent-orange: #eab308;
+  --accent-purple: #d2a6ff;
+  --accent-red: #ef4444;
+  --accent-red-rgb: 239, 68, 68;
+  --accent-yellow: #eab308;
+  --accent-cyan: #c8e0e8;
+
+  /* Surfaces, as alpha over whatever is behind. */
+  --surface: rgba(var(--accent-rgb), 0.15);
+  --surface-hover: rgba(var(--accent-rgb), 0.25);
+  --surface-active: rgba(var(--accent-rgb), 0.35);
+
+  --list-selection-background: rgba(var(--accent-rgb), 0.15);
+  --list-selection-secondary-background: rgba(var(--accent-rgb), 0.1);
+  --grid-item-background: #1a1a1b;
+
+  /*
+   * How glassy the surface is, 0 to 1. At 0 it goes fully solid; at 1 it is
+   * pure tint over the desktop blur. A token so it can become a setting
+   * without touching a single colour.
+   */
+  --glass-strength: 1;
+
+  /*
+   * Two different tints, matching how StreamNook layers them.
+   *
+   * The window is the analogue of .glass-modal, so it takes the tertiary
+   * surface at 78%: dark enough to read against any desktop, sheer enough for
+   * the acrylic blur behind it to show.
+   *
+   * Panels sitting ON that surface take --tint-panel, the near-transparent
+   * white of .glass-panel, which lifts without colouring.
+   */
+  --tint: color-mix(in srgb, var(--core-secondary-background) 88%, transparent);
+  --tint-panel: rgba(255, 255, 255, 0.03);
+
+  --text-muted: rgba(var(--accent-rgb), 0.6);
+  --text-faint: rgba(var(--accent-rgb), 0.38);
+  --hairline: rgba(var(--accent-rgb), 0.1);
+  --border-light: rgba(var(--accent-rgb), 0.2);
+
+  /*
+   * The canonical Winters' Glass bevels, taken verbatim from StreamNook so the
+   * recipe stays identical across both apps.
+   */
+  --bevel-tile: inset 1px 1px 0 0 rgba(255, 255, 255, 0.1),
+    inset -1px -1px 0 0 rgba(0, 0, 0, 0.18);
+  --bevel-hero: inset 1px 1px 0 0 rgba(255, 255, 255, 0.14),
+    inset -1px -1px 0 0 rgba(0, 0, 0, 0.22), 0 4px 10px rgba(0, 0, 0, 0.18);
+
+  /*
+   * The window gets the light catch only, not the full tile bevel.
+   *
+   * A border plus two 1px insets is 3px of edge treatment stacked exactly
+   * where DWM is already clipping the corner. On StreamNook's settings modal
+   * that is proportionally invisible; on a 750x500 launcher it reads as a
+   * chunky frame. DWM defines the shape, this just catches the light.
+   */
+  --bevel-window: inset 1px 1px 0 0 rgba(255, 255, 255, 0.08);
+
+  --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+  --sheen-hover: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.028));
+
+  /* StreamNook's spring. Slightly overshoots, which reads as physical. */
+  --ease: cubic-bezier(0.175, 0.885, 0.32, 1.25);
+
+  /* Matches DWM's DWMWCP_ROUND, so the OS clip and the page agree. */
+  --radius-window: 8px;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --row-height: 38px;
+  --pad: 12px;
+
+  /*
+   * One type scale, so nothing in the launcher is sized by feel.
+   *
+   * Everything on a row is the same size and separated by colour and weight
+   * instead. Mixing an 11px uppercase label with 13px body on one line is
+   * what made the old list read as three unrelated things per row.
+   */
+  --text-query: 17px;
+  /* Overridden per face: only Segoe has a separate display cut. */
+  --font-display: var(--font);
+  --text-row: 13px;
+  --text-meta: 12px;
+  --text-group: 11.5px;
+
+  /* Inter is a variable font, so the in-between weights are real. 450 reads
+     as "slightly more present" without the jump to a semibold. */
+  --weight-row: 450;
+
+  /*
+   * Inter is bundled rather than named and hoped for: it is not installed on
+   * Windows, so the old stack silently fell through to Segoe UI Variable and
+   * the design was never seeing the face it was drawn against.
+   *
+   * Which face wins is a setting, because the answer depends on the display.
+   * Inter is drawn for screens where hinting no longer decides anything;
+   * Segoe UI Variable is hinted by Microsoft for Windows at 96 DPI, which is
+   * exactly where a 100% scale display sits. Neither is right in the
+   * abstract, so the eye in front of the screen picks.
+   */
+  --font: "Satoshi", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", "Consolas", ui-monospace, monospace;
+}
+
+:root[data-font="inter"] {
+  --font: "Inter Variable", "Inter", system-ui, sans-serif;
+  /* Inter's defaults leave `l` and `1` hard to tell apart in a path or a
+     shortcut, and its contextual alternates round some glyphs off. */
+  --font-features: "cv05" 1, "cv08" 1, "calt" 0;
+}
+
+/*
+ * Segoe UI Variable has real optical sizes and they are separate families:
+ * Text is drawn for body copy, Display for anything above about 18px. Naming
+ * only "Segoe UI Variable" gets neither.
+ */
+:root[data-font="system"] {
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  /* Inter's character alternates mean nothing here and its `calt` is not
+     Segoe's, so the feature list goes back to the face's own defaults. */
+  --font-features: normal;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+}
+
+/*
+ * Transparent, so the desktop acrylic shows. That has a cost worth writing
+ * down, because it is invisible and permanent.
+ *
+ * Chromium will not use subpixel antialiasing on a transparent surface:
+ * blending a glyph against pixels it cannot see has no correct answer, so
+ * every character is rasterised with flat greyscale coverage instead.
+ * Measured here by capturing the screen and counting colour on text edges:
+ * transparent gives 0%, opaque gives 39%, native windows sit at 15 to 61%.
+ * **It is decided per window, not per element** - painting the list rows
+ * fully opaque inside a transparent window still measured 0% - so no
+ * arrangement of panels buys it back. Glass and subpixel text are exclusive.
+ *
+ * The choice here is glass, so the work goes into a face that holds up
+ * without subpixels rather than into pretending the cost is not there.
+ */
+:root {
+  --surface-base: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  /*
+   * Opaque, and this is the crispness fix rather than a colour choice.
+   *
+   * Chromium cannot use subpixel text rendering on a transparent surface:
+   * blending a glyph against pixels it cannot see has no correct answer, so
+   * it falls back to flat greyscale coverage for every character in the
+   * window. Measured on a 96 DPI display, 0% of Sill's text edges carried
+   * colour against 15-25% for every native window on the same screen.
+   *
+   * Nothing about the font fixes that, because the font is not what is being
+   * given up. Painting a known background is.
+   */
+  /*
+   * Painted by `data-surface`, which is set from the backdrop preference.
+   * Opaque is the default and it is not a colour choice: see the note below
+   * on why it decides how every glyph in the window is rasterised.
+   */
+  background: var(--surface-base);
+  color: var(--core-foreground);
+  font-family: var(--font);
+  font-size: 13px;
+  /*
+   * Stated rather than left to chance, and matching StreamNook exactly.
+   *
+   * A transparent window already forces greyscale coverage, so `antialiased`
+   * changes nothing today; it is here so the two applications render the same
+   * way if either window ever stops being transparent. `none` is never right:
+   * at 13px it gives jagged stems and any stroke thinner than a pixel simply
+   * vanishes, because there is nowhere for it to go.
+   *
+   * `geometricPrecision` keeps glyph advances unrounded, which is what stops
+   * words drifting apart as they get longer.
+   */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  font-optical-sizing: auto;
+  font-feature-settings: var(--font-features, "kern" 1, "liga" 1, "calt" 1);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Shared list primitives, used by the root list and by a command's List. */
+.sill-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 5px;
+  outline: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent;
+}
+
+.sill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--row-height);
+  padding: 0 11px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: default;
+  /*
+   * Scoped, never `all`, and backdrop-filter is never animated: transitioning
+   * it on state change is the WebView2 flicker bug.
+   */
+  transition:
+    background-color 0.22s var(--ease),
+    box-shadow 0.22s var(--ease),
+    border-color 0.22s var(--ease);
+}
+
+.sill-row:hover:not(.selected) {
+  background-color: rgba(var(--accent-rgb), 0.07);
+}
+
+/* The selected row is the one lit tile on the surface. */
+.sill-row.selected {
+  background-color: var(--surface);
+  box-shadow: var(--bevel-tile);
+}
+
+/*
+ * A group label, which is what separates one run of rows from the next.
+ *
+ * A rule between groups would be a second horizontal line competing with the
+ * two the window already has, above and below the list. The label alone
+ * carries the break, which is what Raycast does and why its list reads calm.
+ */
+.sill-group {
+  display: flex;
+  align-items: flex-end;
+  height: 28px;
+  /* 11 plus the list's own 5 puts the label on the same left edge as a row's
+     icon. A heading that does not line up with what it heads reads as a
+     stray line of text. */
+  padding: 0 11px 6px;
+  font-size: var(--text-group);
+  font-weight: 500;
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.sill-empty {
+  padding: 32px var(--pad);
+  text-align: center;
+  color: var(--text-faint);
+  line-height: 1.7;
+}
+
+/*
+ * Settings card, from StreamNook's .settings-card.
+ *
+ * A flat grouped slab, not a raised panel. Dropping the bevel, shadow, border
+ * and gradient is what stops a panel full of sections from reading as a stack
+ * of competing floating boxes: the faint fill alone keeps each group legible,
+ * and the space between sections does the rest.
+ */
+.sill-card {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.sill-setting {
+  padding: 13px 16px;
+  background: transparent;
+  transition: background-color 0.1s linear;
+}
+
+.sill-setting:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+/*
+ * A hairline BETWEEN adjacent settings only. The adjacent-sibling selector
+ * skips the first row, and a setting's own dependent controls live inside its
+ * row rather than beside it, so they stay grouped with no internal line.
+ */
+.sill-card .sill-setting + .sill-setting {
+  border-top: 1px solid color-mix(in srgb, var(--hairline) 85%, transparent);
+}
+
+/*
+ * Menu surface, from StreamNook's .user-profile-card. A popover sits ON the
+ * window rather than being the window, so unlike `main` it does get an in-page
+ * blur and a real border.
+ */
+.sill-menu {
+  /* Deep enough that text on the popover stays crisp. At 0.65 the list rows
+     behind it showed through the labels and washed them out. */
+  background-color: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+}
