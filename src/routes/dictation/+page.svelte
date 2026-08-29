@@ -51,9 +51,17 @@
   }
 
   function draw(): void {
-    frame = requestAnimationFrame(draw);
     const el = canvas;
-    if (!el) return;
+    // Re-armed only while there is something to draw on. Scheduling the next
+    // frame first, unconditionally, is what kept this loop running for the
+    // entire life of the app: the panel is hidden almost always, the canvas
+    // is unmounted with it, and the body below returned immediately while the
+    // 60 Hz ping-pong carried on and kept the GPU process awake with it.
+    if (!el) {
+      frame = 0;
+      return;
+    }
+    frame = requestAnimationFrame(draw);
 
     const ctx = el.getContext("2d");
     if (!ctx) return;
@@ -114,9 +122,23 @@
     }
   }
 
+  /**
+   * The loop lives exactly as long as the canvas does.
+   *
+   * `canvas` is bound by `bind:this` inside the `{#if visible}` block, so it
+   * is an element while the meter is on screen and undefined the rest of the
+   * time. Keying the loop to it means the panel costs nothing at all when
+   * nobody is dictating, which is most of the time the app is running.
+   */
+  $effect(() => {
+    if (!canvas) return;
+
+    frame = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(frame);
+  });
+
   onMount(() => {
     introStart = performance.now();
-    frame = requestAnimationFrame(draw);
 
     (async () => {
       // Its own webview, so it does not inherit the launcher's font choice

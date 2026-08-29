@@ -28,16 +28,27 @@ use tokio::sync::mpsc;
 use exthost::{ExtHost, LoadOptions, UiEvent};
 use registry::{CommandRecord, Frecency};
 
-/// Holds the running extension host.
+/// Holds the extension host, if one is running.
 ///
-/// Startup is deferred to `setup` so a failure to spawn Node surfaces as a
-/// visible error rather than a panic during builder construction.
+/// It is a Node process, and starting it with the app cost 38 MB of resident
+/// memory on every machine, including the overwhelming majority of sessions
+/// where no extension is ever opened. So it starts on the first extension
+/// launch and shuts itself down again once nothing has used it, which is the
+/// same lifecycle `dictation::server` gives the whisper process.
 ///
 /// The slot is an `Arc` so it can be cloned out of Tauri's state and moved
 /// into an async task. Holding a `State<'_, _>` across an await would borrow
 /// the app handle for the life of the task.
 #[derive(Clone)]
-struct HostState(Arc<tokio::sync::Mutex<Option<Arc<ExtHost>>>>);
+struct HostState {
+    inner: Arc<tokio::sync::Mutex<Option<Arc<ExtHost>>>>,
+    /// Cloned into every host that gets spawned, so UI events from any of
+    /// them reach the one receiver the window is listening on.
+    events: mpsc::UnboundedSender<UiEvent>,
+    host_js: Arc<PathBuf>,
+    /// When the host was last asked for, which is what the watchdog measures.
+    last_used: Arc<std::sync::Mutex<std::time::Instant>>,
+}
 
 /// The user's own preferences.
 #[derive(Clone)]
@@ -101,26 +112,92 @@ fn dev_host_js() -> PathBuf {
         .join("host.js")
 }
 
-/// How long a command will wait for the host to finish starting.
-const HOST_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-
-/// Resolves the host, waiting briefly if it is still starting.
+/// How long the host may sit unused before it is shut down.
 ///
-/// Startup moved onto the async runtime, so the window can be up and issuing
-/// commands before the child process exists. Failing immediately would turn a
-/// normal race into a visible error on every cold start.
-async fn host_of(state: &State<'_, HostState>) -> Result<Arc<ExtHost>, String> {
-    let deadline = std::time::Instant::now() + HOST_READY_TIMEOUT;
+/// Far shorter than the whisper server's half hour, because the cost of being
+/// wrong is different: reloading a whisper model is seconds off a cold disk,
+/// while respawning Node is a fraction of one.
+const HOST_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+const HOST_IDLE_CHECK: std::time::Duration = std::time::Duration::from_secs(60);
 
-    loop {
-        if let Some(host) = state.0.lock().await.clone() {
-            return Ok(host);
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err("extension host did not start; check the log for why".to_string());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+/// The running host, or nothing if it is not up.
+///
+/// Never starts one. Used by the calls that only make sense against a session
+/// that already exists, so unloading a command from a host that has since
+/// been shut down does not resurrect Node to be told there is nothing to do.
+async fn running_host(state: &HostState) -> Option<Arc<ExtHost>> {
+    state.inner.lock().await.clone()
+}
+
+/// The host, started if it is not already running.
+///
+/// The lock is held across the spawn on purpose: two commands launched at
+/// once must wait for one host rather than race and start two.
+async fn host_of(state: &HostState) -> Result<Arc<ExtHost>, String> {
+    *state.last_used.lock().expect("host clock poisoned") = std::time::Instant::now();
+
+    let mut slot = state.inner.lock().await;
+
+    if let Some(host) = slot.as_ref() {
+        return Ok(host.clone());
     }
+
+    if !state.host_js.exists() {
+        return Err(format!(
+            "extension host bundle missing at {}. Run: npm --prefix host run build",
+            state.host_js.display()
+        ));
+    }
+
+    let host = ExtHost::spawn(&PathBuf::from("node"), &state.host_js, state.events.clone())
+        .await
+        .map_err(|err| format!("could not start the extension host: {err}"))?;
+
+    let host = Arc::new(host);
+    *slot = Some(host.clone());
+    drop(slot);
+
+    crate::say!("extension host started");
+    start_host_watchdog(state.clone());
+
+    Ok(host)
+}
+
+/// Shuts the host down once nothing has used it for a while.
+///
+/// Started when the host is spawned and returns when it fires, so a machine
+/// that never opens an extension never runs this timer at all. A permanent
+/// one-minute tick waiting for a process that is usually not there is exactly
+/// the "why are we waking up?" this is meant to avoid.
+fn start_host_watchdog(state: HostState) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(HOST_IDLE_CHECK).await;
+
+            let idle = state
+                .last_used
+                .lock()
+                .expect("host clock poisoned")
+                .elapsed();
+
+            let mut slot = state.inner.lock().await;
+
+            // Somebody else already shut it down. Nothing left to watch.
+            let Some(host) = slot.as_ref() else { return };
+
+            // A loaded command is a reason to stay up however long it has sat
+            // there: the user is looking at it.
+            if idle < HOST_IDLE_TIMEOUT || host.session_count() > 0 {
+                continue;
+            }
+
+            crate::say!("extension host idle for {}s; shutting it down", idle.as_secs());
+            // Dropping the last handle kills the child: `ExtHost` holds it
+            // with `kill_on_drop`.
+            slot.take();
+            return;
+        }
+    });
 }
 
 /// The root list, or what matches a query.
@@ -129,7 +206,7 @@ async fn search_commands(
     state: State<'_, RegistryState>,
     prefs: State<'_, PrefsState>,
     query: String,
-) -> Result<Vec<registry::RankedCommand>, String> {
+) -> Result<Vec<registry::SearchResult>, String> {
     let excluded = prefs.inner.lock().await.sources.excluded.clone();
     let registry = state.inner.lock().await;
 
@@ -155,7 +232,10 @@ async fn search_commands(
         results.insert(0, registry::answer_record(&answer.text, &answer.input));
     }
 
-    Ok(results)
+    // Narrowed to what the window actually reads on the way out. The ranked
+    // form carries the fields matching needs, which is most of the bytes and
+    // none of the use once ranking is over.
+    Ok(results.into_iter().map(Into::into).collect())
 }
 
 #[tauri::command]
@@ -703,6 +783,10 @@ async fn load_extension(
     host.load(&opts).await.map_err(|e| e.to_string())
 }
 
+/// Fires a callback in a running command.
+///
+/// Deliberately does not start the host: a handler belongs to a session, and
+/// with no host there is no session for it to belong to.
 #[tauri::command]
 async fn activate_handler(
     state: State<'_, HostState>,
@@ -710,15 +794,26 @@ async fn activate_handler(
     handler: String,
     args: Option<Value>,
 ) -> Result<Value, String> {
-    let host = host_of(&state).await?;
+    let host = running_host(&state)
+        .await
+        .ok_or_else(|| format!("no such session: {session}"))?;
+
     host.activate_handler(&session, &handler, args.unwrap_or(Value::Array(vec![])))
         .await
         .map_err(|e| e.to_string())
 }
 
+/// Tears down a running command.
+///
+/// Also does not start the host. The window unloads on its way back to the
+/// root list, and after an idle shutdown that would otherwise respawn Node
+/// purely to be told the session it is closing no longer exists.
 #[tauri::command]
 async fn unload_extension(state: State<'_, HostState>, session: String) -> Result<bool, String> {
-    let host = host_of(&state).await?;
+    let Some(host) = running_host(&state).await else {
+        return Ok(false);
+    };
+
     host.unload(&session).await.map_err(|e| e.to_string())
 }
 
@@ -1359,7 +1454,6 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .manage(HostState(Arc::new(tokio::sync::Mutex::new(None))))
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
                 commands: Vec::new(),
@@ -1375,25 +1469,15 @@ pub fn run() {
             let (tx, rx) = mpsc::unbounded_channel();
             forward_events(handle.clone(), rx);
 
-            // Cloned out before the task so no Tauri borrow crosses an await.
-            let slot = app.state::<HostState>().inner().clone();
-            let host_js = dev_host_js();
-
-            // Started on the async runtime: spawning the child registers it
-            // with the Tokio reactor, and `setup` itself is not running in one.
-            tauri::async_runtime::spawn(async move {
-                if !host_js.exists() {
-                    eprintln!(
-                        "[sill] extension host bundle missing at {}. Run: npm --prefix host run build",
-                        host_js.display()
-                    );
-                    return;
-                }
-
-                match ExtHost::spawn(&PathBuf::from("node"), &host_js, tx).await {
-                    Ok(host) => *slot.0.lock().await = Some(Arc::new(host)),
-                    Err(err) => crate::say!("could not start the extension host: {err}"),
-                }
+            // The host itself is not started here. Nothing has asked for an
+            // extension yet, and starting Node on the chance that something
+            // might is 38 MB resident for a session that usually never opens
+            // one. `host_of` brings it up on the first launch that needs it.
+            app.manage(HostState {
+                inner: Arc::new(tokio::sync::Mutex::new(None)),
+                events: tx,
+                host_js: Arc::new(dev_host_js()),
+                last_used: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
             });
 
             // Preferences first: the hotkey and the backdrop both come from

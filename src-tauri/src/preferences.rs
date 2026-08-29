@@ -198,7 +198,17 @@ pub struct Sources {
     pub app_paths: bool,
     /// Installed programs from the Uninstall hives.
     pub installed_programs: bool,
-    /// Every executable on %PATH%. About 1,200 entries, mostly CLI tools.
+    /// Every executable on %PATH%. About 900 entries, mostly CLI tools.
+    ///
+    /// Off by default, and it is the only source that is. Measured on a real
+    /// machine it was 912 of 1,443 indexed entries, so **63% of the index for
+    /// the handful of them anyone launches by name**, and every one of those
+    /// entries is ranked and weighed on every keystroke. The ranker already
+    /// penalises them precisely because they were drowning real applications.
+    ///
+    /// Anyone who wants `ffmpeg` in the launcher turns it back on and gets it.
+    /// The reverse, a first run where a search for "co" offers forty compiler
+    /// front ends, is the impression that does not get a second chance.
     pub path_executables: bool,
     /// Windows settings pages and Control Panel applets.
     pub windows_settings: bool,
@@ -213,7 +223,12 @@ impl Default for Sources {
             packaged_apps: true,
             app_paths: true,
             installed_programs: true,
-            path_executables: true,
+            // The one source that starts off. See the field's own note.
+            // Only new installs get this: a saved preferences file keeps
+            // whatever it already said, because silently removing two thirds
+            // of somebody's index on an update is not a default change, it is
+            // a bug they cannot explain.
+            path_executables: false,
             windows_settings: true,
             excluded: Vec::new(),
         }
@@ -344,8 +359,15 @@ mod tests {
             "an omitted field inside a nested struct keeps its default"
         );
         assert!(
-            parsed.sources.path_executables,
+            parsed.sources.shortcuts,
             "an omitted section keeps its defaults"
+        );
+        // The same rule the other way up, which is the half that actually
+        // bites: a default of `false` must survive too, or the check above
+        // passes for any field that happens to default true.
+        assert!(
+            !parsed.sources.path_executables,
+            "an omitted section keeps a default of false as well"
         );
         assert_eq!(parsed.files.max_results, 20);
     }

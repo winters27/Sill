@@ -45,14 +45,69 @@ pub struct CommandRecord {
 }
 
 /// A command plus why it placed where it did.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+///
+/// Internal to ranking. What crosses the IPC boundary is [`SearchResult`],
+/// which is a good deal smaller.
+#[derive(Debug, Clone)]
 pub struct RankedCommand {
-    #[serde(flatten)]
     pub command: CommandRecord,
     pub score: i64,
     /// Indices into `title` that matched, so the UI can highlight them.
     pub matched: Vec<usize>,
+}
+
+/// One result, as the window receives it.
+///
+/// Separate from [`CommandRecord`] because the two are answering different
+/// questions. The record is what ranking needs, and it carries the fields that
+/// make matching work: `description`, `keywords`, and the score itself. **None
+/// of those are ever read by the frontend**, and flattening the whole record
+/// onto the wire meant sending every one of them for every result.
+///
+/// This is rule 9's domain/DTO split, applied at the one place it pays for
+/// itself: this type is serialised on every keystroke.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub id: String,
+    pub extension: String,
+    pub extension_title: String,
+    pub command: String,
+    pub title: String,
+    pub subtitle: String,
+    pub mode: String,
+    pub entrypoint: String,
+    pub icon: Option<String>,
+    pub panel: Option<String>,
+    /// Indices into `title` that matched, so the UI can highlight them.
+    pub matched: Vec<usize>,
+}
+
+impl From<RankedCommand> for SearchResult {
+    fn from(ranked: RankedCommand) -> Self {
+        let RankedCommand {
+            command,
+            matched,
+            // Ranking is finished by the time this conversion happens, and the
+            // order results arrive in is the only thing the UI needs to know
+            // about it.
+            score: _,
+        } = ranked;
+
+        Self {
+            id: command.id,
+            extension: command.extension,
+            extension_title: command.extension_title,
+            command: command.command,
+            title: command.title,
+            subtitle: command.subtitle,
+            mode: command.mode,
+            entrypoint: command.entrypoint,
+            icon: command.icon,
+            panel: command.panel,
+            matched,
+        }
+    }
 }
 
 /// Turns a discovered application into a registry entry.
@@ -482,11 +537,19 @@ impl Frecency {
 
 /// How many results a search may return.
 ///
-/// Was 50, which silently capped the root list at 50 of about 1,400 indexed
-/// entries. Every source added past that point was invisible, and the symptom
-/// looked exactly like the indexing not working at all. High enough now to be
-/// no practical limit; the UI windows what it actually draws.
-pub const SEARCH_LIMIT: usize = 2000;
+/// History worth keeping, because both mistakes are easy to repeat. It was
+/// first 50, which silently capped the root list at 50 of about 1,400 indexed
+/// entries: every source added past that point was invisible, and the symptom
+/// looked exactly like the indexing not working at all. It was then raised to
+/// 2,000, above the corpus, which is not a limit at all and meant **every
+/// search serialised the entire index across the IPC boundary**, measured at
+/// 534 KB for an empty query against a list that draws about fifteen rows.
+///
+/// 120 is the number that is a limit without being a wall. Ranking still
+/// considers every entry; this is only how many survive to be sent. Anything
+/// past the first hundred was never going to be found by scrolling, only by
+/// typing more, and typing more re-runs the search over the whole corpus.
+pub const SEARCH_LIMIT: usize = 120;
 
 /// Ranks commands for a query.
 ///
@@ -523,7 +586,15 @@ pub fn search_excluding<'a>(
     excluded: &[String],
 ) -> Vec<RankedCommand> {
     let query = query.trim();
-    let mut out: Vec<RankedCommand> = Vec::new();
+
+    // Scored by reference, cloned afterwards.
+    //
+    // The previous version cloned a whole `CommandRecord`, keywords vector and
+    // all, for every candidate that matched, and then threw all but the first
+    // `limit` of them away. On an empty query that is fourteen hundred deep
+    // clones to produce a hundred results. Borrowing until the truncation is
+    // done means only the survivors are ever copied.
+    let mut scored: Vec<(i64, &CommandRecord, Vec<usize>)> = Vec::new();
 
     // Filtered here rather than at scan time so removing a term brings its
     // entries straight back, with no reindex.
@@ -574,21 +645,25 @@ pub fn search_excluding<'a>(
             score -= 12;
         }
 
-        out.push(RankedCommand {
+        scored.push((score, command, matched));
+    }
+
+    scored.sort_by(|(a_score, a_command, _), (b_score, b_command, _)| {
+        b_score
+            .cmp(a_score)
+            // Stable and predictable when scores tie, rather than arbitrary.
+            .then_with(|| a_command.title.cmp(&b_command.title))
+    });
+    scored.truncate(limit);
+
+    scored
+        .into_iter()
+        .map(|(score, command, matched)| RankedCommand {
             command: command.clone(),
             score,
             matched,
-        });
-    }
-
-    out.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            // Stable and predictable when scores tie, rather than arbitrary.
-            .then_with(|| a.command.title.cmp(&b.command.title))
-    });
-    out.truncate(limit);
-    out
+        })
+        .collect()
 }
 
 /// Whether an entry matches any exclusion term, by title or by path.

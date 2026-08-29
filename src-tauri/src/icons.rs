@@ -11,7 +11,33 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-static CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
+/// How many icons are kept.
+///
+/// Was unbounded, which is a slow leak rather than a cache: every row ever
+/// scrolled past left a base64 PNG behind for the life of the process, and a
+/// machine with fourteen hundred indexed entries can eventually hold all of
+/// them. A few hundred covers everything a person actually launches, several
+/// times over, and re-extracting one that fell out is a millisecond.
+const CAPACITY: usize = 512;
+
+/// One cached answer, and when it was last wanted.
+///
+/// The stamp is what makes eviction pick something cold. Evicting by
+/// insertion order instead would throw out the icon of the app you open every
+/// day the moment you scrolled past five hundred you do not.
+struct Entry {
+    icon: Option<String>,
+    used: u64,
+}
+
+#[derive(Default)]
+struct Cache {
+    entries: HashMap<String, Entry>,
+    /// Monotonic, so "least recently used" is just the smallest.
+    clock: u64,
+}
+
+static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 
 /// A `data:` URI for the icon of a file, or `None` if it has none.
 ///
@@ -22,16 +48,96 @@ static CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
 /// work twice. Extraction is a millisecond of shell and GDI calls, and rows
 /// ask for icons lazily, so there is nothing to gain from overlapping it.
 pub fn icon_data_uri(path: &str) -> Option<String> {
-    let mut cache = CACHE.lock().expect("icon cache poisoned");
-    let map = cache.get_or_insert_with(HashMap::new);
+    let mut guard = CACHE.lock().expect("icon cache poisoned");
+    let cache = guard.get_or_insert_with(Cache::default);
 
-    if let Some(hit) = map.get(path) {
-        return hit.clone();
+    cache.clock += 1;
+    let now = cache.clock;
+
+    if let Some(entry) = cache.entries.get_mut(path) {
+        entry.used = now;
+        return entry.icon.clone();
     }
 
-    let result = extract(path);
-    map.insert(path.to_string(), result.clone());
-    result
+    let icon = extract(path);
+    evict_if_full(cache);
+    cache.entries.insert(
+        path.to_string(),
+        Entry {
+            icon: icon.clone(),
+            used: now,
+        },
+    );
+
+    icon
+}
+
+/// Drops the coldest entry when there is no room for another.
+///
+/// A linear scan, which is the right trade at this size: it runs only when the
+/// cache is full *and* something new is asked for, and a few hundred
+/// comparisons is far less work than the GDI call that follows it.
+fn evict_if_full(cache: &mut Cache) {
+    if cache.entries.len() < CAPACITY {
+        return;
+    }
+
+    let coldest = cache
+        .entries
+        .iter()
+        .min_by_key(|(_, entry)| entry.used)
+        .map(|(path, _)| path.clone());
+
+    if let Some(path) = coldest {
+        cache.entries.remove(&path);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn stash(cache: &mut Cache, path: &str, at: u64) {
+        evict_if_full(cache);
+        cache.entries.insert(
+            path.to_string(),
+            Entry {
+                icon: Some(path.to_string()),
+                used: at,
+            },
+        );
+    }
+
+    #[test]
+    fn the_cache_stops_growing_at_its_capacity() {
+        // The whole point: an unbounded cache is a leak with a nice name.
+        let mut cache = Cache::default();
+        for i in 0..(CAPACITY * 2) {
+            stash(&mut cache, &format!("app-{i}.exe"), i as u64);
+        }
+        assert_eq!(cache.entries.len(), CAPACITY);
+    }
+
+    #[test]
+    fn a_recently_used_entry_outlives_an_old_one() {
+        let mut cache = Cache::default();
+        for i in 0..CAPACITY {
+            stash(&mut cache, &format!("cold-{i}.exe"), i as u64);
+        }
+
+        // Touched now, so it is the newest thing in a full cache.
+        let hot = "cold-0.exe";
+        cache
+            .entries
+            .get_mut(hot)
+            .expect("seeded")
+            .used = u64::MAX;
+
+        stash(&mut cache, "new.exe", 1);
+
+        assert!(cache.entries.contains_key(hot), "the hot entry was evicted");
+        assert!(!cache.entries.contains_key("cold-1.exe"), "the coldest survived");
+    }
 }
 
 #[cfg(not(windows))]

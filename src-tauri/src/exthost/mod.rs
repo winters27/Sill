@@ -271,6 +271,15 @@ impl ExtHost {
         self.manager.unload(session_id).await
     }
 
+    /// How many commands are loaded right now.
+    ///
+    /// The idle watchdog's "is anyone using this?" test. A loaded command is
+    /// a view the user is looking at, so the host stays up for it however
+    /// long it has been since anything was launched.
+    pub fn session_count(&self) -> usize {
+        self.sessions.lock().expect("sessions poisoned").len()
+    }
+
     /// Name of the extension backing a session, if it is still loaded.
     pub fn extension_of(&self, session_id: &str) -> Option<String> {
         self.sessions

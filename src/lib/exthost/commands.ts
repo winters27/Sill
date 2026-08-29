@@ -14,7 +14,6 @@ export interface RankedCommand {
   command: string;
   title: string;
   subtitle: string;
-  description: string;
   /**
    * Where the entry came from.
    *
@@ -37,7 +36,6 @@ export interface RankedCommand {
     /** A quicklink with `{query}` in it, which takes over the field first. */
     | "quicklink-arg";
   entrypoint: string;
-  keywords: string[];
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;
   /**
@@ -49,7 +47,6 @@ export interface RankedCommand {
    * choice, and a copy of the mapping here would drift.
    */
   panel?: string | null;
-  score: number;
   /** Indices into `title` that matched the query, for highlighting. */
   matched: number[];
 }
@@ -148,12 +145,9 @@ export function fileAsCommand(hit: FileHit): RankedCommand {
     command: hit.name,
     title: hit.name,
     subtitle: hit.path,
-    description: "",
     mode: "file",
     entrypoint: hit.path,
-    keywords: [],
     icon: hit.path,
-    score: 0,
     matched: [],
   };
 }

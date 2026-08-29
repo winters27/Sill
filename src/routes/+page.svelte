@@ -213,29 +213,62 @@
   /** Only used to give the root list's synthetic actions the right type. */
   const extensionActions: ReturnType<typeof collectActions> = [];
 
-  /** Guards against an older file query landing after a newer one. */
-  let fileQueryId = 0;
+  /**
+   * Which query the results on screen belong to.
+   *
+   * Two searches can be in flight at once and they can resolve in either
+   * order. Without this the older one can land last and put stale results
+   * under a current query, which reads as the launcher ignoring what you
+   * typed. Both halves share one counter: a newer keystroke invalidates the
+   * command search and the file search alike.
+   */
+  let searchId = 0;
+
+  /** The file query waiting to run, so a burst of typing runs one, not ten. */
+  let fileTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * How long the file half waits before it runs.
+   *
+   * Only the file half waits. Everything lives behind a window message and a
+   * blocking task, which is tens of milliseconds; the command search ranks the
+   * whole index in Rust and is a fraction of one. Debouncing that too would
+   * add lag to the fast path for no reason, which is the mistake every
+   * launcher that feels sluggish has made.
+   */
+  const FILE_SEARCH_DEBOUNCE_MS = 120;
 
   async function refreshRoot() {
+    const current = query;
+    const id = ++searchId;
+
+    clearTimeout(fileTimer);
+
     try {
-      const current = query;
-      commands = await searchCommands(current);
+      const ranked = await searchCommands(current);
+      if (id !== searchId) return;
+
+      commands = ranked;
       if (selected >= commands.length) selected = 0;
-
-      // Files come from Everything and are appended after the commands, so a
-      // slower file query can never reorder or delay what is already shown.
-      if (!current.trim()) return;
-
-      const id = ++fileQueryId;
-      const hits = await searchFiles(current);
-
-      // Another keystroke has already superseded this query.
-      if (id !== fileQueryId || query !== current) return;
-
-      commands = [...commands, ...hits.map(fileAsCommand)];
     } catch (err) {
-      status = `search failed: ${err}`;
+      if (id === searchId) status = `search failed: ${err}`;
+      return;
     }
+
+    if (!current.trim()) return;
+
+    // Files are appended after the commands, so a slower file query can never
+    // reorder or delay what is already shown.
+    fileTimer = setTimeout(async () => {
+      try {
+        const hits = await searchFiles(current);
+        if (id !== searchId) return;
+
+        commands = [...commands, ...hits.map(fileAsCommand)];
+      } catch (err) {
+        if (id === searchId) status = `file search failed: ${err}`;
+      }
+    }, FILE_SEARCH_DEBOUNCE_MS);
   }
 
   async function openSelected() {
@@ -646,6 +679,8 @@
 
     return () => {
       disposed = true;
+      // A pending file query has nowhere to land once this is torn down.
+      clearTimeout(fileTimer);
       unlisten?.();
       shown?.();
       indexed?.();

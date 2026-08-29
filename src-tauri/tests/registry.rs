@@ -431,7 +431,16 @@ fn a_real_application_outranks_a_path_executable() {
 
 #[test]
 #[cfg(windows)]
-fn the_root_list_is_not_silently_truncated() {
+fn nothing_past_the_root_list_cap_becomes_unreachable() {
+    // This started life asserting the root list returned at least 200 entries,
+    // back when the limit had been set to 50 and was silently hiding most of
+    // the index. That was the wrong invariant to freeze: the limit is now a
+    // deliberate 120, because sending the whole index over IPC on every
+    // keystroke cost half a megabyte to draw fifteen rows.
+    //
+    // What actually has to hold is not "the list is long". It is that **a cap
+    // hides nothing**, because anything below it is still found by typing. So
+    // that is what this checks, against the machine's real index.
     let all: Vec<_> = sill_lib::apps::scan_all()
         .iter()
         .map(|a| {
@@ -439,21 +448,59 @@ fn the_root_list_is_not_silently_truncated() {
         })
         .collect();
 
-    // The same limit the app uses, so a regression there fails here.
-    let shown = search(
-        &all,
-        "",
-        &Frecency::default(),
-        NOW,
-        sill_lib::registry::SEARCH_LIMIT,
-    );
+    let limit = sill_lib::registry::SEARCH_LIMIT;
+    let shown = search(&all, "", &Frecency::default(), NOW, limit);
 
     eprintln!("indexed {}, root list shows {}", all.len(), shown.len());
-    assert!(
-        shown.len() >= 200,
-        "the root list caps at {} of {} entries, so nothing added past that cap is ever visible",
+
+    assert_eq!(
         shown.len(),
-        all.len()
+        all.len().min(limit),
+        "the empty root list should be exactly the cap, or everything if there is less"
+    );
+    assert!(
+        limit >= 100,
+        "a cap this small ({limit}) stops being a window and starts being a wall"
+    );
+
+    // Only titles that identify one entry: several vendors ship an "Uninstall"
+    // and no query can be expected to pick between them.
+    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for record in &all {
+        *seen.entry(record.title.as_str()).or_default() += 1;
+    }
+
+    // Sampled from **past the cap**, which is precisely the region the empty
+    // root list can never show. Spread across the tail rather than taken from
+    // its start, and sampled rather than exhaustive because this runs a fuzzy
+    // match over the whole corpus per probe.
+    let beyond: Vec<_> = all
+        .iter()
+        .skip(limit)
+        .filter(|record| seen.get(record.title.as_str()) == Some(&1))
+        .collect();
+
+    if beyond.is_empty() {
+        eprintln!("index is smaller than the cap; nothing is past it to check");
+        return;
+    }
+
+    let step = (beyond.len() / 25).max(1);
+    let mut checked = 0;
+
+    for record in beyond.iter().step_by(step) {
+        let results = search(&all, &record.title, &Frecency::default(), NOW, limit);
+        assert!(
+            results.iter().any(|r| r.command.id == record.id),
+            "{:?} sits past the root list cap and typing its own name does not find it",
+            record.title
+        );
+        checked += 1;
+    }
+
+    eprintln!(
+        "{checked} of {} entries past the cap are all reachable by name",
+        beyond.len()
     );
 }
 
