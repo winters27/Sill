@@ -13,7 +13,8 @@
 
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL,
+    GetAsyncKeyState, SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+    VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
 };
 
 #[cfg(windows)]
@@ -24,8 +25,45 @@ pub use windows::Win32::UI::Input::KeyboardAndMouse::{VK_C, VK_V};
 /// All four events go in one `SendInput` call. Sending them separately lets
 /// another thread's input interleave between them, which arrives at the target
 /// as a lone letter: a stray "v" in the middle of somebody's document.
+/// Modifiers that change what a chord means if they are still held.
+#[cfg(windows)]
+const MODIFIERS: [VIRTUAL_KEY; 5] = [VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN];
+
+/// Lets go of any modifier the user has not released yet.
+///
+/// **Found by testing on a real desktop, and it is not an edge case.** These
+/// chords are sent from a global shortcut, which fires the instant the key
+/// goes down while the user is still holding Ctrl and Alt. Sending Ctrl+C on
+/// top of that arrives at the target as Ctrl+Alt+C, which is not copy, so the
+/// selection is never read and the whole feature silently does nothing.
+///
+/// Only keys actually down are released. Sending a key-up for a modifier
+/// nobody is holding is not free: it can cancel a chord in the middle of being
+/// typed in some applications.
+#[cfg(windows)]
+fn release_held_modifiers() {
+    let held: Vec<INPUT> = MODIFIERS
+        .iter()
+        // SAFETY: takes a virtual key, returns a bitfield, dereferences
+        // nothing. The high bit means the key is down right now.
+        .filter(|&&vk| unsafe { GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000 != 0 })
+        .map(|&vk| stroke(vk, true))
+        .collect();
+
+    if held.is_empty() {
+        return;
+    }
+
+    // SAFETY: a live slice of correctly sized INPUT records, size from the
+    // type rather than assumed.
+    unsafe { SendInput(&held, std::mem::size_of::<INPUT>() as i32) };
+}
+
 #[cfg(windows)]
 pub fn ctrl(key: VIRTUAL_KEY) -> bool {
+    // The shortcut that got us here is probably still held down.
+    release_held_modifiers();
+
     let events = [
         stroke(VK_CONTROL, false),
         stroke(key, false),

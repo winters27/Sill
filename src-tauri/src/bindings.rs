@@ -17,6 +17,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::action::{ActionCtx, ActionRegistry};
 use crate::object::{Object, ObjectKind};
+use crate::selection::{Held, Origin};
 
 /// Where a bound action gets the thing it acts on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,7 +70,9 @@ pub fn apply(app: &AppHandle, previous: &[Binding], current: &[Binding]) {
         // immediately re-registering an unchanged accelerator leaves a window
         // in which the key does nothing.
         if !current.iter().any(|b| b.accelerator == binding.accelerator) {
-            let _ = app.global_shortcut().unregister(binding.accelerator.as_str());
+            let _ = app
+                .global_shortcut()
+                .unregister(binding.accelerator.as_str());
         }
     }
 
@@ -83,26 +86,27 @@ pub fn apply(app: &AppHandle, previous: &[Binding], current: &[Binding]) {
             .iter()
             .any(|b| b.accelerator == binding.accelerator)
         {
-            let _ = app.global_shortcut().unregister(binding.accelerator.as_str());
+            let _ = app
+                .global_shortcut()
+                .unregister(binding.accelerator.as_str());
         }
 
         let handle = app.clone();
         let bound = binding.clone();
 
-        let result = app.global_shortcut().on_shortcut(
-            binding.accelerator.as_str(),
-            move |_, _, event| {
-                // Fires on press and release; acting on both runs everything
-                // twice, which for a transform means transforming the result.
-                if event.state() != tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                    return;
-                }
+        let result =
+            app.global_shortcut()
+                .on_shortcut(binding.accelerator.as_str(), move |_, _, event| {
+                    // Fires on press and release; acting on both runs everything
+                    // twice, which for a transform means transforming the result.
+                    if event.state() != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        return;
+                    }
 
-                let handle = handle.clone();
-                let bound = bound.clone();
-                tauri::async_runtime::spawn(async move { fire(&handle, &bound).await });
-            },
-        );
+                    let handle = handle.clone();
+                    let bound = bound.clone();
+                    tauri::async_runtime::spawn(async move { fire(&handle, &bound).await });
+                });
 
         match result {
             Ok(()) => println!(
@@ -121,14 +125,25 @@ pub fn apply(app: &AppHandle, previous: &[Binding], current: &[Binding]) {
 async fn fire(app: &AppHandle, binding: &Binding) {
     let registry = app.state::<ActionRegistry>();
     let Some(action) = registry.get(&binding.action) else {
-        crate::say!("{} is bound to {}, which does not exist", binding.accelerator, binding.action);
+        crate::say!(
+            "{} is bound to {}, which does not exist",
+            binding.accelerator,
+            binding.action
+        );
         return;
     };
 
-    let object = match resolve(app, binding).await {
-        Ok(object) => object,
+    // Taken before anything else runs, and given back at the end whatever
+    // happens in between. One owner for the whole operation: the action itself
+    // writes its result to the clipboard, so anything reading "the previous
+    // contents" later reads Sill's own output and restores that instead.
+    let held = Held::take(app);
+
+    let (object, origin) = match resolve(app, binding, &held).await {
+        Ok(resolved) => resolved,
         Err(reason) => {
             crate::say!("{}: {reason}", binding.accelerator);
+            held.give_back();
             return;
         }
     };
@@ -140,6 +155,7 @@ async fn fire(app: &AppHandle, binding: &Binding) {
             binding.action,
             object.kind
         );
+        held.give_back();
         return;
     }
 
@@ -147,49 +163,90 @@ async fn fire(app: &AppHandle, binding: &Binding) {
         Ok(outcome) => outcome,
         Err(reason) => {
             crate::say!("{} failed: {reason}", binding.accelerator);
+            held.give_back();
             return;
         }
     };
 
-    // Put the result back where the text came from. Only for a selection: a
-    // binding that reads the clipboard has nothing to paste over, and pressing
-    // Ctrl+V into whatever happens to be in front would be destructive.
-    if binding.replace && matches!(binding.source, Source::Selection) {
+    if may_paste_back(binding, origin) {
         if let Some(text) = outcome.text {
-            if let Err(reason) = crate::selection::replace(app, &text) {
-                crate::say!("{}: {reason}", binding.accelerator);
+            // Blocking, like the capture: it waits on another application.
+            let handle = app.clone();
+            let result =
+                tokio::task::spawn_blocking(move || crate::selection::replace(&handle, &text))
+                    .await;
+
+            match result {
+                Ok(Err(reason)) => crate::say!("{}: {reason}", binding.accelerator),
+                Err(err) => crate::say!("{}: the paste did not finish: {err}", binding.accelerator),
+                Ok(Ok(())) => {}
             }
         }
+
+        // The text changed where it sits, so the clipboard goes back to what
+        // the user had. Leaving the result there is a side effect nobody asked
+        // for.
+        held.give_back();
+    } else {
+        // Nothing was pasted, so the point of the shortcut was to leave the
+        // result on the clipboard, and it is already there.
+        held.keep_result();
     }
 }
 
-/// What the binding acts on.
-async fn resolve(app: &AppHandle, binding: &Binding) -> Result<Object, String> {
+/// Whether a binding's result may be pasted back over what it came from.
+///
+/// Pure and tested on its own, because the wrong answer here writes text into
+/// somebody's document that they never chose.
+///
+/// The question is not what the binding asked for, it is what the capture
+/// actually read. A selection binding falls back to the clipboard when nothing
+/// is highlighted, which is a good fallback for showing a result and a
+/// destructive one for pasting: the highlighted text would be replaced by
+/// whatever happened to be on the clipboard. **This is not hypothetical.** The
+/// first time this code ran against a real editor the capture failed, the
+/// fallback fired, and the editor's contents were replaced with an unrelated
+/// document.
+fn may_paste_back(binding: &Binding, captured: Option<Origin>) -> bool {
+    binding.replace && captured == Some(Origin::Selection)
+}
+
+/// What the binding acts on, and where the text came from if it is text.
+async fn resolve(
+    app: &AppHandle,
+    binding: &Binding,
+    held: &Held,
+) -> Result<(Object, Option<Origin>), String> {
     match &binding.source {
         Source::Selection | Source::Clipboard => {
             let captured = if matches!(binding.source, Source::Selection) {
                 // Blocking: reading a selection presses Ctrl+C and waits for
                 // the other application to answer, which is not something to
-                // do on a runtime worker.
-                let handle = app.clone();
-                tokio::task::spawn_blocking(move || {
-                    crate::selection::Captured::selection_or_clipboard(&handle)
+                // do on a runtime worker. `block_in_place` rather than
+                // `spawn_blocking` because the borrow cannot be moved to
+                // another thread and must not be cloned: there is one
+                // clipboard and one owner of it.
+                tokio::task::block_in_place(|| {
+                    crate::selection::Captured::selection_or_clipboard(app, held)
                 })
-                .await
-                .map_err(|err| format!("the capture did not finish: {err}"))?
             } else {
-                crate::selection::Captured::clipboard(app)
+                crate::selection::Captured::clipboard(held)
             };
 
-            let captured = captured.ok_or_else(|| "nothing selected and nothing copied".to_string())?;
+            let captured =
+                captured.ok_or_else(|| "nothing selected and nothing copied".to_string())?;
+            let origin = captured.from;
 
-            Ok(Object {
-                kind: ObjectKind::Text,
-                id: "selection".to_string(),
-                title: preview(&captured.text),
-                target: captured.text,
-                mode: "text".to_string(),
-            })
+            Ok((
+                Object {
+                    kind: ObjectKind::Text,
+                    id: "selection".to_string(),
+                    title: preview(&captured.text),
+                    target: captured.text,
+                    mode: "text".to_string(),
+                },
+                Some(origin),
+            ))
         }
 
         Source::Command { id } => {
@@ -204,7 +261,10 @@ async fn resolve(app: &AppHandle, binding: &Binding) -> Result<Object, String> {
                 .cloned()
                 .ok_or_else(|| format!("nothing in the index is called {id}"))?;
 
+            // No origin. Launching an application produces no text, and there
+            // is no selection behind it to put anything back into.
             Object::from_record(&record)
+                .map(|object| (object, None))
                 .ok_or_else(|| format!("{} is a kind of thing Sill cannot act on", record.title))
         }
     }
@@ -261,6 +321,35 @@ mod tests {
         let older = r#"{"accelerator":"Ctrl+Alt+U","action":"sill.text.upper","source":{"from":"selection"}}"#;
         let parsed: Binding = serde_json::from_str(older).expect("parses");
         assert!(parsed.replace);
+    }
+
+    #[test]
+    fn a_result_goes_back_only_into_a_selection_that_was_actually_read() {
+        let bound = binding("Ctrl+Alt+U", "sill.text.upper");
+        assert!(bound.replace, "the binding under test asks to replace");
+
+        // The whole point: read a selection, put the result back.
+        assert!(may_paste_back(&bound, Some(Origin::Selection)));
+
+        // Nothing was highlighted, so the capture fell back to the clipboard.
+        // Pasting now would replace whatever *is* highlighted with unrelated
+        // text. Found on a real desktop, where it overwrote a document.
+        assert!(!may_paste_back(&bound, Some(Origin::Clipboard)));
+
+        // Launching an application produces nothing to paste anywhere.
+        assert!(!may_paste_back(&bound, None));
+    }
+
+    #[test]
+    fn a_binding_that_only_copies_never_pastes() {
+        let copier = Binding {
+            replace: false,
+            ..binding("Ctrl+Alt+J", "sill.text.upper")
+        };
+
+        for captured in [Some(Origin::Selection), Some(Origin::Clipboard), None] {
+            assert!(!may_paste_back(&copier, captured), "{captured:?}");
+        }
     }
 
     #[test]

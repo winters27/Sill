@@ -28,15 +28,19 @@ const MAX_TEXT_BYTES: usize = 1_000_000;
 /// Largest image kept, before which it is noted but its bytes are dropped.
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
-/// How many times a read is attempted before the change is given up on.
+/// How many times the clipboard is reached for before giving up.
 ///
 /// The clipboard is a single system-wide resource held under a lock, and the
 /// application that just copied is usually **still holding it** at the moment
 /// Windows announces the change. A single attempt therefore loses entries at
 /// random, which is the classic clipboard-manager bug. Every mature one
 /// retries; this spreads eight attempts over about a quarter of a second.
-const READ_ATTEMPTS: u32 = 8;
-const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(30);
+///
+/// **Writes need this as much as reads do**, which is why it is shared rather
+/// than local to the reader. Putting a borrowed clipboard back lost the same
+/// race, silently, and the user's clipboard was gone.
+pub(crate) const CLIPBOARD_ATTEMPTS: u32 = 8;
+pub(crate) const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(30);
 
 /// Shared handle to the running history.
 #[derive(Clone)]
@@ -45,6 +49,16 @@ pub struct Clipboard {
     /// Set while Sill is itself writing to the clipboard, so a paste out of
     /// the history does not come straight back in as a new entry.
     ignoring: Arc<AtomicUsize>,
+    /// Set while Sill is running a whole operation against the clipboard,
+    /// rather than making one known write.
+    ///
+    /// A count cannot express this. Running a shortcut borrows the clipboard,
+    /// runs an action that **also** writes to it, pastes, and puts the
+    /// original back, and the action is free to write as often as it likes.
+    /// Reserving a number up front means guessing that number, and guessing it
+    /// wrong either records Sill's own writes as though the user had copied
+    /// them or swallows the next thing the user really does copy.
+    suspended: Arc<AtomicBool>,
     watching: Arc<AtomicBool>,
     /// The settings the watcher needs, cached here because it runs on its own
     /// thread with no route back to the preference store.
@@ -66,17 +80,39 @@ pub struct Rules {
 }
 
 impl Clipboard {
+    /// A handle over a temporary database, for testing the parts that never
+    /// touch it.
+    ///
+    /// The reservation count is arithmetic on an atomic and has nothing to do
+    /// with storage, but it lives on this struct because the listener thread
+    /// is what reads it. A temp file rather than `:memory:` because the store
+    /// opens in WAL mode, which an in-memory database cannot use.
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "sill-clipboard-test-{}-{:?}.db",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        Self {
+            store: Arc::new(Mutex::new(Store::open(&path).expect("a temp store opens"))),
+            ignoring: Arc::new(AtomicUsize::new(0)),
+            suspended: Arc::new(AtomicBool::new(false)),
+            watching: Arc::new(AtomicBool::new(false)),
+            rules: Arc::new(Mutex::new(Rules::default())),
+        }
+    }
+
     pub fn open(app: &AppHandle) -> Option<Self> {
-        let path = app
-            .path()
-            .app_data_dir()
-            .ok()?
-            .join("clipboard.db");
+        let path = app.path().app_data_dir().ok()?.join("clipboard.db");
 
         match Store::open(&path) {
             Ok(store) => Some(Self {
                 store: Arc::new(Mutex::new(store)),
                 ignoring: Arc::new(AtomicUsize::new(0)),
+                suspended: Arc::new(AtomicBool::new(false)),
                 watching: Arc::new(AtomicBool::new(false)),
                 rules: Arc::new(Mutex::new(Rules {
                     enabled: true,
@@ -127,7 +163,32 @@ impl Clipboard {
         self.ignoring.store(0, Ordering::SeqCst);
     }
 
+    /// Records nothing at all until [`Self::resume`].
+    ///
+    /// For an operation that writes an unknown number of times: a shortcut
+    /// borrows the clipboard, runs an action that writes its own result, and
+    /// puts the original back. Every one of those is Sill, and none of them is
+    /// something the user copied.
+    pub fn suspend(&self) {
+        self.suspended.store(true, Ordering::SeqCst);
+    }
+
+    /// Starts recording again, forgetting anything reserved while suspended.
+    ///
+    /// Call after a settle: the listener runs on its own thread and reports a
+    /// change slightly after it happens, so resuming the instant the last
+    /// write returns lets that last write be recorded as the user's.
+    pub fn resume(&self) {
+        self.ignoring.store(0, Ordering::SeqCst);
+        self.suspended.store(false, Ordering::SeqCst);
+    }
+
     fn take_ignore(&self) -> bool {
+        // Nothing is counted while suspended, so nothing can be miscounted.
+        if self.suspended.load(Ordering::SeqCst) {
+            return true;
+        }
+
         self.ignoring
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
                 current.checked_sub(1)
@@ -314,12 +375,14 @@ fn capture(app: &AppHandle, clipboard: &Clipboard) -> Result<(), String> {
 
 /// Opens the clipboard, waiting out whoever else has it.
 fn open_clipboard() -> Option<arboard::Clipboard> {
-    for attempt in 0..READ_ATTEMPTS {
+    for attempt in 0..CLIPBOARD_ATTEMPTS {
         match arboard::Clipboard::new() {
             Ok(board) => return Some(board),
             Err(err) => {
-                if attempt + 1 == READ_ATTEMPTS {
-                    crate::say!("could not open the clipboard after {READ_ATTEMPTS} tries: {err}");
+                if attempt + 1 == CLIPBOARD_ATTEMPTS {
+                    crate::say!(
+                        "could not open the clipboard after {CLIPBOARD_ATTEMPTS} tries: {err}"
+                    );
                     return None;
                 }
                 std::thread::sleep(RETRY_DELAY);
@@ -336,11 +399,11 @@ fn open_clipboard() -> Option<arboard::Clipboard> {
 /// be tried instead. Anything else means the read failed, which is worth
 /// waiting out.
 fn read_text(board: &mut arboard::Clipboard) -> Option<String> {
-    for attempt in 0..READ_ATTEMPTS {
+    for attempt in 0..CLIPBOARD_ATTEMPTS {
         match board.get_text() {
             Ok(text) => return Some(text),
             Err(arboard::Error::ContentNotAvailable) => return None,
-            Err(_) if attempt + 1 == READ_ATTEMPTS => return None,
+            Err(_) if attempt + 1 == CLIPBOARD_ATTEMPTS => return None,
             Err(_) => std::thread::sleep(RETRY_DELAY),
         }
     }
@@ -416,6 +479,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn nothing_is_recorded_while_the_clipboard_is_suspended() {
+        // A shortcut writes to the clipboard an unknown number of times: the
+        // borrow, the action's own copy of its result, the paste, and putting
+        // the original back. Reserving a number up front means guessing it,
+        // and the guess was wrong by exactly one, which is how a 5,011
+        // character clipboard came back as 14.
+        let clipboard = Clipboard::for_test();
+        clipboard.suspend();
+
+        for change in 0..9 {
+            assert!(clipboard.take_ignore(), "change {change} is Sill's");
+        }
+
+        clipboard.resume();
+        assert!(
+            !clipboard.take_ignore(),
+            "once resumed, a change is the user's again"
+        );
+    }
+
+    #[test]
+    fn resuming_forgets_anything_reserved_while_suspended() {
+        // Both mechanisms are live: a single known write still reserves one
+        // change. Reservations made while suspended are never consumed, so
+        // without this they would swallow real copies later.
+        let clipboard = Clipboard::for_test();
+        clipboard.suspend();
+        clipboard.ignore_next_changes(3);
+        clipboard.resume();
+
+        assert!(
+            !clipboard.take_ignore(),
+            "a stale reservation would eat the user's next copy"
+        );
+    }
+
+    #[test]
+    fn one_known_write_is_still_ignored_exactly_once() {
+        // Pasting an entry out of the history writes once and must not come
+        // straight back in as a new entry. That path is unchanged.
+        let clipboard = Clipboard::for_test();
+        clipboard.ignore_next_changes(1);
+
+        assert!(clipboard.take_ignore());
+        assert!(!clipboard.take_ignore());
+    }
+
+    #[test]
     fn the_same_bytes_hash_the_same_and_different_bytes_do_not() {
         // This is what decides whether two copies are one entry.
         assert_eq!(hash(b"hello"), hash(b"hello"));
@@ -452,7 +563,10 @@ mod tests {
     #[test]
     fn a_blank_rule_does_not_exclude_everything() {
         // An empty row left in the editor matches every string.
-        assert!(!is_ignored(Some("Slack"), &["".to_string(), "  ".to_string()]));
+        assert!(!is_ignored(
+            Some("Slack"),
+            &["".to_string(), "  ".to_string()]
+        ));
     }
 
     #[test]
