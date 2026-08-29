@@ -11,6 +11,7 @@ pub mod files;
 pub mod host_bridge;
 pub mod preferences;
 pub mod registry;
+pub mod secrets;
 pub mod settings_catalog;
 pub mod settings_index;
 pub mod quicklinks;

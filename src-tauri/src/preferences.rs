@@ -216,6 +216,78 @@ pub struct Sources {
     pub excluded: Vec<String>,
 }
 
+/// Fields that are encrypted on their way to disk.
+///
+/// A path rather than a name, because "key" appears in plenty of places that
+/// are not secret: `shortcutKey`, `finishKey`, `cancelKey`. Matching on the
+/// word would have encrypted three keyboard settings and left the credential
+/// alone the day someone renamed it.
+const SEALED: &[&[&str]] = &[&["dictation", "provider", "apiKey"]];
+
+/// Follows a path into a document, if every step of it exists.
+fn at<'a>(root: &'a mut serde_json::Value, path: &[&str]) -> Option<&'a mut serde_json::Value> {
+    path.iter().try_fold(root, |node, step| node.get_mut(step))
+}
+
+/// Encrypts every secret in a document about to be written.
+///
+/// A value that cannot be sealed is **removed rather than written through**.
+/// Writing it would put the credential in the file in plain text, which is
+/// the exact thing this exists to stop, and doing so silently is worse than
+/// the user having to paste the key again.
+fn seal_secrets(document: &mut serde_json::Value) {
+    for path in SEALED {
+        let Some(slot) = at(document, path) else { continue };
+        let Some(plaintext) = slot.as_str() else { continue };
+
+        if plaintext.is_empty() || crate::secrets::is_sealed(plaintext) {
+            continue;
+        }
+
+        match crate::secrets::seal(plaintext) {
+            Some(sealed) => *slot = serde_json::Value::String(sealed),
+            None => {
+                crate::say!(
+                    "could not encrypt {}; it is left out of the file rather than \
+                     written in plain text. You will have to enter it again",
+                    path.join(".")
+                );
+                *slot = serde_json::Value::Null;
+            }
+        }
+    }
+}
+
+/// Decrypts every secret in a document just read.
+///
+/// A value with no marker is one an older build wrote in plain text. It is
+/// passed through so the user does not lose a working setup on upgrade, and
+/// the next save seals it.
+fn unseal_secrets(document: &mut serde_json::Value) {
+    for path in SEALED {
+        let Some(slot) = at(document, path) else { continue };
+        let Some(stored) = slot.as_str() else { continue };
+
+        if !crate::secrets::is_sealed(stored) {
+            continue;
+        }
+
+        match crate::secrets::unseal(stored) {
+            Some(plaintext) => *slot = serde_json::Value::String(plaintext),
+            None => {
+                // Sealed by a different Windows account, or copied from
+                // another machine. Nothing can recover it, and leaving the
+                // blob in place would send it to the provider as a key.
+                crate::say!(
+                    "{} could not be decrypted on this account and has been cleared",
+                    path.join(".")
+                );
+                *slot = serde_json::Value::Null;
+            }
+        }
+    }
+}
+
 impl Default for Sources {
     fn default() -> Self {
         Self {
@@ -309,8 +381,17 @@ impl Preferences {
     pub fn load(path: &Path) -> Self {
         std::fs::read_to_string(path)
             .ok()
-            .and_then(|text| match serde_json::from_str(&text) {
-                Ok(value) => Some(value),
+            .and_then(|text| match serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(mut value) => {
+                    unseal_secrets(&mut value);
+                    match serde_json::from_value(value) {
+                        Ok(prefs) => Some(prefs),
+                        Err(err) => {
+                            crate::say!("preferences could not be read, using defaults: {err}");
+                            None
+                        }
+                    }
+                }
                 Err(err) => {
                     crate::say!("preferences could not be read, using defaults: {err}");
                     None
@@ -329,7 +410,15 @@ impl Preferences {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let text = serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into());
+
+        let text = match serde_json::to_value(self) {
+            Ok(mut value) => {
+                seal_secrets(&mut value);
+                serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".into())
+            }
+            Err(_) => "{}".into(),
+        };
+
         std::fs::write(path, text)
     }
 }
@@ -394,5 +483,99 @@ mod tests {
         assert_eq!(back.appearance.backdrop, Backdrop::None);
         assert!(!back.sources.path_executables);
         assert_eq!(back.files.only_in, vec![r"C:\work".to_string()]);
+    }
+
+    /// A key set in memory must not be readable in the file.
+    ///
+    /// This is the whole point of the exercise, so it is asserted against the
+    /// bytes on disk rather than against a round trip, which would pass just
+    /// as happily if nothing were encrypted at all.
+    #[cfg(windows)]
+    #[test]
+    fn a_provider_key_never_reaches_the_file_in_plain_text() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("preferences.json");
+
+        let secret = "sk-live-DO-NOT-LEAK-0123456789";
+        let mut prefs = Preferences::default();
+        prefs.dictation.provider.api_key = Some(secret.to_string());
+        prefs.dictation.provider.base_url = Some("https://api.example.com".into());
+
+        prefs.save(&path).expect("saved");
+
+        let written = std::fs::read_to_string(&path).expect("readable");
+        assert!(
+            !written.contains(secret),
+            "the key is sitting in the file:\n{written}"
+        );
+        assert!(
+            written.contains("dpapi:v1:"),
+            "nothing was sealed, so the field was simply dropped"
+        );
+        // Everything that is not a secret stays legible, because a settings
+        // file nobody can read or edit by hand is its own problem.
+        assert!(written.contains("https://api.example.com"));
+
+        let back = Preferences::load(&path);
+        assert_eq!(back.dictation.provider.api_key.as_deref(), Some(secret));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_key_written_by_an_older_build_still_works_and_is_sealed_on_the_next_save() {
+        // The upgrade path. Losing a working provider setup on update would
+        // be a worse outcome than the plain text it is fixing.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("preferences.json");
+
+        let legacy = r#"{"dictation":{"provider":{"enabled":true,"apiKey":"legacy-plain-key"}}}"#;
+        std::fs::write(&path, legacy).expect("wrote the old shape");
+
+        let loaded = Preferences::load(&path);
+        assert_eq!(
+            loaded.dictation.provider.api_key.as_deref(),
+            Some("legacy-plain-key"),
+            "an unsealed key must be read as itself, not run through decrypt"
+        );
+
+        loaded.save(&path).expect("saved");
+        let written = std::fs::read_to_string(&path).expect("readable");
+        assert!(!written.contains("legacy-plain-key"), "still in plain text");
+    }
+
+    #[test]
+    fn sealing_only_touches_the_credential() {
+        // `shortcutKey`, `finishKey` and `cancelKey` all contain "key". A
+        // name-based rule would have encrypted three keyboard settings and
+        // left the actual secret alone.
+        let mut document = serde_json::json!({
+            "dictation": {
+                "shortcutKey": "space",
+                "finishKey": "enter",
+                "provider": { "apiKey": "secret", "baseUrl": "https://x.test" }
+            }
+        });
+
+        seal_secrets(&mut document);
+
+        assert_eq!(document["dictation"]["shortcutKey"], "space");
+        assert_eq!(document["dictation"]["finishKey"], "enter");
+        assert_eq!(document["dictation"]["provider"]["baseUrl"], "https://x.test");
+    }
+
+    #[test]
+    fn documents_without_the_secret_are_left_alone() {
+        // Every path step is optional: preferences written before the
+        // dictation section existed must not panic their way through this.
+        let mut bare = serde_json::json!({ "general": { "showInTray": true } });
+        seal_secrets(&mut bare);
+        unseal_secrets(&mut bare);
+        assert_eq!(bare["general"]["showInTray"], true);
+
+        let mut null_key = serde_json::json!({
+            "dictation": { "provider": { "apiKey": serde_json::Value::Null } }
+        });
+        seal_secrets(&mut null_key);
+        assert!(null_key["dictation"]["provider"]["apiKey"].is_null());
     }
 }
