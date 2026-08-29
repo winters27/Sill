@@ -153,3 +153,53 @@ export function fileAsCommand(hit: FileHit): RankedCommand {
 export function dismiss(): Promise<void> {
   return invoke("dismiss");
 }
+
+/** One thing that can be done to a result, as the registry describes it. */
+export interface ActionInfo {
+  id: string;
+  title: string;
+  /** What Enter does. Exactly one per kind. */
+  primary: boolean;
+}
+
+/** How to reverse an action that said it could be reversed. */
+export type UndoToken = { kind: "restoreClipboard"; text: string };
+
+export interface ActionOutcome {
+  message: string;
+  undo?: UndoToken;
+  session?: string;
+}
+
+/**
+ * What can be done to a result of this kind.
+ *
+ * Asked by mode rather than by id, because the answer depends only on what
+ * kind of thing it is, and a file result was never in an index to look up.
+ */
+export function actionsFor(mode: string): Promise<ActionInfo[]> {
+  return invoke<ActionInfo[]>("actions_for", { mode });
+}
+
+/**
+ * Runs one action against one result.
+ *
+ * The result's own fields go back as they arrived. Nothing here decides what
+ * an action means or whether it applies; Rust owns both, and rejects a pairing
+ * the window got wrong.
+ */
+export function runAction(action: string, command: RankedCommand): Promise<ActionOutcome> {
+  return invoke<ActionOutcome>("run_action", {
+    action,
+    object: {
+      id: command.id,
+      mode: command.mode,
+      target: command.entrypoint,
+      title: command.title,
+    },
+  });
+}
+
+export function undoAction(undo: UndoToken): Promise<string> {
+  return invoke<string>("undo_action", { undo });
+}

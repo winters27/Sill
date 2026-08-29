@@ -52,7 +52,7 @@ pub enum Capability {
 /// honest answer: launching an application cannot be taken back, and neither
 /// can pasting into somebody else's window. Offering an undo that silently
 /// does nothing is worse than offering none.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Undo {
     /// Put back what was on the clipboard before.

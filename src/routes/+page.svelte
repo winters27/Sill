@@ -20,7 +20,13 @@
     searchFiles,
     openPath,
     fileAsCommand,
+    actionsFor,
+    // `runAction` here already means "run the panel entry at this index".
+    runAction as runObjectAction,
+    undoAction,
+    type ActionInfo,
     type RankedCommand,
+    type UndoToken,
   } from "$lib/exthost/commands";
   import { ViewTree, isHandlerRef, type ElementNode, type Op } from "$lib/exthost/tree";
   import { applyAppearance, getPreferences, openSettings, type Preferences } from "$lib/settings";
@@ -180,24 +186,19 @@
       ] as typeof extensionActions;
     }
 
+    // Whatever Rust says can be done to the selected result. This used to be
+    // two entries written here by hand, which meant the panel and the Enter
+    // key were two separate opinions about what a result supports.
     if (mode === "root") {
-      const command = commands[selected];
-      if (!command) return [];
-      return [
-        {
-          id: -1,
-          title: "Open Command",
-          tag: "Sill.OpenCommand",
-          props: { id: command.id },
-          shortcut: { modifiers: [], key: "enter" },
-        },
-        {
-          id: -2,
-          title: "Copy Command Name",
-          tag: "Action.CopyToClipboard",
-          props: { content: command.title },
-        },
-      ] as typeof extensionActions;
+      return rootActions.map((action, index) => ({
+        id: -1 - index,
+        title: action.title,
+        tag: `Sill.Action:${action.id}`,
+        props: {},
+        shortcut: action.primary
+          ? { modifiers: [], key: "enter" }
+          : undefined,
+      })) as typeof extensionActions;
     }
 
     const node = tree.top();
@@ -213,6 +214,41 @@
 
   /** Only used to give the root list's synthetic actions the right type. */
   const extensionActions: ReturnType<typeof collectActions> = [];
+
+  /**
+   * What the action registry says can be done to the selected result.
+   *
+   * Fetched rather than derived because the answer lives in Rust, which is
+   * where it has to live: the same list drives Enter, and later a global
+   * shortcut and a workflow step. A second copy here would be a second
+   * opinion about what a result supports.
+   */
+  let rootActions = $state<ActionInfo[]>([]);
+
+  /**
+   * How to reverse the last action, when it said it could be.
+   *
+   * One deep on purpose. A launcher is not a document editor, and an undo
+   * stack that goes back through a morning of copies would mostly be a way to
+   * put back something nobody wanted.
+   */
+  let lastUndo = $state<UndoToken | null>(null);
+
+  $effect(() => {
+    const command = mode === "root" ? commands[selected] : undefined;
+    if (!command) {
+      rootActions = [];
+      return;
+    }
+
+    // Keyed on the kind, so arrowing through a list of applications asks once
+    // rather than once per row.
+    const wanted = command.mode;
+    void actionsFor(wanted).then((list) => {
+      // The selection moved to a different kind while this was in flight.
+      if (commands[selected]?.mode === wanted) rootActions = list;
+    });
+  });
 
   /**
    * Which query the results on screen belong to.
@@ -412,20 +448,29 @@
       return;
     }
 
-    // The root list's actions are the launcher's own, not an extension's.
-    if (action.tag === "Sill.OpenCommand") {
-      const id = String((action.props as { id?: unknown }).id ?? "");
-      const at = commands.findIndex((c) => c.id === id);
-      if (at >= 0) {
-        selected = at;
-        await openSelected();
-      }
-      return;
-    }
-
+    // The root list's actions come from Rust's registry, so running one is a
+    // matter of naming it. The window does not decide what any of them mean.
     if (mode === "root") {
-      if (isRunnable(action)) {
-        status = await performBuiltin(action.tag, action.props);
+      const chosen = action.tag.startsWith("Sill.Action:")
+        ? action.tag.slice("Sill.Action:".length)
+        : "";
+      const command = commands[selected];
+      if (!chosen || !command) return;
+
+      // The primary action goes through openSelected, which knows the two
+      // things the registry does not: a quicklink with a hole in it takes
+      // over the field, and an extension command switches the whole view.
+      if (rootActions.find((a) => a.id === chosen)?.primary) {
+        await openSelected();
+        return;
+      }
+
+      try {
+        const outcome = await runObjectAction(chosen, command);
+        status = outcome.message;
+        lastUndo = outcome.undo ?? null;
+      } catch (err) {
+        status = `${err}`;
       }
       return;
     }
@@ -517,6 +562,18 @@
     if (event.key === "," && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       void openSettings();
+      return;
+    }
+
+    // Ctrl+Z takes back the last action that offered it. Most do not, and
+    // the key does nothing rather than claiming to have undone something.
+    if (event.key.toLowerCase() === "z" && (event.ctrlKey || event.metaKey) && lastUndo) {
+      event.preventDefault();
+      const token = lastUndo;
+      lastUndo = null;
+      void undoAction(token)
+        .then((message) => (status = message))
+        .catch((err) => (status = `${err}`));
       return;
     }
 

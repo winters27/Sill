@@ -155,3 +155,34 @@ fn things_on_disk_can_have_their_path_copied_and_folder_opened() {
         );
     }
 }
+
+#[test]
+fn the_action_panel_has_something_to_show_for_every_result() {
+    // Exactly what `actions_for` does for the window: mode to kind to a drawn
+    // list. The panel used to be two entries written by hand in the frontend,
+    // so this is the contract that replaced them.
+    let registry = builtins();
+
+    for mode in INDEX_MODES {
+        let kind = ObjectKind::from_mode(mode).expect("a known mode");
+        let drawn = registry.describe(kind);
+
+        assert!(
+            !drawn.is_empty(),
+            "{mode} draws an empty action panel, which reads as the key being dead"
+        );
+
+        let primary: Vec<_> = drawn.iter().filter(|a| a.primary).map(|a| a.id).collect();
+        assert_eq!(
+            primary.len(),
+            1,
+            "{mode} should have exactly one action on Enter, has {primary:?}"
+        );
+
+        assert!(
+            drawn[0].primary,
+            "{mode} draws {} first but Enter runs {}",
+            drawn[0].id, primary[0]
+        );
+    }
+}

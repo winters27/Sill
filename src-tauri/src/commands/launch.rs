@@ -145,3 +145,89 @@ pub(crate) async fn perform_builtin(
         other => Err(format!("{other} is not a built-in Sill can perform")),
     }
 }
+
+/// An object the window is pointing at.
+///
+/// The window echoes back the fields Rust already sent it in a search result
+/// rather than inventing any, which is what lets a file work: a file result
+/// comes from Everything at query time and was never in the index, so there
+/// is nothing to look it up in.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ObjectRef {
+    id: String,
+    mode: String,
+    /// The result's `entrypoint`: a path, a panel, a stored id, a value.
+    target: String,
+    title: String,
+}
+
+impl ObjectRef {
+    fn into_object(self) -> Result<Object, String> {
+        let kind = crate::object::ObjectKind::from_mode(&self.mode)
+            .ok_or_else(|| format!("{} is a kind of thing Sill cannot act on", self.title))?;
+
+        Ok(Object {
+            kind,
+            id: self.id,
+            target: self.target,
+            title: self.title,
+            mode: self.mode,
+        })
+    }
+}
+
+/// What can be done to the selected result.
+///
+/// Keyed on the mode rather than looked up by id, because the answer depends
+/// only on what kind of thing it is, and because a file result is not in any
+/// index to be looked up in.
+#[tauri::command]
+pub(crate) fn actions_for(
+    actions: State<'_, ActionRegistry>,
+    mode: String,
+) -> Vec<crate::action::ActionInfo> {
+    crate::object::ObjectKind::from_mode(&mode)
+        .map(|kind| actions.describe(kind))
+        .unwrap_or_default()
+}
+
+/// Runs one action against one object.
+///
+/// Frecency is deliberately not recorded here. It learns what you open, and
+/// copying a path or opening a containing folder is looking at something
+/// rather than reaching for it. Enter still records, through `launch_command`.
+#[tauri::command]
+pub(crate) async fn run_action(
+    app: AppHandle,
+    action: String,
+    object: ObjectRef,
+) -> Result<crate::action::Outcome, String> {
+    let object = object.into_object()?;
+
+    let registry = app.state::<ActionRegistry>();
+    let chosen = registry
+        .get(&action)
+        .ok_or_else(|| format!("no such action: {action}"))?;
+
+    if !chosen.accepts(object.kind) {
+        // Not an error the user caused, so it names both halves: this arrives
+        // when the window's idea of the selection has drifted from Rust's.
+        return Err(format!(
+            "{} cannot be done to {}",
+            chosen.title(),
+            object.title
+        ));
+    }
+
+    chosen.run(&ActionCtx { app: app.clone() }, &object).await
+}
+
+/// Reverses an action that said it could be reversed.
+#[tauri::command]
+pub(crate) async fn undo_action(
+    app: AppHandle,
+    undo: crate::action::Undo,
+) -> Result<String, String> {
+    crate::action::undo(&ActionCtx { app: app.clone() }, &undo)
+}
