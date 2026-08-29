@@ -8,6 +8,7 @@ pub mod dictation;
 pub mod exthost;
 pub mod everything_ipc;
 pub mod files;
+pub mod host_bridge;
 pub mod preferences;
 pub mod registry;
 pub mod settings_catalog;
@@ -42,9 +43,9 @@ use registry::{CommandRecord, Frecency};
 #[derive(Clone)]
 struct HostState {
     inner: Arc<tokio::sync::Mutex<Option<Arc<ExtHost>>>>,
-    /// Cloned into every host that gets spawned, so UI events from any of
-    /// them reach the one receiver the window is listening on.
-    events: mpsc::UnboundedSender<UiEvent>,
+    /// Built once and reused across host restarts. It owns `LocalStorage`,
+    /// which is a file on disk, and the event sender the window listens on.
+    api: Arc<exthost::ApiLayer>,
     host_js: Arc<PathBuf>,
     /// When the host was last asked for, which is what the watchdog measures.
     last_used: Arc<std::sync::Mutex<std::time::Instant>>,
@@ -59,12 +60,12 @@ struct PrefsState {
 
 /// The installed command registry and its ranking state.
 #[derive(Clone)]
-struct RegistryState {
-    inner: Arc<tokio::sync::Mutex<Registry>>,
+pub(crate) struct RegistryState {
+    pub(crate) inner: Arc<tokio::sync::Mutex<Registry>>,
 }
 
-struct Registry {
-    commands: Vec<CommandRecord>,
+pub(crate) struct Registry {
+    pub(crate) commands: Vec<CommandRecord>,
     /// Sill's own settings, shaped as commands.
     ///
     /// Built once at startup: the catalogue is a `const` and cannot change
@@ -149,7 +150,7 @@ async fn host_of(state: &HostState) -> Result<Arc<ExtHost>, String> {
         ));
     }
 
-    let host = ExtHost::spawn(&PathBuf::from("node"), &state.host_js, state.events.clone())
+    let host = ExtHost::spawn(&PathBuf::from("node"), &state.host_js, state.api.clone())
         .await
         .map_err(|err| format!("could not start the extension host: {err}"))?;
 
@@ -1469,17 +1470,6 @@ pub fn run() {
             let (tx, rx) = mpsc::unbounded_channel();
             forward_events(handle.clone(), rx);
 
-            // The host itself is not started here. Nothing has asked for an
-            // extension yet, and starting Node on the chance that something
-            // might is 38 MB resident for a session that usually never opens
-            // one. `host_of` brings it up on the first launch that needs it.
-            app.manage(HostState {
-                inner: Arc::new(tokio::sync::Mutex::new(None)),
-                events: tx,
-                host_js: Arc::new(dev_host_js()),
-                last_used: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
-            });
-
             // Preferences first: the hotkey and the backdrop both come from
             // them, so reading them later would mean applying a default and
             // then immediately replacing it.
@@ -1489,6 +1479,36 @@ pub fn run() {
                 .unwrap_or_else(|_| PathBuf::from("."));
             // Before anything that might have something to report.
             log::open(&data_dir);
+
+            // The host itself is not started here. Nothing has asked for an
+            // extension yet, and starting Node on the chance that something
+            // might is 38 MB resident for a session that usually never opens
+            // one. `host_of` brings it up on the first launch that needs it.
+            //
+            // The API layer is built now and outlives every host process,
+            // because `LocalStorage` is a file: an extension that saved a
+            // token before an idle shutdown has to still have it afterwards.
+            let storage = match exthost::Storage::open(&exthost::storage::path(&data_dir)) {
+                Ok(storage) => storage,
+                Err(err) => {
+                    // Not fatal. An extension that cannot save is worse than
+                    // one that can, and far better than a launcher that
+                    // refuses to start because of it.
+                    crate::say!("extension storage unavailable, falling back to memory: {err}");
+                    exthost::Storage::memory().expect("an in-memory store always opens")
+                }
+            };
+
+            app.manage(HostState {
+                inner: Arc::new(tokio::sync::Mutex::new(None)),
+                api: Arc::new(exthost::ApiLayer::new(
+                    tx,
+                    host_bridge::SillBridge::new(handle.clone()),
+                    Arc::new(storage),
+                )),
+                host_js: Arc::new(dev_host_js()),
+                last_used: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
+            });
 
             let prefs_path = preferences::path(&data_dir);
             let prefs = preferences::Preferences::load(&prefs_path);

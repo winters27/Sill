@@ -7,9 +7,11 @@
 //! `postMessage`.
 
 pub mod api;
+pub mod bridge;
 pub mod framing;
 pub mod manager;
 pub mod rpc;
+pub mod storage;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -19,12 +21,13 @@ use std::sync::{Arc, Mutex};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::process::{Child, Command};
-use tokio::sync::mpsc;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 pub use api::{ApiLayer, UiEvent};
+pub use bridge::{Alert, AppInfo, Bridge, Clip};
 pub use manager::{Capabilities, CommandEnv, CommandMode, LaunchType, LoadOptions, ManagerClient};
 pub use rpc::{Incoming, RpcError, RpcPeer};
+pub use storage::Storage;
 
 /// A loaded command.
 struct Session {
@@ -53,10 +56,17 @@ impl ExtHost {
     /// previously sync, which compiled fine and then panicked at startup with
     /// "there is no reactor running" because Tauri's `setup` hook is not in
     /// one. Making it async moves that mistake to compile time.
+    ///
+    /// The API layer is built by the caller and outlives the host process.
+    ///
+    /// It owns `LocalStorage`, which is a file on disk and must survive an
+    /// idle shutdown: an extension that saved a token before lunch has to
+    /// still have it afterwards, and it would not if the store were created
+    /// alongside each new Node process.
     pub async fn spawn(
         node_exe: &Path,
         host_js: &Path,
-        events: mpsc::UnboundedSender<UiEvent>,
+        api: Arc<ApiLayer>,
     ) -> std::io::Result<Self> {
         let mut child = Command::new(node_exe)
             .arg(host_js)
@@ -110,7 +120,6 @@ impl ExtHost {
         });
 
         let manager = ManagerClient::new(peer);
-        let api = Arc::new(ApiLayer::new(events));
         let sessions: Arc<Mutex<HashMap<String, Session>>> = Arc::new(Mutex::new(HashMap::new()));
 
         // Manager-layer traffic coming up from the host.
@@ -220,14 +229,15 @@ impl ExtHost {
                 while let Some(work) = incoming.recv().await {
                     match work {
                         Incoming::Request { id, method, params } => {
-                            let result = api.dispatch(&session_id, &extension, &method, &params);
+                            let result =
+                                api.dispatch(&session_id, &extension, &method, &params).await;
                             peer.respond(id, result);
                         }
                         Incoming::Event { method, params } => {
                             // Notifications get dispatched too; the result is
                             // simply discarded. UI/render arrives this way.
                             if let Err(err) =
-                                api.dispatch(&session_id, &extension, &method, &params)
+                                api.dispatch(&session_id, &extension, &method, &params).await
                             {
                                 crate::say!("{method}: {err}");
                             }

@@ -98,7 +98,20 @@ const tree = new ViewTree();
 let session;
 let buf = Buffer.alloc(0);
 
-/** Mimics Rust's ApiLayer closely enough to exercise an extension. */
+/**
+ * Mimics Rust's ApiLayer closely enough to exercise an extension.
+ *
+ * "Closely enough" is a hazard as well as a convenience, and it bit once: this
+ * table answered Clipboard/copy, Clipboard/paste, Clipboard/readContent and
+ * UI/confirmAlert for months while `ApiLayer::dispatch` had no arm for any of
+ * them, so the gate ran green against a program that did not exist and every
+ * extension calling `Clipboard.copy` failed for real users.
+ *
+ * The guard against that living here is not this file, which cannot see Rust.
+ * It is `every_method_the_host_calls_is_answered_or_declared_missing` in
+ * `src-tauri/tests/exthost.rs`, which reads the host's own source and dispatches
+ * every method it finds. **Adding a case here is not evidence of anything.**
+ */
 function serveApi(method, params) {
   switch (method) {
     case "UI/render":
@@ -123,9 +136,13 @@ function serveApi(method, params) {
     case "UI/closeMainWindow":
     case "Clipboard/copy":
     case "Clipboard/paste":
+    case "Clipboard/clear":
+    case "Application/open":
       return null;
     case "Clipboard/readContent":
-      return { text: "" };
+      return { text: "", html: null, file: null };
+    case "Application/list":
+      return [];
     case "UI/confirmAlert":
       return true;
     default:
