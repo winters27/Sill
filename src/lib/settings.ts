@@ -66,6 +66,23 @@ export interface SnippetSettings {
   expandKeywords: boolean;
 }
 
+/** Where a bound action gets the thing it acts on. */
+export type BindingSource =
+  | { from: "selection" }
+  | { from: "clipboard" }
+  | { from: "command"; id: string };
+
+/** A key that runs an action without the launcher appearing. */
+export interface Binding {
+  /** An accelerator like "Ctrl+Alt+U". */
+  accelerator: string;
+  /** The action's stable id, which is why action ids are stable. */
+  action: string;
+  source: BindingSource;
+  /** Put the result back over the selection rather than only copying it. */
+  replace: boolean;
+}
+
 export interface Preferences {
   general: General;
   snippets: SnippetSettings;
@@ -75,6 +92,7 @@ export interface Preferences {
   appearance: Appearance;
   sources: Sources;
   files: FileSearch;
+  bindings: Binding[];
 }
 
 /**

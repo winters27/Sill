@@ -351,6 +351,9 @@ pub struct Preferences {
     pub appearance: Appearance,
     pub sources: Sources,
     pub files: FileSearch,
+    /// Global shortcuts that run an action without showing the launcher.
+    #[serde(default)]
+    pub bindings: Vec<crate::bindings::Binding>,
 }
 
 impl Appearance {

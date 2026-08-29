@@ -36,6 +36,7 @@ pub const PANELS: &[&str] = &[
     "appearance",
     "dictation",
     "snippets",
+    "shortcuts",
     "quicklinks",
     "clipboard",
     "sources",
@@ -92,6 +93,8 @@ pub const SETTINGS: &[Setting] = &[
     // ------------------------------------------------------------ snippets
     s("snippets", "Snippets", "Expand keywords as I type", "snippet expansion abbreviation"),
     s("snippets", "Snippets", "Snippets", "template saved text signature placeholder"),
+    // ----------------------------------------------------------- shortcuts
+    s("shortcuts", "Shortcuts", "Shortcuts", "hotkey key global selection transform text case"),
     // ---------------------------------------------------------- quicklinks
     s("quicklinks", "Quicklinks", "Quicklinks", "link url bookmark search open"),
     s("quicklinks", "Quicklinks", "Open with", "browser application default chrome"),

@@ -4,6 +4,7 @@
     | "appearance"
     | "dictation"
     | "snippets"
+    | "shortcuts"
     | "quicklinks"
     | "clipboard"
     | "history"
@@ -120,6 +121,11 @@
     <circle cx="6" cy="6.5" r="2.6" />
     <circle cx="6" cy="17.5" r="2.6" />
     <path d="M8.3 8 20 17M20 7 8.3 16" />
+  {:else if name === "shortcuts"}
+    <!-- A keycap. These settings are keys, and a key is what a key looks
+         like; a lightning bolt would be saying "fast" about a binding. -->
+    <rect x="3" y="6" width="18" height="12" rx="2.5" />
+    <path d="M8 11.5h2M14 11.5h2M8.5 14.5h7" />
   {:else if name === "quicklinks"}
     <!-- A chain link: the one glyph that reads as a saved address. -->
     <path d="M10 13.5a4 4 0 0 0 5.7.4l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.5 1.5" />

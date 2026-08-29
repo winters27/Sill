@@ -1,0 +1,131 @@
+//! Sending keystrokes to whatever has focus.
+//!
+//! Extracted from `dictation::paste`, which had the only copy of it and is no
+//! longer the only caller: replacing a selection needs Ctrl+C as well as
+//! Ctrl+V, and putting a copy chord in a module called `paste` would be a
+//! confusing place for the next person to look.
+//!
+//! Everything here is marked with [`crate::synthetic::SILL_SYNTHETIC`], which
+//! is what lets Sill's own keyboard hook tell our keystrokes from the user's.
+//! Filtering on `LLKHF_INJECTED` instead would also ignore every remapper,
+//! macro key, on-screen keyboard and remote session, which is most of the
+//! reason that flag is the wrong tool.
+
+#[cfg(windows)]
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL,
+};
+
+#[cfg(windows)]
+pub use windows::Win32::UI::Input::KeyboardAndMouse::{VK_C, VK_V};
+
+/// Holds Ctrl, taps `key`, releases Ctrl.
+///
+/// All four events go in one `SendInput` call. Sending them separately lets
+/// another thread's input interleave between them, which arrives at the target
+/// as a lone letter: a stray "v" in the middle of somebody's document.
+#[cfg(windows)]
+pub fn ctrl(key: VIRTUAL_KEY) -> bool {
+    let events = [
+        stroke(VK_CONTROL, false),
+        stroke(key, false),
+        stroke(key, true),
+        stroke(VK_CONTROL, true),
+    ];
+
+    // SAFETY: `events` is a live array of correctly sized INPUT records and
+    // the size argument is taken from the type rather than assumed.
+    let sent = unsafe { SendInput(&events, std::mem::size_of::<INPUT>() as i32) };
+
+    if sent as usize != events.len() {
+        // The usual cause is a target running elevated while Sill is not:
+        // Windows refuses synthetic input across that boundary and gives no
+        // other signal.
+        crate::say!(
+            "a keystroke was blocked, {sent} of {} events delivered. \
+             The target is probably running elevated",
+            events.len()
+        );
+        return false;
+    }
+
+    true
+}
+
+#[cfg(windows)]
+fn stroke(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: 0,
+                dwFlags: if up {
+                    KEYEVENTF_KEYUP
+                } else {
+                    Default::default()
+                },
+                time: 0,
+                dwExtraInfo: crate::synthetic::SILL_SYNTHETIC,
+            },
+        },
+    }
+}
+
+#[cfg(not(windows))]
+pub fn ctrl(_key: u16) -> bool {
+    false
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_chord_presses_and_releases_both_keys_in_order() {
+        // Modifier down, key down, key up, modifier up. Releasing the
+        // modifier first leaves the target seeing a bare letter.
+        let events = [
+            stroke(VK_CONTROL, false),
+            stroke(VK_V, false),
+            stroke(VK_V, true),
+            stroke(VK_CONTROL, true),
+        ];
+
+        let flags: Vec<_> = events
+            .iter()
+            // SAFETY: every record was built as INPUT_KEYBOARD above.
+            .map(|input| unsafe { (input.Anonymous.ki.wVk, input.Anonymous.ki.dwFlags) })
+            .collect();
+
+        assert_eq!(
+            flags,
+            vec![
+                (VK_CONTROL, Default::default()),
+                (VK_V, Default::default()),
+                (VK_V, KEYEVENTF_KEYUP),
+                (VK_CONTROL, KEYEVENTF_KEYUP),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_event_is_a_keyboard_event() {
+        // A record whose type does not match the union member that was filled
+        // in is read as mouse input, which moves the pointer.
+        for event in [stroke(VK_V, false), stroke(VK_CONTROL, true)] {
+            assert_eq!(event.r#type, INPUT_KEYBOARD);
+        }
+    }
+
+    #[test]
+    fn our_own_keystrokes_carry_the_mark() {
+        // Without this the dictation hook reads Sill's paste as user input and
+        // the trigger fires on its own keystroke.
+        for event in [stroke(VK_C, false), stroke(VK_V, true)] {
+            // SAFETY: built as INPUT_KEYBOARD directly above.
+            let extra = unsafe { event.Anonymous.ki.dwExtraInfo };
+            assert_eq!(extra, crate::synthetic::SILL_SYNTHETIC);
+        }
+    }
+}

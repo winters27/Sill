@@ -1,6 +1,7 @@
 pub mod action;
 pub mod actions;
 pub mod apps;
+pub mod bindings;
 pub mod icons;
 pub mod log;
 pub mod lnk;
@@ -14,9 +15,11 @@ pub mod everything_ipc;
 pub mod files;
 pub mod host;
 pub mod host_bridge;
+pub mod input;
 pub mod preferences;
 pub mod registry;
 pub mod secrets;
+pub mod selection;
 pub mod state;
 pub mod settings_catalog;
 pub mod settings_index;
@@ -656,6 +659,8 @@ pub fn run() {
 
             apply_window_size(&handle, &prefs.appearance);
             register_summon_shortcut(&handle, &prefs.hotkey.summon);
+            // Nothing was bound before, so everything in the list is new.
+            bindings::apply(&handle, &[], &prefs.bindings);
             apply_tray(&handle, prefs.general.show_in_tray);
             apply_autostart(&handle, prefs.general.open_at_login);
             watch_focus(&handle, prefs.hotkey.dismiss_on_blur);

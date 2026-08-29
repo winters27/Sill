@@ -10,7 +10,7 @@
 //! is worth keeping, what must never be kept, and how to tell one copy from
 //! the same copy again.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use sha2::{Digest, Sha256};
@@ -44,7 +44,7 @@ pub struct Clipboard {
     store: Arc<Mutex<Store>>,
     /// Set while Sill is itself writing to the clipboard, so a paste out of
     /// the history does not come straight back in as a new entry.
-    ignoring: Arc<AtomicBool>,
+    ignoring: Arc<AtomicUsize>,
     watching: Arc<AtomicBool>,
     /// The settings the watcher needs, cached here because it runs on its own
     /// thread with no route back to the preference store.
@@ -76,7 +76,7 @@ impl Clipboard {
         match Store::open(&path) {
             Ok(store) => Some(Self {
                 store: Arc::new(Mutex::new(store)),
-                ignoring: Arc::new(AtomicBool::new(false)),
+                ignoring: Arc::new(AtomicUsize::new(0)),
                 watching: Arc::new(AtomicBool::new(false)),
                 rules: Arc::new(Mutex::new(Rules {
                     enabled: true,
@@ -104,11 +104,35 @@ impl Clipboard {
     /// of the list every time it was used, reordering the history under the
     /// user's hands.
     pub fn ignore_next(&self) {
-        self.ignoring.store(true, Ordering::SeqCst);
+        self.ignore_next_changes(1);
+    }
+
+    /// Marks the next `count` clipboard changes as Sill's own.
+    ///
+    /// A count rather than a flag because borrowing the clipboard takes two
+    /// changes, not one: reading a selection copies into it and then puts the
+    /// previous contents back. With a flag the restore was recorded, so every
+    /// transformation left the user's own older clipboard entry sitting at the
+    /// top of the history as though they had just copied it.
+    pub fn ignore_next_changes(&self, count: usize) {
+        self.ignoring.fetch_add(count, Ordering::SeqCst);
+    }
+
+    /// Cancels changes that were expected and did not happen.
+    ///
+    /// A capture that finds nothing selected never writes to the clipboard, so
+    /// the two it reserved would otherwise swallow the user's next two real
+    /// copies.
+    pub fn forget_ignored(&self) {
+        self.ignoring.store(0, Ordering::SeqCst);
     }
 
     fn take_ignore(&self) -> bool {
-        self.ignoring.swap(false, Ordering::SeqCst)
+        self.ignoring
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                current.checked_sub(1)
+            })
+            .is_ok()
     }
 
     pub fn set_rules(&self, rules: Rules) {

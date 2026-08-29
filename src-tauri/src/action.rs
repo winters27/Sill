@@ -76,6 +76,14 @@ pub struct Outcome {
     /// anything.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    /// The text this produced, when it produced any.
+    ///
+    /// What lets a shortcut put the result back where the text came from, and
+    /// the seam a workflow will eventually chain through: an action that
+    /// returns text can feed one that takes it. Absent for everything that
+    /// opens, launches or navigates, which is most of them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 impl Outcome {
@@ -84,23 +92,28 @@ impl Outcome {
             message: message.into(),
             undo: None,
             session: None,
+            text: None,
         }
     }
 
     pub fn undoable(message: impl Into<String>, undo: Undo) -> Self {
         Self {
-            message: message.into(),
             undo: Some(undo),
-            session: None,
+            ..Self::done(message)
         }
     }
 
     pub fn running(message: impl Into<String>, session: impl Into<String>) -> Self {
         Self {
-            message: message.into(),
-            undo: None,
             session: Some(session.into()),
+            ..Self::done(message)
         }
+    }
+
+    /// Records what this produced, so a caller can put it somewhere.
+    pub fn producing(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(text.into());
+        self
     }
 }
 

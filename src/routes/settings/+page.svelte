@@ -15,6 +15,7 @@
   import ClipboardPanel from "$lib/components/settings/ClipboardPanel.svelte";
   import SnippetsPanel from "$lib/components/settings/SnippetsPanel.svelte";
   import QuicklinksPanel from "$lib/components/settings/QuicklinksPanel.svelte";
+  import ShortcutsPanel from "$lib/components/settings/ShortcutsPanel.svelte";
   import {
     acceleratorFrom,
     applyAppearance,
@@ -63,6 +64,11 @@
       id: "snippets",
       name: "Snippets",
       blurb: "Saved text, expanded by keyword or pasted from the launcher",
+    },
+    {
+      id: "shortcuts",
+      name: "Shortcuts",
+      blurb: "Keys that act on the selected text without opening the launcher",
     },
     {
       id: "quicklinks",
@@ -553,6 +559,8 @@
             <DictationPanel prefs={p} {commit} />
           {:else if active === "snippets"}
             <SnippetsPanel prefs={p} {commit} />
+          {:else if active === "shortcuts"}
+            <ShortcutsPanel prefs={p} {commit} />
           {:else if active === "quicklinks"}
             <QuicklinksPanel />
           {:else if active === "clipboard"}

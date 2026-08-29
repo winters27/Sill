@@ -577,7 +577,10 @@ impl Action for Transform {
             return Ok(Outcome::done("Already like that"));
         }
 
-        copy_with_undo(ctx, &changed, self.title)
+        // The text goes back with the outcome so a shortcut can put it where
+        // the original came from. Copying is what happens when there is
+        // nowhere better to put it.
+        Ok(copy_with_undo(ctx, &changed, self.title)?.producing(changed))
     }
 }
 

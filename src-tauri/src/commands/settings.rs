@@ -76,6 +76,10 @@ pub(crate) async fn set_preferences(
         apply_dictation(&app, &prefs.dictation);
     }
 
+    if previous.bindings != prefs.bindings {
+        crate::bindings::apply(&app, &previous.bindings, &prefs.bindings);
+    }
+
     if previous.hotkey.summon != prefs.hotkey.summon {
         rebind_summon(&app, &previous.hotkey.summon, &prefs.hotkey.summon);
     }
