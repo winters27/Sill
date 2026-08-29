@@ -291,13 +291,7 @@ mod tests {
     fn the_markup_rewrite_leaves_everything_else_alone() {
         // It has to fire on exactly one shape, or it starts mangling
         // expressions it does not understand.
-        for input in [
-            "20% of 60",
-            "50 * 20%",
-            "(120 + 10)%",
-            "120 + 10",
-            "5%",
-        ] {
+        for input in ["20% of 60", "50 * 20%", "(120 + 10)%", "120 + 10", "5%"] {
             assert_eq!(
                 apply_percentage_convention(input),
                 input,

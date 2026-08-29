@@ -109,9 +109,7 @@ pub fn hide(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
-fn position_at_bottom_center<R: tauri::Runtime>(
-    window: &tauri::WebviewWindow<R>,
-) -> Result<()> {
+fn position_at_bottom_center<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Result<()> {
     let monitor = window
         .primary_monitor()
         .map_err(|e| DictationError::Platform(format!("primary_monitor: {e}")))?

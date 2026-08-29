@@ -157,10 +157,7 @@ fn search_via_client(query: &str, limit: usize) -> Vec<FileHit> {
     // Everything's output is not guaranteed UTF-8 on every locale.
     let text = String::from_utf8_lossy(&output.stdout);
 
-    text.lines()
-        .filter_map(parse_line)
-        .take(limit)
-        .collect()
+    text.lines().filter_map(parse_line).take(limit).collect()
 }
 
 /// Parses one `es -attributes` line: attributes, whitespace, then the path.

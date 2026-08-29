@@ -24,9 +24,9 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 use crate::dictation::assets;
-use crate::dictation::job::Job;
-use crate::dictation::error::{DictationError, Result};
 use crate::dictation::engine;
+use crate::dictation::error::{DictationError, Result};
+use crate::dictation::job::Job;
 
 /// The runtime catalog name for whisper.cpp.
 pub const RUNTIME: &str = "whisper";
@@ -244,7 +244,8 @@ impl WhisperServer {
             // the only moment the dead server's own account of why it stopped
             // is still in hand.
             Ok(Some(status)) => {
-                crate::say!("the whisper server exited on its own ({status}). {}",
+                crate::say!(
+                    "the whisper server exited on its own ({status}). {}",
                     tail(&running.log)
                 );
                 None
@@ -360,12 +361,7 @@ fn working_set(_pid: u32) -> u64 {
 }
 
 /// Spawns the server on a free loopback port and waits for it to answer.
-async fn spawn(
-    exe: &Path,
-    model: &Path,
-    model_id: &str,
-    job: Option<&Job>,
-) -> Result<Running> {
+async fn spawn(exe: &Path, model: &Path, model_id: &str, job: Option<&Job>) -> Result<Running> {
     let port = free_port()?;
     let threads = thread_count(
         std::thread::available_parallelism()

@@ -143,10 +143,9 @@ impl Bridge for SillBridge {
             // Only one label given, so the other keeps the system's word for
             // it. Inventing "Cancel" in English would be wrong on a machine
             // that is not running in English.
-            (Some(yes), None) => MessageDialogButtons::OkCancelCustom(
-                yes.to_string(),
-                "Cancel".to_string(),
-            ),
+            (Some(yes), None) => {
+                MessageDialogButtons::OkCancelCustom(yes.to_string(), "Cancel".to_string())
+            }
             _ => MessageDialogButtons::OkCancel,
         };
 

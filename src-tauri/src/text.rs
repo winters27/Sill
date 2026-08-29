@@ -166,7 +166,10 @@ mod tests {
 
     #[test]
     fn tidying_lines_removes_the_indentation_that_made_it_worth_doing() {
-        assert_eq!(tidy_lines("  one  \n\n\t two\n   \n three "), "one\ntwo\nthree");
+        assert_eq!(
+            tidy_lines("  one  \n\n\t two\n   \n three "),
+            "one\ntwo\nthree"
+        );
         assert_eq!(tidy_lines(""), "");
     }
 
@@ -206,7 +209,10 @@ mod tests {
         let encoded = url_encode(original);
 
         assert!(!encoded.contains(' '), "a raw space survived: {encoded}");
-        assert!(!encoded.contains('&'), "a raw ampersand survived: {encoded}");
+        assert!(
+            !encoded.contains('&'),
+            "a raw ampersand survived: {encoded}"
+        );
         assert_eq!(url_decode(&encoded).as_deref(), Ok(original));
     }
 

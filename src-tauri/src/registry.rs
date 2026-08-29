@@ -246,7 +246,14 @@ pub fn builtins() -> Vec<CommandRecord> {
             "dictation",
             "Dictate",
             "Start a dictation without the hotkey",
-            &["voice", "speech", "talk", "transcribe", "microphone", "whisper"],
+            &[
+                "voice",
+                "speech",
+                "talk",
+                "transcribe",
+                "microphone",
+                "whisper",
+            ],
         ),
         builtin(
             "dictation-history",
@@ -472,8 +479,7 @@ fn simple_subsequence(needle: &[char], hay: &[char]) -> Option<(i64, Vec<usize>)
     let mut hay_i = 0;
 
     for &want in needle {
-        let found = (hay_i..hay.len())
-            .find(|&i| hay[i].to_lowercase().next() == Some(want))?;
+        let found = (hay_i..hay.len()).find(|&i| hay[i].to_lowercase().next() == Some(want))?;
         matched.push(found);
         hay_i = found + 1;
     }
@@ -647,7 +653,10 @@ fn classify(needle: &[char], command: &CommandRecord) -> Option<(MatchClass, Vec
 
     if aligned {
         if let Some(at) = find_run(&hay_lower, needle) {
-            return Some((MatchClass::TitleSubstring, (at..at + needle.len()).collect()));
+            return Some((
+                MatchClass::TitleSubstring,
+                (at..at + needle.len()).collect(),
+            ));
         }
     }
 
@@ -658,7 +667,10 @@ fn classify(needle: &[char], command: &CommandRecord) -> Option<(MatchClass, Vec
     // Nothing in the title. The other sources are searched but never
     // highlighted, since their indices would point into the wrong string.
     if fuzzy_with(needle, &command.extension_title).is_some()
-        || command.keywords.iter().any(|k| fuzzy_with(needle, k).is_some())
+        || command
+            .keywords
+            .iter()
+            .any(|k| fuzzy_with(needle, k).is_some())
     {
         return Some((MatchClass::Elsewhere, Vec::new()));
     }

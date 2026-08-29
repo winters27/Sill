@@ -79,8 +79,10 @@ fn icon_source(command: &str) -> Option<String> {
 
     if command.starts_with("ms-settings:") {
         // The modern Settings app, which is what every ms-settings URI opens.
-        return exists(format!(r"{system_root}\ImmersiveControlPanel\SystemSettings.exe"))
-            .or_else(|| exists(format!(r"{system32}\control.exe")));
+        return exists(format!(
+            r"{system_root}\ImmersiveControlPanel\SystemSettings.exe"
+        ))
+        .or_else(|| exists(format!(r"{system32}\control.exe")));
     }
 
     // A `.cpl` is a DLL and carries its own icon, which is nicer than a
@@ -110,7 +112,8 @@ fn icon_source(command: &str) -> Option<String> {
 
 /// Every settings page, as registry entries.
 pub fn load() -> Vec<CommandRecord> {
-    let Ok(catalog) = serde_json::from_str::<Catalog>(CATALOG.trim_start_matches('\u{feff}')) else {
+    let Ok(catalog) = serde_json::from_str::<Catalog>(CATALOG.trim_start_matches('\u{feff}'))
+    else {
         eprintln!("[sill] the Windows settings catalog could not be parsed");
         return Vec::new();
     };
@@ -137,8 +140,7 @@ pub fn load() -> Vec<CommandRecord> {
             // Searchable by section and by whatever aliases the catalog knows,
             // so "network proxy" finds the proxy page even though its own name
             // is only "Proxy".
-            let mut keywords: Vec<String> =
-                entry.alt_names.iter().map(|a| humanize(a)).collect();
+            let mut keywords: Vec<String> = entry.alt_names.iter().map(|a| humanize(a)).collect();
             if !area.is_empty() {
                 keywords.push(area.clone());
             }
@@ -195,7 +197,10 @@ mod tests {
     fn pascal_case_becomes_words() {
         assert_eq!(humanize("VideoPlayback"), "Video Playback");
         assert_eq!(humanize("PermissionsAndHistory"), "Permissions And History");
-        assert_eq!(humanize("AreaNetworkAndInternet"), "Area Network And Internet");
+        assert_eq!(
+            humanize("AreaNetworkAndInternet"),
+            "Area Network And Internet"
+        );
     }
 
     #[test]

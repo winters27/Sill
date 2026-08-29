@@ -2,31 +2,31 @@ pub mod action;
 pub mod actions;
 pub mod apps;
 pub mod bindings;
-pub mod icons;
-pub mod log;
-pub mod lnk;
-pub mod object;
 pub mod calculator;
-pub mod commands;
 pub mod clipboard;
+pub mod commands;
 pub mod dictation;
-pub mod exthost;
 pub mod everything_ipc;
+pub mod exthost;
 pub mod files;
 pub mod host;
 pub mod host_bridge;
+pub mod icons;
 pub mod input;
+pub mod lnk;
+pub mod log;
+pub mod object;
 pub mod preferences;
+pub mod quicklinks;
 pub mod registry;
 pub mod secrets;
 pub mod selection;
-pub mod state;
 pub mod settings_catalog;
 pub mod settings_index;
-pub mod quicklinks;
-pub mod synthetic;
 pub mod snippets;
+pub mod state;
 pub mod summon;
+pub mod synthetic;
 pub mod text;
 
 use std::path::PathBuf;
@@ -40,7 +40,6 @@ use registry::{CommandRecord, Frecency};
 use commands::settings::open_settings;
 use host::{forward_events, host_js, index_paths};
 use state::{now_seconds, HostState, PrefsState, Registry, RegistryState};
-
 
 /// Reads the installed command index and the saved ranking history.
 ///
@@ -59,7 +58,12 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
     let cached = registry::load_cache(&cache_path);
 
     let state = handle.state::<RegistryState>().inner().clone();
-    let sources = handle.state::<PrefsState>().inner.blocking_lock().sources.clone();
+    let sources = handle
+        .state::<PrefsState>()
+        .inner
+        .blocking_lock()
+        .sources
+        .clone();
     let index_paths = index_paths(&handle);
 
     tauri::async_runtime::spawn(async move {
@@ -153,8 +157,7 @@ pub(crate) fn scan_everything(
 
     // One PowerShell round trip covers three registry sources, so it is only
     // skipped when the user has turned all of them off.
-    let registry_sources =
-        sources.packaged_apps || sources.app_paths || sources.installed_programs;
+    let registry_sources = sources.packaged_apps || sources.app_paths || sources.installed_programs;
     let packaged = if registry_sources {
         apps::scan_apps_folder()
     } else {
@@ -172,8 +175,8 @@ pub(crate) fn scan_everything(
     let mut targets: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     let keep = |record: &apps::AppRecord,
-                    names: &mut std::collections::HashSet<String>,
-                    targets: &mut std::collections::HashSet<String>| {
+                names: &mut std::collections::HashSet<String>,
+                targets: &mut std::collections::HashSet<String>| {
         if !names.insert(record.name.to_lowercase()) {
             return false;
         }
@@ -331,8 +334,7 @@ pub(crate) fn apply_dictation(app: &AppHandle, settings: &dictation::models::Dic
         }
     };
 
-    let (finish, cancel) =
-        dictation::hotkey::end_keys(&settings.finish_key, &settings.cancel_key);
+    let (finish, cancel) = dictation::hotkey::end_keys(&settings.finish_key, &settings.cancel_key);
     chord.finish = finish;
     chord.cancel = cancel;
 
@@ -485,7 +487,12 @@ pub(crate) fn reload_quicklinks(app: &AppHandle) {
 pub(crate) fn reload_index(app: &AppHandle) {
     let handle = app.clone();
     let state = app.state::<RegistryState>().inner().clone();
-    let sources = app.state::<PrefsState>().inner.blocking_lock().sources.clone();
+    let sources = app
+        .state::<PrefsState>()
+        .inner
+        .blocking_lock()
+        .sources
+        .clone();
     let index_paths = index_paths(app);
 
     tauri::async_runtime::spawn(async move {
@@ -513,13 +520,15 @@ fn register_summon_shortcut(app: &AppHandle, accelerator: &str) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
     let handle = app.clone();
-    let result = app.global_shortcut().on_shortcut(accelerator, move |_, _, event| {
-        // Fires on both press and release; acting on both would toggle twice
-        // and leave the window exactly as it was.
-        if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-            summon::toggle_main(&handle);
-        }
-    });
+    let result = app
+        .global_shortcut()
+        .on_shortcut(accelerator, move |_, _, event| {
+            // Fires on both press and release; acting on both would toggle twice
+            // and leave the window exactly as it was.
+            if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                summon::toggle_main(&handle);
+            }
+        });
 
     match result {
         Ok(()) => println!("[sill] summon key registered: {accelerator}"),
@@ -558,7 +567,6 @@ fn watch_focus(app: &AppHandle, dismiss_on_blur: bool) {
         }
     });
 }
-
 
 /// Hides the launcher, so whatever was in front of it comes back.
 ///

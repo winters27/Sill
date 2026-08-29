@@ -127,16 +127,15 @@ mod cache_tests {
 
         // Touched now, so it is the newest thing in a full cache.
         let hot = "cold-0.exe";
-        cache
-            .entries
-            .get_mut(hot)
-            .expect("seeded")
-            .used = u64::MAX;
+        cache.entries.get_mut(hot).expect("seeded").used = u64::MAX;
 
         stash(&mut cache, "new.exe", 1);
 
         assert!(cache.entries.contains_key(hot), "the hot entry was evicted");
-        assert!(!cache.entries.contains_key("cold-1.exe"), "the coldest survived");
+        assert!(
+            !cache.entries.contains_key("cold-1.exe"),
+            "the coldest survived"
+        );
     }
 }
 
@@ -282,10 +281,7 @@ fn extract(path: &str) -> Option<String> {
     }
 
     let png = result?;
-    Some(format!(
-        "data:image/png;base64,{}",
-        base64_encode(&png)
-    ))
+    Some(format!("data:image/png;base64,{}", base64_encode(&png)))
 }
 
 /// The icon as the shell composites it, badges and all.
@@ -303,8 +299,10 @@ fn resolved_target(path: &str) -> Option<String> {
     let target = crate::lnk::target_of(std::path::Path::new(path))?;
 
     if std::env::var_os("SILL_ICON_DEBUG").is_some() {
-        eprintln!("[icons] {path}
-          -> target {target:?}");
+        eprintln!(
+            "[icons] {path}
+          -> target {target:?}"
+        );
     }
 
     std::path::Path::new(&target).is_file().then_some(target)
@@ -436,8 +434,11 @@ fn icon_without_overlay(path: &str) -> Option<windows::Win32::UI::WindowsAndMess
     let located = expand_env(&String::from_utf16_lossy(&info.szDisplayName[..end]));
 
     if std::env::var_os("SILL_ICON_DEBUG").is_some() {
-        eprintln!("[icons] {path}
-          -> {located:?} index {}", info.iIcon);
+        eprintln!(
+            "[icons] {path}
+          -> {located:?} index {}",
+            info.iIcon
+        );
     }
 
     icon_at_size(&located, info.iIcon)
@@ -528,7 +529,10 @@ fn icon_to_png(hicon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<
 
     if read == 0 || bitmap.bmWidth <= 0 || bitmap.bmHeight <= 0 {
         if std::env::var_os("SILL_ICON_DEBUG").is_some() {
-            eprintln!("[icons] GetObjectW read={read} w={} h={}", bitmap.bmWidth, bitmap.bmHeight);
+            eprintln!(
+                "[icons] GetObjectW read={read} w={} h={}",
+                bitmap.bmWidth, bitmap.bmHeight
+            );
         }
         cleanup();
         return None;

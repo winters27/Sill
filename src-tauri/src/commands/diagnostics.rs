@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 
 use tauri::{AppHandle, State};
 
+use crate::everything_ipc;
 use crate::registry::CommandRecord;
 use crate::state::{data_dir, RegistryState};
-use crate::everything_ipc;
 
 /// What the About and Advanced panels report.
 #[derive(serde::Serialize)]

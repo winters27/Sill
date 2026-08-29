@@ -293,12 +293,7 @@ pub fn scan_apps_folder() -> Vec<AppRecord> {
     use std::process::Command;
 
     let output = Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            APPS_QUERY,
-        ])
+        .args(["-NoProfile", "-NonInteractive", "-Command", APPS_QUERY])
         .output();
 
     let Ok(output) = output else {
@@ -413,7 +408,12 @@ fn tidy_name(name: &str) -> String {
     let mut out = name.trim();
 
     for tag in [
-        " (x64)", " (x86)", " (64-bit)", " (32-bit)", " (64 bit)", " (32 bit)",
+        " (x64)",
+        " (x86)",
+        " (64-bit)",
+        " (32-bit)",
+        " (64 bit)",
+        " (32 bit)",
     ] {
         if let Some(stripped) = out.strip_suffix(tag) {
             out = stripped.trim_end();
@@ -637,7 +637,10 @@ pub fn scan_path_executables() -> Vec<AppRecord> {
             if !file.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
             }
-            if path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase)
+            if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_ascii_lowercase)
                 != Some("exe".to_string())
             {
                 continue;

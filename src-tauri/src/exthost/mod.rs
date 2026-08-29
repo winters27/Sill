@@ -129,7 +129,9 @@ impl ExtHost {
             tokio::spawn(async move {
                 while let Some(work) = incoming.recv().await {
                     match work {
-                        Incoming::Event { method, params } if method == "Manager/extensionMessage" => {
+                        Incoming::Event { method, params }
+                            if method == "Manager/extensionMessage" =>
+                        {
                             let session_id = params
                                 .get("session_id")
                                 .and_then(Value::as_str)
@@ -154,7 +156,9 @@ impl ExtHost {
                             }
                         }
 
-                        Incoming::Event { method, params } if method == "Manager/extensionCrash" => {
+                        Incoming::Event { method, params }
+                            if method == "Manager/extensionCrash" =>
+                        {
                             let session_id = params
                                 .get("session_id")
                                 .and_then(Value::as_str)
@@ -234,15 +238,17 @@ impl ExtHost {
                 while let Some(work) = incoming.recv().await {
                     match work {
                         Incoming::Request { id, method, params } => {
-                            let result =
-                                api.dispatch(&session_id, &extension, &method, &params).await;
+                            let result = api
+                                .dispatch(&session_id, &extension, &method, &params)
+                                .await;
                             peer.respond(id, result);
                         }
                         Incoming::Event { method, params } => {
                             // Notifications get dispatched too; the result is
                             // simply discarded. UI/render arrives this way.
-                            if let Err(err) =
-                                api.dispatch(&session_id, &extension, &method, &params).await
+                            if let Err(err) = api
+                                .dispatch(&session_id, &extension, &method, &params)
+                                .await
                             {
                                 crate::say!("{method}: {err}");
                             }

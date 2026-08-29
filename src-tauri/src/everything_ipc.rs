@@ -26,9 +26,9 @@ use std::sync::OnceLock;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, PeekMessageW,
-    RegisterClassExW, SendMessageW, TranslateMessage, HWND_MESSAGE, MSG, PM_REMOVE,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WM_COPYDATA, WNDCLASSEXW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW, PeekMessageW, RegisterClassExW,
+    SendMessageW, TranslateMessage, HWND_MESSAGE, MSG, PM_REMOVE, WINDOW_EX_STYLE, WINDOW_STYLE,
+    WM_COPYDATA, WNDCLASSEXW,
 };
 
 /// Prints protocol diagnostics when `SILL_EVERYTHING_DEBUG` is set.
@@ -306,12 +306,7 @@ fn pump_until_reply() -> Vec<FileHit> {
 }
 
 /// Receives Everything's reply.
-unsafe extern "system" fn wndproc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if msg == WM_COPYDATA {
         let cds = lparam.0 as *const CopyDataStruct;
         trace!(

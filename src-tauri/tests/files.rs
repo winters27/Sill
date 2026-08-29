@@ -25,7 +25,8 @@ fn everything_ipc_returns_results() {
 
     // A parsed reply must give absolute paths and matching names.
     assert!(
-        hits.iter().all(|h| h.path.contains(std::path::MAIN_SEPARATOR)),
+        hits.iter()
+            .all(|h| h.path.contains(std::path::MAIN_SEPARATOR)),
         "results should be full paths"
     );
     assert!(
@@ -91,18 +92,15 @@ fn scoping_wraps_the_folder_clause_so_it_applies_to_the_whole_query() {
     let scoped = sill_lib::files::scope("report", &[r"C:\work".to_string()]);
 
     assert_eq!(
-        scoped,
-        r#"report <path:"C:\work">"#,
+        scoped, r#"report <path:"C:\work">"#,
         "the folder clause has to be grouped, or it binds to the last term only"
     );
 }
 
 #[test]
 fn scoping_joins_several_folders_as_alternatives() {
-    let scoped = sill_lib::files::scope(
-        "notes",
-        &[r"C:\a".to_string(), r"D:\my files".to_string()],
-    );
+    let scoped =
+        sill_lib::files::scope("notes", &[r"C:\a".to_string(), r"D:\my files".to_string()]);
 
     assert_eq!(scoped, r#"notes <path:"C:\a"|path:"D:\my files">"#);
 }

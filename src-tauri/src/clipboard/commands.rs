@@ -44,10 +44,7 @@ pub fn clipboard_search(
 /// Separate from the list because a listing of four hundred rows must not
 /// carry four hundred screenshots with it.
 #[tauri::command]
-pub fn clipboard_entry(
-    clipboard: State<'_, Clipboard>,
-    id: i64,
-) -> Result<Option<Detail>, String> {
+pub fn clipboard_entry(clipboard: State<'_, Clipboard>, id: i64) -> Result<Option<Detail>, String> {
     let store = clipboard.store();
     let Some(entry) = store.get(id).map_err(|e| e.to_string())? else {
         return Ok(None);
@@ -145,11 +142,7 @@ fn write_image(board: &mut arboard::Clipboard, png: &[u8]) -> Result<(), String>
 }
 
 #[tauri::command]
-pub fn clipboard_pin(
-    clipboard: State<'_, Clipboard>,
-    id: i64,
-    pinned: bool,
-) -> Result<(), String> {
+pub fn clipboard_pin(clipboard: State<'_, Clipboard>, id: i64, pinned: bool) -> Result<(), String> {
     clipboard
         .store()
         .set_pinned(id, pinned)
@@ -163,10 +156,7 @@ pub fn clipboard_delete(clipboard: State<'_, Clipboard>, id: i64) -> Result<(), 
 
 /// Empties the history. Pinned entries survive unless `everything`.
 #[tauri::command]
-pub fn clipboard_clear(
-    clipboard: State<'_, Clipboard>,
-    everything: bool,
-) -> Result<usize, String> {
+pub fn clipboard_clear(clipboard: State<'_, Clipboard>, everything: bool) -> Result<usize, String> {
     clipboard
         .store()
         .clear(everything)

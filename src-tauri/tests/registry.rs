@@ -30,9 +30,17 @@ fn command(id: &str, title: &str, extension_title: &str) -> CommandRecord {
 
 fn corpus() -> Vec<CommandRecord> {
     vec![
-        command("uuid-generator:viewHistory", "View History", "UUID Generator"),
+        command(
+            "uuid-generator:viewHistory",
+            "View History",
+            "UUID Generator",
+        ),
         command("uuid-generator:generate", "Generate UUID", "UUID Generator"),
-        command("password-generator:random", "Generate Random Password", "Password Generator"),
+        command(
+            "password-generator:random",
+            "Generate Random Password",
+            "Password Generator",
+        ),
         command("emoji:search", "Search Emoji", "Emoji"),
         command("clipboard:history", "Clipboard History", "Clipboard"),
     ]
@@ -60,17 +68,27 @@ fn a_prefix_outranks_a_mid_word_match() {
     let found = titles(&results);
 
     let generate = found.iter().position(|t| *t == "Generate UUID");
-    assert!(generate.is_some(), "Generate UUID should match 'gen', got {found:?}");
+    assert!(
+        generate.is_some(),
+        "Generate UUID should match 'gen', got {found:?}"
+    );
 
     // "Generate UUID" starts with the query; the others only contain it via
     // their extension title, so the direct hit must lead.
-    assert_eq!(generate, Some(0), "the prefix match should lead, got {found:?}");
+    assert_eq!(
+        generate,
+        Some(0),
+        "the prefix match should lead, got {found:?}"
+    );
 }
 
 #[test]
 fn non_matches_are_excluded_entirely() {
     let results = search(&corpus(), "zzzz", &Frecency::default(), NOW, 10);
-    assert!(results.is_empty(), "a query matching nothing returns nothing");
+    assert!(
+        results.is_empty(),
+        "a query matching nothing returns nothing"
+    );
 }
 
 #[test]
@@ -156,7 +174,10 @@ fn repeated_use_accumulates() {
     }
     let many = frecency.score("emoji:search", NOW);
 
-    assert!(many > once, "more launches should score higher: {many} vs {once}");
+    assert!(
+        many > once,
+        "more launches should score higher: {many} vs {once}"
+    );
 }
 
 #[test]
@@ -332,7 +353,11 @@ fn the_apps_folder_finds_what_the_start_menu_walk_misses() {
         "an App Paths entry must point at a file that exists"
     );
 
-    eprintln!("by AppUserModelID: {}, by path: {}", by_id.len(), by_path.len());
+    eprintln!(
+        "by AppUserModelID: {}, by path: {}",
+        by_id.len(),
+        by_path.len()
+    );
 }
 
 #[test]
@@ -355,8 +380,10 @@ fn app_paths_entries_do_not_duplicate_shortcuts() {
         all.len()
     );
 
-    let shortcut_targets: std::collections::HashSet<String> =
-        shortcuts.iter().filter_map(sill_lib::apps::target_key).collect();
+    let shortcut_targets: std::collections::HashSet<String> = shortcuts
+        .iter()
+        .filter_map(sill_lib::apps::target_key)
+        .collect();
 
     // Anything in the merged list that is not a shortcut came from the second
     // scan, so it must bring a target no shortcut already covers.
@@ -366,9 +393,7 @@ fn app_paths_entries_do_not_duplicate_shortcuts() {
     let shadowing: Vec<&str> = all
         .iter()
         .filter(|a| !shortcut_paths.contains(a.path.as_str()))
-        .filter(|a| {
-            sill_lib::apps::target_key(a).is_some_and(|t| shortcut_targets.contains(&t))
-        })
+        .filter(|a| sill_lib::apps::target_key(a).is_some_and(|t| shortcut_targets.contains(&t)))
         .map(|a| a.name.as_str())
         .collect();
 
@@ -598,7 +623,10 @@ fn windows_settings_are_searchable() {
     // Section keywords make a page reachable by where it lives, not only by
     // its own one-word name.
     let proxy = search(&settings, "proxy", &frecency, NOW, 20);
-    assert!(!proxy.is_empty(), "'proxy' should reach the proxy settings page");
+    assert!(
+        !proxy.is_empty(),
+        "'proxy' should reach the proxy settings page"
+    );
 
     // Every entry must know how to launch.
     assert!(
@@ -606,8 +634,10 @@ fn windows_settings_are_searchable() {
         "a settings entry with no command cannot be run"
     );
 
-    let kinds: std::collections::BTreeSet<&str> =
-        settings.iter().map(|s| s.extension_title.as_str()).collect();
+    let kinds: std::collections::BTreeSet<&str> = settings
+        .iter()
+        .map(|s| s.extension_title.as_str())
+        .collect();
     eprintln!("{} settings across kinds {:?}", settings.len(), kinds);
 }
 
@@ -691,7 +721,9 @@ fn an_exclusion_term_hides_matching_entries() {
         "the entry has to be there before it can be hidden"
     );
     assert!(
-        !after.iter().any(|r| r.command.title.to_lowercase().contains("history")),
+        !after
+            .iter()
+            .any(|r| r.command.title.to_lowercase().contains("history")),
         "an excluded title should not come back, got {:?}",
         after.iter().map(|r| &r.command.title).collect::<Vec<_>>()
     );
@@ -717,10 +749,7 @@ fn an_exclusion_term_is_case_insensitive_and_ignores_blanks() {
         &["   ".to_string(), "HISTORY".to_string()],
     );
 
-    assert!(
-        !results.is_empty(),
-        "a blank term must not hide everything"
-    );
+    assert!(!results.is_empty(), "a blank term must not hide everything");
     assert!(
         !results.iter().any(|r| r.command.title == "View History"),
         "matching should ignore case"
@@ -829,9 +858,8 @@ fn two_results_only_swap_when_one_of_them_matches_differently() {
     let frecency = Frecency::default();
 
     for query in [
-        "visual", "code", "discord", "docker", "google", "calendar", "notepad",
-        "terminal", "steam", "photo", "micro", "settings", "git", "power",
-        "explorer", "sn", "st", "ca",
+        "visual", "code", "discord", "docker", "google", "calendar", "notepad", "terminal",
+        "steam", "photo", "micro", "settings", "git", "power", "explorer", "sn", "st", "ca",
     ] {
         let mut previous: Option<(String, Vec<String>)> = None;
 
@@ -847,7 +875,8 @@ fn two_results_only_swap_when_one_of_them_matches_differently() {
                         let (Some(a_then), Some(b_then)) = (rank(was, a), rank(was, b)) else {
                             continue;
                         };
-                        let (Some(a_now), Some(b_now)) = (rank(&ranked, a), rank(&ranked, b)) else {
+                        let (Some(a_now), Some(b_now)) = (rank(&ranked, a), rank(&ranked, b))
+                        else {
                             continue;
                         };
 
@@ -884,7 +913,10 @@ fn a_better_kind_of_match_is_what_promotes_a_result() {
     // "c" lands on the C of Code, a word start, same as it does for
     // Calculator. "ca" is a prefix of Calculator and no longer a word-start
     // match for Visual Studio Code, so Calculator overtakes it.
-    assert_eq!(class_of("ca", &corpus, "app:calc"), Some(MatchClass::TitlePrefix));
+    assert_eq!(
+        class_of("ca", &corpus, "app:calc"),
+        Some(MatchClass::TitlePrefix)
+    );
 
     let after = ids(&search(&corpus, "ca", &frecency, NOW, 50));
     let calc = after.iter().position(|id| id == "app:calc");
@@ -914,7 +946,11 @@ fn initials_beat_a_run_of_the_same_letters() {
     );
 
     let found = ids(&search(&corpus, "gc", &Frecency::default(), NOW, 50));
-    assert_eq!(found.first().map(String::as_str), Some("app:chrome"), "got {found:?}");
+    assert_eq!(
+        found.first().map(String::as_str),
+        Some("app:chrome"),
+        "got {found:?}"
+    );
 }
 
 #[test]
@@ -934,7 +970,10 @@ fn a_match_only_in_a_keyword_ranks_below_any_match_in_the_name() {
     let mut with_keyword = command("ext:tool", "Unrelated Name", "Extension");
     with_keyword.keywords = vec!["docker".to_string()];
 
-    let corpus = vec![command("app:docker", "Docker Desktop", "Application"), with_keyword];
+    let corpus = vec![
+        command("app:docker", "Docker Desktop", "Application"),
+        with_keyword,
+    ];
     let found = ids(&search(&corpus, "docker", &Frecency::default(), NOW, 50));
 
     assert_eq!(
@@ -948,19 +987,59 @@ fn a_match_only_in_a_keyword_ranks_below_any_match_in_the_name() {
 /// initials, vendor prefixes, and long titles that contain short ones.
 fn realistic() -> Vec<CommandRecord> {
     [
-        "Visual Studio Code", "Visual Studio 2022", "VSCodium", "Discord",
-        "Docker Desktop", "Google Chrome", "Google Drive", "Calculator",
-        "Calendar", "Screen Capture", "Notion Calendar", "Notepad",
-        "Notepad++", "Windows Terminal", "Terminal Preview", "Steam",
-        "Steam Link", "Spotify", "Photos", "Photoshop", "File Explorer",
-        "Internet Explorer", "PowerShell 7", "Windows PowerShell ISE",
-        "Command Prompt", "Task Manager", "Device Manager", "Disk Cleanup",
-        "Snipping Tool", "Sticky Notes", "Sound Recorder", "Settings",
-        "System Settings", "Slack", "Signal", "Skype", "Zoom Workplace",
-        "OBS Studio", "Audacity", "Blender", "GIMP", "Inkscape",
-        "Firefox Developer Edition", "Microsoft Edge", "Microsoft Teams",
-        "Microsoft Word", "Microsoft Excel", "Postman", "PostgreSQL",
-        "DB Browser for SQLite", "Docker Compose", "Git Bash", "GitHub Desktop",
+        "Visual Studio Code",
+        "Visual Studio 2022",
+        "VSCodium",
+        "Discord",
+        "Docker Desktop",
+        "Google Chrome",
+        "Google Drive",
+        "Calculator",
+        "Calendar",
+        "Screen Capture",
+        "Notion Calendar",
+        "Notepad",
+        "Notepad++",
+        "Windows Terminal",
+        "Terminal Preview",
+        "Steam",
+        "Steam Link",
+        "Spotify",
+        "Photos",
+        "Photoshop",
+        "File Explorer",
+        "Internet Explorer",
+        "PowerShell 7",
+        "Windows PowerShell ISE",
+        "Command Prompt",
+        "Task Manager",
+        "Device Manager",
+        "Disk Cleanup",
+        "Snipping Tool",
+        "Sticky Notes",
+        "Sound Recorder",
+        "Settings",
+        "System Settings",
+        "Slack",
+        "Signal",
+        "Skype",
+        "Zoom Workplace",
+        "OBS Studio",
+        "Audacity",
+        "Blender",
+        "GIMP",
+        "Inkscape",
+        "Firefox Developer Edition",
+        "Microsoft Edge",
+        "Microsoft Teams",
+        "Microsoft Word",
+        "Microsoft Excel",
+        "Postman",
+        "PostgreSQL",
+        "DB Browser for SQLite",
+        "Docker Compose",
+        "Git Bash",
+        "GitHub Desktop",
     ]
     .iter()
     .enumerate()
@@ -1007,7 +1086,10 @@ fn a_guess_never_outranks_something_that_actually_matched() {
         .position(|id| class_of("notepad", &corpus, id) == Some(MatchClass::TitleTypo));
 
     if let (Some(real), Some(guess)) = (real, guess) {
-        assert!(real < guess, "a guess was offered above a real match: {found:?}");
+        assert!(
+            real < guess,
+            "a guess was offered above a real match: {found:?}"
+        );
     }
 
     assert_eq!(

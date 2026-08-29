@@ -12,13 +12,13 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::dictation::capture::{is_silent, CaptureSession};
+use crate::dictation::error::{DictationError, Result};
 use crate::dictation::models::{DictationSettings, OutputMode};
 use crate::dictation::panel::{self, PanelStatus};
 use crate::dictation::providers::{transcription_request, TranscribeOptions};
 use crate::dictation::sound;
 use crate::dictation::transcriber::{build_transcription_client, transcribe};
 use crate::dictation::{resample, wav};
-use crate::dictation::error::{DictationError, Result};
 
 /// How often the panel's waveform advances. 33 ms is about 30 Hz, which is
 /// fast enough that the bar being drawn is the sound currently being made,
@@ -168,7 +168,8 @@ impl DictationService {
             return Ok(());
         }
 
-        crate::say!("captured {} samples at {} Hz; transcribing via {}",
+        crate::say!(
+            "captured {} samples at {} Hz; transcribing via {}",
             clip.samples.len(),
             clip.sample_rate,
             settings.provider_id
@@ -274,7 +275,9 @@ impl DictationService {
                     }
                 }
             })
-            .map_err(|e| DictationError::Other(format!("Could not start the action thread: {e}")))?;
+            .map_err(|e| {
+                DictationError::Other(format!("Could not start the action thread: {e}"))
+            })?;
 
         // A heartbeat, because the counters are the only proof the hook is
         // alive and the settings window is a bad place to read them from: it
@@ -443,7 +446,10 @@ async fn transcribe_and_deliver(
     let started = std::time::Instant::now();
     let transcript = transcribe(&build_transcription_client(), &request, bytes).await?;
     let transcribe_ms = started.elapsed().as_millis() as u64;
-    crate::say!("transcript: {} chars in {transcribe_ms} ms", transcript.len());
+    crate::say!(
+        "transcript: {} chars in {transcribe_ms} ms",
+        transcript.len()
+    );
 
     if transcript.is_empty() {
         return Ok(());

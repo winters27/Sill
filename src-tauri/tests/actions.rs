@@ -9,7 +9,6 @@
 use sill_lib::actions::builtins;
 use sill_lib::object::ObjectKind;
 
-
 /// Every mode `scripts/build-extension.mjs` or a scan can put in the index.
 const INDEX_MODES: &[&str] = &[
     "app",
@@ -77,7 +76,9 @@ fn the_primary_action_is_offered_first() {
 
     for kind in ObjectKind::ALL {
         let offered = registry.for_kind(*kind);
-        let Some(first) = offered.first() else { continue };
+        let Some(first) = offered.first() else {
+            continue;
+        };
         let Some(primary) = registry.primary(*kind) else {
             continue;
         };
@@ -141,14 +142,21 @@ fn things_on_disk_can_have_their_path_copied_and_folder_opened() {
     // bolted to one: three kinds, one implementation.
     let registry = builtins();
 
-    for kind in [ObjectKind::Application, ObjectKind::File, ObjectKind::Folder] {
+    for kind in [
+        ObjectKind::Application,
+        ObjectKind::File,
+        ObjectKind::Folder,
+    ] {
         let offered: Vec<_> = registry
             .for_kind(kind)
             .into_iter()
             .map(|a| a.id())
             .collect();
 
-        assert!(offered.contains(&"sill.copyPath"), "{kind:?} lost Copy Path");
+        assert!(
+            offered.contains(&"sill.copyPath"),
+            "{kind:?} lost Copy Path"
+        );
         assert!(
             offered.contains(&"sill.revealInFolder"),
             "{kind:?} lost Show in Folder"
@@ -207,7 +215,11 @@ fn text_and_clipboard_rows_are_the_same_thing_to_a_transform() {
             "{mode} does not reach the window as a kind"
         );
 
-        let offered: Vec<_> = registry.for_kind(*kind).into_iter().map(|a| a.id()).collect();
+        let offered: Vec<_> = registry
+            .for_kind(*kind)
+            .into_iter()
+            .map(|a| a.id())
+            .collect();
 
         for wanted in [
             "sill.text.upper",
@@ -215,7 +227,10 @@ fn text_and_clipboard_rows_are_the_same_thing_to_a_transform() {
             "sill.text.base64Decode",
             "sill.text.jsonPretty",
         ] {
-            assert!(offered.contains(&wanted), "{mode} is missing {wanted}: {offered:?}");
+            assert!(
+                offered.contains(&wanted),
+                "{mode} is missing {wanted}: {offered:?}"
+            );
         }
     }
 }
@@ -234,8 +249,15 @@ fn loose_text_has_exactly_one_action_on_enter() {
             .map(|a| a.id())
             .collect();
 
-        assert_eq!(claimants, vec!["sill.clipboard.copy"], "{mode} claimants wrong");
-        assert!(registry.describe(*kind)[0].primary, "{mode} draws a non-primary first");
+        assert_eq!(
+            claimants,
+            vec!["sill.clipboard.copy"],
+            "{mode} claimants wrong"
+        );
+        assert!(
+            registry.describe(*kind)[0].primary,
+            "{mode} draws a non-primary first"
+        );
     }
 }
 
@@ -251,7 +273,11 @@ fn a_transform_is_never_offered_on_something_that_is_not_text() {
         ObjectKind::ExtensionCommand,
         ObjectKind::Builtin,
     ] {
-        let offered: Vec<_> = registry.for_kind(kind).into_iter().map(|a| a.id()).collect();
+        let offered: Vec<_> = registry
+            .for_kind(kind)
+            .into_iter()
+            .map(|a| a.id())
+            .collect();
         assert!(
             !offered.iter().any(|id| id.starts_with("sill.text.")),
             "{kind:?} was offered a text transform: {offered:?}"

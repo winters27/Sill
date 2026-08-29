@@ -28,7 +28,11 @@ fn extracts_an_icon_from_a_system_executable() {
         &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
         "the decoded bytes should start with the PNG signature"
     );
-    assert!(bytes.len() > 200, "a real icon is more than a stub, got {} bytes", bytes.len());
+    assert!(
+        bytes.len() > 200,
+        "a real icon is more than a stub, got {} bytes",
+        bytes.len()
+    );
 }
 
 #[test]
@@ -58,7 +62,9 @@ fn report_icon_paths_for_real_shortcuts() {
     let mut no_target = Vec::new();
 
     for app in &apps {
-        let Some(source) = app.icon_source.as_ref() else { continue };
+        let Some(source) = app.icon_source.as_ref() else {
+            continue;
+        };
 
         if source.to_ascii_lowercase().ends_with(".lnk")
             && sill_lib::lnk::target_of(std::path::Path::new(source)).is_none()
@@ -90,7 +96,10 @@ fn a_plain_executable_still_gets_an_icon() {
     // Removing the composited fallback to kill shortcut badges once broke
     // every non-shortcut file, because those never carried a badge to begin
     // with. The fallback is only skipped for shortcuts.
-    for exe in [r"C:\Windows\explorer.exe", r"C:\Windows\System32\notepad.exe"] {
+    for exe in [
+        r"C:\Windows\explorer.exe",
+        r"C:\Windows\System32\notepad.exe",
+    ] {
         assert!(
             sill_lib::icons::icon_data_uri(exe).is_some(),
             "{exe} should have an icon; the badge rule must not apply to non-shortcuts"

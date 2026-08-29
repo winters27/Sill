@@ -118,7 +118,9 @@ pub fn remember_foreground() {
         // SAFETY: GetForegroundWindow takes nothing and returns a handle or
         // null. Nothing is dereferenced.
         let hwnd = unsafe { GetForegroundWindow() };
-        let mut slot = PREVIOUS_FOREGROUND.lock().expect("foreground slot poisoned");
+        let mut slot = PREVIOUS_FOREGROUND
+            .lock()
+            .expect("foreground slot poisoned");
         *slot = if hwnd.0.is_null() {
             None
         } else {

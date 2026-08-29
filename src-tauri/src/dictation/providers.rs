@@ -12,9 +12,9 @@
 //! (Google inlines base64 in JSON; Azure builds a deployment URL) are not
 //! wired yet and are rejected rather than half-supported.
 
+use crate::dictation::error::DictationError;
 use crate::dictation::provider::normalize_openai_base;
 use crate::dictation::provider::ProviderConfig;
-use crate::dictation::error::DictationError;
 use std::collections::HashMap;
 
 /// Upload ceiling the OpenAI-compatible transcription endpoints document.
@@ -218,8 +218,9 @@ fn collapse_whitespace(text: &str) -> String {
 /// empty transcript: pasting nothing is indistinguishable from a broken
 /// microphone, so the failure has to be loud.
 pub fn parse_transcript(body: &str) -> Result<String, DictationError> {
-    let value: serde_json::Value = serde_json::from_str(body)
-        .map_err(|e| DictationError::Other(format!("Transcription response was not valid JSON: {e}")))?;
+    let value: serde_json::Value = serde_json::from_str(body).map_err(|e| {
+        DictationError::Other(format!("Transcription response was not valid JSON: {e}"))
+    })?;
 
     match value.get("text").and_then(serde_json::Value::as_str) {
         Some(text) => Ok(collapse_whitespace(text)),

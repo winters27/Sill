@@ -140,7 +140,8 @@ fn is_path(text: &str) -> bool {
     }
 
     let looks_absolute = text.starts_with(r"\\")
-        || (text.as_bytes().get(1) == Some(&b':') && matches!(text.as_bytes().first(), Some(c) if c.is_ascii_alphabetic()));
+        || (text.as_bytes().get(1) == Some(&b':')
+            && matches!(text.as_bytes().first(), Some(c) if c.is_ascii_alphabetic()));
 
     looks_absolute && std::path::Path::new(text).exists()
 }
@@ -185,7 +186,13 @@ mod tests {
 
     #[test]
     fn colours_in_every_form_a_stylesheet_uses() {
-        for value in ["#fff", "#FFFFFF", "#12345678", "rgb(1, 2, 3)", "hsla(0,0%,0%,.5)"] {
+        for value in [
+            "#fff",
+            "#FFFFFF",
+            "#12345678",
+            "rgb(1, 2, 3)",
+            "hsla(0,0%,0%,.5)",
+        ] {
             assert_eq!(classify(value), Kind::Color, "{value}");
         }
     }

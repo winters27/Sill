@@ -86,8 +86,7 @@ pub fn save(file: &Path, snippets: &[Snippet]) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let body = serde_json::to_string_pretty(snippets)
-        .unwrap_or_else(|_| "[]".to_string());
+    let body = serde_json::to_string_pretty(snippets).unwrap_or_else(|_| "[]".to_string());
 
     let staging = file.with_extension("json.partial");
     std::fs::write(&staging, body)?;
@@ -194,8 +193,14 @@ mod tests {
     fn the_longest_keyword_wins() {
         // Otherwise `addr` fires first and `addrwork` can never be typed.
         let snippets = vec![
-            Snippet { whole_word: false, ..snippet("short", "addr") },
-            Snippet { whole_word: false, ..snippet("long", "addrwork") },
+            Snippet {
+                whole_word: false,
+                ..snippet("short", "addr")
+            },
+            Snippet {
+                whole_word: false,
+                ..snippet("long", "addrwork")
+            },
         ];
         assert_eq!(match_keyword(&snippets, "my addrwork").unwrap().id, "long");
         assert_eq!(match_keyword(&snippets, "my addr").unwrap().id, "short");
@@ -208,9 +213,15 @@ mod tests {
 
         assert!(match_keyword(&snippets, "sig").is_some());
         assert!(match_keyword(&snippets, "my sig").is_some());
-        assert!(match_keyword(&snippets, "(sig").is_some(), "punctuation is a boundary");
+        assert!(
+            match_keyword(&snippets, "(sig").is_some(),
+            "punctuation is a boundary"
+        );
         assert!(match_keyword(&snippets, "resig").is_none());
-        assert!(match_keyword(&snippets, "1sig").is_none(), "a digit is a word character");
+        assert!(
+            match_keyword(&snippets, "1sig").is_none(),
+            "a digit is a word character"
+        );
     }
 
     #[test]
@@ -271,10 +282,19 @@ mod tests {
         let snippets = vec![snippet("a", ";sig")];
 
         assert!(!keyword_is_free(&snippets, "b", ";sig"));
-        assert!(!keyword_is_free(&snippets, "b", ";SIG"), "case does not rescue it");
-        assert!(keyword_is_free(&snippets, "a", ";sig"), "its own keyword is fine");
+        assert!(
+            !keyword_is_free(&snippets, "b", ";SIG"),
+            "case does not rescue it"
+        );
+        assert!(
+            keyword_is_free(&snippets, "a", ";sig"),
+            "its own keyword is fine"
+        );
         assert!(keyword_is_free(&snippets, "b", ";other"));
-        assert!(keyword_is_free(&snippets, "b", ""), "no keyword clashes with nothing");
+        assert!(
+            keyword_is_free(&snippets, "b", ""),
+            "no keyword clashes with nothing"
+        );
     }
 
     #[test]

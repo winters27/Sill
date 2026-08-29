@@ -1,7 +1,8 @@
 //! Reading and writing Sill's own preferences, and the window that edits them.
 
-use crate::{apply_autostart, apply_dictation, apply_tray, apply_window_size,
-            rebind_summon, same_dictation};
+use crate::{
+    apply_autostart, apply_dictation, apply_tray, apply_window_size, rebind_summon, same_dictation,
+};
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -88,7 +89,11 @@ pub(crate) async fn set_preferences(
         || previous.appearance.tint_alpha != prefs.appearance.tint_alpha
     {
         if let Some(window) = app.get_webview_window("main") {
-            summon::apply_backdrop(&window, prefs.appearance.backdrop, prefs.appearance.tint_alpha);
+            summon::apply_backdrop(
+                &window,
+                prefs.appearance.backdrop,
+                prefs.appearance.tint_alpha,
+            );
         }
     }
 
@@ -120,25 +125,22 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
         return Ok(());
     }
 
-    let window = tauri::WebviewWindowBuilder::new(
-        &app,
-        "settings",
-        tauri::WebviewUrl::App(route.into()),
-    )
-    .title("Settings")
-    // Room for a 244px sidebar plus a settings pane that does not wrap its own
-    // descriptions. Anything narrower and the right pane reads as a column.
-    .inner_size(1180.0, 800.0)
-    .min_inner_size(940.0, 620.0)
-    .resizable(true)
-    // Frameless and transparent, so the page draws its own title bar and the
-    // same glass the launcher uses. A default title bar next to a glass body
-    // looks like two different applications.
-    .decorations(false)
-    .transparent(true)
-    .center()
-    .build()
-    .map_err(|e| e.to_string())?;
+    let window =
+        tauri::WebviewWindowBuilder::new(&app, "settings", tauri::WebviewUrl::App(route.into()))
+            .title("Settings")
+            // Room for a 244px sidebar plus a settings pane that does not wrap its own
+            // descriptions. Anything narrower and the right pane reads as a column.
+            .inner_size(1180.0, 800.0)
+            .min_inner_size(940.0, 620.0)
+            .resizable(true)
+            // Frameless and transparent, so the page draws its own title bar and the
+            // same glass the launcher uses. A default title bar next to a glass body
+            // looks like two different applications.
+            .decorations(false)
+            .transparent(true)
+            .center()
+            .build()
+            .map_err(|e| e.to_string())?;
 
     let appearance = {
         let prefs = app.state::<PrefsState>();

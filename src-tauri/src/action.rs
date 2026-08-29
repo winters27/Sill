@@ -208,7 +208,10 @@ impl ActionRegistry {
     }
 
     pub fn get(&self, id: &str) -> Option<&dyn Action> {
-        self.actions.iter().map(|a| a.as_ref()).find(|a| a.id() == id)
+        self.actions
+            .iter()
+            .map(|a| a.as_ref())
+            .find(|a| a.id() == id)
     }
 
     /// What the window draws for this kind.

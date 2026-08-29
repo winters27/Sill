@@ -176,9 +176,8 @@ impl RpcPeer {
 
             if let Some(sender) = sender {
                 let outcome = if has_error {
-                    Err(serde_json::from_value(message["error"].clone()).unwrap_or_else(|_| {
-                        RpcError::internal(message["error"].to_string())
-                    }))
+                    Err(serde_json::from_value(message["error"].clone())
+                        .unwrap_or_else(|_| RpcError::internal(message["error"].to_string())))
                 } else {
                     Ok(message["result"].clone())
                 };
@@ -188,10 +187,7 @@ impl RpcPeer {
         }
 
         let Some(method) = method else { return };
-        let params = message
-            .get("params")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
+        let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
 
         let work = match message.get("id") {
             Some(id) if !id.is_null() => Incoming::Request {

@@ -14,9 +14,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use crate::dictation::models::SetupProgress;
 use crate::dictation::error::{DictationError, Result};
 use crate::dictation::fetch;
+use crate::dictation::models::SetupProgress;
 
 /// HuggingFace revision every model URL is pinned to.
 const REVISION: &str = "5359861c739e955e79d9a303bcbc70fb988958b1";
@@ -112,8 +112,8 @@ fn models_dir(app: &AppHandle) -> Result<PathBuf> {
 
 /// Path a model occupies once installed, whether or not it is there yet.
 pub fn model_path(app: &AppHandle, id: &str) -> Result<PathBuf> {
-    let model =
-        model(id).ok_or_else(|| DictationError::NotFound(format!("Unknown whisper model '{id}'")))?;
+    let model = model(id)
+        .ok_or_else(|| DictationError::NotFound(format!("Unknown whisper model '{id}'")))?;
     Ok(models_dir(app)?.join(model.file))
 }
 
@@ -143,8 +143,8 @@ pub fn is_installed(app: &AppHandle, id: &str) -> bool {
 /// Progress goes out as `dictation:setup` so the settings panel can draw a
 /// bar for a download that takes minutes.
 pub async fn ensure(app: &AppHandle, id: &str) -> Result<PathBuf> {
-    let model =
-        model(id).ok_or_else(|| DictationError::NotFound(format!("Unknown whisper model '{id}'")))?;
+    let model = model(id)
+        .ok_or_else(|| DictationError::NotFound(format!("Unknown whisper model '{id}'")))?;
     let dir = models_dir(app)?;
     let destination = dir.join(model.file);
     if destination.is_file() {
@@ -164,15 +164,20 @@ pub async fn ensure(app: &AppHandle, id: &str) -> Result<PathBuf> {
     // installed" check reads as a finished one.
     let staging = dir.join(format!(".{}.partial", model.file));
 
-    fetch::download_to(&fetch::client(), &url_for(model), &staging, |done, total| {
-        SetupProgress::Model {
-            bytes_downloaded: done,
-            // The CDN reports a length, but a missing one must not render as
-            // a full bar, and the published size is known here anyway.
-            total_bytes: if total > 0 { total } else { model.size_bytes },
-        }
-        .emit(app);
-    })
+    fetch::download_to(
+        &fetch::client(),
+        &url_for(model),
+        &staging,
+        |done, total| {
+            SetupProgress::Model {
+                bytes_downloaded: done,
+                // The CDN reports a length, but a missing one must not render as
+                // a full bar, and the published size is known here anyway.
+                total_bytes: if total > 0 { total } else { model.size_bytes },
+            }
+            .emit(app);
+        },
+    )
     .await?;
 
     SetupProgress::Verifying.emit(app);

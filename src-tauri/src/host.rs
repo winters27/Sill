@@ -4,8 +4,6 @@
 //! bundle lives, when Node is worth starting, and when it should be allowed
 //! to go away again.
 
-
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -37,7 +35,10 @@ pub(crate) fn dev_root() -> PathBuf {
 pub(crate) fn index_paths(app: &AppHandle) -> Vec<PathBuf> {
     let mut paths = vec![data_dir(app).join("extensions").join("index.json")];
 
-    let dev = dev_root().join("extensions").join("build").join("index.json");
+    let dev = dev_root()
+        .join("extensions")
+        .join("build")
+        .join("index.json");
     if dev.exists() {
         paths.push(dev);
     }
@@ -175,7 +176,10 @@ pub(crate) fn start_host_watchdog(state: HostState) {
                 continue;
             }
 
-            crate::say!("extension host idle for {}s; shutting it down", idle.as_secs());
+            crate::say!(
+                "extension host idle for {}s; shutting it down",
+                idle.as_secs()
+            );
             // Dropping the last handle kills the child: `ExtHost` holds it
             // with `kill_on_drop`.
             slot.take();

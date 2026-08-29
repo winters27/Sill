@@ -45,7 +45,10 @@ pub(crate) async fn activate_handler(
 /// root list, and after an idle shutdown that would otherwise respawn Node
 /// purely to be told the session it is closing no longer exists.
 #[tauri::command]
-pub(crate) async fn unload_extension(state: State<'_, HostState>, session: String) -> Result<bool, String> {
+pub(crate) async fn unload_extension(
+    state: State<'_, HostState>,
+    session: String,
+) -> Result<bool, String> {
     let Some(host) = running_host(&state).await else {
         return Ok(false);
     };

@@ -24,7 +24,10 @@ use super::storage::Storage;
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum UiEvent {
     /// A batch of tree patches from the reconciler.
-    Render { session: String, ops: Value },
+    Render {
+        session: String,
+        ops: Value,
+    },
     ShowToast {
         session: String,
         id: String,
@@ -39,18 +42,34 @@ pub enum UiEvent {
         message: String,
         style: String,
     },
-    HideToast { session: String, id: String },
-    ShowHud { session: String, text: String },
-    SetSearchText { session: String, text: String },
-    PopToRoot { session: String },
-    CloseMainWindow { session: String },
+    HideToast {
+        session: String,
+        id: String,
+    },
+    ShowHud {
+        session: String,
+        text: String,
+    },
+    SetSearchText {
+        session: String,
+        text: String,
+    },
+    PopToRoot {
+        session: String,
+    },
+    CloseMainWindow {
+        session: String,
+    },
     /// A command died on its own.
     ///
     /// Was logged and dropped, which left the window waiting for a first
     /// render that was never coming. An extension that crashes on load is
     /// indistinguishable from one that is slow, and the user gets an empty
     /// screen with no way to tell which.
-    Crashed { session: String, reason: String },
+    Crashed {
+        session: String,
+        reason: String,
+    },
 }
 
 pub struct ApiLayer {
@@ -197,13 +216,15 @@ impl ApiLayer {
             // with "method not found" in every extension that used it.
             "Clipboard/copy" => {
                 let clip = clip_from(params.get("content"), params.get("options"));
-                self.blocking(move |bridge| bridge.clipboard_write(&clip)).await?;
+                self.blocking(move |bridge| bridge.clipboard_write(&clip))
+                    .await?;
                 Ok(Value::Null)
             }
 
             "Clipboard/paste" => {
                 let clip = clip_from(params.get("content"), params.get("options"));
-                self.blocking(move |bridge| bridge.clipboard_paste(&clip)).await?;
+                self.blocking(move |bridge| bridge.clipboard_paste(&clip))
+                    .await?;
                 Ok(Value::Null)
             }
 
@@ -243,8 +264,9 @@ impl ApiLayer {
 
             "Application/list" => {
                 let apps = self.blocking(|bridge| bridge.applications()).await?;
-                serde_json::to_value(apps)
-                    .map_err(|err| RpcError::internal(format!("could not list applications: {err}")))
+                serde_json::to_value(apps).map_err(|err| {
+                    RpcError::internal(format!("could not list applications: {err}"))
+                })
             }
 
             // ------------------------------------------------------------- ui
@@ -392,7 +414,9 @@ mod tests {
         assert_eq!(rich.html.as_deref(), Some("<b>hi</b>"));
 
         assert_eq!(
-            clip_from(Some(&json!({"file": "C:\\a.txt"})), None).file.as_deref(),
+            clip_from(Some(&json!({"file": "C:\\a.txt"})), None)
+                .file
+                .as_deref(),
             Some("C:\\a.txt")
         );
     }

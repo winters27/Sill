@@ -34,7 +34,9 @@ pub fn to_target_rate(samples: &[f32], from_rate: u32) -> Result<Vec<f32>, Dicta
         MONO,
         FixedSync::Both,
     )
-    .map_err(|e| DictationError::Other(format!("Could not build a {from_rate} Hz resampler: {e}")))?;
+    .map_err(|e| {
+        DictationError::Other(format!("Could not build a {from_rate} Hz resampler: {e}"))
+    })?;
 
     let needed = resampler.process_all_needed_output_len(samples.len());
     let mut out = vec![0.0f32; needed];
@@ -46,7 +48,9 @@ pub fn to_target_rate(samples: &[f32], from_rate: u32) -> Result<Vec<f32>, Dicta
 
     let (_read, written) = resampler
         .process_all_into_buffer(&input, &mut output, samples.len(), None)
-        .map_err(|e| DictationError::Other(format!("Resampling to {TARGET_RATE} Hz failed: {e}")))?;
+        .map_err(|e| {
+            DictationError::Other(format!("Resampling to {TARGET_RATE} Hz failed: {e}"))
+        })?;
 
     out.truncate(written);
     Ok(out)

@@ -190,7 +190,12 @@ impl Store {
     /// orders by relevance instead. Two different orderings on purpose: with
     /// no query the useful answer is "what did I just copy", and with one it
     /// is "which entry matches best".
-    pub fn search(&self, query: &str, kind: Option<Kind>, limit: usize) -> rusqlite::Result<Vec<Entry>> {
+    pub fn search(
+        &self,
+        query: &str,
+        kind: Option<Kind>,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<Entry>> {
         let trimmed = query.trim();
         let filter = kind.map(Kind::as_str);
 
@@ -220,7 +225,10 @@ impl Store {
                 "#,
             )?;
             let mapped = statement
-                .query_map(params![fts_query(trimmed), filter, limit as i64], read_entry)?
+                .query_map(
+                    params![fts_query(trimmed), filter, limit as i64],
+                    read_entry,
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             mapped
         };
@@ -359,7 +367,15 @@ mod tests {
 
     fn add(store: &Store, text: &str, at: i64) -> i64 {
         store
-            .record(text, Kind::Text, text, Some("Test"), None, text.len() as i64, at)
+            .record(
+                text,
+                Kind::Text,
+                text,
+                Some("Test"),
+                None,
+                text.len() as i64,
+                at,
+            )
             .expect("records")
     }
 
@@ -384,7 +400,15 @@ mod tests {
     fn a_later_copy_never_forgets_where_an_earlier_one_came_from() {
         let (_dir, store) = store();
         store
-            .record("x", Kind::Text, "x", Some("Slack"), Some("C:/slack.exe"), 1, NOW)
+            .record(
+                "x",
+                Kind::Text,
+                "x",
+                Some("Slack"),
+                Some("C:/slack.exe"),
+                1,
+                NOW,
+            )
             .expect("records");
         store
             .record("x", Kind::Text, "x", None, None, 1, NOW + 1)
@@ -460,10 +484,16 @@ mod tests {
         // entry keeps turning up in results forever.
         let (_dir, store) = store();
         let id = add(&store, "findable", NOW);
-        assert_eq!(store.search("findable", None, 10).expect("searches").len(), 1);
+        assert_eq!(
+            store.search("findable", None, 10).expect("searches").len(),
+            1
+        );
 
         store.delete(id).expect("deletes");
-        assert_eq!(store.search("findable", None, 10).expect("searches").len(), 0);
+        assert_eq!(
+            store.search("findable", None, 10).expect("searches").len(),
+            0
+        );
         assert_eq!(store.count().expect("counts"), 0);
     }
 
@@ -477,9 +507,15 @@ mod tests {
             .record("b", Kind::Text, "example text", None, None, 0, NOW)
             .expect("records");
 
-        assert_eq!(store.search("", Some(Kind::Link), 10).expect("lists").len(), 1);
         assert_eq!(
-            store.search("example", Some(Kind::Link), 10).expect("searches").len(),
+            store.search("", Some(Kind::Link), 10).expect("lists").len(),
+            1
+        );
+        assert_eq!(
+            store
+                .search("example", Some(Kind::Link), 10)
+                .expect("searches")
+                .len(),
             1
         );
     }
@@ -549,8 +585,19 @@ mod tests {
         let (_dir, store) = store();
         let long = "x".repeat(5_000_000);
         let id = store
-            .record("hash-of-long", Kind::Text, &long, None, None, long.len() as i64, NOW)
+            .record(
+                "hash-of-long",
+                Kind::Text,
+                &long,
+                None,
+                None,
+                long.len() as i64,
+                NOW,
+            )
             .expect("records");
-        assert_eq!(store.get(id).expect("reads").expect("exists").text.len(), 5_000_000);
+        assert_eq!(
+            store.get(id).expect("reads").expect("exists").text.len(),
+            5_000_000
+        );
     }
 }

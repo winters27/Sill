@@ -6,12 +6,12 @@
 
 use crate::dictation::assets::{self, WhisperModel};
 use crate::dictation::capture::list_input_devices;
+use crate::dictation::engine;
+use crate::dictation::history;
 use crate::dictation::models::{
     AudioInputDevice, DictationSettings, LocalSetupStatus, SetupProgress,
 };
 use crate::dictation::server::WhisperServer;
-use crate::dictation::engine;
-use crate::dictation::history;
 use crate::dictation::service::DictationService;
 use tauri::{AppHandle, State};
 
@@ -32,7 +32,8 @@ pub fn set_dictation_settings(
     settings: DictationSettings,
 ) -> Result<(), String> {
     let enabled = settings.enabled;
-    crate::say!("settings: enabled={} shortcut={:?}+{:?} provider={} device={:?}",
+    crate::say!(
+        "settings: enabled={} shortcut={:?}+{:?} provider={} device={:?}",
         enabled,
         settings.shortcut_modifier,
         settings.shortcut_key,
@@ -162,7 +163,11 @@ pub fn get_local_dictation_status(
             0
         } else {
             assets::size_of(&model_id).unwrap_or(0)
-        }) + if engine_installed { 0 } else { engine::ARCHIVE_BYTES },
+        }) + if engine_installed {
+            0
+        } else {
+            engine::ARCHIVE_BYTES
+        },
         engine_version: engine::VERSION.to_string(),
         model_label: assets::label_of(&model_id).unwrap_or(&model_id).to_string(),
         model_memory_bytes: assets::memory_of(&model_id).unwrap_or(0),

@@ -590,9 +590,17 @@ impl Action for Transform {
 /// then JSON. Deliberately a short list: a launcher that offers forty text
 /// operations has buried the four anybody uses.
 fn transforms() -> Vec<Box<dyn Action>> {
-    let entries: [(&'static str, &'static str, fn(&str) -> Result<String, String>); 9] = [
-        ("sill.text.upper", "Upper Case", |s| Ok(crate::text::upper(s))),
-        ("sill.text.lower", "Lower Case", |s| Ok(crate::text::lower(s))),
+    let entries: [(
+        &'static str,
+        &'static str,
+        fn(&str) -> Result<String, String>,
+    ); 9] = [
+        ("sill.text.upper", "Upper Case", |s| {
+            Ok(crate::text::upper(s))
+        }),
+        ("sill.text.lower", "Lower Case", |s| {
+            Ok(crate::text::lower(s))
+        }),
         ("sill.text.title", "Title Case", |s| {
             Ok(crate::text::title_case(s))
         }),
@@ -602,12 +610,20 @@ fn transforms() -> Vec<Box<dyn Action>> {
         ("sill.text.base64Encode", "Base64 Encode", |s| {
             Ok(crate::text::base64_encode(s))
         }),
-        ("sill.text.base64Decode", "Base64 Decode", crate::text::base64_decode),
+        (
+            "sill.text.base64Decode",
+            "Base64 Decode",
+            crate::text::base64_decode,
+        ),
         ("sill.text.urlEncode", "URL Encode", |s| {
             Ok(crate::text::url_encode(s))
         }),
         ("sill.text.urlDecode", "URL Decode", crate::text::url_decode),
-        ("sill.text.jsonPretty", "Format JSON", crate::text::json_pretty),
+        (
+            "sill.text.jsonPretty",
+            "Format JSON",
+            crate::text::json_pretty,
+        ),
     ];
 
     entries

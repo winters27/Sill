@@ -141,7 +141,10 @@ async fn runs_a_raycast_extension_end_to_end() {
     assert_eq!(toast_style, "success", "toast carried the style");
 
     // ---- unload ----
-    assert!(exthost.unload(&session).await.expect("unload call"), "unload succeeded");
+    assert!(
+        exthost.unload(&session).await.expect("unload call"),
+        "unload succeeded"
+    );
     assert!(
         exthost.extension_of(&session).is_none(),
         "session was forgotten after unload"
@@ -232,10 +235,7 @@ impl Bridge for StubBridge {
 fn layer(tx: mpsc::UnboundedSender<UiEvent>) -> (Arc<ApiLayer>, Arc<StubBridge>) {
     let bridge = StubBridge::new();
     let storage = Arc::new(Storage::memory().expect("in-memory store"));
-    (
-        Arc::new(ApiLayer::new(tx, bridge.clone(), storage)),
-        bridge,
-    )
+    (Arc::new(ApiLayer::new(tx, bridge.clone(), storage)), bridge)
 }
 
 #[tokio::test]
@@ -260,15 +260,24 @@ async fn storage_is_scoped_per_extension() {
     let (tx, _events) = mpsc::unbounded_channel();
     let (api, _bridge) = layer(tx);
 
-    api.dispatch("s1", "alpha", "Storage/set", &json!({"key": "k", "value": "from-alpha"}))
-        .await
-        .expect("set");
+    api.dispatch(
+        "s1",
+        "alpha",
+        "Storage/set",
+        &json!({"key": "k", "value": "from-alpha"}),
+    )
+    .await
+    .expect("set");
 
     let mine = api
         .dispatch("s1", "alpha", "Storage/get", &json!({"key": "k"}))
         .await
         .expect("get");
-    assert_eq!(mine, json!("from-alpha"), "an extension reads its own value");
+    assert_eq!(
+        mine,
+        json!("from-alpha"),
+        "an extension reads its own value"
+    );
 
     let theirs = api
         .dispatch("s2", "beta", "Storage/get", &json!({"key": "k"}))
@@ -347,7 +356,10 @@ async fn reading_the_clipboard_returns_raycasts_shape() {
 
     // Extensions destructure this rather than probing it, so every key has to
     // be present even when there is nothing to put in it.
-    assert_eq!(content.get("text"), Some(&json!("already on the clipboard")));
+    assert_eq!(
+        content.get("text"),
+        Some(&json!("already on the clipboard"))
+    );
     assert_eq!(content.get("html"), Some(&Value::Null));
     assert_eq!(content.get("file"), Some(&Value::Null));
 }
@@ -545,7 +557,12 @@ fn the_built_index_carries_preferences_through_to_the_record() {
 
     let with_preferences: Vec<_> = commands
         .iter()
-        .filter(|command| command.preferences.as_object().is_some_and(|p| !p.is_empty()))
+        .filter(|command| {
+            command
+                .preferences
+                .as_object()
+                .is_some_and(|p| !p.is_empty())
+        })
         .collect();
 
     assert!(

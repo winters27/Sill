@@ -3,8 +3,8 @@
 //! Everything that can be decided without a network round trip lives in the
 //! pure helpers here, so the only untested surface is the POST itself.
 
-use crate::dictation::providers::{parse_transcript, RequestBody, TranscriptionRequest};
 use crate::dictation::error::DictationError;
+use crate::dictation::providers::{parse_transcript, RequestBody, TranscriptionRequest};
 use std::time::Duration;
 
 /// Whole-request ceiling. Generous because a long clip against a CPU-only
@@ -56,16 +56,14 @@ pub async fn transcribe(
         outgoing = outgoing.header(name, value);
     }
 
-    let response = outgoing
-        .send()
-        .await
-        .map_err(|e| DictationError::Other(format!("Could not reach the transcription service: {e}")))?;
+    let response = outgoing.send().await.map_err(|e| {
+        DictationError::Other(format!("Could not reach the transcription service: {e}"))
+    })?;
 
     let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| DictationError::Other(format!("Transcription response was unreadable: {e}")))?;
+    let body = response.text().await.map_err(|e| {
+        DictationError::Other(format!("Transcription response was unreadable: {e}"))
+    })?;
 
     if !status.is_success() {
         return Err(describe_http_failure(status.as_u16(), &body));
@@ -211,8 +209,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "opens the microphone and calls a paid API"]
     async fn probe_transcribes_a_live_recording() {
-        use crate::dictation::provider::ProviderConfig;
         use crate::dictation::capture::CaptureSession;
+        use crate::dictation::provider::ProviderConfig;
         use crate::dictation::providers::{transcription_request, TranscribeOptions};
         use crate::dictation::{resample, wav};
         use std::time::Instant;

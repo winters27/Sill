@@ -79,7 +79,10 @@ mod tests {
 
     #[test]
     fn a_multi_digit_version_counts_as_a_version() {
-        assert_eq!(normalize_openai_base("https://host/v10"), "https://host/v10");
+        assert_eq!(
+            normalize_openai_base("https://host/v10"),
+            "https://host/v10"
+        );
     }
 
     #[test]

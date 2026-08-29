@@ -260,7 +260,8 @@ mod windows_impl {
         next()
     }
 
-    const KBDLLHOOKSTRUCT_FLAGS_NONE: windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS =
+    const KBDLLHOOKSTRUCT_FLAGS_NONE:
+        windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS =
         windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS(0);
 
     fn handle_key(expander: &Expander, vk: u32) {
@@ -597,7 +598,13 @@ mod tests {
 
         // Anything that moves the caret means what was typed before it is no
         // longer immediately behind it.
-        for key in [vk::VK_RETURN, vk::VK_TAB, vk::VK_LEFT, vk::VK_HOME, vk::VK_ESCAPE] {
+        for key in [
+            vk::VK_RETURN,
+            vk::VK_TAB,
+            vk::VK_LEFT,
+            vk::VK_HOME,
+            vk::VK_ESCAPE,
+        ] {
             assert!(resets_context(key.0 as u32), "{key:?} should reset");
         }
         for key in [vk::VK_A, vk::VK_SPACE, vk::VK_OEM_1] {

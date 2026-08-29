@@ -8,9 +8,9 @@
 //! on stop. Everything crossing the thread boundary is the shared sample
 //! buffer and a one-shot stop signal.
 
+use crate::dictation::error::DictationError;
 use crate::dictation::models::{AudioInputDevice, CaptureFormat, SupportedRange};
 use crate::dictation::resample::TARGET_RATE;
-use crate::dictation::error::DictationError;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -185,7 +185,8 @@ impl CaptureSession {
 
         let format = choose_capture_format(&supported, default_format);
         let sample_format = default_config.sample_format();
-        crate::say!("[dictation] capturing at {} Hz / {} ch ({:?}); resampling {}",
+        crate::say!(
+            "[dictation] capturing at {} Hz / {} ch ({:?}); resampling {}",
             format.sample_rate,
             format.channels,
             sample_format,
@@ -318,11 +319,12 @@ fn resolve_device(device_id: Option<&str>) -> Result<cpal::Device, DictationErro
     let host = cpal::default_host();
     match device_id {
         Some(id) => {
-            let parsed = id
-                .parse::<cpal::DeviceId>()
-                .map_err(|e| DictationError::Validation(format!("Invalid microphone id '{id}': {e}")))?;
-            host.device_by_id(&parsed)
-                .ok_or_else(|| DictationError::NotFound(format!("Microphone '{id}' is not connected")))
+            let parsed = id.parse::<cpal::DeviceId>().map_err(|e| {
+                DictationError::Validation(format!("Invalid microphone id '{id}': {e}"))
+            })?;
+            host.device_by_id(&parsed).ok_or_else(|| {
+                DictationError::NotFound(format!("Microphone '{id}' is not connected"))
+            })
         }
         None => host
             .default_input_device()

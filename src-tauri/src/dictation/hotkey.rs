@@ -156,8 +156,9 @@ pub fn chord_from_shortcut(modifier: &str, key: &str) -> Result<Chord, Dictation
         ));
     }
 
-    let vk = virtual_key_for(key)
-        .ok_or_else(|| DictationError::Validation(format!("'{key}' cannot be used as a shortcut key")))?;
+    let vk = virtual_key_for(key).ok_or_else(|| {
+        DictationError::Validation(format!("'{key}' cannot be used as a shortcut key"))
+    })?;
 
     if matches!(vk, vk::RETURN | vk::ESCAPE) {
         return Err(DictationError::Validation(format!(
@@ -298,7 +299,7 @@ mod windows_hook {
     /// that takes too long (`LowLevelHooksTimeout`, 5 s by default), so it must
     /// never block. Reads are atomics or an uncontended mutex; the only handoff
     /// is a send on an unbounded channel, which never waits for a receiver.
-/// The trigger the callback compares against.
+    /// The trigger the callback compares against.
     ///
     /// An `ArcSwap` rather than a `Mutex`, for the same reason the snippet
     /// expander uses one: this is read on **every keystroke inside a
@@ -513,7 +514,9 @@ mod windows_hook {
                     HOOK_INSTALLED.store(false, Ordering::SeqCst);
                     let _ = UnhookWindowsHookEx(hook);
                 })
-                .map_err(|e| DictationError::Other(format!("Could not start the hotkey thread: {e}")))?;
+                .map_err(|e| {
+                    DictationError::Other(format!("Could not start the hotkey thread: {e}"))
+                })?;
 
             match ready_rx.recv() {
                 Ok(Ok(())) => Ok(Self {

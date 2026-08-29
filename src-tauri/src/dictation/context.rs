@@ -215,8 +215,12 @@ mod tests {
     fn the_prompt_puts_the_vocabulary_last() {
         // A speech model conditions most strongly on the tail of its prompt,
         // so the names that must come out right go closest to the speech.
-        let prompt = build_prompt("Prefer British spelling.", Some("Slack"), "Vicinae, Raycast")
-            .expect("all three parts present");
+        let prompt = build_prompt(
+            "Prefer British spelling.",
+            Some("Slack"),
+            "Vicinae, Raycast",
+        )
+        .expect("all three parts present");
 
         assert!(prompt.ends_with("Vicinae, Raycast"), "got {prompt}");
         assert!(prompt.starts_with("Prefer British spelling."));

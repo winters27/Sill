@@ -237,8 +237,12 @@ fn at<'a>(root: &'a mut serde_json::Value, path: &[&str]) -> Option<&'a mut serd
 /// the user having to paste the key again.
 fn seal_secrets(document: &mut serde_json::Value) {
     for path in SEALED {
-        let Some(slot) = at(document, path) else { continue };
-        let Some(plaintext) = slot.as_str() else { continue };
+        let Some(slot) = at(document, path) else {
+            continue;
+        };
+        let Some(plaintext) = slot.as_str() else {
+            continue;
+        };
 
         if plaintext.is_empty() || crate::secrets::is_sealed(plaintext) {
             continue;
@@ -265,8 +269,12 @@ fn seal_secrets(document: &mut serde_json::Value) {
 /// the next save seals it.
 fn unseal_secrets(document: &mut serde_json::Value) {
     for path in SEALED {
-        let Some(slot) = at(document, path) else { continue };
-        let Some(stored) = slot.as_str() else { continue };
+        let Some(slot) = at(document, path) else {
+            continue;
+        };
+        let Some(stored) = slot.as_str() else {
+            continue;
+        };
 
         if !crate::secrets::is_sealed(stored) {
             continue;
@@ -384,22 +392,24 @@ impl Preferences {
     pub fn load(path: &Path) -> Self {
         std::fs::read_to_string(path)
             .ok()
-            .and_then(|text| match serde_json::from_str::<serde_json::Value>(&text) {
-                Ok(mut value) => {
-                    unseal_secrets(&mut value);
-                    match serde_json::from_value(value) {
-                        Ok(prefs) => Some(prefs),
-                        Err(err) => {
-                            crate::say!("preferences could not be read, using defaults: {err}");
-                            None
+            .and_then(
+                |text| match serde_json::from_str::<serde_json::Value>(&text) {
+                    Ok(mut value) => {
+                        unseal_secrets(&mut value);
+                        match serde_json::from_value(value) {
+                            Ok(prefs) => Some(prefs),
+                            Err(err) => {
+                                crate::say!("preferences could not be read, using defaults: {err}");
+                                None
+                            }
                         }
                     }
-                }
-                Err(err) => {
-                    crate::say!("preferences could not be read, using defaults: {err}");
-                    None
-                }
-            })
+                    Err(err) => {
+                        crate::say!("preferences could not be read, using defaults: {err}");
+                        None
+                    }
+                },
+            )
             .unwrap_or_default()
     }
 
@@ -563,7 +573,10 @@ mod tests {
 
         assert_eq!(document["dictation"]["shortcutKey"], "space");
         assert_eq!(document["dictation"]["finishKey"], "enter");
-        assert_eq!(document["dictation"]["provider"]["baseUrl"], "https://x.test");
+        assert_eq!(
+            document["dictation"]["provider"]["baseUrl"],
+            "https://x.test"
+        );
     }
 
     #[test]
