@@ -559,6 +559,110 @@ impl Frecency {
     }
 }
 
+// ------------------------------------------------------- match classes
+
+/// How well a query matched, as a handful of discrete kinds.
+///
+/// This is what makes the list stable to type into. A fuzzy score changes by
+/// a point or two on every keystroke, so ordering by it lets results trade
+/// places constantly, and the position a person is reaching for moves out
+/// from under them. Ordering by class means a result only moves when the
+/// **kind** of match changes, which is a thing that happens rarely and for a
+/// reason the user can feel.
+///
+/// Declaration order is preference order, best first: `Ord` is derived and
+/// the sort relies on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MatchClass {
+    /// The title is exactly what was typed.
+    ExactTitle,
+    /// The title starts with what was typed.
+    TitlePrefix,
+    /// Every character landed on the start of a word: `vh` in View History.
+    TitleWordStarts,
+    /// The title contains what was typed, unbroken.
+    TitleSubstring,
+    /// The characters are all there in order, scattered.
+    TitleSubsequence,
+    /// Nothing in the title. Matched the extension's name or a keyword.
+    Elsewhere,
+}
+
+/// Whether a character begins a word, by the same rule [`fuzzy`] scores.
+fn begins_a_word(hay: &[char], at: usize) -> bool {
+    at == 0
+        || matches!(hay[at - 1], ' ' | '-' | '_' | '.' | '/' | ':')
+        || (hay[at].is_uppercase() && hay[at - 1].is_lowercase())
+}
+
+/// Where `needle` appears unbroken in `hay`, in character positions.
+fn find_run(hay: &[char], needle: &[char]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > hay.len() {
+        return None;
+    }
+    (0..=hay.len() - needle.len()).find(|&at| hay[at..at + needle.len()] == *needle)
+}
+
+/// How this command matched, and which characters of its title to highlight.
+///
+/// `None` when it did not match at all, which is the answer for almost every
+/// entry on almost every query.
+fn classify(query: &str, command: &CommandRecord) -> Option<(MatchClass, Vec<usize>)> {
+    let needle: Vec<char> = query.to_lowercase().chars().collect();
+    let hay: Vec<char> = command.title.chars().collect();
+    let hay_lower: Vec<char> = command.title.to_lowercase().chars().collect();
+
+    // Lowercasing can change length in some scripts, and these indices are
+    // handed to the window to slice the *original* title.
+    let aligned = hay_lower.len() == hay.len();
+
+    if aligned {
+        if hay_lower == needle {
+            return Some((MatchClass::ExactTitle, (0..needle.len()).collect()));
+        }
+        if hay_lower.starts_with(&needle) {
+            return Some((MatchClass::TitlePrefix, (0..needle.len()).collect()));
+        }
+    }
+
+    let scattered = fuzzy(query, &command.title);
+
+    // Checked before the substring case on purpose. Typing initials is a
+    // deliberate act and `sc` should find Screen Capture ahead of Discord,
+    // which merely contains those two letters in a row.
+    if let Some((_, matched)) = &scattered {
+        if !matched.is_empty() && matched.iter().all(|&at| begins_a_word(&hay, at)) {
+            return Some((MatchClass::TitleWordStarts, matched.clone()));
+        }
+    }
+
+    if aligned {
+        if let Some(at) = find_run(&hay_lower, &needle) {
+            return Some((MatchClass::TitleSubstring, (at..at + needle.len()).collect()));
+        }
+    }
+
+    if let Some((_, matched)) = scattered {
+        return Some((MatchClass::TitleSubsequence, matched));
+    }
+
+    // Nothing in the title. The other sources are searched but never
+    // highlighted, since their indices would point into the wrong string.
+    let elsewhere = fuzzy(query, &command.extension_title).is_some()
+        || command.keywords.iter().any(|k| fuzzy(query, k).is_some());
+
+    elsewhere.then(|| (MatchClass::Elsewhere, Vec::new()))
+}
+
+/// How a query matched this command, if it did.
+///
+/// Public because the class is a fact about the result worth having outside
+/// ranking: the tests assert stability against it, and grouping the list by
+/// it is the obvious next use.
+pub fn match_class(query: &str, command: &CommandRecord) -> Option<MatchClass> {
+    classify(query.trim(), command).map(|(class, _)| class)
+}
+
 // ----------------------------------------------------------------- search
 
 /// How many results a search may return.
@@ -620,7 +724,9 @@ pub fn search_excluding<'a>(
     // `limit` of them away. On an empty query that is fourteen hundred deep
     // clones to produce a hundred results. Borrowing until the truncation is
     // done means only the survivors are ever copied.
-    let mut scored: Vec<(i64, &CommandRecord, Vec<usize>)> = Vec::new();
+    // (class, weight, command, matched). See the sort below for why the
+    // ordering is these four things and not a single score.
+    let mut scored: Vec<(MatchClass, i64, &CommandRecord, Vec<usize>)> = Vec::new();
 
     // Filtered here rather than at scan time so removing a term brings its
     // entries straight back, with no reindex.
@@ -635,58 +741,58 @@ pub fn search_excluding<'a>(
             continue;
         }
 
-        let (mut score, matched) = if query.is_empty() {
-            (0, Vec::new())
+        // An empty query is the root list, where everything matched equally
+        // and the order is purely what you reach for most.
+        let (class, matched) = if query.is_empty() {
+            (MatchClass::ExactTitle, Vec::new())
         } else {
-            // The title is what the user sees, so a hit there ranks above one
-            // in the extension name or a keyword.
-            let title = fuzzy(query, &command.title).map(|(s, m)| (s * 3, m));
-            // Only title matches are highlighted, so the other sources drop
-            // their indices rather than pointing into the wrong string.
-            let extension = fuzzy(query, &command.extension_title).map(|(s, _)| (s * 2, Vec::new()));
-            let keyword = command
-                .keywords
-                .iter()
-                .filter_map(|k| fuzzy(query, k))
-                .map(|(s, _)| (s, Vec::new()))
-                .max_by_key(|(s, _)| *s);
-
-            match [title, extension, keyword]
-                .into_iter()
-                .flatten()
-                .max_by_key(|(s, _)| *s)
-            {
-                Some(best) => best,
+            match classify(query, command) {
+                Some(found) => found,
                 None => continue,
             }
         };
 
-        score += frecency.score(&command.id, now);
+        let mut weight = frecency.score(&command.id, now);
 
         // A bare PATH executable is usually not what someone means. There are
         // roughly a thousand of them against a couple of hundred real
         // applications, so without this a CLI tool wins on any short query.
         // A penalty rather than exclusion: they are still reachable by name.
         if command.mode == "exe" {
-            score -= 12;
+            weight -= 12;
         }
 
-        scored.push((score, command, matched));
+        scored.push((class, weight, command, matched));
     }
 
-    scored.sort_by(|(a_score, a_command, _), (b_score, b_command, _)| {
-        b_score
-            .cmp(a_score)
-            // Stable and predictable when scores tie, rather than arbitrary.
-            .then_with(|| a_command.title.cmp(&b_command.title))
+    /*
+     * Four keys, and every one of them is stable while you type.
+     *
+     * Class first, so a result only changes position when the *kind* of match
+     * changes. Then how much you reach for it. Then the shorter title, which
+     * is the honest reading of two equally good matches: the query covers more
+     * of it. Then the name, so ties are alphabetical rather than arbitrary.
+     *
+     * What is deliberately absent is the fuzzy score itself. It moves by a
+     * point or two on every keystroke, so ordering by it lets results trade
+     * places constantly and the row someone is reaching for slides out from
+     * under their finger. It still decides the class; it just no longer
+     * decides the position within one.
+     */
+    scored.sort_by(|(a_class, a_weight, a, _), (b_class, b_weight, b, _)| {
+        a_class
+            .cmp(b_class)
+            .then_with(|| b_weight.cmp(a_weight))
+            .then_with(|| a.title.chars().count().cmp(&b.title.chars().count()))
+            .then_with(|| a.title.cmp(&b.title))
     });
     scored.truncate(limit);
 
     scored
         .into_iter()
-        .map(|(score, command, matched)| RankedCommand {
+        .map(|(_, weight, command, matched)| RankedCommand {
             command: command.clone(),
-            score,
+            score: weight,
             matched,
         })
         .collect()

@@ -780,3 +780,190 @@ fn a_snippet_is_findable_by_what_is_inside_it() {
 
     assert_eq!(results.len(), 1, "content should be searchable");
 }
+
+// ------------------------------------------------------- ranking stability
+
+use sill_lib::registry::{match_class, MatchClass};
+
+/// A corpus with the collisions a real index has: several things that start
+/// the same way, several that merely contain the letters.
+fn crowded() -> Vec<CommandRecord> {
+    vec![
+        command("app:code", "Visual Studio Code", "Application"),
+        command("app:codium", "VSCodium", "Application"),
+        command("app:discord", "Discord", "Application"),
+        command("app:docker", "Docker Desktop", "Application"),
+        command("app:chrome", "Google Chrome", "Application"),
+        command("app:calc", "Calculator", "Application"),
+        command("app:screen", "Screen Capture", "Application"),
+        command("app:notion", "Notion Calendar", "Application"),
+    ]
+}
+
+fn ids(results: &[sill_lib::registry::RankedCommand]) -> Vec<String> {
+    results.iter().map(|r| r.command.id.clone()).collect()
+}
+
+fn class_of(query: &str, corpus: &[CommandRecord], id: &str) -> Option<MatchClass> {
+    corpus
+        .iter()
+        .find(|c| c.id == id)
+        .and_then(|c| match_class(query, c))
+}
+
+#[test]
+fn two_results_only_swap_when_one_of_them_matches_differently() {
+    // The property the whole class model exists for, stated exactly: as a
+    // query grows a character at a time, any two results that both still
+    // match and whose kind of match has not changed must stay in the same
+    // order relative to each other.
+    //
+    // Ordering by a fuzzy score fails this constantly. The score moves by a
+    // point or two per keystroke, results trade places, and the row someone
+    // was reaching for slides out from under their finger.
+    //
+    // Checked as pairwise inversions rather than by comparing positions:
+    // one result dropping a class shifts every position below it without
+    // any two of them having actually changed places.
+    let corpus = realistic();
+    let frecency = Frecency::default();
+
+    for query in [
+        "visual", "code", "discord", "docker", "google", "calendar", "notepad",
+        "terminal", "steam", "photo", "micro", "settings", "git", "power",
+        "explorer", "sn", "st", "ca",
+    ] {
+        let mut previous: Option<(String, Vec<String>)> = None;
+
+        for length in 1..=query.len() {
+            let now_query = &query[..length];
+            let ranked = ids(&search(&corpus, now_query, &frecency, NOW, 50));
+
+            if let Some((was_query, was)) = &previous {
+                let rank = |list: &[String], id: &String| list.iter().position(|x| x == id);
+
+                for a in &ranked {
+                    for b in &ranked {
+                        let (Some(a_then), Some(b_then)) = (rank(was, a), rank(was, b)) else {
+                            continue;
+                        };
+                        let (Some(a_now), Some(b_now)) = (rank(&ranked, a), rank(&ranked, b)) else {
+                            continue;
+                        };
+
+                        // Only look at pairs that actually changed places.
+                        if !(a_then < b_then && a_now > b_now) {
+                            continue;
+                        }
+
+                        let a_moved =
+                            class_of(was_query, &corpus, a) != class_of(now_query, &corpus, a);
+                        let b_moved =
+                            class_of(was_query, &corpus, b) != class_of(now_query, &corpus, b);
+
+                        assert!(
+                            a_moved || b_moved,
+                            "typing {was_query:?} then {now_query:?} swapped {a} past {b}                              without either changing how it matched"
+                        );
+                    }
+                }
+            }
+
+            previous = Some((now_query.to_string(), ranked));
+        }
+    }
+}
+
+#[test]
+fn a_better_kind_of_match_is_what_promotes_a_result() {
+    // The other half: the model must not be stable by being inert. A result
+    // whose match improves does move up.
+    let corpus = crowded();
+    let frecency = Frecency::default();
+
+    // "c" lands on the C of Code, a word start, same as it does for
+    // Calculator. "ca" is a prefix of Calculator and no longer a word-start
+    // match for Visual Studio Code, so Calculator overtakes it.
+    assert_eq!(class_of("ca", &corpus, "app:calc"), Some(MatchClass::TitlePrefix));
+
+    let after = ids(&search(&corpus, "ca", &frecency, NOW, 50));
+    let calc = after.iter().position(|id| id == "app:calc");
+    let code = after.iter().position(|id| id == "app:code");
+
+    assert_eq!(calc, Some(0), "a prefix match should lead, got {after:?}");
+    assert!(
+        code.is_none() || code > calc,
+        "Calculator should outrank Visual Studio Code for 'ca', got {after:?}"
+    );
+}
+
+#[test]
+fn initials_beat_a_run_of_the_same_letters() {
+    // `gc` is someone typing initials. Google Chrome is what they meant;
+    // Logcat Viewer merely contains a g and a c in a row.
+    let mut corpus = crowded();
+    corpus.push(command("app:logcat", "Logcat Viewer", "Application"));
+
+    assert_eq!(
+        class_of("gc", &corpus, "app:chrome"),
+        Some(MatchClass::TitleWordStarts)
+    );
+    assert_eq!(
+        class_of("gc", &corpus, "app:logcat"),
+        Some(MatchClass::TitleSubstring)
+    );
+
+    let found = ids(&search(&corpus, "gc", &Frecency::default(), NOW, 50));
+    assert_eq!(found.first().map(String::as_str), Some("app:chrome"), "got {found:?}");
+}
+
+#[test]
+fn the_kinds_of_match_are_ordered_best_first() {
+    // The sort relies on the derived Ord, so the declaration order in the
+    // enum is load-bearing rather than cosmetic.
+    assert!(MatchClass::ExactTitle < MatchClass::TitlePrefix);
+    assert!(MatchClass::TitlePrefix < MatchClass::TitleWordStarts);
+    assert!(MatchClass::TitleWordStarts < MatchClass::TitleSubstring);
+    assert!(MatchClass::TitleSubstring < MatchClass::TitleSubsequence);
+    assert!(MatchClass::TitleSubsequence < MatchClass::Elsewhere);
+}
+
+#[test]
+fn a_match_only_in_a_keyword_ranks_below_any_match_in_the_name() {
+    // Keywords make a command findable; they do not make it the answer.
+    let mut with_keyword = command("ext:tool", "Unrelated Name", "Extension");
+    with_keyword.keywords = vec!["docker".to_string()];
+
+    let corpus = vec![command("app:docker", "Docker Desktop", "Application"), with_keyword];
+    let found = ids(&search(&corpus, "docker", &Frecency::default(), NOW, 50));
+
+    assert_eq!(
+        found,
+        vec!["app:docker".to_string(), "ext:tool".to_string()],
+        "the command actually called Docker should lead"
+    );
+}
+
+/// Names with the shapes a real Start Menu has: shared prefixes, shared
+/// initials, vendor prefixes, and long titles that contain short ones.
+fn realistic() -> Vec<CommandRecord> {
+    [
+        "Visual Studio Code", "Visual Studio 2022", "VSCodium", "Discord",
+        "Docker Desktop", "Google Chrome", "Google Drive", "Calculator",
+        "Calendar", "Screen Capture", "Notion Calendar", "Notepad",
+        "Notepad++", "Windows Terminal", "Terminal Preview", "Steam",
+        "Steam Link", "Spotify", "Photos", "Photoshop", "File Explorer",
+        "Internet Explorer", "PowerShell 7", "Windows PowerShell ISE",
+        "Command Prompt", "Task Manager", "Device Manager", "Disk Cleanup",
+        "Snipping Tool", "Sticky Notes", "Sound Recorder", "Settings",
+        "System Settings", "Slack", "Signal", "Skype", "Zoom Workplace",
+        "OBS Studio", "Audacity", "Blender", "GIMP", "Inkscape",
+        "Firefox Developer Edition", "Microsoft Edge", "Microsoft Teams",
+        "Microsoft Word", "Microsoft Excel", "Postman", "PostgreSQL",
+        "DB Browser for SQLite", "Docker Compose", "Git Bash", "GitHub Desktop",
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, title)| command(&format!("app:{i}"), title, "Application"))
+    .collect()
+}
