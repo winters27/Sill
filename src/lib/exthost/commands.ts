@@ -82,8 +82,27 @@ export function searchCommands(query: string): Promise<RankedCommand[]> {
   return invoke<RankedCommand[]>("search_commands", { query });
 }
 
-export function launchCommand(id: string): Promise<LaunchedCommand> {
-  return invoke<LaunchedCommand>("launch_command", { id });
+/**
+ * Runs an indexed command, and tells Sill what was typed to reach it.
+ *
+ * The query is what makes an abbreviation learnable. Choosing Gmail after
+ * typing `ggm` says something the id alone cannot: not that Gmail is popular,
+ * but that `ggm` means Gmail.
+ */
+export function launchCommand(id: string, query?: string): Promise<LaunchedCommand> {
+  return invoke<LaunchedCommand>("launch_command", { id, query });
+}
+
+/**
+ * Counts a use of something the window opened by itself.
+ *
+ * The clipboard history becomes a view rather than a launch, and a quicklink
+ * with a hole in it takes over the field. Neither reaches `launch_command`,
+ * so without this neither is visible to ranking at all: `sill:clipboard` had
+ * never been recorded once, however often it was opened.
+ */
+export function recordUse(id: string, query?: string): Promise<void> {
+  return invoke<void>("record_use", { id, query }).catch(() => undefined);
 }
 
 export function unloadExtension(session: string): Promise<boolean> {

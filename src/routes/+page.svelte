@@ -21,6 +21,7 @@
     performBuiltin,
     searchFiles,
     searchWindows,
+    recordUse,
     openPath,
     fileAsCommand,
     actionsFor,
@@ -554,6 +555,10 @@
       // Its own view rather than a window: the history is browsed the same
       // way the root list is, with the same field and the same keys.
       if (command.id === "sill:clipboard") {
+        // Opened here rather than launched, but it is still a use, and
+        // ranking has to see it or the history can never rise in the root
+        // list however often it is reached for.
+        void recordUse(command.id, query);
         mode = "clipboard";
         selected = 0;
         query = "";
@@ -563,6 +568,7 @@
       // A quicklink with a hole in it. Kept here rather than launched, so the
       // field can be handed over to filling the hole.
       if (command.mode === "quicklink-arg") {
+        void recordUse(command.id, query);
         awaiting = {
           id: command.entrypoint,
           title: command.title,
@@ -589,7 +595,9 @@
 
       try {
         status = `opening ${command.title}`;
-        const launched = await launchCommand(command.id);
+        // The query goes with it, so Sill learns the user's own shorthand
+        // for this rather than only that they opened it.
+        const launched = await launchCommand(command.id, query);
 
         // A file is opened by the shell and has no session of its own.
         if (command.mode === "file") {

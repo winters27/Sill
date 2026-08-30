@@ -533,7 +533,44 @@ pub struct Frecency {
     /// id -> (launch count, last launch as unix seconds)
     #[serde(default)]
     entries: HashMap<String, (u32, i64)>,
+    /// query -> id -> (times chosen for that query, last time)
+    ///
+    /// What the user meant, as opposed to what they opened. Typing `ggm` and
+    /// choosing Gmail says something the id alone does not: not "Gmail is
+    /// popular" but "`ggm` means Gmail". That is an alias nobody had to sit
+    /// down and configure, and it is the thing people miss most when they
+    /// move between launchers.
+    ///
+    /// Nested rather than keyed on a joined string, because the lookup is per
+    /// query and happens once per search rather than once per candidate: the
+    /// inner map is fetched once and then asked about each id.
+    #[serde(default)]
+    learned: HashMap<String, HashMap<String, (u32, i64)>>,
 }
+
+/// How many times one query has to reach one command before it counts.
+///
+/// Two, not one. Once is a keystroke that could have been a mistake, and a
+/// single stray Enter would silently reorder a list for good. Twice is a
+/// habit, and it still arrives on the second use rather than the tenth.
+///
+/// The first use is not wasted either: it already counts towards ordinary
+/// frecency, which moves the result up within its match class.
+pub const LEARNED_AT: u32 = 2;
+
+/// The longest query worth remembering.
+///
+/// An abbreviation is short by definition. Somebody who typed the whole name
+/// has already found the thing, and remembering that teaches nothing while
+/// growing the file with one entry per keystroke of every long search.
+const LEARNED_MAX_LEN: usize = 24;
+
+/// How many distinct queries are kept.
+///
+/// Bounded because it is written to disk and read on every launch, and an
+/// unbounded map of everything ever typed is exactly the kind of quiet growth
+/// rule 23 exists to stop. The oldest are dropped first.
+const LEARNED_QUERIES: usize = 400;
 
 /// Recency buckets, in seconds, and what each is worth.
 const RECENCY_TIERS: [(i64, i64); 5] = [
@@ -573,6 +610,74 @@ impl Frecency {
         let entry = self.entries.entry(id.to_string()).or_insert((0, now));
         entry.0 = entry.0.saturating_add(1);
         entry.1 = now;
+    }
+
+    /// Remembers that this query reached this command.
+    ///
+    /// Called with whatever was in the field when the user committed, which is
+    /// what makes it an abbreviation rather than a name: the point is to learn
+    /// the short thing they type, not the long thing they eventually matched.
+    pub fn record_query(&mut self, query: &str, id: &str, now: i64) {
+        let query = query.trim().to_lowercase();
+
+        if query.is_empty() || query.chars().count() > LEARNED_MAX_LEN {
+            return;
+        }
+
+        let seen = self.learned.entry(query.clone()).or_default();
+        let entry = seen.entry(id.to_string()).or_insert((0, now));
+        entry.0 = entry.0.saturating_add(1);
+        entry.1 = now;
+
+        self.forget_oldest_queries(&query);
+    }
+
+    /// Keeps the map bounded, dropping the least recently used queries.
+    ///
+    /// `keep` is what was just recorded, and it is never dropped. Times are
+    /// whole seconds, so everything used in the same second ties, and a tie
+    /// among `HashMap` keys is broken by hash order. Without this the query
+    /// the user just used can be the one forgotten by the very write that
+    /// recorded it, **intermittently**: the same test passed and failed on
+    /// consecutive runs of unchanged code, which is how this was found.
+    fn forget_oldest_queries(&mut self, keep: &str) {
+        if self.learned.len() <= LEARNED_QUERIES {
+            return;
+        }
+
+        // The freshest time any command was chosen for that query.
+        let mut ages: Vec<(String, i64)> = self
+            .learned
+            .iter()
+            .filter(|(query, _)| query.as_str() != keep)
+            .map(|(query, seen)| {
+                let newest = seen.values().map(|(_, at)| *at).max().unwrap_or(0);
+                (query.clone(), newest)
+            })
+            .collect();
+
+        // By time, then by name. The name is not meaningful ordering, only
+        // something stable: without it, which of a set of equally old queries
+        // gets dropped changes between runs of identical code.
+        ages.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+
+        for (query, _) in ages.into_iter().take(self.learned.len() - LEARNED_QUERIES) {
+            self.learned.remove(&query);
+        }
+    }
+
+    /// What this query has taught, if anything.
+    ///
+    /// Fetched once per search rather than once per candidate: the map is
+    /// keyed by query, so the caller looks it up and then asks it about each
+    /// id in turn.
+    pub fn learned_for(&self, query: &str) -> Option<&HashMap<String, (u32, i64)>> {
+        self.learned.get(query.trim().to_lowercase().as_str())
+    }
+
+    /// How many distinct queries have taught something. For diagnostics.
+    pub fn learned_len(&self) -> usize {
+        self.learned.len()
     }
 
     /// Higher is more likely to be what the user wants.
@@ -670,6 +775,14 @@ pub enum MatchClass {
     /// "when I type this, I mean that". A model that can overrule it has
     /// turned an instruction into a suggestion.
     Alias,
+    /// This query has reached this command before, more than once.
+    ///
+    /// Below an alias, which was stated outright, and above everything the
+    /// ranker infers from text. It is still evidence rather than instruction,
+    /// but it is evidence about **this query** specifically, which no amount
+    /// of reading the title can supply: nothing about "Obsidian" suggests
+    /// somebody types "notes" to reach it.
+    Learned,
     /// The title is exactly what was typed.
     ExactTitle,
     /// The title starts with what was typed.
@@ -710,6 +823,7 @@ fn classify(
     needle: &[char],
     command: &CommandRecord,
     alias: Option<&str>,
+    learned: Option<&HashMap<String, (u32, i64)>>,
 ) -> Option<(MatchClass, Vec<usize>)> {
     // Checked before the title, because it outranks it. The alias is already
     // lowercased when it is stored, and the needle is lowercased by the
@@ -723,6 +837,32 @@ fn classify(
         }
     }
 
+    // What this exact query has reached before. Checked after an alias, which
+    // was stated, and before the title, which is inference.
+    //
+    // **This does not make a non-match into a match.** The command still has
+    // to be something the query would have found anyway; learning promotes it
+    // past the things that outranked it, rather than conjuring it out of a
+    // corpus of fifteen hundred entries because the letters were typed once.
+    // Without that rule a stray Enter puts an unrelated result at the top of a
+    // query it has nothing to do with, which is unexplainable from the screen.
+    let taught = learned
+        .and_then(|seen| seen.get(&command.id))
+        .is_some_and(|(count, _)| *count >= LEARNED_AT);
+
+    // The text match still has to hold. Promotion is what learning does; it
+    // does not create a match that was never there.
+    let (class, matched) = classify_text(needle, command)?;
+
+    Some(if taught {
+        (MatchClass::Learned, matched)
+    } else {
+        (class, matched)
+    })
+}
+
+/// How this command matched on its own text, with nothing learned or stated.
+fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass, Vec<usize>)> {
     let hay: Vec<char> = command.title.chars().collect();
     let hay_lower: Vec<char> = command.title.to_lowercase().chars().collect();
 
@@ -876,7 +1016,7 @@ fn looks_like_a_typo_of(needle: &[char], title: &str, budget: usize) -> bool {
 /// it is the obvious next use.
 pub fn match_class(query: &str, command: &CommandRecord) -> Option<MatchClass> {
     let needle: Vec<char> = query.trim().to_lowercase().chars().collect();
-    classify(&needle, command, None).map(|(class, _)| class)
+    classify(&needle, command, None, None).map(|(class, _)| class)
 }
 
 /// The same, for a command the user has given a name of their own.
@@ -886,7 +1026,7 @@ pub fn match_class_with_alias(
     alias: &str,
 ) -> Option<MatchClass> {
     let needle: Vec<char> = query.trim().to_lowercase().chars().collect();
-    classify(&needle, command, Some(alias)).map(|(class, _)| class)
+    classify(&needle, command, Some(alias), None).map(|(class, _)| class)
 }
 
 // ----------------------------------------------------------------- search
@@ -956,6 +1096,11 @@ pub fn search_excluding<'a>(
     // candidate. See `fuzzy_with` for what that was costing.
     let needle: Vec<char> = query.to_lowercase().chars().collect();
 
+    // Looked up once for the whole search. The map is keyed by query, so
+    // fetching it per candidate would be a hash of the same string fifteen
+    // hundred times per keystroke.
+    let learned = frecency.learned_for(query);
+
     // Scored by reference, cloned afterwards.
     //
     // The previous version cloned a whole `CommandRecord`, keywords vector and
@@ -986,7 +1131,7 @@ pub fn search_excluding<'a>(
         let (class, matched) = if query.is_empty() {
             (MatchClass::ExactTitle, Vec::new())
         } else {
-            match classify(&needle, command, aliases.for_command(&command.id)) {
+            match classify(&needle, command, aliases.for_command(&command.id), learned) {
                 Some(found) => found,
                 None => continue,
             }

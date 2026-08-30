@@ -27,6 +27,11 @@ pub(crate) async fn launch_command(
     app: AppHandle,
     state: State<'_, RegistryState>,
     id: String,
+    // What was in the field when this was chosen, so Sill can learn the
+    // user's own shorthand for it. Typing `ggm` and choosing Gmail says
+    // something the id alone cannot: not "Gmail is popular" but "`ggm` means
+    // Gmail". Optional, because a launch can come from places with no query.
+    query: Option<String>,
 ) -> Result<LaunchedCommand, String> {
     let record = {
         let mut registry = state.inner.lock().await;
@@ -37,7 +42,14 @@ pub(crate) async fn launch_command(
             .cloned()
             .ok_or_else(|| format!("no such command: {id}"))?;
 
-        registry.frecency.record(&id, now_seconds());
+        let now = now_seconds();
+        registry.frecency.record(&id, now);
+
+        // The query as it was typed, not as it was matched. The shorthand is
+        // the thing worth learning; the full name teaches nothing.
+        if let Some(query) = query.as_deref() {
+            registry.frecency.record_query(query, &id, now);
+        }
         let path = registry.frecency_path.clone();
         if let Err(err) = registry.frecency.save(&path) {
             // Losing ranking history is not worth failing a launch over.
@@ -241,4 +253,37 @@ pub(crate) async fn undo_action(
     undo: crate::action::Undo,
 ) -> Result<String, String> {
     crate::action::undo(&ActionCtx { app: app.clone() }, &undo)
+}
+
+/// Counts a use of something the window opened by itself.
+///
+/// Two results are handled entirely in the window and never reach
+/// `launch_command`: the clipboard history, which becomes a view rather than
+/// a launch, and a quicklink with a hole in it, which takes over the field
+/// instead. **Both were therefore invisible to ranking.** `sill:clipboard`
+/// had never been recorded once, however often it was opened, so it could
+/// never rise in the root list and nothing typed at it could ever be learned.
+///
+/// Separate from `launch_command` rather than folded into it because these
+/// genuinely are not launches; what they share is only that they count.
+#[tauri::command]
+pub(crate) async fn record_use(
+    state: State<'_, RegistryState>,
+    id: String,
+    query: Option<String>,
+) -> Result<(), String> {
+    let mut registry = state.inner.lock().await;
+
+    let now = now_seconds();
+    registry.frecency.record(&id, now);
+    if let Some(query) = query.as_deref() {
+        registry.frecency.record_query(query, &id, now);
+    }
+
+    let path = registry.frecency_path.clone();
+    if let Err(err) = registry.frecency.save(&path) {
+        crate::say!("could not save frecency: {err}");
+    }
+
+    Ok(())
 }

@@ -1393,3 +1393,223 @@ fn a_blank_alias_is_not_an_alias_that_matches_everything() {
         "the query matched nothing at all"
     );
 }
+
+// --------------------------------------------------------------- learning
+
+/// A frecency store that has already seen `query` reach `title` `times` over.
+fn taught(commands: &[CommandRecord], query: &str, title: &str, times: u32) -> Frecency {
+    let id = commands
+        .iter()
+        .find(|c| c.title == title)
+        .unwrap_or_else(|| panic!("the corpus has {title}"))
+        .id
+        .clone();
+
+    let mut frecency = Frecency::default();
+    for _ in 0..times {
+        frecency.record_query(query, &id, NOW);
+    }
+    frecency
+}
+
+fn ranked(commands: &[CommandRecord], query: &str, frecency: &Frecency) -> Vec<String> {
+    registry::search_excluding(
+        commands.iter(),
+        query,
+        frecency,
+        &Aliases::default(),
+        NOW,
+        50,
+        &[],
+    )
+    .into_iter()
+    .map(|r| r.command.title)
+    .collect()
+}
+
+#[test]
+fn choosing_the_same_thing_twice_for_a_query_promotes_it_next_time() {
+    // The whole point, and the case measured on this machine: typing
+    // "notepad" reaches several things, and whichever one you keep choosing
+    // should stop being the one you have to arrow down to.
+    let commands = realistic();
+
+    // Notepad++ is not what "notepad" ranks first on its own.
+    let cold = ranked(&commands, "notepad", &Frecency::default());
+    assert_ne!(cold.first().map(String::as_str), Some("Notepad++"));
+
+    let learned = taught(&commands, "notepad", "Notepad++", 2);
+    let warm = ranked(&commands, "notepad", &learned);
+
+    assert_eq!(
+        warm.first().map(String::as_str),
+        Some("Notepad++"),
+        "two choices did not teach it"
+    );
+}
+
+#[test]
+fn choosing_it_once_is_not_enough_to_reorder_anything() {
+    // Once is a keystroke that could have been a mistake. A single stray
+    // Enter must not silently reorder a list for good.
+    let commands = realistic();
+
+    let once = taught(&commands, "notepad", "Notepad++", 1);
+    assert_eq!(
+        ranked(&commands, "notepad", &once),
+        ranked(&commands, "notepad", &Frecency::default()),
+        "one choice changed the order"
+    );
+}
+
+#[test]
+fn learning_never_invents_a_match_that_was_not_there() {
+    // The rule that keeps this explainable. A learned pair promotes something
+    // the query would have found anyway; it must not conjure an unrelated
+    // result out of fifteen hundred entries because the letters were typed
+    // near it once. Otherwise a stray Enter puts Spotify at the top of
+    // "docker" and nothing on screen explains why.
+    let commands = realistic();
+    let learned = taught(&commands, "docker", "Spotify", 5);
+
+    let found = ranked(&commands, "docker", &learned);
+
+    assert!(
+        !found.iter().any(|t| t == "Spotify"),
+        "learning dragged in something the query does not match: {found:?}"
+    );
+    assert!(
+        found.iter().any(|t| t == "Docker Desktop"),
+        "and it lost the results that do match"
+    );
+}
+
+#[test]
+fn what_was_learned_for_one_query_stays_there() {
+    // Learning is per query. Teaching "notepad" must not change "note", which
+    // is a different thing the user might mean differently.
+    let commands = realistic();
+    let learned = taught(&commands, "notepad", "Notepad++", 3);
+
+    assert_eq!(
+        ranked(&commands, "note", &learned),
+        ranked(&commands, "note", &Frecency::default()),
+        "teaching one query leaked into another"
+    );
+}
+
+#[test]
+fn a_query_is_remembered_the_same_however_it_was_typed() {
+    let commands = realistic();
+    let id = commands
+        .iter()
+        .find(|c| c.title == "Notepad++")
+        .expect("in the corpus")
+        .id
+        .clone();
+
+    let mut frecency = Frecency::default();
+    frecency.record_query("  NoTePaD  ", &id, NOW);
+    frecency.record_query("notepad", &id, NOW);
+
+    assert_eq!(
+        ranked(&commands, "NOTEPAD", &frecency)
+            .first()
+            .map(String::as_str),
+        Some("Notepad++"),
+        "case and padding split one habit into two"
+    );
+}
+
+#[test]
+fn a_long_query_teaches_nothing() {
+    // Somebody who typed the whole name has already found the thing.
+    // Remembering it grows the file with one entry per long search and
+    // teaches nothing, since the next identical search finds it anyway.
+    let commands = realistic();
+    let id = commands[0].id.clone();
+
+    let mut frecency = Frecency::default();
+    for _ in 0..5 {
+        frecency.record_query(
+            "an extremely long thing nobody would use as shorthand",
+            &id,
+            NOW,
+        );
+    }
+
+    assert_eq!(frecency.learned_len(), 0);
+}
+
+#[test]
+fn an_empty_query_teaches_nothing() {
+    // The root list. Everything matched equally, so choosing something says
+    // nothing about what any letters mean.
+    let commands = realistic();
+    let id = commands[0].id.clone();
+
+    let mut frecency = Frecency::default();
+    frecency.record_query("", &id, NOW);
+    frecency.record_query("   ", &id, NOW);
+
+    assert_eq!(frecency.learned_len(), 0);
+}
+
+#[test]
+fn what_is_remembered_is_bounded_and_drops_the_oldest_first() {
+    // It is written to disk and read on every launch. An unbounded map of
+    // everything ever typed is the quiet growth rule 23 exists to stop.
+    let mut frecency = Frecency::default();
+
+    // Old, and first in.
+    frecency.record_query("oldest", "app:a", NOW - 100_000);
+
+    for n in 0..600 {
+        frecency.record_query(&format!("q{n}"), "app:b", NOW);
+    }
+
+    assert!(
+        frecency.learned_len() <= 400,
+        "grew to {}",
+        frecency.learned_len()
+    );
+    assert!(
+        frecency.learned_for("oldest").is_none(),
+        "the oldest query survived the trim"
+    );
+    assert!(
+        frecency.learned_for("q599").is_some(),
+        "the newest query was dropped instead"
+    );
+}
+
+#[test]
+fn an_alias_still_beats_something_learned() {
+    // Stated beats inferred. An alias is an instruction and learning is
+    // evidence, however strong the evidence has got.
+    let commands = realistic();
+
+    let spotify = commands
+        .iter()
+        .find(|c| c.title == "Spotify")
+        .expect("in the corpus")
+        .id
+        .clone();
+
+    // "steam" is taught hard towards Steam Link...
+    let learned = taught(&commands, "steam", "Steam Link", 9);
+    // ...but the user has said outright that "steam" means Spotify.
+    let aliases = Aliases::new(&[Alias {
+        alias: "steam".into(),
+        command: spotify,
+    }]);
+
+    let found =
+        registry::search_excluding(commands.iter(), "steam", &learned, &aliases, NOW, 50, &[]);
+
+    assert_eq!(
+        found.first().map(|r| r.command.title.as_str()),
+        Some("Spotify"),
+        "learning overruled an instruction"
+    );
+}
