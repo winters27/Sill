@@ -120,17 +120,11 @@ describe("which slice is drawn", () => {
   const HEIGHT = 400;
   const OVERSCAN = 8;
 
-  /** `padding` is what the container adds below the rows, as the chin does. */
-  function windowFor(count: number, scrollTop: number, padding = 0) {
+  function windowFor(count: number, scrollTop: number) {
     const lines = linesOf(flat(count));
     const offsets = offsetsOf(lines, ROW, HEADER);
-    const total = offsets[lines.length] ?? 0;
-    const reach = Math.max(0, total + padding - HEIGHT);
 
-    return {
-      lines,
-      ...windowOf(offsets, lines.length, scrollTop, HEIGHT, OVERSCAN, reach),
-    };
+    return { lines, ...windowOf(offsets, lines.length, scrollTop, HEIGHT, OVERSCAN) };
   }
 
   test("the top of a long list draws from the first line", () => {
@@ -166,13 +160,12 @@ describe("which slice is drawn", () => {
    * below the viewport: a screen of blank space that only came right if you
    * scrolled and provoked an event.
    */
-  test("a remembered position past the end of a shrunken list still draws it", () => {
-    // Two hundred results, scrolled a long way down, then a query that
-    // returns three. The remembered position is now far past the end.
-    const { at, first, last, lines } = windowFor(3, ROW * 150);
+  test("a position past the end of a short list still draws the whole list", () => {
+    // The browser has already corrected the element by the time this is asked,
+    // so the position it is given is real. What matters is that a number from
+    // anywhere cannot index outside the list.
+    const { first, last, lines } = windowFor(3, ROW * 150);
 
-    // Clamped to the list that exists, not the one that used to.
-    expect(at).toBe(0);
     expect(first).toBe(0);
     expect(last).toBe(lines.length);
   });
@@ -199,35 +192,23 @@ describe("which slice is drawn", () => {
 
   test("an empty list draws nothing without failing", () => {
     const offsets = offsetsOf([], ROW, HEADER);
-    const { first, last } = windowOf(offsets, 0, 0, HEIGHT, OVERSCAN, 0);
+    const { first, last } = windowOf(offsets, 0, 0, HEIGHT, OVERSCAN);
 
     expect(first).toBe(0);
     expect(last).toBe(0);
   });
 
-  /*
-   * The other end of the same bug, and the one that shipped.
-   *
-   * The rows are not all there is inside the scrolling box: the container has
-   * 48 pixels of padding below them to clear the chin, and that padding
-   * scrolls too. Clamping to "the rows minus the viewport" stopped the drawn
-   * slice short of the end, so scrolling to the bottom showed blank space.
-   */
   test("a container with padding below the rows still draws its last row", () => {
+    // The bug that shipped. The rows are not all there is inside the scrolling
+    // box: 48 pixels of padding below them clears the chin, and that padding
+    // scrolls too. Anything here that worked out the reach from the rows alone
+    // stopped the drawn slice short of the end, and the bottom went blank.
     const CHIN = 48;
     const lines = linesOf(flat(200));
     const offsets = offsetsOf(lines, ROW, HEADER);
-    const total = offsets[lines.length];
-    const bottom = total + CHIN - HEIGHT;
+    const bottom = offsets[lines.length] + CHIN - HEIGHT;
 
-    const { at, last } = windowFor(200, bottom, CHIN);
-
-    expect(at).toBe(bottom);
-    expect(last).toBe(lines.length);
-  });
-
-  test("padding never lets the window run past the end of the list", () => {
-    const { last, lines } = windowFor(30, 100_000, 48);
+    const { last } = windowOf(offsets, lines.length, bottom, HEIGHT, OVERSCAN);
 
     expect(last).toBe(lines.length);
   });

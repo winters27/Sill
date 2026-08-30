@@ -57,14 +57,6 @@
   let viewport = $state<HTMLDivElement | null>(null);
   let scrollTop = $state(0);
   let height = $state(600);
-  /**
-   * How far the list can actually scroll.
-   *
-   * Read from the element rather than worked out from the rows, because the
-   * rows are not all there is inside it: the container's own padding clears
-   * the chin, and that padding is scrollable too.
-   */
-  let reach = $state(0);
   let rowHeight = $state(FALLBACK_ROW);
   let headerHeight = $state(FALLBACK_HEADER);
 
@@ -93,13 +85,12 @@
    * each keystroke re-create the lot. Two spacers stand in for what is above
    * and below, so the scrollbar still describes the whole list.
    */
-  const shown = $derived(
-    windowOf(offsets, lines.length, scrollTop, height, OVERSCAN, reach),
-  );
+  const shown = $derived(windowOf(offsets, lines.length, scrollTop, height, OVERSCAN));
   const first = $derived(shown.first);
   const last = $derived(shown.last);
 
   const slice = $derived(lines.slice(first, last));
+
 
   /**
    * Keeps the selected row on screen.
@@ -176,7 +167,6 @@
     if (!viewport) return;
     scrollTop = viewport.scrollTop;
     height = viewport.clientHeight;
-    reach = viewport.scrollHeight - viewport.clientHeight;
   }
 
   /**
@@ -192,7 +182,10 @@
     const sync = () => {
       if (!viewport) return;
       height = viewport.clientHeight;
-      reach = viewport.scrollHeight - viewport.clientHeight;
+      // Read again in case the list was left scrolled past where a shorter
+      // one can go: the browser has already corrected the element, and this
+      // is what stops the remembered copy disagreeing with it.
+      scrollTop = viewport.scrollTop;
       const row = viewport.querySelector<HTMLElement>(".sill-row");
       if (row && row.offsetHeight > 0) rowHeight = row.offsetHeight;
       const header = viewport.querySelector<HTMLElement>(".sill-group");

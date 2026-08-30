@@ -113,20 +113,23 @@ export function lineAt(offsets: number[], count: number, y: number): number {
 /**
  * Which slice of the list to put in the DOM, and where it starts.
  *
- * `at` is where the list actually is rather than where it was last heard to
- * be. The remembered scroll position is only refreshed by a scroll event, and
- * the browser clamps the real one on its own whenever the content gets
- * shorter. Between the two, a search returning fewer results than the last one
- * sliced the list from a position past its end, and **every row rendered below
- * the viewport**: a screen of blank space that only came right if you scrolled
- * and provoked an event.
+ * **The position is taken as given.** Two blank-screen bugs came from trying
+ * to correct it here, and both had the same shape: this file believing it knew
+ * how far the container could scroll better than the container did.
  *
- * `reach` is how far the container can actually scroll, and it is asked for
- * rather than worked out from the rows. Deriving it as "the rows minus the
- * viewport" assumes the rows are all there is inside the scrolling box, and
- * the first time that stopped being true, a 48 pixel bottom padding put the
- * end of the list past where this would clamp: **scrolling to the bottom drew
- * nothing**, which is the same blank screen from the other end.
+ * The first clamped to "the rows, minus the viewport" and fixed a stale
+ * position after a list shrank. The second was that same clamp, once the
+ * container grew 48 pixels of padding below the rows: the end of the list sat
+ * past where the clamp would go, so scrolling to the bottom drew nothing.
+ *
+ * The browser already clamps the real scroll position, and it accounts for
+ * padding, borders and anything else in that box. Believing it is both simpler
+ * and right. What the stale-position case actually needed was for a new query
+ * to start at the top, which is what `asking` does in the component, and that
+ * is a smaller and truer statement of the problem.
+ *
+ * Everything here is still bounded, so a position from anywhere cannot index
+ * outside the list.
  */
 export function windowOf(
   offsets: number[],
@@ -134,9 +137,9 @@ export function windowOf(
   scrollTop: number,
   height: number,
   overscan: number,
-  reach: number,
 ): { at: number; first: number; last: number } {
-  const at = Math.max(0, Math.min(scrollTop, Math.max(0, reach)));
+  // Negative only during an overscroll bounce, which some browsers report.
+  const at = Math.max(0, scrollTop);
 
   return {
     at,
