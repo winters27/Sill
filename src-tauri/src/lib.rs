@@ -6,6 +6,7 @@ pub mod calculator;
 pub mod clipboard;
 pub mod commands;
 pub mod dictation;
+pub mod emoji;
 pub mod everything_ipc;
 pub mod exthost;
 pub mod files;
@@ -865,6 +866,7 @@ pub fn run() {
             commands::search::search_commands,
             commands::search::search_files,
             commands::search::search_windows,
+            commands::search::search_emoji,
             commands::settings::hotkey_conflicts,
             commands::settings::set_alias,
             commands::settings::index_rows,

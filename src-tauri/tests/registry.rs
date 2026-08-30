@@ -1799,3 +1799,92 @@ fn a_long_query_is_remembered_even_though_it_teaches_nothing() {
     assert_eq!(frecency.learned_len(), 0, "it should teach nothing");
     assert_eq!(frecency.history(), [long], "but it should be recallable");
 }
+
+// --------------------------------------------------------- exact keywords
+
+#[test]
+fn an_exact_keyword_beats_letters_found_scattered_in_a_title() {
+    // Measured, not preferred. Searching emoji for "tada" returned the trade
+    // mark sign: t, a, d, a really are in "trade mark" in that order, so it
+    // matched as a subsequence, while the party popper only matched on its
+    // shortcode. A whole word somebody declared as another name for the thing
+    // is better evidence than four letters scattered through a longer one.
+    let scattered = command("x:trade", "trade mark", "Symbols");
+    let mut declared = command("x:party", "party popper", "Activities");
+    declared.keywords = vec!["tada".to_string()];
+
+    let commands = vec![scattered, declared];
+
+    let found = registry::search_excluding(
+        commands.iter(),
+        "tada",
+        &Frecency::default(),
+        &Aliases::default(),
+        NOW,
+        50,
+        Excluded::none(),
+    );
+
+    assert_eq!(
+        found.first().map(|r| r.command.title.as_str()),
+        Some("party popper"),
+        "the scattered match won"
+    );
+    assert_eq!(found.len(), 2, "and the other is still findable");
+}
+
+#[test]
+fn a_keyword_has_to_be_the_whole_query_to_count_as_exact() {
+    // "mail" is not an exact match for the keyword "email". Treating a partial
+    // one as exact would promote almost everything, since keywords are short
+    // and there are many of them.
+    let mut thing = command("x:thing", "Some Thing", "Test");
+    thing.keywords = vec!["email".to_string()];
+
+    assert_eq!(
+        match_class("mail", &thing),
+        Some(MatchClass::Elsewhere),
+        "a partial keyword was treated as exact"
+    );
+    assert_eq!(match_class("email", &thing), Some(MatchClass::KeywordExact));
+}
+
+#[test]
+fn an_exact_keyword_does_not_outrank_the_title_itself() {
+    // It is better evidence than a scattered subsequence, not better than
+    // somebody typing the name. A prefix of the real title still wins.
+    let mut aliased = command("x:other", "Something Else", "Test");
+    aliased.keywords = vec!["note".to_string()];
+    let named = command("x:notes", "Notes", "Test");
+
+    let commands = vec![aliased, named];
+
+    let found = registry::search_excluding(
+        commands.iter(),
+        "note",
+        &Frecency::default(),
+        &Aliases::default(),
+        NOW,
+        50,
+        Excluded::none(),
+    );
+
+    assert_eq!(
+        found.first().map(|r| r.command.title.as_str()),
+        Some("Notes"),
+        "a keyword outranked the actual name"
+    );
+}
+
+#[test]
+fn a_keyword_written_with_capitals_still_matches() {
+    // Keywords are written by hand in the index and in extension manifests,
+    // so they are not reliably lowercase.
+    let mut thing = command("x:thing", "Some Thing", "Test");
+    thing.keywords = vec!["Screenshot".to_string()];
+
+    assert_eq!(
+        match_class("screenshot", &thing),
+        Some(MatchClass::KeywordExact)
+    );
+}

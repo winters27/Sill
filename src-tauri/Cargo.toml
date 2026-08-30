@@ -55,4 +55,5 @@ arboard = "3.6.1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 arc-swap = "1.9.2"
 async-trait = "0.1.92"
+emojis = "0.9.0"
 

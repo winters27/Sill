@@ -239,6 +239,9 @@
         return "File";
       case "exe":
         return "Executable";
+      case "emoji":
+        // The group, which is the only useful thing to say about one.
+        return command.extensionTitle;
       default:
         // Applications carry a category worked out from where they resolve,
         // which says more than the word "Application" would.
@@ -305,6 +308,8 @@
         return "Files";
       case "window":
         return "Open Windows";
+      case "emoji":
+        return "Emoji";
       case "window":
         return "Open Windows";
       case "exe":
@@ -365,7 +370,11 @@
         onclick={() => onrun(index)}
         onkeydown={(e) => e.key === "Enter" && onrun(index)}
       >
-        {#if command.mode === "answer"}
+        {#if command.mode === "emoji"}
+          <!-- The emoji is its own icon. A lettered tile beside the character
+               it stands for would be a worse drawing of the same thing. -->
+          <span class="emoji" aria-hidden="true">{command.subtitle}</span>
+        {:else if command.mode === "answer"}
           <!-- A lettered tile would show the first digit of the result,
                which means nothing. -->
           <span class="equals" aria-hidden="true">=</span>
@@ -438,6 +447,18 @@
 
   /* The user's own name for this. Quiet: it is a reminder, not a label
      competing with the title it sits beside. */
+  /* Sized to fill the icon tile rather than sit in it, because here the
+     character IS the icon. */
+  .emoji {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    flex: none;
+    font-size: 19px;
+    line-height: 1;
+  }
+
   .alias {
     flex: none;
     padding: 1px 5px;

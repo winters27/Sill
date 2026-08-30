@@ -35,7 +35,9 @@ export interface RankedCommand {
     /** A quicklink with `{query}` in it, which takes over the field first. */
     | "quicklink-arg"
     /** A window that is open right now. Never from the index. */
-    | "window";
+    | "window"
+    /** One emoji. Its own corpus, reached through its own command. */
+    | "emoji";
   entrypoint: string;
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;
@@ -75,7 +77,9 @@ export interface LaunchedCommand {
     /** A quicklink with `{query}` in it, which takes over the field first. */
     | "quicklink-arg"
     /** A window that is open right now. Never from the index. */
-    | "window";
+    | "window"
+    /** One emoji. Its own corpus, reached through its own command. */
+    | "emoji";
 }
 
 export function searchCommands(query: string): Promise<RankedCommand[]> {
@@ -172,6 +176,17 @@ export function searchFiles(query: string): Promise<FileHit[]> {
  * Ranked in Rust by the same function as everything else, so these arrive
  * already in order and merge straight into the list.
  */
+/**
+ * Emoji matching a query.
+ *
+ * Its own corpus rather than part of the index. Three thousand seven hundred
+ * entries would nearly quadruple an index that is ranked on every keystroke,
+ * so that typing "smile" could find an emoji as well as an application.
+ */
+export function searchEmoji(query: string): Promise<RankedCommand[]> {
+  return invoke<RankedCommand[]>("search_emoji", { query }).catch(() => []);
+}
+
 export function searchWindows(query: string): Promise<RankedCommand[]> {
   return invoke<RankedCommand[]>("search_windows", { query }).catch(() => []);
 }

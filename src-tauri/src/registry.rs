@@ -276,6 +276,15 @@ pub fn builtins() -> Vec<CommandRecord> {
             &["paste", "copy", "history", "recent", "pasteboard"],
         ),
         builtin(
+            "emoji",
+            "snippets",
+            "Emoji",
+            "Search every emoji by name and paste one",
+            &[
+                "emoji", "symbol", "smiley", "face", "icon", "unicode", "reaction",
+            ],
+        ),
+        builtin(
             "dictate",
             "dictation",
             "Dictate",
@@ -830,6 +839,16 @@ pub enum MatchClass {
     TitleWordStarts,
     /// The title contains what was typed, unbroken.
     TitleSubstring,
+    /// A keyword is exactly what was typed.
+    ///
+    /// Above a scattered subsequence, and that ordering was decided by a
+    /// measurement rather than a preference. Searching emoji for `tada`
+    /// returned the trade mark sign: `t`, `a`, `d`, `a` really are in "trade
+    /// mark" in that order, so it matched as a subsequence, while the party
+    /// popper only matched on its shortcode. A whole word somebody declared as
+    /// another name for this thing is better evidence than four letters found
+    /// scattered through a longer one.
+    KeywordExact,
     /// The characters are all there in order, scattered.
     TitleSubsequence,
     /// Nothing in the title. Matched the extension's name or a keyword.
@@ -900,6 +919,14 @@ fn classify(
     })
 }
 
+/// One character, lowercased, for comparing against an already-lowered needle.
+///
+/// Keywords are written by hand in the index and by extension manifests, so
+/// they are not reliably lowercase even though almost all of them are.
+fn lower_one(c: char) -> char {
+    c.to_lowercase().next().unwrap_or(c)
+}
+
 /// How this command matched on its own text, with nothing learned or stated.
 fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass, Vec<usize>)> {
     let hay: Vec<char> = command.title.chars().collect();
@@ -944,6 +971,16 @@ fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass
 
     // Nothing in the title. The other sources are searched but never
     // highlighted, since their indices would point into the wrong string.
+    // No highlight for either of these: what matched is not in the title, so
+    // marking positions in it would underline the wrong characters.
+    if command
+        .keywords
+        .iter()
+        .any(|keyword| keyword.chars().map(lower_one).eq(needle.iter().copied()))
+    {
+        return Some((MatchClass::KeywordExact, Vec::new()));
+    }
+
     if fuzzy_with(needle, &command.extension_title).is_some()
         || command
             .keywords

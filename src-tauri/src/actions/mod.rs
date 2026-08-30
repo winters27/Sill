@@ -31,6 +31,7 @@ pub fn builtins() -> ActionRegistry {
         Box::new(OpenSillSetting),
         Box::new(RunBuiltin),
         Box::new(PasteSnippet),
+        Box::new(PasteEmoji),
         Box::new(OpenQuicklink),
         Box::new(CopyAnswer),
         Box::new(CopyPath),
@@ -358,6 +359,51 @@ impl Action for PasteSnippet {
     }
 }
 
+/// Puts an emoji where the user was typing.
+///
+/// Pasting rather than copying, because that is what an emoji picker is for:
+/// you were writing something and you wanted a face in it. Copying and leaving
+/// the user to paste is one more step in the middle of a sentence.
+///
+/// Copy is still offered beside it, from the same action that copies any text.
+struct PasteEmoji;
+
+#[async_trait]
+impl Action for PasteEmoji {
+    fn id(&self) -> &'static str {
+        "sill.emoji.paste"
+    }
+
+    fn title(&self) -> &'static str {
+        "Paste"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Emoji
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardWrite, Capability::InputInjection]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        ctx.app
+            .clipboard()
+            .write_text(object.target.clone())
+            .map_err(|err| format!("Could not copy the emoji: {err}"))?;
+
+        // No undo. It has gone into somebody else's window, and sending Ctrl+Z
+        // on their behalf would be a guess about an application Sill knows
+        // nothing about.
+        crate::dictation::paste::deliver(&ctx.app);
+        Ok(Outcome::done(format!("Pasted {}", object.target)))
+    }
+}
+
 /// Opens a saved link.
 struct OpenQuicklink;
 
@@ -654,7 +700,10 @@ impl Action for CopyClipboardEntry {
     }
 
     fn accepts(&self, kind: ObjectKind) -> bool {
-        matches!(kind, ObjectKind::ClipboardEntry | ObjectKind::Text)
+        matches!(
+            kind,
+            ObjectKind::ClipboardEntry | ObjectKind::Text | ObjectKind::Emoji
+        )
     }
 
     fn capabilities(&self) -> &'static [Capability] {
@@ -662,7 +711,9 @@ impl Action for CopyClipboardEntry {
     }
 
     fn is_primary(&self, kind: ObjectKind) -> bool {
-        self.accepts(kind)
+        // Not for an emoji: pasting is what a picker is for, and two primaries
+        // for one kind is a registry that cannot say what Enter does.
+        self.accepts(kind) && kind != ObjectKind::Emoji
     }
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {

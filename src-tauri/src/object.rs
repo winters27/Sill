@@ -44,6 +44,8 @@ pub enum ObjectKind {
     ClipboardEntry,
     /// Loose text: a selection, or whatever an action produced.
     Text,
+    /// One emoji, which is a piece of text with a name.
+    Emoji,
     /// A window that is open right now.
     ///
     /// The first kind that is not in the index and never will be. The desktop
@@ -72,6 +74,7 @@ impl ObjectKind {
         Self::Answer,
         Self::ClipboardEntry,
         Self::Text,
+        Self::Emoji,
         Self::Window,
     ];
 
@@ -102,6 +105,7 @@ impl ObjectKind {
             // and they still need a name to be dispatched on.
             "clipboard" => Self::ClipboardEntry,
             "text" => Self::Text,
+            "emoji" => Self::Emoji,
             "window" => Self::Window,
             _ => return None,
         })

@@ -120,6 +120,46 @@ pub(crate) async fn search_windows(
     Ok(results.into_iter().map(Into::into).collect())
 }
 
+/// Emoji matching a query.
+///
+/// Its own corpus rather than part of the index. Three thousand seven hundred
+/// entries would nearly quadruple a fifteen-hundred-entry index that is ranked
+/// on every keystroke, so that typing "smile" could find an emoji as well as
+/// an application. Behind its own command, they cost nothing until asked for.
+#[tauri::command]
+pub(crate) async fn search_emoji(
+    state: State<'_, RegistryState>,
+    query: String,
+) -> Result<Vec<registry::SearchResult>, String> {
+    let records = tokio::task::spawn_blocking(crate::emoji::records)
+        .await
+        .unwrap_or_default();
+
+    let registry = state.inner.lock().await;
+
+    // An empty query lists them in their own order, which is by group and then
+    // by how Unicode arranged them: smileys, people, animals, food. Ranking
+    // that by frecency would scatter related emoji across the list.
+    if query.trim().is_empty() {
+        return Ok(records
+            .into_iter()
+            .map(registry::SearchResult::from_record)
+            .collect());
+    }
+
+    let results = registry::search_excluding(
+        records.iter(),
+        &query,
+        &registry.frecency,
+        &registry.aliases,
+        now_seconds(),
+        registry::SEARCH_LIMIT,
+        registry::Excluded::none(),
+    );
+
+    Ok(results.into_iter().map(Into::into).collect())
+}
+
 /// Every display, for laying windows out.
 #[tauri::command]
 pub(crate) async fn list_monitors() -> Result<Vec<windowing::Monitor>, String> {

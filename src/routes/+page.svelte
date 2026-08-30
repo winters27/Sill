@@ -26,6 +26,7 @@
     performBuiltin,
     searchFiles,
     searchWindows,
+    searchEmoji,
     recordUse,
     queryHistory,
     openPath,
@@ -65,6 +66,7 @@
     | "switcher"
     | "collection"
     | "alias"
+    | "emoji"
   >("root");
   /**
    * The quicklink waiting for something to be typed into it.
@@ -148,7 +150,9 @@
   });
 
   const count = $derived.by(() => {
-    if (mode === "root" || mode === "switcher") return commands.length;
+    if (mode === "root" || mode === "switcher" || mode === "emoji") {
+      return commands.length;
+    }
     // The field is a name, not a filter, so there is nothing to arrow through.
     if (mode === "collection" || mode === "alias") return 0;
     if (mode === "clipboard") return clipboardCount;
@@ -434,6 +438,19 @@
 
     clearTimeout(fileTimer);
 
+    if (mode === "emoji") {
+      try {
+        const found = await searchEmoji(current);
+        if (id !== searchId) return;
+
+        commands = found;
+        if (selected >= commands.length) selected = 0;
+      } catch (err) {
+        if (id === searchId) status = `emoji search failed: ${err}`;
+      }
+      return;
+    }
+
     // The switcher is windows and nothing else. Mixing applications in would
     // mean "Chrome" the program sitting beside "Chrome" the window you are
     // trying to get back to, and no way to tell which is which at a glance.
@@ -545,6 +562,26 @@
       return;
     }
 
+    if (mode === "emoji") {
+      const emoji = commands[selected];
+      if (!emoji) return;
+
+      try {
+        // Dismissed first: pasting means putting it back where the user was
+        // typing, and Sill has to stop being the foreground window for that
+        // to mean anything.
+        await dismiss();
+        await runObjectAction("sill.emoji.paste", asTarget(emoji));
+      } catch (err) {
+        status = `${err}`;
+      }
+
+      mode = "root";
+      selected = 0;
+      query = "";
+      return;
+    }
+
     if (mode === "switcher") {
       const window = commands[selected];
       if (!window) return;
@@ -564,6 +601,16 @@
 
       // Its own view rather than a window: the history is browsed the same
       // way the root list is, with the same field and the same keys.
+      // Its own corpus behind its own command, the same shape the clipboard
+      // history uses and for the same reason.
+      if (command.id === "sill:emoji") {
+        void recordUse(command.id, query);
+        mode = "emoji";
+        selected = 0;
+        query = "";
+        return;
+      }
+
       if (command.id === "sill:clipboard") {
         // Opened here rather than launched, but it is still a use, and
         // ranking has to see it or the history can never rise in the root
@@ -972,6 +1019,14 @@
       return;
     }
 
+    if (mode === "emoji") {
+      mode = "root";
+      selected = 0;
+      query = "";
+      await refreshRoot();
+      return;
+    }
+
     if (mode === "clipboard") {
       // A step back rather than a way out. Escape with entries picked means
       // "not those", and closing the whole view would throw away the search
@@ -1211,7 +1266,9 @@
   $effect(() => {
     query;
     // Not while the field holds a name rather than a query.
-    if (mode === "root" || mode === "switcher") void refreshRoot();
+    if (mode === "root" || mode === "switcher" || mode === "emoji") {
+      void refreshRoot();
+    }
   });
 
   onMount(() => {
@@ -1348,6 +1405,8 @@
       <span class="crumb">Clipboard History</span>
     {:else if mode === "switcher"}
       <span class="crumb">Open Windows</span>
+    {:else if mode === "emoji"}
+      <span class="crumb">Emoji</span>
     {:else if mode === "collection"}
       <span class="crumb">Collection</span>
     {:else if mode === "alias" && naming}
@@ -1360,8 +1419,10 @@
       bind:value={query}
       placeholder={mode === "argument"
         ? "Type what to search for, then Enter…"
-        : mode === "alias"
-          ? "Type a short name, then Enter. Empty forgets it…"
+        : mode === "emoji"
+          ? "Search emoji by name…"
+          : mode === "alias"
+            ? "Type a short name, then Enter. Empty forgets it…"
           : mode === "collection"
             ? "Name the collection, then Enter…"
           : mode === "clipboard"
@@ -1404,7 +1465,7 @@
       onrich={(rich) => (richEntry = rich)}
       oncollection={(open) => (openCollection = open)}
     />
-  {:else if mode === "root" || mode === "switcher" || mode === "alias"}
+  {:else if mode === "root" || mode === "switcher" || mode === "alias" || mode === "emoji"}
     <!-- Kept on screen while a name is typed, so what is being named stays
          visible. -->
     <RootList
