@@ -6,7 +6,7 @@
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
   import RootList from "$lib/components/RootList.svelte";
-  import { LISTBOX, optionId } from "$lib/results";
+  import { LISTBOX, isBrowsing, merged, optionId } from "$lib/results";
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import ClipboardView from "$lib/components/ClipboardView.svelte";
@@ -172,9 +172,7 @@
    * typing a name rather than filtering, so there is nothing to arrow through
    * either.
    */
-  const browsing = $derived(
-    (mode === "root" || mode === "switcher" || mode === "emoji") && commands.length > 0,
-  );
+  const browsing = $derived(isBrowsing(mode, commands.length));
 
   const count = $derived.by(() => {
     if (mode === "root" || mode === "switcher" || mode === "emoji") {
@@ -921,24 +919,7 @@
     };
   }
 
-  /**
-   * Puts a second search's results into the first, by how well each matched.
-   *
-   * Appending was wrong and measuring showed how wrong: typing "tada" matched
-   * eighty-four things in the index, every one of them a coincidence of
-   * spelling, and the party popper somebody had plainly named landed
-   * eighty-fifth. Groups are ordered by their best member, so where the first
-   * one lands decides where the whole group reads.
-   *
-   * So: above everything the index only half-recognised, below everything it
-   * knew by name. Neither list is reordered within itself.
-   */
-  function merged(into: RankedCommand[], extra: RankedCommand[]): RankedCommand[] {
-    let at = 0;
-    while (at < into.length && into[at].strong) at += 1;
 
-    return [...into.slice(0, at), ...extra, ...into.slice(at)];
-  }
 
   /**
    * Pastes or copies one emoji, and remembers what was typed to reach it.

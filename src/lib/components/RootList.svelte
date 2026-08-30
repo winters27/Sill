@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { RankedCommand } from "$lib/exthost/commands";
   import { LISTBOX, optionId } from "$lib/results";
+  import { groupOf, linesOf, offsetsOf, windowOf, type Line } from "$lib/list";
   import LaunchIcon from "./LaunchIcon.svelte";
   import SettingsIcon, { type IconName } from "./SettingsIcon.svelte";
 
@@ -47,10 +48,6 @@
   let rowHeight = $state(FALLBACK_ROW);
   let headerHeight = $state(FALLBACK_HEADER);
 
-  type Line =
-    | { kind: "header"; label: string }
-    | { kind: "row"; command: RankedCommand; index: number };
-
   /**
    * The list as drawn: group labels interleaved with their rows.
    *
@@ -58,82 +55,28 @@
    * the ranker still decides what you see first. Grouping that fought the
    * ranking would put the answer below a heading nobody was looking at.
    */
-  const lines = $derived.by((): Line[] => {
-    const order: string[] = [];
-    const groups = new Map<string, Line[]>();
+  /**
+   * The list as drawn: group labels interleaved with their rows.
+   *
+   * The arithmetic lives in `$lib/list` so it can be tested. A list that
+   * renders a screen of nothing is arithmetic, not markup.
+   */
+  const lines = $derived(linesOf(commands));
 
-    commands.forEach((command, index) => {
-      const label = groupOf(command);
-      let bucket = groups.get(label);
-      if (!bucket) {
-        bucket = [];
-        groups.set(label, bucket);
-        order.push(label);
-      }
-      bucket.push({ kind: "row", command, index });
-    });
-
-    // One group is not a grouping; a lone header over the whole list is
-    // noise rather than structure.
-    if (order.length < 2) {
-      return commands.map((command, index) => ({ kind: "row", command, index }));
-    }
-
-    return order.flatMap((label) => [
-      { kind: "header", label } as Line,
-      ...(groups.get(label) ?? []),
-    ]);
-  });
-
-  /** Where each line starts, and where the list ends. One extra entry. */
-  const offsets = $derived.by(() => {
-    const out = new Array<number>(lines.length + 1);
-    let y = 0;
-    for (let i = 0; i < lines.length; i++) {
-      out[i] = y;
-      y += lines[i].kind === "header" ? headerHeight : rowHeight;
-    }
-    out[lines.length] = y;
-    return out;
-  });
-
+  const offsets = $derived(offsetsOf(lines, rowHeight, headerHeight));
   const total = $derived(offsets[lines.length] ?? 0);
-
-  /** Index of the last line starting at or before `y`. */
-  function lineAt(y: number): number {
-    let low = 0;
-    let high = lines.length - 1;
-    while (low < high) {
-      const mid = (low + high + 1) >> 1;
-      if (offsets[mid] <= y) low = mid;
-      else high = mid - 1;
-    }
-    return low;
-  }
 
   /*
    * Only the visible slice goes in the DOM.
    *
-   * The index holds well over a thousand entries and rendering every row
-   * makes each keystroke re-create the lot. Two spacers stand in for what is
-   * above and below, so the scrollbar still describes the whole list.
+   * The index holds well over a thousand entries and rendering every row makes
+   * each keystroke re-create the lot. Two spacers stand in for what is above
+   * and below, so the scrollbar still describes the whole list.
    */
-  /**
-   * Where the list actually is, rather than where it was last heard to be.
-   *
-   * `scrollTop` is only refreshed by a scroll event, and the browser clamps
-   * the real scroll position on its own whenever the content gets shorter.
-   * Between those two the remembered value can be past the end of a list that
-   * has just shrunk, and every line then renders below the viewport: a screen
-   * of blank space with the results pushed off the bottom, which only comes
-   * right if you scroll and provoke an event.
-   */
-  const at = $derived(Math.max(0, Math.min(scrollTop, total - height)));
+  const shown = $derived(windowOf(offsets, lines.length, scrollTop, height, OVERSCAN));
+  const first = $derived(shown.first);
+  const last = $derived(shown.last);
 
-  const first = $derived(Math.max(0, lineAt(at) - OVERSCAN));
-  const last = $derived(
-    Math.min(lines.length, lineAt(at + height) + 1 + OVERSCAN),
-  );
   const slice = $derived(lines.slice(first, last));
 
   /**
@@ -333,34 +276,7 @@
     return out;
   }
 
-  function groupOf(command: RankedCommand): string {
-    switch (command.mode) {
-      case "answer":
-        return "Answer";
-      case "snippet":
-        return "Snippets";
-      case "sill-setting":
-        return "Sill Settings";
-      case "view":
-      case "no-view":
-        return "Commands";
-      case "builtin":
-        return "Sill";
-      case "setting":
-        return "Settings";
-      case "file":
-      case "file-setup":
-        return "Files";
-      case "window":
-        return "Open Windows";
-      case "emoji":
-        return "Emoji";
-      case "exe":
-        return "Developer";
-      default:
-        return "Applications";
-    }
-  }
+
 
   /**
    * The faint middle label.

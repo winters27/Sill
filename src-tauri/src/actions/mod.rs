@@ -586,7 +586,7 @@ impl Action for RecycleFile {
 }
 
 /// The folder a path is in, or the path itself when it is one.
-fn folder_of(target: &str) -> Result<String, String> {
+pub fn folder_of(target: &str) -> Result<String, String> {
     let path = std::path::Path::new(target);
 
     if path.is_dir() {
@@ -600,7 +600,7 @@ fn folder_of(target: &str) -> Result<String, String> {
 }
 
 /// The last part of a path, for saying what happened to it.
-fn name_of(target: &str) -> String {
+pub fn name_of(target: &str) -> String {
     std::path::Path::new(target)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -617,7 +617,7 @@ fn name_of(target: &str) -> String {
 /// until it finds an empty one, so a single terminator means it keeps reading
 /// past the end of the string.
 #[cfg(windows)]
-fn recycle(path: &std::path::Path) -> Result<(), String> {
+pub fn recycle(path: &std::path::Path) -> Result<(), String> {
     use windows::core::PCWSTR;
     use windows::Win32::UI::Shell::{
         SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FO_DELETE,

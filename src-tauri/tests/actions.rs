@@ -377,3 +377,95 @@ fn only_the_recoverable_kind_of_deletion_is_offered() {
         }
     }
 }
+
+// ------------------------------------------ what the file actions really do
+
+#[test]
+fn a_terminal_opens_in_the_folder_and_not_inside_the_file() {
+    use sill_lib::actions::folder_of;
+
+    let dir = std::env::temp_dir().join("sill-folder-of");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("README.md");
+    std::fs::write(&file, "x").unwrap();
+
+    // Nobody means "open a terminal inside README.md".
+    assert_eq!(
+        folder_of(&file.to_string_lossy()).unwrap(),
+        dir.to_string_lossy()
+    );
+
+    // A folder is already where it should open.
+    assert_eq!(
+        folder_of(&dir.to_string_lossy()).unwrap(),
+        dir.to_string_lossy()
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn something_with_nowhere_to_open_is_refused_rather_than_guessed_at() {
+    use sill_lib::actions::folder_of;
+
+    assert!(folder_of("").is_err());
+}
+
+#[test]
+fn what_happened_is_reported_by_name_and_not_by_path() {
+    use sill_lib::actions::name_of;
+
+    assert_eq!(name_of(r"C:\work\notes.md"), "notes.md");
+    assert_eq!(name_of("notes.md"), "notes.md");
+    // Nothing to shorten is still worth saying.
+    assert_eq!(name_of(r"C:\"), r"C:\");
+}
+
+#[cfg(windows)]
+#[test]
+fn recycling_takes_a_file_away_and_the_bin_still_has_it() {
+    // The whole claim of the action: it is the recoverable kind of deletion.
+    // Tested against a real file, because a mock would only prove the mock.
+    use sill_lib::actions::recycle;
+
+    let dir = std::env::temp_dir().join("sill-recycle-one");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("throwaway.txt");
+    std::fs::write(&file, "not wanted").unwrap();
+    assert!(file.exists());
+
+    recycle(&file).expect("recycled");
+
+    assert!(!file.exists(), "the file is still where it was");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[cfg(windows)]
+#[test]
+fn recycling_a_folder_takes_what_is_inside_it_too() {
+    use sill_lib::actions::recycle;
+
+    let dir = std::env::temp_dir().join("sill-recycle-folder");
+    std::fs::create_dir_all(dir.join("inside")).unwrap();
+    std::fs::write(dir.join("inside").join("a.txt"), "x").unwrap();
+
+    recycle(&dir.join("inside")).expect("recycled");
+
+    assert!(!dir.join("inside").exists());
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[cfg(windows)]
+#[test]
+fn recycling_something_that_is_not_there_says_so_rather_than_claiming_success() {
+    // Reporting a deletion that did not happen is the one outcome worse than
+    // failing, because nobody goes looking for the file afterwards.
+    use sill_lib::actions::recycle;
+
+    let missing = std::env::temp_dir().join("sill-no-such-file-at-all.txt");
+    std::fs::remove_file(&missing).ok();
+
+    assert!(recycle(&missing).is_err());
+}
