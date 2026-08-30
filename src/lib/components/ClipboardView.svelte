@@ -37,9 +37,11 @@
      * can poll for.
      */
     onpick: (ids: number[]) => void;
+    /** Whether the highlighted entry kept a formatted version. */
+    onrich: (rich: boolean) => void;
   }
 
-  let { query, selected, onselect, oncount, onpick }: Props = $props();
+  let { query, selected, onselect, oncount, onpick, onrich }: Props = $props();
 
   let entries = $state<ClipEntry[]>([]);
   let kind = $state<ClipKind | "all">("all");
@@ -141,10 +143,16 @@
     return picked;
   }
 
-  export async function paste(alsoPaste = true) {
+  export async function paste(alsoPaste = true, plainText = false) {
     if (!current) return;
-    await clipboardPaste(current.id, alsoPaste);
+    await clipboardPaste(current.id, alsoPaste, plainText);
   }
+
+  // The launcher draws the action panel, so it has to be told rather than
+  // asked. Reported on every change of selection, which is when it can differ.
+  $effect(() => {
+    onrich(current?.rich ?? false);
+  });
 
   export async function togglePin() {
     if (!current) return;

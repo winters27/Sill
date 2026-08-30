@@ -175,6 +175,20 @@
             ]
           : [];
 
+      // Only for an entry that actually kept formatting. Offering it on a
+      // line of terminal output would be offering to do nothing.
+      const plain = richEntry
+        ? [
+            {
+              id: -32,
+              title: "Paste as Plain Text",
+              tag: "Sill.ClipboardPastePlain",
+              props: {},
+              shortcut: { modifiers: ["ctrl", "shift"], key: "enter" },
+            },
+          ]
+        : [];
+
       return [
         ...merging,
         {
@@ -184,6 +198,7 @@
           props: {},
           shortcut: { modifiers: [], key: "enter" },
         },
+        ...plain,
         {
           id: -11,
           title: "Copy",
@@ -531,6 +546,15 @@
    */
   let picked = $state<number[]>([]);
 
+  /**
+   * Whether the highlighted history entry kept a formatted version.
+   *
+   * Mirrored up here for the same reason the picks are: the action panel is
+   * drawn by this component, and an action that would do nothing should not
+   * be listed.
+   */
+  let richEntry = $state(false);
+
   /** The separator a plain merge uses: one entry per line. */
   const NEWLINE = String.fromCharCode(10);
 
@@ -601,6 +625,9 @@
           break;
         case "Sill.ClipboardCopy":
           await clipboardView?.paste(false);
+          break;
+        case "Sill.ClipboardPastePlain":
+          await clipboardView?.paste(true, true);
           break;
         case "Sill.ClipboardPin":
           await clipboardView?.togglePin();
@@ -1040,6 +1067,7 @@
       onselect={(i) => (selected = i)}
       oncount={(n) => (clipboardCount = n)}
       onpick={(ids) => (picked = ids)}
+      onrich={(rich) => (richEntry = rich)}
     />
   {:else if mode === "root" || mode === "switcher"}
     <RootList

@@ -32,6 +32,8 @@ export interface ClipEntry {
   /** The source application's executable, which the icon comes from. */
   appPath: string | null;
   bytes: number;
+  /** Whether a formatted version was kept beside the text. */
+  rich: boolean;
 }
 
 /** One entry with everything the preview pane shows. */
@@ -75,8 +77,12 @@ export function clipboardEntry(id: number): Promise<ClipDetail | null> {
 }
 
 /** Puts an entry back on the clipboard, and optionally pastes it. */
-export function clipboardPaste(id: number, paste: boolean): Promise<void> {
-  return invoke("clipboard_paste", { id, paste });
+export function clipboardPaste(
+  id: number,
+  paste: boolean,
+  plainText = false,
+): Promise<void> {
+  return invoke("clipboard_paste", { id, paste, plainText });
 }
 
 export function clipboardPin(id: number, pinned: boolean): Promise<void> {

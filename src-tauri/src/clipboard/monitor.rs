@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::clipboard::kind::{classify, Kind};
 use crate::clipboard::sensitive;
-use crate::clipboard::store::Store;
+use crate::clipboard::store::{Recording, Store};
 
 /// Longest text kept.
 ///
@@ -408,18 +408,31 @@ fn capture_with(
             }
         }
 
+        // The formatted version of the same copy, when there was one. Read
+        // after the secret check rather than before it: a redacted entry
+        // must not keep the markup that still holds the value.
+        let html = if matches!(
+            crate::clipboard::sensitive::classify(&text),
+            sensitive::Sensitivity::Ordinary
+        ) {
+            read_html(&mut board)
+        } else {
+            None
+        };
+
         let kind = classify(&text);
         let store = clipboard.store();
         store
-            .record(
-                &hash(text.as_bytes()),
+            .record(Recording {
+                hash: &hash(text.as_bytes()),
                 kind,
-                &text,
-                name.as_deref(),
-                exe.as_deref(),
-                text.len() as i64,
+                text: &text,
+                html: html.as_deref(),
+                app: name.as_deref(),
+                app_path: exe.as_deref(),
+                bytes: text.len() as i64,
                 now,
-            )
+            })
             .map_err(|e| e.to_string())?;
         drop(store);
 
@@ -444,15 +457,16 @@ fn capture_with(
         // Hashed over the pixels, so the same screenshot copied twice is one
         // entry rather than two identically named ones.
         let id = store
-            .record(
-                &hash(&image.bytes),
-                Kind::Image,
-                &label,
-                name.as_deref(),
-                exe.as_deref(),
-                bytes as i64,
+            .record(Recording {
+                hash: &hash(&image.bytes),
+                kind: Kind::Image,
+                text: &label,
+                html: None,
+                app: name.as_deref(),
+                app_path: exe.as_deref(),
+                bytes: bytes as i64,
                 now,
-            )
+            })
             .map_err(|e| e.to_string())?;
 
         if bytes <= MAX_IMAGE_BYTES {
@@ -485,6 +499,49 @@ fn open_clipboard() -> Option<arboard::Clipboard> {
         }
     }
     None
+}
+
+/// The formatted version of what was copied, when the source offered one.
+///
+/// Absent far more often than not: a terminal, a code editor and a plain text
+/// field all copy text and nothing else. Missing is the ordinary case and not
+/// worth a retry ladder, unlike the text itself.
+fn read_html(board: &mut arboard::Clipboard) -> Option<String> {
+    board
+        .get()
+        .html()
+        .ok()
+        .map(|html| fragment(&html))
+        .filter(|html| !html.is_empty())
+}
+
+/// The part of a CF_HTML payload that is actually the copied content.
+///
+/// **Real CF_HTML headers are frequently wrong**, and the reader trusts them.
+/// Its byte offsets say where the fragment starts and ends, and when an
+/// application miscounts them the reader falls back to the end of the buffer,
+/// handing back the closing tags of the document wrapper and the clipboard's
+/// own terminating NUL. Observed from .NET's own clipboard writer, so this is
+/// the ordinary case rather than a corrupt one.
+///
+/// A NUL in the middle of a string is not something to write into a database
+/// and then hand back to a renderer, and trailing `</body></html>` inside what
+/// claims to be a fragment is markup nobody copied.
+fn fragment(html: &str) -> String {
+    let mut text = html;
+
+    // The markers are comments the wrapper puts around the real content, and
+    // they are correct even when the offsets that point at them are not.
+    if let Some(at) = text.find("<!--StartFragment-->") {
+        text = &text[at + "<!--StartFragment-->".len()..];
+    }
+
+    if let Some(at) = text.find("<!--EndFragment-->") {
+        text = &text[..at];
+    }
+
+    text.trim_matches(|c: char| c == ' ' || c.is_whitespace())
+        .to_string()
 }
 
 /// Reads text, retrying a locked clipboard but not an absent format.
@@ -572,6 +629,35 @@ pub fn now_seconds() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_html_payload_with_wrong_offsets_still_yields_just_the_content() {
+        // What .NET's own clipboard writer produces: the reader trusts the
+        // header's byte offsets, miscounts, and hands back the rest of the
+        // document plus the clipboard's terminating NUL.
+        let ragged = "<b>hello</b><!--EndFragment--></body></html> ";
+        assert_eq!(fragment(ragged), "<b>hello</b>");
+
+        // And with the opening marker still attached.
+        let both = "<html><body><!--StartFragment--><i>hi</i><!--EndFragment--></body></html> ";
+        assert_eq!(fragment(both), "<i>hi</i>");
+    }
+
+    #[test]
+    fn a_well_formed_fragment_is_left_exactly_as_it_is() {
+        // The common case must not be mangled by the repair.
+        assert_eq!(fragment("<b>hello</b>"), "<b>hello</b>");
+        assert_eq!(fragment("  <p>spaced</p>  "), "<p>spaced</p>");
+    }
+
+    #[test]
+    fn no_nul_survives_into_the_database() {
+        // SQLite will store it, and everything downstream then carries a
+        // string that truncates in half the places it is used.
+        for html in ["<b>x</b> ", " <b>x</b>", "<b>x</b><!--EndFragment-->  "] {
+            assert!(!fragment(html).contains(' '), "{html:?}");
+        }
+    }
 
     #[test]
     fn nothing_is_recorded_while_the_clipboard_is_suspended() {

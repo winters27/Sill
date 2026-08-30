@@ -40,10 +40,35 @@ pub struct Entry {
     pub app_path: Option<String>,
     /// Size in bytes, which is the only useful thing to say about an image.
     pub bytes: i64,
+    /// Whether a formatted version was kept alongside the text.
+    ///
+    /// A flag rather than the markup, because the list sends every row to the
+    /// window on every search and the markup is routinely many times the size
+    /// of the text. Whoever needs the markup asks for the entry by id.
+    #[serde(default)]
+    pub rich: bool,
 }
 
 pub struct Store {
     connection: Connection,
+}
+
+/// One thing copied, as it is written down.
+///
+/// A struct rather than eight positional arguments. Two of them are
+/// `Option<&str>` and adjacent, which is exactly the shape where a caller
+/// silently swaps them and nothing complains.
+pub struct Recording<'a> {
+    /// The deduplication key.
+    pub hash: &'a str,
+    pub kind: Kind,
+    pub text: &'a str,
+    /// The formatted version, when the source offered one.
+    pub html: Option<&'a str>,
+    pub app: Option<&'a str>,
+    pub app_path: Option<&'a str>,
+    pub bytes: i64,
+    pub now: i64,
 }
 
 impl Store {
@@ -125,6 +150,16 @@ impl Store {
             .connection
             .execute("ALTER TABLE entries ADD COLUMN app_path TEXT", []);
 
+        // The formatted version of the same copy, when there was one.
+        //
+        // Beside the text rather than instead of it, and both are always
+        // written. The plain text is what search reads, what a preview shows
+        // and what "paste as plain text" pastes; the markup is only ever an
+        // upgrade offered to an application that can take it.
+        let _ = self
+            .connection
+            .execute("ALTER TABLE entries ADD COLUMN html TEXT", []);
+
         // Off by default in SQLite, and the blobs table depends on it.
         self.connection.pragma_update(None, "foreign_keys", true)?;
         Ok(())
@@ -136,29 +171,35 @@ impl Store {
     /// two rows: it moves the existing one to the top and counts the use,
     /// which is what makes a history of the last hundred copies useful rather
     /// than a hundred copies of the same URL.
-    pub fn record(
-        &self,
-        hash: &str,
-        kind: Kind,
-        text: &str,
-        app: Option<&str>,
-        app_path: Option<&str>,
-        bytes: i64,
-        now: i64,
-    ) -> rusqlite::Result<i64> {
+    pub fn record(&self, recording: Recording<'_>) -> rusqlite::Result<i64> {
+        let Recording {
+            hash,
+            kind,
+            text,
+            html,
+            app,
+            app_path,
+            bytes,
+            now,
+        } = recording;
+
         self.connection.execute(
             r#"
-            INSERT INTO entries (hash, kind, text, first_seen, last_seen, app, bytes, app_path)
-            VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7)
+            INSERT INTO entries (hash, kind, text, first_seen, last_seen, app, bytes, app_path, html)
+            VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(hash) DO UPDATE SET
                 last_seen = ?4,
                 uses = uses + 1,
                 -- A later copy knows where it came from; an earlier one may
                 -- not have. Never overwrite a known source with nothing.
                 app = COALESCE(?5, app),
-                app_path = COALESCE(?7, app_path)
+                app_path = COALESCE(?7, app_path),
+                -- Same reasoning: the same text copied once from an editor
+                -- and once from a terminal should keep the formatted version
+                -- it had, rather than losing it to the plainer copy.
+                html = COALESCE(?8, html)
             "#,
-            params![hash, kind.as_str(), text, now, app, bytes, app_path],
+            params![hash, kind.as_str(), text, now, app, bytes, app_path, html],
         )?;
 
         self.connection
@@ -202,7 +243,7 @@ impl Store {
         let mut rows = if trimmed.is_empty() {
             let mut statement = self.connection.prepare(
                 r#"
-                SELECT id, kind, text, first_seen, last_seen, uses, pinned, app, bytes, app_path
+                SELECT id, kind, text, first_seen, last_seen, uses, pinned, app, bytes, app_path, html
                 FROM entries
                 WHERE (?1 IS NULL OR kind = ?1)
                 ORDER BY pinned DESC, last_seen DESC
@@ -216,7 +257,7 @@ impl Store {
         } else {
             let mut statement = self.connection.prepare(
                 r#"
-                SELECT e.id, e.kind, e.text, e.first_seen, e.last_seen, e.uses, e.pinned, e.app, e.bytes, e.app_path
+                SELECT e.id, e.kind, e.text, e.first_seen, e.last_seen, e.uses, e.pinned, e.app, e.bytes, e.app_path, e.html
                 FROM entries_fts f
                 JOIN entries e ON e.id = f.rowid
                 WHERE entries_fts MATCH ?1 AND (?2 IS NULL OR e.kind = ?2)
@@ -241,7 +282,7 @@ impl Store {
         self.connection
             .query_row(
                 r#"
-                SELECT id, kind, text, first_seen, last_seen, uses, pinned, app, bytes, app_path
+                SELECT id, kind, text, first_seen, last_seen, uses, pinned, app, bytes, app_path, html
                 FROM entries WHERE id = ?1
                 "#,
                 [id],
@@ -300,6 +341,20 @@ impl Store {
         )
     }
 
+    /// The formatted version of an entry, when it kept one.
+    ///
+    /// Asked for by id rather than carried on every row: markup is routinely
+    /// several times the size of the text it formats, and the list sends every
+    /// row to the window on every keystroke.
+    pub fn html(&self, id: i64) -> rusqlite::Result<Option<String>> {
+        self.connection
+            .query_row("SELECT html FROM entries WHERE id = ?1", [id], |row| {
+                row.get::<_, Option<String>>(0)
+            })
+            .optional()
+            .map(Option::flatten)
+    }
+
     /// Several entries joined into one piece of text.
     ///
     /// The order is the order of `ids`, which is the order they were picked
@@ -345,6 +400,7 @@ fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
         app: row.get(7)?,
         bytes: row.get(8)?,
         app_path: row.get(9)?,
+        rich: row.get::<_, Option<String>>(10)?.is_some(),
     })
 }
 
@@ -394,16 +450,97 @@ mod tests {
 
     fn add(store: &Store, text: &str, at: i64) -> i64 {
         store
-            .record(
+            .record(Recording {
+                hash: text,
+                kind: Kind::Text,
                 text,
-                Kind::Text,
-                text,
-                Some("Test"),
-                None,
-                text.len() as i64,
-                at,
-            )
+                html: None,
+                app: Some("Test"),
+                app_path: None,
+                bytes: text.len() as i64,
+                now: at,
+            })
             .expect("records")
+    }
+
+    fn add_rich(store: &Store, text: &str, html: Option<&str>, at: i64) -> i64 {
+        store
+            .record(Recording {
+                hash: text,
+                kind: Kind::Text,
+                text,
+                html,
+                app: Some("Word"),
+                app_path: None,
+                bytes: text.len() as i64,
+                now: at,
+            })
+            .expect("records")
+    }
+
+    #[test]
+    fn formatting_is_kept_beside_the_text_and_not_instead_of_it() {
+        // Both, always. The plain text is what search reads and what a
+        // preview shows; the markup is only ever an upgrade offered to an
+        // application that can take it.
+        let (_dir, store) = store();
+        let id = add_rich(&store, "hello world", Some("<b>hello world</b>"), NOW);
+
+        let entry = store.get(id).expect("reads").expect("exists");
+        assert_eq!(entry.text, "hello world", "the plain text is still there");
+        assert!(entry.rich, "and it says a formatted version exists");
+
+        assert_eq!(
+            store.html(id).expect("reads"),
+            Some("<b>hello world</b>".to_string())
+        );
+    }
+
+    #[test]
+    fn a_plainer_copy_of_the_same_text_does_not_lose_the_formatting() {
+        // The same sentence copied once from a document and once from a
+        // terminal is one entry. Letting the plainer copy win would quietly
+        // strip formatting that was there a moment ago.
+        let (_dir, store) = store();
+        let id = add_rich(&store, "shared", Some("<i>shared</i>"), NOW);
+        let again = add_rich(&store, "shared", None, NOW + 60);
+
+        assert_eq!(id, again, "the same text is the same entry");
+        assert_eq!(
+            store.html(id).expect("reads"),
+            Some("<i>shared</i>".to_string()),
+            "the formatting survived the plainer copy"
+        );
+        assert!(store.get(id).expect("reads").expect("exists").rich);
+    }
+
+    #[test]
+    fn an_entry_with_no_formatting_says_so_rather_than_pretending() {
+        let (_dir, store) = store();
+        let id = add_rich(&store, "just text", None, NOW);
+
+        assert!(!store.get(id).expect("reads").expect("exists").rich);
+        assert_eq!(store.html(id).expect("reads"), None);
+    }
+
+    #[test]
+    fn the_list_carries_a_flag_and_never_the_markup() {
+        // Markup is routinely several times the size of the text it formats,
+        // and every row of the list crosses to the window on every keystroke.
+        // Sending it there would undo the payload work the search already did.
+        let (_dir, store) = store();
+        let long = format!("<span style=\"{}\">x</span>", "a:b;".repeat(500));
+        add_rich(&store, "x", Some(&long), NOW);
+
+        let listed = store.search("", None, 10).expect("searches");
+        let json = serde_json::to_string(&listed).expect("serialises");
+
+        assert!(json.contains("\"rich\":true"));
+        assert!(
+            !json.contains("<span"),
+            "the markup reached the window: {} bytes",
+            json.len()
+        );
     }
 
     #[test]
@@ -427,18 +564,28 @@ mod tests {
     fn a_later_copy_never_forgets_where_an_earlier_one_came_from() {
         let (_dir, store) = store();
         store
-            .record(
-                "x",
-                Kind::Text,
-                "x",
-                Some("Slack"),
-                Some("C:/slack.exe"),
-                1,
-                NOW,
-            )
+            .record(Recording {
+                hash: "x",
+                kind: Kind::Text,
+                text: "x",
+                html: None,
+                app: Some("Slack"),
+                app_path: Some("C:/slack.exe"),
+                bytes: 1,
+                now: NOW,
+            })
             .expect("records");
         store
-            .record("x", Kind::Text, "x", None, None, 1, NOW + 1)
+            .record(Recording {
+                hash: "x",
+                kind: Kind::Text,
+                text: "x",
+                html: None,
+                app: None,
+                app_path: None,
+                bytes: 1,
+                now: NOW + 1,
+            })
             .expect("records");
 
         let entry = store.get(1).expect("reads").expect("exists");
@@ -528,10 +675,28 @@ mod tests {
     fn filtering_by_kind_narrows_both_listing_and_search() {
         let (_dir, store) = store();
         store
-            .record("a", Kind::Link, "https://example.com", None, None, 0, NOW)
+            .record(Recording {
+                hash: "a",
+                kind: Kind::Link,
+                text: "https://example.com",
+                html: None,
+                app: None,
+                app_path: None,
+                bytes: 0,
+                now: NOW,
+            })
             .expect("records");
         store
-            .record("b", Kind::Text, "example text", None, None, 0, NOW)
+            .record(Recording {
+                hash: "b",
+                kind: Kind::Text,
+                text: "example text",
+                html: None,
+                app: None,
+                app_path: None,
+                bytes: 0,
+                now: NOW,
+            })
             .expect("records");
 
         assert_eq!(
@@ -612,15 +777,16 @@ mod tests {
         let (_dir, store) = store();
         let long = "x".repeat(5_000_000);
         let id = store
-            .record(
-                "hash-of-long",
-                Kind::Text,
-                &long,
-                None,
-                None,
-                long.len() as i64,
-                NOW,
-            )
+            .record(Recording {
+                hash: "hash-of-long",
+                kind: Kind::Text,
+                text: &long,
+                html: None,
+                app: None,
+                app_path: None,
+                bytes: long.len() as i64,
+                now: NOW,
+            })
             .expect("records");
         assert_eq!(
             store.get(id).expect("reads").expect("exists").text.len(),

@@ -6,7 +6,7 @@
 //! given. See `build.rs`.
 
 use sill_lib::clipboard::kind::Kind;
-use sill_lib::clipboard::store::Store;
+use sill_lib::clipboard::store::{Recording, Store};
 
 fn store() -> (Store, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temp directory");
@@ -16,15 +16,16 @@ fn store() -> (Store, tempfile::TempDir) {
 
 fn add(store: &Store, text: &str, at: i64) -> i64 {
     store
-        .record(
-            &format!("hash-{text}"),
-            Kind::Text,
+        .record(Recording {
+            hash: &format!("hash-{text}"),
+            kind: Kind::Text,
             text,
-            Some("Test"),
-            None,
-            text.len() as i64,
-            at,
-        )
+            html: None,
+            app: Some("Test"),
+            app_path: None,
+            bytes: text.len() as i64,
+            now: at,
+        })
         .expect("records");
 
     store

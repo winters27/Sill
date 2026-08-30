@@ -84,8 +84,17 @@ pub async fn clipboard_paste(
     clipboard: State<'_, Clipboard>,
     id: i64,
     paste: bool,
+    // Put back only the text, dropping any formatting that was kept. This is
+    // the reason formatting is worth storing at all: without it, "paste as
+    // plain text" is not an option anybody can offer, because everything
+    // already is plain.
+    //
+    // The window sends `plainText`; Tauri matches it to this name.
+    plain_text: Option<bool>,
 ) -> Result<(), String> {
-    let (text, image) = {
+    let plain = plain_text.unwrap_or(false);
+
+    let (text, html, image) = {
         let store = clipboard.store();
         let entry = store
             .get(id)
@@ -96,8 +105,15 @@ pub async fn clipboard_paste(
         } else {
             None
         };
+        // Read only when it is going to be used. Markup is routinely several
+        // times the size of the text it formats.
+        let html = if plain || !entry.rich {
+            None
+        } else {
+            store.html(id).map_err(|e| e.to_string())?
+        };
         store.touch(id, now_seconds()).map_err(|e| e.to_string())?;
-        (entry.text, image)
+        (entry.text, html, image)
     };
 
     // The watcher would otherwise see Sill's own write and move the entry to
@@ -105,9 +121,17 @@ pub async fn clipboard_paste(
     clipboard.ignore_next();
 
     let mut board = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    match image {
-        Some(png) => write_image(&mut board, &png)?,
-        None => board.set_text(text).map_err(|e| e.to_string())?,
+    match (image, html) {
+        (Some(png), _) => write_image(&mut board, &png)?,
+        // Both formats in one write, and the plain text is the alternative
+        // rather than a second write: whichever the target understands, it
+        // takes, and a plain field still gets sensible text rather than
+        // markup as literal characters.
+        (None, Some(html)) => board
+            .set()
+            .html(html, Some(text))
+            .map_err(|e| e.to_string())?,
+        (None, None) => board.set_text(text).map_err(|e| e.to_string())?,
     }
 
     if !paste {
