@@ -10,9 +10,61 @@
     listSnippets,
     PLACEHOLDERS,
     saveSnippet,
+    exportSnippets,
+    importSnippets,
     type Snippet,
   } from "$lib/snippets";
   import type { Preferences } from "$lib/settings";
+
+  /**
+   * Writes them out, and says where they went.
+   *
+   * Closing the dialog without choosing answers nothing, which is somebody
+   * changing their mind rather than something failing.
+   */
+  async function sendOut() {
+    transfer = "";
+
+    try {
+      const where = await exportSnippets();
+      if (where) transfer = `Written to ${where}`;
+    } catch (err) {
+      transfer = `${err}`;
+    }
+  }
+
+  /**
+   * Reads them in, and says exactly what changed.
+   *
+   * Counted rather than summarised, because the two surprising outcomes both
+   * need naming: snippets skipped for being here already, and keywords left
+   * off because another snippet answers to them.
+   */
+  async function bringIn() {
+    transfer = "";
+
+    try {
+      const done = await importSnippets();
+      if (!done) return;
+
+      const said: string[] = [];
+      if (done.added) said.push(`${done.added} added`);
+      if (done.updated) said.push(`${done.updated} updated`);
+      if (done.skipped) said.push(`${done.skipped} already here`);
+      if (done.keywordsTaken) {
+        said.push(
+          `${done.keywordsTaken} came without ${
+            done.keywordsTaken === 1 ? "its keyword" : "their keywords"
+          }, which ${done.keywordsTaken === 1 ? "was" : "were"} already in use`,
+        );
+      }
+
+      transfer = said.length ? `${said.join(", ")}.` : "Nothing to bring in.";
+      snippets = await listSnippets();
+    } catch (err) {
+      transfer = `${err}`;
+    }
+  }
 
   interface Props {
     /** Not `$bindable`: nothing here reassigns it, only writes its fields. */
@@ -23,6 +75,8 @@
   let { prefs, commit }: Props = $props();
 
   let snippets = $state<Snippet[]>([]);
+  /** What the last export or import did, said in words rather than counted. */
+  let transfer = $state("");
   let editing = $state<Snippet | null>(null);
   let error = $state("");
   let confirmingDelete = $state("");
@@ -203,6 +257,24 @@
   <Section label="Add" bare>
     <Button label="New snippet" onclick={() => edit(emptySnippet())} />
   </Section>
+
+  <Section
+    label="Moving them around"
+    description="A file of snippets, so they can be backed up, carried to another machine, or brought over from another tool. Importing only ever adds: nothing already here is removed."
+  >
+    <Row title="Snippets as a file">
+      {#snippet control()}
+        <div class="row-actions">
+          <Button label="Export" onclick={sendOut} />
+          <Button label="Import" onclick={bringIn} />
+        </div>
+      {/snippet}
+    </Row>
+
+    {#if transfer}
+      <p class="transfer">{transfer}</p>
+    {/if}
+  </Section>
 {/if}
 
 <style>
@@ -354,6 +426,13 @@
   .no-keyword {
     font-size: var(--text-meta);
     color: var(--text-faint);
+  }
+
+  .transfer {
+    margin: 0;
+    padding: 2px 0 6px;
+    font-size: 12px;
+    color: var(--text-dim);
   }
 
   .empty {

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 /// One snippet.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Snippet {
     /// Stable across renames, because the frecency and the editor both refer

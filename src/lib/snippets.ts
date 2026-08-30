@@ -51,6 +51,33 @@ export const PLACEHOLDERS: { token: string; means: string }[] = [
   { token: "{uuid}", means: "A fresh unique id" },
 ];
 
+/** What an import did, so it can be said rather than guessed at. */
+export interface ImportSummary {
+  added: number;
+  updated: number;
+  skipped: number;
+  keywordsTaken: number;
+}
+
+/**
+ * Writes every snippet to a file.
+ *
+ * Answers with where it went, or nothing if the dialog was closed without
+ * choosing, which is an ordinary thing to do and needs no message.
+ */
+export function exportSnippets(): Promise<string | null> {
+  return invoke<string | null>("export_snippets");
+}
+
+/**
+ * Reads snippets from a file and folds them into the ones already here.
+ *
+ * Additive: whatever the file holds, nothing already here is removed.
+ */
+export function importSnippets(): Promise<ImportSummary | null> {
+  return invoke<ImportSummary | null>("import_snippets");
+}
+
 export function listSnippets(): Promise<Snippet[]> {
   return invoke<Snippet[]>("list_snippets");
 }

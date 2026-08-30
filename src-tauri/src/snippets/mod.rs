@@ -5,3 +5,4 @@ pub mod commands;
 pub mod expander;
 pub mod placeholder;
 pub mod store;
+pub mod transfer;

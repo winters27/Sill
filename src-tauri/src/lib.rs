@@ -971,6 +971,8 @@ pub fn run() {
             snippets::commands::list_snippets,
             snippets::commands::save_snippet,
             snippets::commands::delete_snippet,
+            snippets::commands::export_snippets,
+            snippets::commands::import_snippets,
             snippets::commands::expand_snippet,
             snippets::commands::type_snippet,
             commands::system::dismiss
