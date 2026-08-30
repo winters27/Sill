@@ -33,6 +33,139 @@ pub struct Context {
     /// `{query}` in it is the reason this exists: it is the difference
     /// between a bookmark and a search.
     pub query: String,
+    /// Whatever was selected in the window the snippet is expanding into.
+    ///
+    /// **Only filled when the template asks for it.** Reading a selection
+    /// means sending a copy chord and taking the clipboard over for a moment,
+    /// which is far too rude to do on the chance a snippet might want it.
+    pub selection: String,
+    /// The instant this expansion happened.
+    pub clock: Clock,
+}
+
+/// A broken-down local time, for the placeholders that format one.
+///
+/// Carried rather than pre-formatted because `{date:dddd}` and `{date}` want
+/// different strings out of the same instant, and formatting every possible
+/// shape in advance to throw all but one away is work for nothing.
+///
+/// Hand-held rather than a date crate's type, for the reason the rest of this
+/// file already gives: Windows hands back a broken-down local time directly,
+/// so the only work left is arranging the numbers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Clock {
+    pub year: u16,
+    /// 1 to 12.
+    pub month: u16,
+    /// 1 to 31.
+    pub day: u16,
+    /// 0 to 23.
+    pub hour: u16,
+    pub minute: u16,
+    pub second: u16,
+    /// 0 is Sunday, the way Windows numbers them.
+    pub weekday: u16,
+}
+
+const MONTHS: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June", "July", "August",
+    "September", "October", "November", "December",
+];
+
+const DAYS: [&str; 7] = [
+    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+];
+
+impl Clock {
+    /// Writes this instant the way the pattern asks for.
+    ///
+    /// The token vocabulary people already know from every other tool that
+    /// does this: `YYYY-MM-DD`, `dddd`, `h:mm A`. Anything that is not a token
+    /// is copied through, so separators, words and punctuation all survive.
+    ///
+    /// Longest token first, always. Checking `M` before `MMMM` would turn a
+    /// month name into four copies of its number, which is the classic way to
+    /// get this wrong.
+    pub fn format(&self, pattern: &str) -> String {
+        const TOKENS: [&str; 18] = [
+            "YYYY", "YY", "MMMM", "MMM", "MM", "M", "DD", "D", "dddd", "ddd",
+            "HH", "H", "hh", "h", "mm", "m", "ss", "s",
+        ];
+
+        let mut out = String::with_capacity(pattern.len() + 8);
+        let mut rest = pattern;
+
+        'outer: while !rest.is_empty() {
+            for token in TOKENS {
+                if let Some(after) = rest.strip_prefix(token) {
+                    out.push_str(&self.token(token));
+                    rest = after;
+                    continue 'outer;
+                }
+            }
+
+            // AM and PM are single letters and would swallow an ordinary A in
+            // a word, so they are only read where a pattern plausibly means
+            // them: on their own or after a space or a colon.
+            if let Some(after) = rest.strip_prefix('A') {
+                out.push_str(if self.hour < 12 { "AM" } else { "PM" });
+                rest = after;
+                continue;
+            }
+            if let Some(after) = rest.strip_prefix('a') {
+                out.push_str(if self.hour < 12 { "am" } else { "pm" });
+                rest = after;
+                continue;
+            }
+
+            let mut chars = rest.chars();
+            if let Some(next) = chars.next() {
+                out.push(next);
+            }
+            rest = chars.as_str();
+        }
+
+        out
+    }
+
+    fn token(&self, token: &str) -> String {
+        // Twelve-hour clocks call midnight and noon twelve, not zero.
+        let twelve = match self.hour % 12 {
+            0 => 12,
+            other => other,
+        };
+
+        match token {
+            "YYYY" => format!("{:04}", self.year),
+            "YY" => format!("{:02}", self.year % 100),
+            "MMMM" => MONTHS
+                .get(self.month.saturating_sub(1) as usize)
+                .unwrap_or(&"")
+                .to_string(),
+            "MMM" => MONTHS
+                .get(self.month.saturating_sub(1) as usize)
+                .map(|name| name.chars().take(3).collect())
+                .unwrap_or_default(),
+            "MM" => format!("{:02}", self.month),
+            "M" => self.month.to_string(),
+            "DD" => format!("{:02}", self.day),
+            "D" => self.day.to_string(),
+            "dddd" => DAYS.get(self.weekday as usize).unwrap_or(&"").to_string(),
+            "ddd" => DAYS
+                .get(self.weekday as usize)
+                .map(|name| name.chars().take(3).collect())
+                .unwrap_or_default(),
+            "HH" => format!("{:02}", self.hour),
+            "H" => self.hour.to_string(),
+            "hh" => format!("{twelve:02}"),
+            "h" => twelve.to_string(),
+            "mm" => format!("{:02}", self.minute),
+            "m" => self.minute.to_string(),
+            "ss" => format!("{:02}", self.second),
+            "s" => self.second.to_string(),
+            other => other.to_string(),
+        }
+    }
 }
 
 /// An expanded snippet, and where to leave the caret.
@@ -81,7 +214,16 @@ pub fn expand_with(
         let name = &after[..close];
         rest = &after[close + 1..];
 
-        match name.trim().to_ascii_lowercase().as_str() {
+        // A placeholder may carry an argument after the first colon, and only
+        // the first: `{date:HH:mm}` is a date with a pattern containing a
+        // colon, not a placeholder called `date:HH`.
+        let trimmed = name.trim();
+        let (head, argument) = match trimmed.split_once(':') {
+            Some((head, argument)) => (head.trim(), Some(argument)),
+            None => (trimmed, None),
+        };
+
+        match head.to_ascii_lowercase().as_str() {
             CURSOR => {
                 // Only the first one counts. Two carets is not a thing a text
                 // field can do, and silently honouring the last would move the
@@ -91,10 +233,26 @@ pub fn expand_with(
                 }
             }
             "clipboard" => out.push_str(&escape(&context.clipboard)),
-            "date" => out.push_str(&escape(&context.date)),
-            "time" => out.push_str(&escape(&context.time)),
+            "date" => match argument {
+                Some(pattern) => out.push_str(&escape(&context.clock.format(pattern))),
+                None => out.push_str(&escape(&context.date)),
+            },
+            "time" => match argument {
+                Some(pattern) => out.push_str(&escape(&context.clock.format(pattern))),
+                None => out.push_str(&escape(&context.time)),
+            },
             "uuid" => out.push_str(&escape(&context.uuid)),
             "query" => out.push_str(&escape(&context.query)),
+            "selection" => out.push_str(&escape(&context.selection)),
+            // An environment variable, by name. A variable that is not set
+            // produces nothing rather than the placeholder: it was addressed
+            // correctly and the answer is that there is nothing there.
+            "env" => {
+                if let Some(wanted) = argument {
+                    let value = std::env::var(wanted.trim()).unwrap_or_default();
+                    out.push_str(&escape(&value));
+                }
+            }
             _ => {
                 // Unknown: put it back verbatim.
                 out.push('{');
@@ -117,6 +275,15 @@ pub fn needs_clipboard(template: &str) -> bool {
     mentions(template, "clipboard")
 }
 
+/// Whether `template` asks for the selection.
+///
+/// Asked before expanding, because filling it in costs a copy chord and the
+/// clipboard. Nothing else in the context is expensive enough to be worth a
+/// question; this one is worth two.
+pub fn needs_selection(template: &str) -> bool {
+    mentions(template, "selection")
+}
+
 /// Whether `template` uses the named placeholder.
 ///
 /// Matched the way `expand` matches, trimmed and case-insensitively, so
@@ -128,7 +295,13 @@ pub fn mentions(template: &str, name: &str) -> bool {
         let Some(close) = after.find('}') else {
             return false;
         };
-        if after[..close].trim().eq_ignore_ascii_case(name) {
+        // Compared against the part before the first colon, so `{date:YYYY}`
+        // is reported as a mention of `date`. Without this a caller asking
+        // "does this need the selection" would be told no by `{selection:x}`.
+        let whole = after[..close].trim();
+        let head = whole.split_once(':').map_or(whole, |(head, _)| head.trim());
+
+        if head.eq_ignore_ascii_case(name) {
             return true;
         }
         rest = &after[close + 1..];
@@ -147,6 +320,7 @@ mod tests {
             time: "14:32".into(),
             uuid: "0189a1f2".into(),
             query: "rust traits".into(),
+            ..Context::default()
         }
     }
 
@@ -242,5 +416,174 @@ mod tests {
         assert!(needs_clipboard("{CLIPBOARD}"));
         assert!(!needs_clipboard("{date} only"));
         assert!(!needs_clipboard("the word clipboard on its own"));
+    }
+
+    // ------------------------------------------------------ formatting a time
+
+    fn moment() -> Clock {
+        // Sunday 3 May 2026, 09:07:05. Deliberately awkward: a single-digit
+        // month, day, hour, minute and second all at once, so anything that
+        // forgets to pad shows up, and a Sunday because it is weekday zero.
+        Clock {
+            year: 2026,
+            month: 5,
+            day: 3,
+            hour: 9,
+            minute: 7,
+            second: 5,
+            weekday: 0,
+        }
+    }
+
+    #[test]
+    fn a_pattern_writes_the_time_the_way_it_asks() {
+        let at = moment();
+
+        assert_eq!(at.format("YYYY-MM-DD"), "2026-05-03");
+        assert_eq!(at.format("D/M/YY"), "3/5/26");
+        assert_eq!(at.format("HH:mm:ss"), "09:07:05");
+        assert_eq!(at.format("H:m:s"), "9:7:5");
+    }
+
+    #[test]
+    fn the_longest_token_is_read_first() {
+        // The classic way to get this wrong. Reading `M` before `MMMM` turns a
+        // month name into four copies of its number, and `D` before `dddd`
+        // does the same to a weekday.
+        let at = moment();
+
+        assert_eq!(at.format("MMMM"), "May");
+        assert_eq!(at.format("MMM"), "May");
+        assert_eq!(at.format("dddd"), "Sunday");
+        assert_eq!(at.format("ddd"), "Sun");
+        assert_eq!(at.format("MMMM D, YYYY"), "May 3, 2026");
+        assert_eq!(at.format("dddd, D MMMM YYYY"), "Sunday, 3 May 2026");
+    }
+
+    #[test]
+    fn a_twelve_hour_clock_calls_midnight_and_noon_twelve() {
+        // Not zero, which is what the arithmetic gives if nobody thinks about
+        // it, and which reads as a broken clock.
+        let midnight = Clock { hour: 0, ..moment() };
+        let noon = Clock { hour: 12, ..moment() };
+        let evening = Clock { hour: 21, ..moment() };
+
+        assert_eq!(midnight.format("h:mm A"), "12:07 AM");
+        assert_eq!(noon.format("h:mm A"), "12:07 PM");
+        assert_eq!(evening.format("h:mm a"), "9:07 pm");
+        assert_eq!(evening.format("hh:mm"), "09:07");
+    }
+
+    #[test]
+    fn anything_that_is_not_a_token_is_left_alone() {
+        let at = moment();
+
+        assert_eq!(at.format("YYYY_MM_DD"), "2026_05_03");
+        assert_eq!(at.format("[YYYY]"), "[2026]");
+        assert_eq!(at.format(""), "");
+        assert_eq!(at.format("---"), "---");
+    }
+
+    // -------------------------------------------------- the new placeholders
+
+    #[test]
+    fn a_date_placeholder_takes_a_pattern() {
+        let mut ctx = context();
+        ctx.clock = moment();
+
+        assert_eq!(
+            expand("on {date:dddd}", &ctx).text,
+            "on Sunday"
+        );
+        assert_eq!(
+            expand("{date:MMMM D, YYYY}", &ctx).text,
+            "May 3, 2026"
+        );
+    }
+
+    #[test]
+    fn a_pattern_may_contain_the_colon_that_separates_it() {
+        // `{time:HH:mm}` is a time with a pattern containing a colon, not a
+        // placeholder named `time:HH`. Only the first colon separates.
+        let mut ctx = context();
+        ctx.clock = moment();
+
+        assert_eq!(expand("{time:HH:mm:ss}", &ctx).text, "09:07:05");
+    }
+
+    #[test]
+    fn a_date_with_no_pattern_is_what_it_always_was() {
+        // The placeholder people already have in their snippets. Adding an
+        // optional argument must not change what happens without one.
+        assert_eq!(expand("{date}", &context()).text, "2026-08-29");
+        assert_eq!(expand("{time}", &context()).text, "14:32");
+    }
+
+    #[test]
+    fn the_selection_is_substituted_when_it_was_asked_for() {
+        let mut ctx = context();
+        ctx.selection = "what was highlighted".into();
+
+        assert_eq!(
+            expand("quoting: {selection}", &ctx).text,
+            "quoting: what was highlighted"
+        );
+    }
+
+    #[test]
+    fn an_environment_variable_is_read_by_name() {
+        // Set here rather than assumed, because a test that depends on the
+        // machine having a particular variable is a test that fails on
+        // somebody else's.
+        std::env::set_var("SILL_PLACEHOLDER_TEST", "from the environment");
+
+        assert_eq!(
+            expand("{env:SILL_PLACEHOLDER_TEST}", &context()).text,
+            "from the environment"
+        );
+
+        std::env::remove_var("SILL_PLACEHOLDER_TEST");
+    }
+
+    #[test]
+    fn an_unset_variable_produces_nothing_rather_than_the_placeholder() {
+        // It was addressed correctly and the answer is that there is nothing
+        // there. Leaving `{env:X}` in the text would put the request itself
+        // into whatever the person was writing.
+        std::env::remove_var("SILL_NO_SUCH_VARIABLE");
+
+        assert_eq!(
+            expand("[{env:SILL_NO_SUCH_VARIABLE}]", &context()).text,
+            "[]"
+        );
+    }
+
+    #[test]
+    fn asking_whether_a_template_needs_the_selection_sees_past_an_argument() {
+        // The gate that stops every expansion sending a copy chord. A caller
+        // told "no" by a template that does mention it would expand a snippet
+        // with an empty selection in it.
+        assert!(needs_selection("quote: {selection}"));
+        assert!(needs_selection("{ SELECTION }"));
+        assert!(!needs_selection("{clipboard} only"));
+        assert!(!needs_selection("the word selection on its own"));
+
+        // And the argument form does not hide a mention from the gate.
+        assert!(mentions("{date:YYYY}", "date"));
+        assert!(mentions("{env:HOME}", "env"));
+    }
+
+    #[test]
+    fn a_substituted_value_is_escaped_and_the_text_around_it_is_not() {
+        // The rule the whole module turns on, checked for the new arms too.
+        let mut ctx = context();
+        ctx.selection = "a b".into();
+        ctx.clock = moment();
+
+        let out = expand_with("x=/{selection}/ {date:YYYY}", &ctx, &|value| {
+            value.replace(' ', "+")
+        });
+
+        assert_eq!(out.text, "x=/a+b/ 2026");
     }
 }

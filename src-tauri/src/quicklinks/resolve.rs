@@ -71,6 +71,7 @@ mod tests {
             time: "14:32".into(),
             uuid: "0189a1f2".into(),
             query: query.into(),
+            ..Context::default()
         }
     }
 

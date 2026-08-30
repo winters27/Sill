@@ -132,7 +132,20 @@ pub fn context(app: &AppHandle, template: &str) -> Context {
         String::new()
     };
 
-    let (date, time) = local_date_and_time();
+    let clock = local_clock();
+    let (date, time) = (
+        clock.format("YYYY-MM-DD"),
+        clock.format("HH:mm"),
+    );
+
+    // Asked for only when the template says so. Reading a selection sends a
+    // copy chord and takes the clipboard over for a moment, which is far too
+    // rude to do on the chance that a snippet might have wanted it.
+    let selection = if placeholder::needs_selection(template) {
+        crate::selection::capture(app).unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     Context {
         clipboard,
@@ -142,29 +155,37 @@ pub fn context(app: &AppHandle, template: &str) -> Context {
         // A snippet expands where the caret already is, so there is nowhere
         // to have asked for one. Quicklinks are the caller that fills this.
         query: String::new(),
+        selection,
+        clock,
     }
 }
 
-/// `YYYY-MM-DD` and `HH:MM` in local time.
+/// The local time, broken down.
 ///
-/// Hand-computed from the system clock rather than through a date crate:
-/// Windows hands back a broken-down local time directly, so the only work
-/// left is formatting it.
+/// Read from the system rather than through a date crate: Windows hands back a
+/// broken-down local time directly, so the only work left is arranging the
+/// numbers, and `Clock::format` is where that happens.
 #[cfg(windows)]
-fn local_date_and_time() -> (String, String) {
+fn local_clock() -> placeholder::Clock {
     use windows::Win32::System::SystemInformation::GetLocalTime;
 
     // SAFETY: fills an owned struct and takes nothing.
     let now = unsafe { GetLocalTime() };
-    (
-        format!("{:04}-{:02}-{:02}", now.wYear, now.wMonth, now.wDay),
-        format!("{:02}:{:02}", now.wHour, now.wMinute),
-    )
+
+    placeholder::Clock {
+        year: now.wYear,
+        month: now.wMonth,
+        day: now.wDay,
+        hour: now.wHour,
+        minute: now.wMinute,
+        second: now.wSecond,
+        weekday: now.wDayOfWeek,
+    }
 }
 
 #[cfg(not(windows))]
-fn local_date_and_time() -> (String, String) {
-    (String::new(), String::new())
+fn local_clock() -> placeholder::Clock {
+    placeholder::Clock::default()
 }
 
 /// A short unique id, for a snippet and for `{uuid}`.
@@ -208,10 +229,27 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn the_date_and_time_are_the_shapes_the_placeholders_promise() {
-        let (date, time) = local_date_and_time();
+        let now = local_clock();
+        let date = now.format("YYYY-MM-DD");
+        let time = now.format("HH:mm");
+
         assert_eq!(date.len(), 10, "YYYY-MM-DD, got {date}");
         assert_eq!(date.matches('-').count(), 2);
         assert_eq!(time.len(), 5, "HH:MM, got {time}");
         assert_eq!(time.matches(':').count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_clock_is_read_from_the_machine_rather_than_invented() {
+        // A default `Clock` formats as year zero, which would look like a
+        // working date placeholder while being nothing of the kind.
+        let now = local_clock();
+
+        assert!(now.year >= 2024, "year came back as {}", now.year);
+        assert!((1..=12).contains(&now.month), "month {}", now.month);
+        assert!((1..=31).contains(&now.day), "day {}", now.day);
+        assert!(now.hour < 24 && now.minute < 60 && now.second < 60);
+        assert!(now.weekday < 7, "weekday {}", now.weekday);
     }
 }

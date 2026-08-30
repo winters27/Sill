@@ -35,8 +35,19 @@ export interface Expansion {
 export const PLACEHOLDERS: { token: string; means: string }[] = [
   { token: "{cursor}", means: "Where the caret ends up" },
   { token: "{clipboard}", means: "Whatever is on the clipboard" },
-  { token: "{date}", means: "Today, as 2026-08-29" },
+  { token: "{selection}", means: "Whatever is selected where you are typing" },
+  { token: "{date}", means: "Today, as 2026-08-30" },
   { token: "{time}", means: "Now, as 14:32" },
+  {
+    token: "{date:MMMM D, YYYY}",
+    means:
+      "Today, written your way. YYYY YY MMMM MMM MM M for the year and month, DD D for the day, dddd ddd for the weekday",
+  },
+  {
+    token: "{time:h:mm A}",
+    means: "Now, written your way. HH H hh h mm m ss s, and A or a for AM and PM",
+  },
+  { token: "{env:NAME}", means: "An environment variable, empty if it is not set" },
   { token: "{uuid}", means: "A fresh unique id" },
 ];
 
