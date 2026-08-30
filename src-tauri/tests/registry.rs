@@ -2246,3 +2246,60 @@ fn initials_only_count_where_words_actually_begin() {
     let class = match_class("gc", &corpus[0]).expect("still matches somehow");
     assert_ne!(class, MatchClass::TitleWordStarts, "read as initials");
 }
+
+// ----------------------------------------------------------- system switches
+
+#[test]
+fn the_system_switches_are_reachable_by_the_words_people_use() {
+    // Nobody types "toggle mute". They type "mute", or "quiet", or "silence",
+    // and a switch nobody can find is a switch that does not exist.
+    let corpus = registry::builtins();
+
+    for (typed, wanted) in [
+        ("mute", "sill:system.mute"),
+        ("quiet", "sill:system.mute"),
+        ("silence", "sill:system.mute"),
+        ("volume", "sill:system.volume.up"),
+        ("louder", "sill:system.volume.up"),
+        ("quieter", "sill:system.volume.down"),
+        ("dark", "sill:system.theme"),
+        ("dark mode", "sill:system.theme"),
+        ("night", "sill:system.theme"),
+        ("lock", "sill:system.lock"),
+        ("afk", "sill:system.lock"),
+    ] {
+        let found = ids(&search(&corpus, typed, &Frecency::default(), NOW, 50));
+
+        assert!(
+            found.iter().any(|id| id == wanted),
+            "{typed:?} does not reach {wanted}: {:?}",
+            found.iter().take(5).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn a_system_switch_says_what_it_does_rather_than_what_the_machine_is_doing() {
+    // Titles that named the state would need the audio endpoint queried to
+    // know which word to use, and the index is built at startup and searched
+    // on every keystroke. Neither is a place for a COM round trip.
+    let corpus = registry::builtins();
+    let switches: Vec<&CommandRecord> = corpus
+        .iter()
+        .filter(|row| row.id.starts_with("sill:system."))
+        .collect();
+
+    assert!(switches.len() >= 7, "only {} switches", switches.len());
+
+    for switch in switches {
+        assert!(!switch.title.is_empty(), "{} has no title", switch.id);
+        assert!(!switch.subtitle.is_empty(), "{} says nothing", switch.id);
+        // "Unmute" and "Switch to Light Mode" both describe a state.
+        assert!(
+            !switch.title.starts_with("Unmute") && !switch.title.contains("Switch to"),
+            "{} names a state rather than an action: {:?}",
+            switch.id,
+            switch.title
+        );
+    }
+}

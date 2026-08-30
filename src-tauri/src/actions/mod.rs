@@ -310,10 +310,59 @@ impl Action for RunBuiltin {
                 crate::dismiss_main(app);
                 return Ok(outcome);
             }
+            // The switches. Each says what it did rather than what it was
+            // asked to do, because "Volume 60%" is the useful sentence and
+            // "Turned the volume up" is not.
+            //
+            // Dismissed first, all of them. Nobody flips a switch and then
+            // wants to look at the launcher, and one that stayed open would
+            // have to be closed by hand every time.
+            system if system.starts_with("system.") => {
+                let said = run_system(system)?;
+                crate::dismiss_main(app);
+                return Ok(Outcome::done(said));
+            }
             other => return Err(format!("unknown Sill command: {other}")),
         }
 
         Ok(Outcome::done(format!("Opened {}", object.title)))
+    }
+}
+
+/// Flips one system switch, and says what the machine is now doing.
+///
+/// A toggle reads the current state and inverts it rather than being told,
+/// because the row was drawn a moment ago and the answer could have changed
+/// since. Being told would let a stale row turn the sound off twice.
+fn run_system(id: &str) -> Result<String, String> {
+    use crate::system;
+
+    match id {
+        "system.volume.up" => Ok(format!("Volume {}%", system::nudge_volume(true)?)),
+        "system.volume.down" => Ok(format!("Volume {}%", system::nudge_volume(false)?)),
+        "system.volume.half" => Ok(format!("Volume {}%", system::set_volume(50)?)),
+        "system.volume.max" => Ok(format!("Volume {}%", system::set_volume(100)?)),
+
+        "system.mute" => {
+            let now = system::muted().unwrap_or(false);
+            let set = system::set_muted(!now)?;
+
+            Ok(if set { "Sound off".into() } else { "Sound on".into() })
+        }
+
+        "system.theme" => {
+            let now = system::dark().unwrap_or(false);
+            let set = system::set_dark(!now)?;
+
+            Ok(if set { "Dark mode".into() } else { "Light mode".into() })
+        }
+
+        "system.lock" => {
+            system::lock()?;
+            Ok("Locked".into())
+        }
+
+        other => Err(format!("unknown system command: {other}")),
     }
 }
 

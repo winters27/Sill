@@ -28,6 +28,7 @@ pub mod settings_catalog;
 pub mod settings_index;
 pub mod snippets;
 pub mod state;
+pub mod system;
 pub mod summon;
 pub mod synthetic;
 pub mod text;

@@ -265,7 +265,7 @@ pub fn cache_path(data_dir: &Path) -> PathBuf {
 /// list rather than behind a shortcut: a setting nobody can find is a setting
 /// nobody has.
 pub fn builtins() -> Vec<CommandRecord> {
-    vec![
+    let mut rows = vec![
         builtin(
             "settings",
             "general",
@@ -350,6 +350,83 @@ pub fn builtins() -> Vec<CommandRecord> {
             "Dictation Vocabulary",
             "Words and names dictation should always get right",
             &["voice", "speech", "terms", "jargon", "names"],
+        ),
+    ];
+
+    // Folded in rather than kept apart, so a system switch ranks, takes an
+    // alias, takes a hotkey and can be hidden exactly like every other row.
+    rows.extend(system_commands());
+    rows
+}
+
+/// The system switches, as rows.
+///
+/// Titles name the action rather than the state, so nothing here has to ask
+/// the machine what it is currently doing. A row reading "Unmute" would need
+/// the audio endpoint queried to know whether to say it, and the index is
+/// built at startup and searched on every keystroke: neither is a place to put
+/// a COM round trip for a word.
+///
+/// What actually happened is said afterwards instead. "Sound off" once it is
+/// off is better than "Unmute" beforehand, because it is a fact rather than a
+/// prediction, and it is right even when something else changed it in between.
+///
+/// Keywords carry the words people reach for. Somebody wanting silence types
+/// "mute" or "quiet", somebody going away types "lock", and neither should
+/// have to learn what Sill decided to call it.
+fn system_commands() -> Vec<CommandRecord> {
+    vec![
+        builtin(
+            "system.volume.up",
+            // The gear, which is where Windows itself keeps these. There is no
+            // art of its own and inventing a panel that settings does not have
+            // would be a lie the icon has to keep telling.
+            "general",
+            "Volume Up",
+            "Ten percent louder",
+            &["louder", "sound", "audio", "increase"],
+        ),
+        builtin(
+            "system.volume.down",
+            "general",
+            "Volume Down",
+            "Ten percent quieter",
+            &["quieter", "sound", "audio", "decrease", "lower"],
+        ),
+        builtin(
+            "system.volume.half",
+            "general",
+            "Volume 50%",
+            "Sets the volume to half",
+            &["half", "sound", "audio"],
+        ),
+        builtin(
+            "system.volume.max",
+            "general",
+            "Volume 100%",
+            "Sets the volume to full",
+            &["full", "max", "loud", "sound", "audio"],
+        ),
+        builtin(
+            "system.mute",
+            "general",
+            "Toggle Mute",
+            "Silences the sound, or brings it back",
+            &["mute", "unmute", "silence", "quiet", "sound", "audio"],
+        ),
+        builtin(
+            "system.theme",
+            "general",
+            "Toggle Dark Mode",
+            "Switches Windows between light and dark",
+            &["dark", "light", "theme", "appearance", "night", "mode"],
+        ),
+        builtin(
+            "system.lock",
+            "general",
+            "Lock Screen",
+            "Locks this machine straight away",
+            &["lock", "away", "screen", "afk"],
         ),
     ]
 }
