@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { RankedCommand } from "$lib/exthost/commands";
   import { LISTBOX, optionId } from "$lib/results";
-  import { groupOf, linesOf, offsetsOf, windowOf, type Line } from "$lib/list";
+  import { groupOf, linesOf, scrollFor, type Line } from "$lib/list";
   import LaunchIcon from "./LaunchIcon.svelte";
   import SettingsIcon, { type IconName } from "./SettingsIcon.svelte";
 
@@ -46,122 +46,156 @@
    * and renders blank space where rows should be.
    *
    * These are only what is used before the first measurement lands, but they
-   * still track `--row-height` and `.sill-group`: a wrong fallback paints
-   * blank space on the very first frame, which is the frame somebody sees.
+   * still track `--row-height` and `.sill-group`.
+   *
+   * They no longer decide which rows are drawn, because every row is. What
+   * they still do is tell the fade how deep into the chin each row has sunk,
+   * where being a pixel or two out means a slightly wrong blur rather than a
+   * screen of nothing.
    */
   const FALLBACK_ROW = 40;
   const FALLBACK_HEADER = 30;
-  /** Lines drawn beyond the viewport, so scrolling never flashes empty. */
-  const OVERSCAN = 8;
 
-  let viewport = $state<HTMLDivElement | null>(null);
   let scrollTop = $state(0);
   let height = $state(600);
   let rowHeight = $state(FALLBACK_ROW);
   let headerHeight = $state(FALLBACK_HEADER);
+  /** The list's own bottom padding, which the chin sits over. */
+  let inset = $state(0);
 
   /**
-   * The list as drawn: group labels interleaved with their rows.
+   * Clearance between a row and the edge it is nearest.
    *
-   * Groups are ordered by their best-scoring member, not alphabetically, so
-   * the ranker still decides what you see first. Grouping that fought the
-   * ranking would put the answer below a heading nobody was looking at.
+   * A row parked exactly against the edge reads as half cut off, and arrowing
+   * into it feels like the list stopped rather than moved.
    */
+  const EDGE_GAP = 8;
+
+  let viewport = $state<HTMLDivElement | null>(null);
+
   /**
-   * The list as drawn: group labels interleaved with their rows.
+   * Every line is drawn.
    *
-   * The arithmetic lives in `$lib/list` so it can be tested. A list that
-   * renders a screen of nothing is arithmetic, not markup.
+   * There used to be a window over them, with spacers standing in for what was
+   * above and below, sized from an assumed row height. It was written when a
+   * search could return two thousand rows; it returns at most a hundred and
+   * twenty now, which a browser does not notice.
+   *
+   * It cost two screens of blank space, both times because the assumed heights
+   * stopped matching what was actually laid out, and both times the difference
+   * showed up as rows that existed but were not drawn. Nothing here measures
+   * anything any more: the rows are simply all there.
    */
   const lines = $derived(linesOf(commands));
 
-  const offsets = $derived(offsetsOf(lines, rowHeight, headerHeight));
-  const total = $derived(offsets[lines.length] ?? 0);
-
-  /*
-   * Only the visible slice goes in the DOM.
-   *
-   * The index holds well over a thousand entries and rendering every row makes
-   * each keystroke re-create the lot. Two spacers stand in for what is above
-   * and below, so the scrollbar still describes the whole list.
-   */
-  const shown = $derived(windowOf(offsets, lines.length, scrollTop, height, OVERSCAN));
-  const first = $derived(shown.first);
-  const last = $derived(shown.last);
-
-  const slice = $derived(lines.slice(first, last));
-
-
   /**
-   * Keeps the selected row on screen.
+   * Where each line sits, for the fade and nothing else.
    *
-   * Sets scrollTop directly rather than calling `scrollIntoView`, because a
-   * row outside the window is not in the DOM to scroll to.
+   * This used to decide which rows existed in the DOM. Now it only decides how
+   * blurred each one is on its way into the chin, which is a much smaller
+   * thing to be wrong about.
    */
+  const offsets = $derived.by(() => {
+    const out = new Array<number>(lines.length + 1);
+    let y = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      out[i] = y;
+      y += lines[i].kind === "header" ? headerHeight : rowHeight;
+    }
+
+    out[lines.length] = y;
+    return out;
+  });
+
   /** A new question is answered from the top of the list. */
   $effect(() => {
     // Read so the effect runs when it changes, and only then.
     asking;
 
-    if (viewport) {
-      viewport.scrollTop = 0;
-      scrollTop = 0;
-    }
-  });
-
-  $effect(() => {
-    const target = selected;
-    if (!viewport) return;
-
-    const line = lines.findIndex((entry) => entry.kind === "row" && entry.index === target);
-    if (line === -1) return;
-
-    // The group label above the first row of a group scrolls in with it, or
-    // the selection appears to sit under a heading that is cut off.
-    const leadIn = lines[line - 1]?.kind === "header" ? headerHeight : 0;
-    const top = offsets[line] - leadIn;
-    const bottom = offsets[line + 1];
-
-    // Both branches record where they moved to. Setting `scrollTop` on the
-    // element fires a scroll event, but not until the browser gets round to
-    // it, and a keystroke landing first would slice the list from a position
-    // it is no longer at.
-    /*
-     * The chin is laid OVER the bottom of this list, not beside it.
-     *
-     * So `clientHeight` is not the usable height: the last stretch of it is
-     * where rows dissolve into the fade and the controls sit. Scrolling a row
-     * to `bottom - clientHeight` parks it exactly there, which reads as the
-     * selection fading out every time you arrow past the last full row.
-     *
-     * The floor is the container's own bottom padding, read rather than
-     * copied. That padding is already sized to clear the fade, so asking it is
-     * both correct and impossible to get out of step with.
-     */
-    const floor = viewport.clientHeight - bottomInset();
-
-    if (top < viewport.scrollTop) {
-      viewport.scrollTop = top;
-      scrollTop = top;
-    } else if (bottom > viewport.scrollTop + floor) {
-      viewport.scrollTop = bottom - floor;
-      scrollTop = viewport.scrollTop;
-    }
+    if (viewport) viewport.scrollTop = 0;
   });
 
   /**
-   * The strip at the bottom a row must not be scrolled into.
+   * Keeps the selected row on screen.
    *
-   * The list's own `padding-bottom`, which already clears both the fade and
-   * the controls sitting over it. Measured rather than hardcoded, for the same
-   * reason the row height is: a number copied out of the CSS drifts the first
-   * time the CSS changes, and the failure here is a selection that scrolls out
-   * of sight rather than anything that looks like a bug in this file.
+   * Every number is measured off the elements. The row is in the DOM whatever
+   * the scroll position, because they all are, so its real rectangle can be
+   * asked for rather than worked out.
    */
-  function bottomInset(): number {
-    if (!viewport) return 0;
-    return Number.parseFloat(getComputedStyle(viewport).paddingBottom) || 0;
+  $effect(() => {
+    const target = selected;
+    // Read so the row's position is recomputed when the list changes under it.
+    lines.length;
+    if (!viewport) return;
+
+    const row = viewport.querySelector<HTMLElement>(`[data-row="${target}"]`);
+    if (!row) return;
+
+    const box = row.getBoundingClientRect();
+    const around = viewport.getBoundingClientRect();
+
+    // The group label above the first row of a group comes in with it, or the
+    // selection appears to sit under a heading that is cut off.
+    const heading = row.previousElementSibling;
+    const lead =
+      heading instanceof HTMLElement && heading.classList.contains("sill-group")
+        ? heading.getBoundingClientRect().height
+        : 0;
+
+    /*
+     * The chin is laid OVER the bottom of this list, not beside it, so the
+     * visible height is not the whole of `clientHeight`: the last stretch is
+     * where rows dissolve into the fade and the controls sit. The list's own
+     * bottom padding is already sized to clear it, so it is read rather than
+     * copied.
+     */
+    const usable = viewport.clientHeight - inset;
+
+    viewport.scrollTop = scrollFor({
+      scrollTop: viewport.scrollTop,
+      viewport: usable,
+      scrollHeight: viewport.scrollHeight,
+      rowTop: box.top - around.top + viewport.scrollTop - lead,
+      rowHeight: box.height + lead,
+      gap: EDGE_GAP,
+      first: target === 0,
+      last: target === commands.length - 1,
+    });
+  });
+
+  /**
+   * How blurred a row is, from how far it has sunk into the chin.
+   *
+   * `filter`, not `backdrop-filter`. `backdrop-filter` photographs the pixels
+   * behind an element, blurs the photograph and pastes it back, and Chromium
+   * takes that photograph against the page's own backdrop. This page has none:
+   * the window is transparent and so is `body`, so the photograph comes back
+   * empty and there is nothing to smudge.
+   *
+   * `filter` blurs content it is handed. No photograph, nothing sampled, no
+   * dependence on what is behind the window. So the rows blur themselves as
+   * they reach the bottom, which is the same effect from the other direction.
+   *
+   * Only the one or two rows actually in the zone get a value, so only those
+   * get a compositing layer.
+   */
+  function blurAt(lineIndex: number): number {
+    if (fade <= 0) return 0;
+
+    // Where the row's bottom edge sits inside the visible box.
+    const bottom = (offsets[lineIndex + 1] ?? 0) - scrollTop;
+    const into = bottom - (height - inset);
+    if (into <= 0) return 0;
+
+    return Math.min(1, into / fade) * MAX_BLUR;
   }
+
+  /** The deepest a row gets blurred, in pixels. */
+  const MAX_BLUR = 6;
+
+  /** How deep the fade zone is, from the stylesheet. */
+  let fade = $state(0);
 
   function onScroll() {
     if (!viewport) return;
@@ -170,26 +204,37 @@
   }
 
   /**
-   * Keeps the row height and viewport size current.
+   * Keeps the measurements the chin needs current.
    *
-   * The viewport height was previously only read during a scroll, so before
-   * the first scroll the window was sized from a guess. A resize observer
-   * covers the window changing size too.
+   * Nothing about row positions is measured any more: every row is drawn, so
+   * where each one sits is asked of the element at the moment it matters.
+   * What is still read here is the padding and the fade, because those come
+   * from the stylesheet rather than from layout.
    */
   $effect(() => {
     if (!viewport) return;
 
     const sync = () => {
       if (!viewport) return;
+
       height = viewport.clientHeight;
-      // Read again in case the list was left scrolled past where a shorter
-      // one can go: the browser has already corrected the element, and this
-      // is what stops the remembered copy disagreeing with it.
       scrollTop = viewport.scrollTop;
+
       const row = viewport.querySelector<HTMLElement>(".sill-row");
       if (row && row.offsetHeight > 0) rowHeight = row.offsetHeight;
       const header = viewport.querySelector<HTMLElement>(".sill-group");
       if (header && header.offsetHeight > 0) headerHeight = header.offsetHeight;
+
+      // Read here rather than per row. `getComputedStyle` forces a style
+      // recalculation, and the blur is computed for every rendered row on
+      // every scroll frame: asking thirty times a frame for two numbers that
+      // only change when the CSS does is exactly the kind of idle-adjacent
+      // waste the efficiency rule exists to stop.
+      inset = Number.parseFloat(getComputedStyle(viewport).paddingBottom) || 0;
+      fade =
+        Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue("--chin-fade"),
+        ) || 0;
     };
 
     sync();
@@ -362,19 +407,20 @@
   bind:this={viewport}
   onscroll={onScroll}
 >
-  <div style="height: {offsets[first] ?? 0}px"></div>
-
-  {#each slice as line (line.kind === "header" ? `h:${line.label}` : line.command.id)}
+  {#each lines as line, at (line.kind === "header" ? `h:${line.label}` : line.command.id)}
     {#if line.kind === "header"}
       <div class="sill-group" role="presentation">{line.label}</div>
     {:else}
       {@const command = line.command}
       {@const index = line.index}
+      {@const blur = blurAt(at)}
       <div
         id={optionId(index)}
+        data-row={index}
         class="sill-row"
         class:answer={command.mode === "answer"}
         class:selected={index === selected}
+        style:filter={blur > 0.1 ? `blur(${blur.toFixed(1)}px)` : null}
         role="option"
         aria-selected={index === selected}
         tabindex="-1"
@@ -444,8 +490,6 @@
       </div>
     {/if}
   {/each}
-
-  <div style="height: {Math.max(0, total - (offsets[last] ?? 0))}px"></div>
 
   {#if commands.length === 0}
     <div class="sill-empty">

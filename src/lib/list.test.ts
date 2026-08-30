@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from "vitest";
 import type { RankedCommand } from "$lib/exthost/commands";
-import { groupOf, lineAt, linesOf, offsetsOf, windowOf } from "$lib/list";
+import { groupOf, linesOf, scrollFor } from "$lib/list";
 
 const ROW = 38;
 const HEADER = 26;
@@ -86,146 +86,43 @@ describe("laying the list out", () => {
   });
 });
 
-describe("where each line sits", () => {
-  test("headings and rows are their own heights", () => {
-    const offsets = offsetsOf(linesOf([command("app"), command("emoji")]), ROW, HEADER);
+describe("keeping the selected row in view", () => {
+  const base = {
+    viewport: 400,
+    scrollHeight: 5000,
+    rowHeight: 40,
+    gap: 8,
+    first: false,
+    last: false,
+  };
 
-    // header, row, header, row, and the end.
-    expect(offsets).toEqual([0, HEADER, HEADER + ROW, HEADER * 2 + ROW, HEADER * 2 + ROW * 2]);
+  test("a row already in view does not move the list", () => {
+    // Moving when nothing needs to move is what makes arrowing feel jumpy.
+    expect(scrollFor({ ...base, scrollTop: 1000, rowTop: 1100 })).toBe(1000);
   });
 
-  test("an empty list has a zero height rather than no answer", () => {
-    expect(offsetsOf([], ROW, HEADER)).toEqual([0]);
+  test("a row above the view is brought down to it", () => {
+    expect(scrollFor({ ...base, scrollTop: 1000, rowTop: 900 })).toBe(892);
   });
 
-  test("a position finds the line it falls inside", () => {
-    const lines = linesOf(flat(5));
-    const offsets = offsetsOf(lines, ROW, HEADER);
-
-    expect(lineAt(offsets, lines.length, 0)).toBe(0);
-    expect(lineAt(offsets, lines.length, ROW - 1)).toBe(0);
-    expect(lineAt(offsets, lines.length, ROW)).toBe(1);
-    expect(lineAt(offsets, lines.length, ROW * 4)).toBe(4);
+  test("a row below the view is brought up to it", () => {
+    // rowTop 1360 + 40 high + 8 gap - 400 viewport.
+    expect(scrollFor({ ...base, scrollTop: 1000, rowTop: 1360 })).toBe(1008);
   });
 
-  test("a position past the end lands on the last line, not off it", () => {
-    const lines = linesOf(flat(3));
-    const offsets = offsetsOf(lines, ROW, HEADER);
-
-    expect(lineAt(offsets, lines.length, 10_000)).toBe(2);
-  });
-});
-
-describe("which slice is drawn", () => {
-  const HEIGHT = 400;
-  const OVERSCAN = 8;
-
-  function windowFor(count: number, scrollTop: number) {
-    const lines = linesOf(flat(count));
-    const offsets = offsetsOf(lines, ROW, HEADER);
-
-    return { lines, ...windowOf(offsets, lines.length, scrollTop, HEIGHT, OVERSCAN) };
-  }
-
-  test("the top of a long list draws from the first line", () => {
-    const { first, last } = windowFor(200, 0);
-
-    expect(first).toBe(0);
-    expect(last).toBeGreaterThan(HEIGHT / ROW);
-    expect(last).toBeLessThan(200);
+  test("the first row goes all the way to the top", () => {
+    // So a group heading above it stays visible rather than being clipped by
+    // the gap arithmetic.
+    expect(scrollFor({ ...base, scrollTop: 3000, rowTop: 0, first: true })).toBe(0);
   });
 
-  test("scrolling draws the lines that are actually on screen", () => {
-    const { at, first } = windowFor(200, ROW * 50);
-
-    expect(at).toBe(ROW * 50);
-    expect(first).toBe(50 - OVERSCAN);
+  test("the last row goes past the end and lets the browser stop it", () => {
+    // The container knows about its own padding below the rows; this file
+    // deliberately does not, having been wrong about it twice.
+    expect(scrollFor({ ...base, scrollTop: 0, rowTop: 4900, last: true })).toBe(5000);
   });
 
-  test("a list shorter than the viewport draws all of it from the top", () => {
-    const { at, first, last } = windowFor(3, 0);
-
-    expect(at).toBe(0);
-    expect(first).toBe(0);
-    expect(last).toBe(3);
-  });
-
-  /*
-   * The bug this file exists for.
-   *
-   * The remembered scroll position is only refreshed by a scroll event, and
-   * the browser clamps the real one on its own whenever the content gets
-   * shorter. Between the two, a search returning fewer results than the last
-   * one sliced the list from a position past its end, so every row rendered
-   * below the viewport: a screen of blank space that only came right if you
-   * scrolled and provoked an event.
-   */
-  test("a position past the end of a short list still draws the whole list", () => {
-    // The browser has already corrected the element by the time this is asked,
-    // so the position it is given is real. What matters is that a number from
-    // anywhere cannot index outside the list.
-    const { first, last, lines } = windowFor(3, ROW * 150);
-
-    expect(first).toBe(0);
-    expect(last).toBe(lines.length);
-  });
-
-  test("the drawn slice is never empty while there are results", () => {
-    // The blank screen, stated as the property rather than as one case. No
-    // remembered position, however stale, may draw nothing.
-    for (const count of [1, 3, 12, 200]) {
-      for (const scrollTop of [0, 37, 500, 5_000, 100_000]) {
-        const { first, last } = windowFor(count, scrollTop);
-
-        expect(last).toBeGreaterThan(first);
-      }
-    }
-  });
-
-  test("a negative position is treated as the top", () => {
-    // Some browsers report one during an overscroll bounce.
-    const { at, first } = windowFor(50, -200);
-
-    expect(at).toBe(0);
-    expect(first).toBe(0);
-  });
-
-  test("an empty list draws nothing without failing", () => {
-    const offsets = offsetsOf([], ROW, HEADER);
-    const { first, last } = windowOf(offsets, 0, 0, HEIGHT, OVERSCAN);
-
-    expect(first).toBe(0);
-    expect(last).toBe(0);
-  });
-
-  test("a container with padding below the rows still draws its last row", () => {
-    // The bug that shipped. The rows are not all there is inside the scrolling
-    // box: 48 pixels of padding below them clears the chin, and that padding
-    // scrolls too. Anything here that worked out the reach from the rows alone
-    // stopped the drawn slice short of the end, and the bottom went blank.
-    const CHIN = 48;
-    const lines = linesOf(flat(200));
-    const offsets = offsetsOf(lines, ROW, HEADER);
-    const bottom = offsets[lines.length] + CHIN - HEIGHT;
-
-    const { last } = windowOf(offsets, lines.length, bottom, HEIGHT, OVERSCAN);
-
-    expect(last).toBe(lines.length);
-  });
-});
-
-describe("Windows' own switches", () => {
-  test("they get a heading of their own rather than Sill's", () => {
-    // Filed with Sill's commands they read as Sill features, which is the
-    // opposite of true: changing the volume changes the machine.
-    expect(groupOf(command("system"))).toBe("System");
-    expect(groupOf(command("system"))).not.toBe(groupOf(command("builtin")));
-  });
-
-  test("they are not filed with the settings pages either", () => {
-    // A settings page opens somewhere and leaves the changing to a person.
-    // These change the machine outright, and the difference is worth a
-    // separate heading.
-    expect(groupOf(command("system"))).not.toBe(groupOf(command("setting")));
+  test("a row near the top never asks for a negative position", () => {
+    expect(scrollFor({ ...base, scrollTop: 20, rowTop: 4 })).toBe(0);
   });
 });

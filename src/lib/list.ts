@@ -82,68 +82,46 @@ export function linesOf(commands: RankedCommand[]): Line[] {
   ]);
 }
 
-/** Where each line starts, and where the list ends. One entry longer than the list. */
-export function offsetsOf(lines: Line[], rowHeight: number, headerHeight: number): number[] {
-  const out = new Array<number>(lines.length + 1);
-  let y = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    out[i] = y;
-    y += lines[i].kind === "header" ? headerHeight : rowHeight;
-  }
-
-  out[lines.length] = y;
-  return out;
-}
-
-/** Index of the last line starting at or before `y`. */
-export function lineAt(offsets: number[], count: number, y: number): number {
-  let low = 0;
-  let high = count - 1;
-
-  while (low < high) {
-    const mid = (low + high + 1) >> 1;
-    if (offsets[mid] <= y) low = mid;
-    else high = mid - 1;
-  }
-
-  return Math.max(0, low);
-}
-
 /**
- * Which slice of the list to put in the DOM, and where it starts.
+ * Where to put the scroll so a row is fully in view.
  *
- * **The position is taken as given.** Two blank-screen bugs came from trying
- * to correct it here, and both had the same shape: this file believing it knew
- * how far the container could scroll better than the container did.
+ * Takes measurements rather than making them: every number here comes from the
+ * element, so nothing can disagree with what the browser actually laid out.
+ * That is the whole point. The list used to work out row positions from an
+ * assumed row height, and twice the assumption stopped matching reality and
+ * the difference came out as a screen of blank space.
  *
- * The first clamped to "the rows, minus the viewport" and fixed a stale
- * position after a list shrank. The second was that same clamp, once the
- * container grew 48 pixels of padding below the rows: the end of the list sat
- * past where the clamp would go, so scrolling to the bottom drew nothing.
- *
- * The browser already clamps the real scroll position, and it accounts for
- * padding, borders and anything else in that box. Believing it is both simpler
- * and right. What the stale-position case actually needed was for a new query
- * to start at the top, which is what `asking` does in the component, and that
- * is a smaller and truer statement of the problem.
- *
- * Everything here is still bounded, so a position from anywhere cannot index
- * outside the list.
+ * At the ends the container is taken all the way, so a group heading above the
+ * first row and the padding below the last one both stay visible. Anywhere
+ * else the row is nudged just far enough to clear the edge, because moving
+ * more than that makes arrowing feel like the list is jumping.
  */
-export function windowOf(
-  offsets: number[],
-  count: number,
-  scrollTop: number,
-  height: number,
-  overscan: number,
-): { at: number; first: number; last: number } {
-  // Negative only during an overscroll bounce, which some browsers report.
-  const at = Math.max(0, scrollTop);
+export function scrollFor(at: {
+  /** Where the container is scrolled now. */
+  scrollTop: number;
+  /** The container's visible height. */
+  viewport: number;
+  /** How far the container can scroll, which the browser already knows. */
+  scrollHeight: number;
+  /** The row's top, relative to the top of the scrollable content. */
+  rowTop: number;
+  rowHeight: number;
+  /** Clearance to leave between the row and the edge it is nearest. */
+  gap: number;
+  first: boolean;
+  last: boolean;
+}): number {
+  if (at.first) return 0;
+  // Past the end on purpose: the browser clamps it, and it knows about the
+  // padding below the rows in a way nothing here should have to.
+  if (at.last) return at.scrollHeight;
 
-  return {
-    at,
-    first: Math.max(0, lineAt(offsets, count, at) - overscan),
-    last: Math.min(count, lineAt(offsets, count, at + height) + 1 + overscan),
-  };
+  const above = at.rowTop - at.gap;
+  const below = at.rowTop + at.rowHeight + at.gap - at.viewport;
+
+  if (at.scrollTop > above) return Math.max(0, above);
+  if (at.scrollTop < below) return below;
+
+  // Already in view. Not moving is the right answer more often than not.
+  return at.scrollTop;
 }
