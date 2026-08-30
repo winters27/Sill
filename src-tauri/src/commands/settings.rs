@@ -53,11 +53,15 @@ pub(crate) async fn set_preferences(
 
     if let Some(expander) = app.try_state::<snippets::expander::Expander>() {
         expander.set_enabled(prefs.snippets.expand_keywords);
-        // Watching starts on demand and never stops: the hook owns a thread
-        // with a message pump, and standing that up and tearing it down as a
-        // setting is toggled is far more machinery than declining to match.
+
+        // Switched off means taken out, not told to ignore everything. A
+        // low-level keyboard hook is called for every keystroke on the
+        // machine, in every application; staying in that path in order to do
+        // nothing is exactly the cost rule 23 refuses.
         if prefs.snippets.expand_keywords {
             snippets::expander::watch(&app, &expander);
+        } else {
+            snippets::expander::stop(&expander);
         }
     }
 
@@ -68,10 +72,13 @@ pub(crate) async fn set_preferences(
             ignored_apps: prefs.clipboard.ignored_apps.clone(),
             secrets: prefs.clipboard.secrets,
         });
-        // Watching starts on demand and never stops: the listener owns a
-        // thread, and turning the setting off simply stops it recording.
+        // Switched off means stopped. The watcher owns a thread and a hidden
+        // window and is woken by every copy on the machine, whether or not it
+        // does anything with what it sees.
         if prefs.clipboard.enabled {
             clipboard::monitor::watch(&app, &history);
+        } else {
+            clipboard::monitor::stop(&history);
         }
     }
 

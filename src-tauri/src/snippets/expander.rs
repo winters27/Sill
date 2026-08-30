@@ -132,6 +132,16 @@ struct Inner {
     snippets: ArcSwap<Vec<Snippet>>,
     enabled: AtomicBool,
     running: AtomicBool,
+    /// The thread the hook is installed on, so it can be told to stop.
+    ///
+    /// A low-level keyboard hook is called for **every keystroke on the
+    /// machine**, in every application, forever. Leaving it installed when
+    /// expansion is switched off means Sill is still in the path of every key
+    /// the user presses in order to do nothing with it, which is the exact
+    /// shape of cost rule 23 exists to refuse.
+    ///
+    /// Zero means not running. A thread id is never zero.
+    thread: std::sync::atomic::AtomicU32,
     /// Set while the replacement is being typed, so the synthetic keystrokes
     /// Sill sends are not read back in as more typing.
     replacing: AtomicBool,
@@ -169,7 +179,7 @@ impl Expander {
 }
 
 #[cfg(windows)]
-pub use windows_impl::{move_caret_back, replace, watch};
+pub use windows_impl::{arm, armed, move_caret_back, replace, stop, watch};
 
 #[cfg(windows)]
 mod windows_impl {
@@ -177,13 +187,14 @@ mod windows_impl {
     use std::sync::OnceLock;
     use tauri::{AppHandle, Emitter};
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetKeyState, MapVirtualKeyW, ToUnicode, MAPVK_VK_TO_VSC, VIRTUAL_KEY, VK_BACK, VK_CAPITAL,
         VK_CONTROL, VK_MENU, VK_SHIFT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, GetMessageW, SetWindowsHookExW, UnhookWindowsHookEx, KBDLLHOOKSTRUCT,
-        LLKHF_INJECTED, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN,
+        CallNextHookEx, GetMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
+        KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_QUIT, WM_SYSKEYDOWN,
     };
 
     /// The one expander the hook callback can reach.
@@ -196,16 +207,26 @@ mod windows_impl {
 
     /// Installs the hook, once.
     pub fn watch(app: &AppHandle, expander: &Expander) {
+        let _ = APP.set(app.clone());
+        arm(expander);
+    }
+
+    /// The hook's thread and its lifetime, with no app handle involved.
+    ///
+    /// Split out so the thing this is really about can be tested: that the
+    /// thread starts, and that stopping it ends it. The app handle is only
+    /// wanted by the hook procedure, which a test never reaches.
+    pub fn arm(expander: &Expander) {
         if expander.inner.running.swap(true, Ordering::SeqCst) {
             return;
         }
 
         let _ = EXPANDER.set(expander.clone());
-        let _ = APP.set(app.clone());
 
+        let expander = expander.clone();
         std::thread::Builder::new()
             .name("snippet-hook".to_string())
-            .spawn(|| {
+            .spawn(move || {
                 // SAFETY: the hook is installed and pumped on this thread,
                 // which is what `SetWindowsHookExW` requires, and released
                 // when the pump ends.
@@ -213,16 +234,58 @@ mod windows_impl {
                     let Ok(hook) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0)
                     else {
                         crate::say!("could not install the snippet hook");
+                        expander.inner.running.store(false, Ordering::SeqCst);
                         return;
                     };
+
+                    // Published only once the hook is really installed, so
+                    // stopping cannot race ahead of starting and post a quit
+                    // to a thread that has not begun pumping.
+                    expander
+                        .inner
+                        .thread
+                        .store(GetCurrentThreadId(), Ordering::SeqCst);
 
                     let mut message = MSG::default();
                     while GetMessageW(&mut message, None, 0, 0).as_bool() {}
 
                     let _ = UnhookWindowsHookEx(hook);
+                    expander.inner.thread.store(0, Ordering::SeqCst);
+                    expander.inner.running.store(false, Ordering::SeqCst);
                 }
             })
             .ok();
+    }
+
+    /// Whether the hook is installed right now.
+    pub fn armed(expander: &Expander) -> bool {
+        expander.inner.thread.load(Ordering::SeqCst) != 0
+    }
+
+    /// Takes the hook out and lets its thread finish.
+    ///
+    /// Not merely stopping it matching. The hook is on the machine's keyboard
+    /// path whether or not it does anything with what it sees, so switching
+    /// expansion off has to remove it rather than teach it to ignore
+    /// everything.
+    ///
+    /// `WM_QUIT` rather than a flag: the thread is blocked in `GetMessageW`,
+    /// so a flag would only be read the next time a message arrived, and no
+    /// message ever arrives on that queue.
+    pub fn stop(expander: &Expander) {
+        let thread = expander.inner.thread.load(Ordering::SeqCst);
+        if thread == 0 {
+            return;
+        }
+
+        // SAFETY: posts to a thread id read from the hook thread itself. A
+        // thread that has already finished makes this fail rather than fault,
+        // which is why the result is only reported.
+        unsafe {
+            if PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0)).is_err() {
+                crate::say!("the snippet hook did not stop");
+            }
+        }
     }
 
     unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -513,6 +576,9 @@ mod windows_impl {
 
 #[cfg(not(windows))]
 pub fn watch(_app: &tauri::AppHandle, _expander: &Expander) {}
+
+#[cfg(not(windows))]
+pub fn stop(_expander: &Expander) {}
 
 #[cfg(test)]
 mod tests {

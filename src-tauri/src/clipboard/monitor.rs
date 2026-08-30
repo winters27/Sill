@@ -74,6 +74,14 @@ pub struct Clipboard {
     /// keeping it afterwards possible without storing it twice.
     skipped: Arc<Mutex<Option<Skipped>>>,
     watching: Arc<AtomicBool>,
+    /// How to tell the watcher thread to finish.
+    ///
+    /// The watcher owns a thread with a message pump and a hidden window
+    /// listening for clipboard changes. Leaving it running when recording is
+    /// switched off means Sill is still woken by every copy on the machine in
+    /// order to decline to record it, which is the shape of cost rule 23
+    /// exists to refuse.
+    stopper: Arc<Mutex<Option<clipboard_master::Shutdown>>>,
     /// The settings the watcher needs, cached here because it runs on its own
     /// thread with no route back to the preference store.
     rules: Arc<Mutex<Rules>>,
@@ -118,6 +126,7 @@ impl Clipboard {
             suspended: Arc::new(AtomicBool::new(false)),
             skipped: Arc::new(Mutex::new(None)),
             watching: Arc::new(AtomicBool::new(false)),
+            stopper: Arc::new(Mutex::new(None)),
             rules: Arc::new(Mutex::new(Rules::default())),
         }
     }
@@ -132,6 +141,7 @@ impl Clipboard {
                 suspended: Arc::new(AtomicBool::new(false)),
                 skipped: Arc::new(Mutex::new(None)),
                 watching: Arc::new(AtomicBool::new(false)),
+                stopper: Arc::new(Mutex::new(None)),
                 rules: Arc::new(Mutex::new(Rules {
                     enabled: true,
                     keep_images: true,
@@ -276,17 +286,46 @@ pub fn watch(app: &AppHandle, clipboard: &Clipboard) {
     std::thread::Builder::new()
         .name("clipboard-watch".to_string())
         .spawn(move || {
-            let handler = Handler { app, clipboard };
+            let stopper = clipboard.stopper.clone();
+            let watching = clipboard.watching.clone();
+            let handler = Handler {
+                app,
+                clipboard: clipboard.clone(),
+            };
+
             match clipboard_master::Master::new(handler) {
                 Ok(mut master) => {
+                    // Taken before the run, because `run` does not return
+                    // until something asks it to.
+                    if let Ok(mut slot) = stopper.lock() {
+                        *slot = Some(master.shutdown_channel());
+                    }
+
                     if let Err(err) = master.run() {
                         crate::say!("the clipboard watcher stopped: {err}");
                     }
                 }
                 Err(err) => crate::say!("could not start the clipboard watcher: {err}"),
             }
+
+            if let Ok(mut slot) = stopper.lock() {
+                *slot = None;
+            }
+            watching.store(false, Ordering::SeqCst);
         })
         .ok();
+}
+
+/// Stops watching, and lets the thread and its window go.
+///
+/// Not merely declining to record. The watcher is woken by every copy on the
+/// machine whether or not it does anything with what it sees, so switching
+/// recording off has to end it rather than teach it to ignore everything.
+pub fn stop(clipboard: &Clipboard) {
+    let taken = clipboard.stopper.lock().ok().and_then(|mut s| s.take());
+    if let Some(shutdown) = taken {
+        shutdown.signal();
+    }
 }
 
 struct Handler {
@@ -540,7 +579,7 @@ fn fragment(html: &str) -> String {
         text = &text[..at];
     }
 
-    text.trim_matches(|c: char| c == ' ' || c.is_whitespace())
+    text.trim_matches(|c: char| c == '\0' || c.is_whitespace())
         .to_string()
 }
 
@@ -635,11 +674,11 @@ mod tests {
         // What .NET's own clipboard writer produces: the reader trusts the
         // header's byte offsets, miscounts, and hands back the rest of the
         // document plus the clipboard's terminating NUL.
-        let ragged = "<b>hello</b><!--EndFragment--></body></html> ";
+        let ragged = "<b>hello</b><!--EndFragment--></body></html>\0";
         assert_eq!(fragment(ragged), "<b>hello</b>");
 
         // And with the opening marker still attached.
-        let both = "<html><body><!--StartFragment--><i>hi</i><!--EndFragment--></body></html> ";
+        let both = "<html><body><!--StartFragment--><i>hi</i><!--EndFragment--></body></html>\0";
         assert_eq!(fragment(both), "<i>hi</i>");
     }
 
@@ -654,8 +693,8 @@ mod tests {
     fn no_nul_survives_into_the_database() {
         // SQLite will store it, and everything downstream then carries a
         // string that truncates in half the places it is used.
-        for html in ["<b>x</b> ", " <b>x</b>", "<b>x</b><!--EndFragment-->  "] {
-            assert!(!fragment(html).contains(' '), "{html:?}");
+        for html in ["<b>x</b>\0", "\0<b>x</b>", "<b>x</b><!--EndFragment-->\0\0"] {
+            assert!(!fragment(html).contains('\0'), "{html:?}");
         }
     }
 
