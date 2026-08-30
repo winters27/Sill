@@ -6,6 +6,7 @@
 //! that only test targets can be given (see `build.rs`). The app binary
 //! carries its own and cannot be given a second.
 
+use sill_lib::action::Capability;
 use sill_lib::actions::builtins;
 use sill_lib::object::ObjectKind;
 
@@ -282,5 +283,97 @@ fn a_transform_is_never_offered_on_something_that_is_not_text() {
             !offered.iter().any(|id| id.starts_with("sill.text.")),
             "{kind:?} was offered a text transform: {offered:?}"
         );
+    }
+}
+
+// ------------------------------------------------------------ file actions
+
+#[test]
+fn a_file_can_be_acted_on_and_not_only_opened() {
+    // Files became findable before they became usable. A search result you can
+    // only open is a worse file manager than the one already on the machine.
+    let registry = sill_lib::actions::builtins();
+
+    for kind in [ObjectKind::File, ObjectKind::Folder] {
+        let offered: Vec<&str> = registry.for_kind(kind).iter().map(|a| a.id()).collect();
+
+        for wanted in [
+            "sill.copyPath",
+            "sill.file.terminal",
+            "sill.file.recycle",
+        ] {
+            assert!(offered.contains(&wanted), "{kind:?} cannot {wanted}: {offered:?}");
+        }
+    }
+}
+
+#[test]
+fn nothing_that_is_not_a_file_is_offered_a_file_action() {
+    // `accepts` is the whole guard. An action listed against a clipboard row
+    // or a calculator answer would be offered on a row whose target is not a
+    // path at all, and recycling one of those is not a small mistake.
+    let registry = sill_lib::actions::builtins();
+
+    for kind in [
+        ObjectKind::Answer,
+        ObjectKind::ClipboardEntry,
+        ObjectKind::Snippet,
+        ObjectKind::Quicklink,
+        ObjectKind::SystemSetting,
+    ] {
+        let offered: Vec<&str> = registry.for_kind(kind).iter().map(|a| a.id()).collect();
+
+        assert!(
+            !offered.contains(&"sill.file.recycle"),
+            "{kind:?} was offered recycling: {offered:?}"
+        );
+        assert!(
+            !offered.contains(&"sill.file.terminal"),
+            "{kind:?} was offered a terminal: {offered:?}"
+        );
+    }
+}
+
+#[test]
+fn the_destructive_action_asks_for_the_right_permission() {
+    // The capability is what a permission screen will read, and one declared
+    // wrongly is a thing somebody grants without knowing what they granted.
+    let registry = sill_lib::actions::builtins();
+
+    let recycle = registry
+        .get("sill.file.recycle")
+        .expect("recycling is registered");
+    assert!(
+        recycle.capabilities().contains(&Capability::FileWrite),
+        "recycling does not declare that it writes to the filesystem"
+    );
+
+    let terminal = registry
+        .get("sill.file.terminal")
+        .expect("terminal is registered");
+    assert!(
+        terminal.capabilities().contains(&Capability::ProcessLaunch),
+        "opening a terminal does not declare that it starts a program"
+    );
+}
+
+#[test]
+fn only_the_recoverable_kind_of_deletion_is_offered() {
+    // Deleting outright is what a file manager is for. A launcher offering it
+    // behind a fuzzy search and one keypress is how somebody loses work they
+    // cannot get back, so the only deletion here is the one the system already
+    // knows how to undo.
+    let registry = sill_lib::actions::builtins();
+
+    for action in registry.for_kind(ObjectKind::File) {
+        let title = action.title().to_lowercase();
+
+        if title.contains("delete") || title.contains("remove") {
+            assert!(
+                title.contains("recycle") || title.contains("bin"),
+                "{} deletes without saying it is recoverable",
+                action.id()
+            );
+        }
     }
 }

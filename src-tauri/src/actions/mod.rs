@@ -37,6 +37,8 @@ pub fn builtins() -> ActionRegistry {
         Box::new(CopyPath),
         Box::new(RevealInFolder),
         Box::new(CopyName),
+        Box::new(TerminalHere),
+        Box::new(RecycleFile),
         Box::new(CopyClipboardEntry),
     ];
 
@@ -476,6 +478,185 @@ impl Action for CopyAnswer {
         crate::dismiss_main(&ctx.app);
         Ok(outcome)
     }
+}
+
+
+/// Opens a terminal where a file lives.
+///
+/// The folder, always, even when a file was chosen: nobody means "open a
+/// terminal inside README.md". A file's parent is what they meant.
+struct TerminalHere;
+
+#[async_trait]
+impl Action for TerminalHere {
+    fn id(&self) -> &'static str {
+        "sill.file.terminal"
+    }
+
+    fn title(&self) -> &'static str {
+        "Open Terminal Here"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        matches!(kind, ObjectKind::File | ObjectKind::Folder)
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ProcessLaunch]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let here = folder_of(&object.target)?;
+
+        // Whichever terminal the machine has, best first. `wt` is the one
+        // people who have it want; `powershell` is on every Windows; `cmd` is
+        // the one that cannot be missing.
+        let opened = ["wt.exe", "powershell.exe", "cmd.exe"]
+            .into_iter()
+            .find_map(|program| {
+                let mut command = std::process::Command::new(program);
+
+                // Each wants the starting folder said differently, and the
+                // difference is not cosmetic: passing the wrong one silently
+                // opens in the home folder.
+                match program {
+                    "wt.exe" => command.arg("-d").arg(&here),
+                    other => {
+                        command.current_dir(&here);
+                        let _ = other;
+                        &mut command
+                    }
+                };
+
+                command.spawn().ok().map(|_| program)
+            })
+            .ok_or_else(|| "No terminal on this machine would start.".to_string())?;
+
+        let _ = opened;
+        Ok(Outcome::done(format!(
+            "Opened a terminal in {}",
+            name_of(&here)
+        )))
+    }
+}
+
+/// Sends a file to the recycle bin.
+///
+/// The one destructive thing here, and it is the recoverable kind on purpose.
+/// Deleting outright is what a file manager is for; a launcher offering it
+/// behind a fuzzy search and one keypress is how somebody loses work they
+/// cannot get back.
+struct RecycleFile;
+
+#[async_trait]
+impl Action for RecycleFile {
+    fn id(&self) -> &'static str {
+        "sill.file.recycle"
+    }
+
+    fn title(&self) -> &'static str {
+        "Move to Recycle Bin"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        matches!(kind, ObjectKind::File | ObjectKind::Folder)
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::FileWrite]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let path = std::path::PathBuf::from(&object.target);
+
+        if !path.exists() {
+            return Err(format!("{} is not there any more.", object.title));
+        }
+
+        recycle(&path)?;
+
+        // No undo token. The recycle bin **is** the undo, it is where people
+        // already know to look, and a token claiming to restore something the
+        // system already holds would be a second answer to one question.
+        Ok(Outcome::done(format!(
+            "Moved {} to the recycle bin",
+            name_of(&object.target)
+        )))
+    }
+}
+
+/// The folder a path is in, or the path itself when it is one.
+fn folder_of(target: &str) -> Result<String, String> {
+    let path = std::path::Path::new(target);
+
+    if path.is_dir() {
+        return Ok(target.to_string());
+    }
+
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(|parent| parent.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("{target} is not somewhere a terminal can open"))
+}
+
+/// The last part of a path, for saying what happened to it.
+fn name_of(target: &str) -> String {
+    std::path::Path::new(target)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| target.to_string())
+}
+
+/// Hands a path to the shell's recycle bin.
+///
+/// `SHFileOperationW` rather than a delete, because the recycle bin is the
+/// whole point: it is undo that outlives the process, that survives a crash,
+/// and that people already know how to use.
+///
+/// The path is double null terminated. The API takes a list of paths and reads
+/// until it finds an empty one, so a single terminator means it keeps reading
+/// past the end of the string.
+#[cfg(windows)]
+fn recycle(path: &std::path::Path) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::{
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FO_DELETE,
+        SHFILEOPSTRUCTW,
+    };
+
+    use std::os::windows::ffi::OsStrExt;
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0, 0]).collect();
+
+    let mut operation = SHFILEOPSTRUCTW {
+        wFunc: FO_DELETE as u32,
+        pFrom: PCWSTR(wide.as_ptr()),
+        // The flags are declared wider than the field that holds them, which
+        // is an oddity of the API rather than of the bindings.
+        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: `pFrom` points at a double null terminated buffer that outlives
+    // the call, and every other field is either set above or zeroed.
+    let code = unsafe { SHFileOperationW(&mut operation) };
+
+    if code != 0 {
+        return Err(format!("Windows refused to recycle that (error {code})"));
+    }
+
+    // Set when somebody cancelled a dialog. Not an error, but not a deletion
+    // either, and reporting success would be a lie.
+    if operation.fAnyOperationsAborted.as_bool() {
+        return Err("That was not moved to the recycle bin.".to_string());
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn recycle(_path: &std::path::Path) -> Result<(), String> {
+    Err("Only Windows has a recycle bin.".to_string())
 }
 
 // --------------------------------------------------------------- secondary
