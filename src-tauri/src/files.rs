@@ -3,7 +3,7 @@
 //! Windows has no fast general file index. Its own Search service is slow and
 //! partial, and walking the filesystem per keystroke is out of the question.
 //! Everything reads the NTFS Master File Table directly and answers in
-//! milliseconds, which is the same technique Raycast built for itself.
+//! milliseconds, which is the only approach fast enough to run per keystroke.
 //!
 //! Queries go straight to Everything's IPC window, in `everything_ipc`. That
 //! is the same protocol `Everything64.dll` speaks, so it costs no third-party
@@ -43,6 +43,112 @@ fn client() -> Option<String> {
     }
 
     Some("es".to_string())
+}
+
+/// Why file search cannot answer.
+///
+/// The two cases need different words and different remedies, and guessing
+/// wrong is worse than saying nothing: telling somebody to install what they
+/// already have reads as the launcher being broken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Missing {
+    /// Not on the machine.
+    Absent,
+    /// On the machine, but not running. Every route to it talks to the
+    /// process, so an installed copy sitting closed answers nothing.
+    Asleep,
+}
+
+/// What is standing between a typed query and a list of files.
+///
+/// `None` means file search works. Asked when the launcher is summoned rather
+/// than per keystroke: it is one window lookup, but the answer only changes
+/// when a program starts or stops, which is not something typing does.
+pub fn missing(enabled: bool) -> Option<Missing> {
+    verdict(enabled, available(), installed())
+}
+
+/// The rule itself, with the machine taken out of it.
+///
+/// Separated because the three inputs are facts about one particular Windows
+/// install and the rule about them is not. This is the part worth pinning
+/// down: **switched off is not a problem to report**, and telling somebody
+/// their file search is broken when they turned it off themselves is the kind
+/// of thing that makes a launcher feel like it is nagging.
+fn verdict(enabled: bool, running: bool, installed: bool) -> Option<Missing> {
+    if !enabled || running {
+        return None;
+    }
+
+    Some(if installed {
+        Missing::Asleep
+    } else {
+        Missing::Absent
+    })
+}
+
+/// Where the program itself lives, when it does.
+///
+/// The standard install locations, which is where the package manager puts it
+/// too. **A portable copy in a folder of somebody's own reads as absent**, and
+/// the remedy offered then is an install that the package manager will decline
+/// as already present. That is a worse answer than the truth and a better one
+/// than silence.
+fn installed() -> bool {
+    [
+        r"C:\Program Files\Everything\Everything.exe",
+        r"C:\Program Files (x86)\Everything\Everything.exe",
+        r"C:\Program Files\Everything\es.exe",
+        r"C:\Program Files (x86)\Everything\es.exe",
+    ]
+    .iter()
+    .any(|candidate| std::path::Path::new(candidate).is_file())
+}
+
+/// Starts the installed copy.
+///
+/// Started detached and left alone. It puts itself in the notification area
+/// and builds its index on its own; waiting on it here would block a command
+/// the window is waiting for, to learn nothing it cannot learn by asking again.
+pub fn start() -> Result<(), String> {
+    let program = [
+        r"C:\Program Files\Everything\Everything.exe",
+        r"C:\Program Files (x86)\Everything\Everything.exe",
+    ]
+    .into_iter()
+    .find(|candidate| std::path::Path::new(candidate).is_file())
+    .ok_or_else(|| "Cannot find it to start.".to_string())?;
+
+    std::process::Command::new(program)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Could not start file search: {e}"))
+}
+
+/// Installs it, in a window somebody can watch.
+///
+/// `/k` rather than `/c` so the console stays open: if the package manager
+/// refuses, the reason is on screen instead of gone. Neither agreement is
+/// accepted here on anybody's behalf, which is the reason the window is
+/// visible at all.
+pub fn install() -> Result<(), String> {
+    std::process::Command::new("cmd")
+        .args([
+            "/c",
+            "start",
+            "Install file search",
+            "cmd",
+            "/k",
+            "winget",
+            "install",
+            "--id",
+            "voidtools.Everything",
+            "--exact",
+        ])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Could not start the installer: {e}"))
 }
 
 /// Whether file search can work at all.
@@ -205,7 +311,7 @@ fn looks_like_attributes(token: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{looks_like_attributes, parse_line};
+    use super::{looks_like_attributes, parse_line, verdict, Missing};
 
     #[test]
     fn a_bare_path_line_parses() {
@@ -235,5 +341,38 @@ mod tests {
     fn blank_lines_are_ignored() {
         assert!(parse_line("").is_none());
         assert!(parse_line("   ").is_none());
+    }
+
+    #[test]
+    fn switched_off_is_not_a_problem_to_report() {
+        // Somebody turned it off. Offering to install a file indexer they
+        // deliberately stopped using is nagging, not helping.
+        for running in [true, false] {
+            for installed in [true, false] {
+                assert_eq!(
+                    verdict(false, running, installed),
+                    None,
+                    "complained while switched off (running={running}, installed={installed})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_running_indexer_is_never_a_problem() {
+        // Including the case where it is running from somewhere the install
+        // probe cannot see, which is the portable copy `installed` admits it
+        // misses. Running is the fact that matters; installed is only how the
+        // remedy is worded.
+        assert_eq!(verdict(true, true, false), None);
+        assert_eq!(verdict(true, true, true), None);
+    }
+
+    #[test]
+    fn the_remedy_matches_what_is_actually_wrong() {
+        // The whole reason there are two variants. "Install this" to somebody
+        // who already has it reads as the launcher being broken.
+        assert_eq!(verdict(true, false, true), Some(Missing::Asleep));
+        assert_eq!(verdict(true, false, false), Some(Missing::Absent));
     }
 }

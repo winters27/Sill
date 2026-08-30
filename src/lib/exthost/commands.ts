@@ -36,6 +36,13 @@ export interface RankedCommand {
     | "quicklink-arg"
     /** A window that is open right now. Never from the index. */
     | "window"
+    /**
+     * The row standing in for files that could not be searched.
+     *
+     * Not a thing to launch. Choosing it fixes what it names, and it only
+     * exists while there is something to fix.
+     */
+    | "file-setup"
     /** One emoji. Its own corpus, reached through its own command. */
     | "emoji";
   entrypoint: string;
@@ -171,6 +178,24 @@ export interface FileHit {
   name: string;
   path: string;
   isDir: boolean;
+}
+
+/** Why file search cannot answer, or nothing when it can. */
+export type FileSearchMissing = "absent" | "asleep";
+
+/**
+ * What is standing between a typed query and a list of files.
+ *
+ * Asked on summon rather than per keystroke. The answer only changes when a
+ * program starts or stops, which is not something typing does.
+ */
+export function fileSearchMissing(): Promise<FileSearchMissing | null> {
+  return invoke<FileSearchMissing | null>("file_search_missing").catch(() => null);
+}
+
+/** Does whatever the thing standing in the way needs. */
+export function startFileSearch(): Promise<string> {
+  return invoke<string>("start_file_search");
 }
 
 export function searchFiles(query: string): Promise<FileHit[]> {

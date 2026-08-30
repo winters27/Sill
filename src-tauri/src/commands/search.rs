@@ -232,6 +232,48 @@ pub(crate) async fn search_files(
     Ok(hits)
 }
 
+/// What is stopping file search from answering, if anything.
+///
+/// Asked when the launcher is summoned, not per keystroke. The answer only
+/// changes when a program starts or stops, and rule 18 is about not paying for
+/// answers nothing asked a new question about.
+///
+/// Returns nothing when file search is switched off, because then there is no
+/// problem to report: somebody turned it off on purpose.
+#[tauri::command]
+pub(crate) async fn file_search_missing(
+    state: State<'_, PrefsState>,
+) -> Result<Option<files::Missing>, String> {
+    let enabled = state.inner.lock().await.files.enabled;
+
+    Ok(files::missing(enabled))
+}
+
+/// Does whatever the thing standing in the way needs.
+///
+/// One command rather than two, because the launcher offers one row and the
+/// row does the right thing. Which of the two it is was already decided by
+/// [`files::missing`], and asking again here keeps the decision in one place.
+///
+/// The install runs in a console window somebody can see. A package manager
+/// asks about agreements and can fail on a network, and a launcher that
+/// swallowed all of that and reported nothing would be worse than one that
+/// shows the same output a person would have seen typing it themselves.
+#[tauri::command]
+pub(crate) async fn start_file_search(state: State<'_, PrefsState>) -> Result<String, String> {
+    let enabled = state.inner.lock().await.files.enabled;
+
+    match files::missing(enabled) {
+        None => Ok("File search is already working.".to_string()),
+        Some(files::Missing::Asleep) => {
+            files::start().map(|()| "Starting file search.".to_string())
+        }
+        Some(files::Missing::Absent) => {
+            files::install().map(|()| "Installing file search.".to_string())
+        }
+    }
+}
+
 /// Opens a file or folder in its default application.
 #[tauri::command]
 pub(crate) async fn open_path(path: String) -> Result<(), String> {

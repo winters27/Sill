@@ -27,6 +27,9 @@
     searchFiles,
     searchWindows,
     searchEmoji,
+    fileSearchMissing,
+    startFileSearch,
+    type FileSearchMissing,
     recordUse,
     queryHistory,
     openPath,
@@ -85,6 +88,15 @@
   let version = $state(0);
   let toast = $state<{ title: string; style: string } | null>(null);
   let status = $state("");
+
+  /**
+   * Why file search cannot answer, when it cannot.
+   *
+   * Held rather than asked for per search. It changes when a program starts or
+   * stops, so it is re-read on summon, which is the only moment it can have
+   * changed without the launcher hearing about it.
+   */
+  let fileSearchGap = $state<FileSearchMissing | null>(null);
   let searchInput = $state<HTMLInputElement | null>(null);
   let formView = $state<ReturnType<typeof FormView> | null>(null);
   let panelOpen = $state(false);
@@ -506,6 +518,14 @@
       if (id === searchId) status = `emoji search failed: ${err}`;
     }
 
+    // Nothing will come back, and saying so beats an empty space where files
+    // should be. One row, only once something has been typed, and only when
+    // file search is switched on: somebody who turned it off does not need
+    // telling that it is off.
+    if (fileSearchGap) {
+      commands = [...commands, fileSearchRow(fileSearchGap)];
+    }
+
     // Files are appended after the commands, so a slower file query can never
     // reorder or delay what is already shown.
     fileTimer = setTimeout(async () => {
@@ -606,6 +626,19 @@
       // behaves identically once it is on screen.
       if (command.mode === "emoji") {
         await useEmoji(command);
+        return;
+      }
+
+      // The row standing in for the files that could not be searched.
+      if (command.mode === "file-setup") {
+        try {
+          status = await startFileSearch();
+          // Asked again rather than assumed: starting a program is a request,
+          // not a result, and the row should stay until it is actually gone.
+          fileSearchGap = await fileSearchMissing();
+        } catch (err) {
+          status = `${err}`;
+        }
         return;
       }
 
@@ -836,6 +869,30 @@
     } catch (err) {
       status = `${err}`;
     }
+  }
+
+  /**
+   * The row that appears where files would have been.
+   *
+   * A row rather than a message under the field, because a message is
+   * something to read and this is something to do. It sits with the files it
+   * is standing in for, and Enter fixes the thing it names.
+   */
+  function fileSearchRow(why: FileSearchMissing): RankedCommand {
+    const absent = why === "absent";
+
+    return {
+      id: "sill:file-search",
+      extension: "sill",
+      extensionTitle: "Files",
+      title: absent ? "Turn on file search" : "Start file search",
+      subtitle: absent
+        ? "Searching files needs Everything, which is not installed. Choose this to install it."
+        : "Everything is installed but not running, so there is nothing to search. Choose this to start it.",
+      mode: "file-setup",
+      entrypoint: "",
+      matched: [],
+    };
   }
 
   /**
@@ -1400,6 +1457,11 @@
       // Focusing only on mount is not enough: that runs once, while the
       // window is still hidden, and focus does not survive hide and show.
       shown = await listen("sill://shown", () => {
+        // Re-asked on every summon. A file indexer can be started or stopped
+        // between two uses of the launcher, and the alternative to asking here
+        // is asking on every keystroke.
+        void fileSearchMissing().then((why) => (fileSearchGap = why));
+
         // Asked for explicitly, because the launcher is not where you were
         // when you left: reopening on a half-finished command is only right
         // if you meant to come back to it.

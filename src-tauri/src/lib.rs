@@ -867,6 +867,8 @@ pub fn run() {
             commands::search::search_files,
             commands::search::search_windows,
             commands::search::search_emoji,
+            commands::search::file_search_missing,
+            commands::search::start_file_search,
             commands::settings::hotkey_conflicts,
             commands::settings::set_alias,
             commands::settings::index_rows,

@@ -305,6 +305,7 @@
       case "setting":
         return "Settings";
       case "file":
+      case "file-setup":
         return "Files";
       case "window":
         return "Open Windows";
