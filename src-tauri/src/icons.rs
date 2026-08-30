@@ -221,6 +221,25 @@ fn extract(path: &str) -> Option<String> {
         return Some(found);
     }
 
+    // A resource reference, which is how Windows itself names an icon: the
+    // file that holds it and which one. `desktop.ini`, the registry and every
+    // shortcut on the machine are written this way, so reading it costs one
+    // split and makes those references usable as they are.
+    if let Some((file, index)) = resource_reference(path) {
+        if let Some(hicon) = icon_at_size(&file, index) {
+            let png = icon_to_png(hicon);
+
+            // SAFETY: extracted just above and not used again.
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::DestroyIcon(hicon);
+            }
+
+            if let Some(png) = png {
+                return Some(format!("data:image/png;base64,{}", base64_encode(&png)));
+            }
+        }
+    }
+
     use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
 
     ensure_com();
@@ -324,6 +343,19 @@ const ICON_PIXELS: u32 = 64;
 #[cfg(windows)]
 fn icon_of_file(path: &str) -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
     icon_at_size(path, 0)
+}
+
+/// Splits `shell32.dll,-16777` into the file and the icon it names.
+///
+/// Nothing without a trailing comma and a number is a reference, so an
+/// ordinary path containing a comma is left alone rather than truncated at it.
+/// A negative number is a resource id and a positive one is a position, which
+/// is Windows' own convention and is passed through unchanged.
+fn resource_reference(path: &str) -> Option<(String, i32)> {
+    let (file, index) = path.rsplit_once(',')?;
+    let index: i32 = index.trim().parse().ok()?;
+
+    (!file.is_empty()).then(|| (file.to_string(), index))
 }
 
 /// One icon out of `path` at [`ICON_PIXELS`], by resource index.

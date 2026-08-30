@@ -469,3 +469,59 @@ fn recycling_something_that_is_not_there_says_so_rather_than_claiming_success() 
 
     assert!(recycle(&missing).is_err());
 }
+
+// -------------------------------------------------- Windows' own switches
+
+#[test]
+fn a_system_switch_is_not_run_by_the_action_that_runs_sill_itself() {
+    // The two ask for different things. Opening settings touches Sill;
+    // changing the volume touches the machine, and a permission screen should
+    // be able to tell somebody which they are agreeing to.
+    let registry = builtins();
+
+    let offered: Vec<&str> = registry
+        .for_kind(ObjectKind::SystemControl)
+        .iter()
+        .map(|a| a.id())
+        .collect();
+
+    assert!(offered.contains(&"sill.system.run"), "{offered:?}");
+    assert!(
+        !offered.contains(&"sill.runBuiltin"),
+        "Sill's own runner accepts a Windows switch: {offered:?}"
+    );
+}
+
+#[test]
+fn changing_the_machine_asks_for_more_than_drawing_a_window() {
+    // Somebody granting a launcher permission to draw its own window has not
+    // thereby granted it permission to mute their speakers.
+    let registry = builtins();
+
+    let system = registry.get("sill.system.run").expect("registered");
+    assert!(system.capabilities().contains(&Capability::SystemControl));
+    assert!(
+        !system.capabilities().contains(&Capability::Ui),
+        "a machine-wide change is declared as if it only touched Sill's window"
+    );
+}
+
+#[test]
+fn nothing_else_is_offered_a_system_switch_action() {
+    let registry = builtins();
+
+    for kind in [
+        ObjectKind::Builtin,
+        ObjectKind::Setting,
+        ObjectKind::SystemSetting,
+        ObjectKind::File,
+        ObjectKind::Answer,
+    ] {
+        let offered: Vec<&str> = registry.for_kind(kind).iter().map(|a| a.id()).collect();
+
+        assert!(
+            !offered.contains(&"sill.system.run"),
+            "{kind:?} was offered it: {offered:?}"
+        );
+    }
+}

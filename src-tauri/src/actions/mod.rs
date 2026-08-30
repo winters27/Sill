@@ -38,6 +38,7 @@ pub fn builtins() -> ActionRegistry {
         Box::new(RevealInFolder),
         Box::new(CopyName),
         Box::new(TerminalHere),
+        Box::new(ToggleSystem),
         Box::new(RecycleFile),
         Box::new(CopyClipboardEntry),
     ];
@@ -310,22 +311,54 @@ impl Action for RunBuiltin {
                 crate::dismiss_main(app);
                 return Ok(outcome);
             }
-            // The switches. Each says what it did rather than what it was
-            // asked to do, because "Volume 60%" is the useful sentence and
-            // "Turned the volume up" is not.
-            //
-            // Dismissed first, all of them. Nobody flips a switch and then
-            // wants to look at the launcher, and one that stayed open would
-            // have to be closed by hand every time.
-            system if system.starts_with("system.") => {
-                let said = run_system(system)?;
-                crate::dismiss_main(app);
-                return Ok(Outcome::done(said));
-            }
             other => return Err(format!("unknown Sill command: {other}")),
         }
 
         Ok(Outcome::done(format!("Opened {}", object.title)))
+    }
+}
+
+/// Changes something about Windows.
+///
+/// Its own action rather than an arm of the one that runs Sill's own commands,
+/// because the two ask for different things. Opening settings touches Sill;
+/// changing the volume touches the machine, and a permission screen should be
+/// able to say so.
+struct ToggleSystem;
+
+#[async_trait]
+impl Action for ToggleSystem {
+    fn id(&self) -> &'static str {
+        "sill.system.run"
+    }
+
+    fn title(&self) -> &'static str {
+        "Run"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::SystemControl
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        // Not `Ui`, which is Sill's own surface. This reaches outside it.
+        &[Capability::SystemControl]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        // Each says what it did rather than what it was asked to do, because
+        // "Volume 60%" is the useful sentence and "Turned the volume up" is
+        // not, and it stays true if something else changed it in between.
+        let said = run_system(&object.target)?;
+
+        // Nobody flips a switch and then wants to look at the launcher.
+        crate::dismiss_main(&ctx.app);
+
+        Ok(Outcome::done(said))
     }
 }
 

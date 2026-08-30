@@ -36,6 +36,11 @@ pub enum ObjectKind {
     Setting,
     /// Something the launcher does to itself.
     Builtin,
+    /// A switch belonging to Windows: the volume, the theme, the lock screen.
+    ///
+    /// Separate from [`ObjectKind::SystemSetting`], which opens a page and
+    /// leaves the changing to somebody. These change the machine outright.
+    SystemControl,
     Snippet,
     Quicklink,
     /// A calculator result, which exists only for as long as it is on screen.
@@ -95,6 +100,10 @@ impl ObjectKind {
             "setting" => Self::SystemSetting,
             "sill-setting" => Self::Setting,
             "builtin" => Self::Builtin,
+            // Not a Sill feature. Changing the volume or the theme changes
+            // Windows, and a row that looked like one of Sill's own commands
+            // would be hiding that.
+            "system" => Self::SystemControl,
             "snippet" => Self::Snippet,
             // The argument version is the same kind of thing; whether it stops
             // to ask is a property of the link, not of what it is.

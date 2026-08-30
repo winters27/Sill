@@ -695,10 +695,17 @@ fn sill_settings_is_reachable_by_typing() {
         );
     }
 
-    assert!(
-        commands.iter().all(|c| c.mode == "builtin"),
-        "built-ins launch through Sill itself, not the shell"
-    );
+    // Nothing here launches through the shell. Two modes, because Windows'
+    // own switches are not things Sill does to itself and are dispatched by
+    // their own action, but both go through Sill rather than out to a program.
+    for command in &commands {
+        assert!(
+            matches!(command.mode.as_str(), "builtin" | "system"),
+            "{} has mode {:?}, which launches through the shell",
+            command.title,
+            command.mode
+        );
+    }
 }
 
 #[test]

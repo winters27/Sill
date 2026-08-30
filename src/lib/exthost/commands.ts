@@ -37,6 +37,13 @@ export interface RankedCommand {
     /** A window that is open right now. Never from the index. */
     | "window"
     /**
+     * A switch belonging to Windows: the volume, the theme, the lock screen.
+     *
+     * Its own kind so it groups apart and wears Windows' own icon. A row that
+     * changes the machine should not look like one of Sill's own commands.
+     */
+    | "system"
+    /**
      * The row standing in for files that could not be searched.
      *
      * Not a thing to launch. Choosing it fixes what it names, and it only
@@ -296,6 +303,17 @@ export function fileAsCommand(hit: FileHit): RankedCommand {
 
 export function dismiss(): Promise<void> {
   return invoke("dismiss");
+}
+
+/**
+ * Summons the launcher, optionally with a command to run once it is up.
+ *
+ * For callers outside the launcher window, which today means the
+ * notification-area menu. The launcher hears `sill://run` on arrival and
+ * decides what the command looks like; the caller only states the intent.
+ */
+export function summonWith(command?: string): Promise<void> {
+  return invoke("summon_with", { command: command ?? null });
 }
 
 /** One thing that can be done to a result, as the registry describes it. */

@@ -39,6 +39,12 @@ pub enum Capability {
     Network,
     /// Opens or changes one of Sill's own windows.
     Ui,
+    /// Changes the machine: the volume, the theme, the lock screen.
+    ///
+    /// Its own thing rather than folded into `Ui`, which is Sill's own
+    /// surface. Somebody granting a launcher permission to draw its own window
+    /// has not thereby granted it permission to mute their speakers.
+    SystemControl,
     /// Moves, resizes, focuses or closes somebody else's window.
     ///
     /// Separate from `Ui`, which is Sill's own surface. Reaching into another

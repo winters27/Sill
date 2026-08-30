@@ -27,6 +27,10 @@ export function groupOf(command: RankedCommand): string {
       return "Commands";
     case "builtin":
       return "Sill";
+    // Windows' own switches, under a heading that says so. Filed with Sill's
+    // commands they read as Sill features, which is the opposite of true.
+    case "system":
+      return "System";
     case "setting":
       return "Settings";
     case "file":

@@ -375,60 +375,104 @@ pub fn builtins() -> Vec<CommandRecord> {
 /// "mute" or "quiet", somebody going away types "lock", and neither should
 /// have to learn what Sill decided to call it.
 fn system_commands() -> Vec<CommandRecord> {
+    // Windows' own icons, from the programs that own each switch. A speaker
+    // from the volume mixer, the personalisation applet's monitor, and the
+    // shell's padlock. Nothing drawn here: the point of these rows is that
+    // they change Windows rather than Sill, and wearing Sill's gear would say
+    // the opposite.
+    //
+    // The padlock is `imageres.dll,54`, which is a resource reference of the
+    // kind Windows writes everywhere and `icons` now reads. Chosen by
+    // extracting the range and looking at it rather than by trusting a number
+    // from somewhere.
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    let audio = format!(r"{root}\System32\SndVol.exe");
+    let theme = format!(r"{root}\System32\themecpl.dll");
+    let padlock = format!(r"{root}\System32\imageres.dll,54");
+
     vec![
-        builtin(
+        system_switch(
             "system.volume.up",
-            // The gear, which is where Windows itself keeps these. There is no
-            // art of its own and inventing a panel that settings does not have
-            // would be a lie the icon has to keep telling.
-            "general",
+            &audio,
             "Volume Up",
             "Ten percent louder",
-            &["louder", "sound", "audio", "increase"],
+            &["louder", "sound", "audio", "increase", "system"],
         ),
-        builtin(
+        system_switch(
             "system.volume.down",
-            "general",
+            &audio,
             "Volume Down",
             "Ten percent quieter",
-            &["quieter", "sound", "audio", "decrease", "lower"],
+            &["quieter", "sound", "audio", "decrease", "lower", "system"],
         ),
-        builtin(
+        system_switch(
             "system.volume.half",
-            "general",
+            &audio,
             "Volume 50%",
             "Sets the volume to half",
-            &["half", "sound", "audio"],
+            &["half", "sound", "audio", "system"],
         ),
-        builtin(
+        system_switch(
             "system.volume.max",
-            "general",
+            &audio,
             "Volume 100%",
             "Sets the volume to full",
-            &["full", "max", "loud", "sound", "audio"],
+            &["full", "max", "loud", "sound", "audio", "system"],
         ),
-        builtin(
+        system_switch(
             "system.mute",
-            "general",
+            &audio,
             "Toggle Mute",
-            "Silences the sound, or brings it back",
-            &["mute", "unmute", "silence", "quiet", "sound", "audio"],
+            "Silences Windows, or brings the sound back",
+            &["mute", "unmute", "silence", "quiet", "sound", "audio", "system"],
         ),
-        builtin(
+        system_switch(
             "system.theme",
-            "general",
+            &theme,
             "Toggle Dark Mode",
             "Switches Windows between light and dark",
-            &["dark", "light", "theme", "appearance", "night", "mode"],
+            &["dark", "light", "theme", "appearance", "night", "mode", "system"],
         ),
-        builtin(
+        system_switch(
             "system.lock",
-            "general",
+            &padlock,
             "Lock Screen",
-            "Locks this machine straight away",
-            &["lock", "away", "screen", "afk"],
+            "Locks Windows straight away",
+            &["lock", "away", "screen", "afk", "system"],
         ),
     ]
+}
+
+/// One of Windows' switches, shaped as a row.
+///
+/// Its own mode rather than `builtin`, so it groups apart and so an action can
+/// accept it without accepting everything Sill does to itself. Its icon comes
+/// from whichever Windows program owns the switch, because a row that changes
+/// the machine should not be wearing the launcher's badge.
+fn system_switch(
+    id: &str,
+    icon: &str,
+    title: &str,
+    subtitle: &str,
+    keywords: &[&str],
+) -> CommandRecord {
+    CommandRecord {
+        id: format!("sill:{id}"),
+        extension: "system".to_string(),
+        extension_title: "System".to_string(),
+        command: id.to_string(),
+        title: title.to_string(),
+        subtitle: subtitle.to_string(),
+        description: String::new(),
+        mode: "system".to_string(),
+        entrypoint: id.to_string(),
+        keywords: keywords.iter().map(|k| k.to_string()).collect(),
+        icon: Some(icon.to_string()),
+        // No panel. These do not appear in settings, and naming one would be
+        // borrowing an icon that says the wrong thing anyway.
+        panel: None,
+        preferences: serde_json::Value::Null,
+    }
 }
 
 fn builtin(id: &str, panel: &str, title: &str, subtitle: &str, keywords: &[&str]) -> CommandRecord {

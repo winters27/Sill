@@ -198,3 +198,19 @@ describe("which slice is drawn", () => {
     expect(last).toBe(0);
   });
 });
+
+describe("Windows' own switches", () => {
+  test("they get a heading of their own rather than Sill's", () => {
+    // Filed with Sill's commands they read as Sill features, which is the
+    // opposite of true: changing the volume changes the machine.
+    expect(groupOf(command("system"))).toBe("System");
+    expect(groupOf(command("system"))).not.toBe(groupOf(command("builtin")));
+  });
+
+  test("they are not filed with the settings pages either", () => {
+    // A settings page opens somewhere and leaves the changing to a person.
+    // These change the machine outright, and the difference is worth a
+    // separate heading.
+    expect(groupOf(command("system"))).not.toBe(groupOf(command("setting")));
+  });
+});

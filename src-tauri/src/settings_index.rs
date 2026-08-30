@@ -543,10 +543,23 @@ mod tests {
         // like the icons were never wired up rather than like a typo.
         let panels: HashSet<&str> = PANELS.iter().copied().collect();
         for record in crate::registry::builtins() {
+            // A row either names a panel, and wears that panel's mark, or
+            // brings an icon of its own. Windows' switches do the second: a
+            // volume control wearing the settings gear would say it belongs
+            // to Sill, which is the one thing it must not say.
+            if record.icon.is_some() {
+                assert!(
+                    record.panel.is_none(),
+                    "{} carries an icon and a panel, so which one wins is a guess",
+                    record.title
+                );
+                continue;
+            }
+
             let panel = record
                 .panel
                 .as_deref()
-                .unwrap_or_else(|| panic!("{} has no panel", record.title));
+                .unwrap_or_else(|| panic!("{} has neither a panel nor an icon", record.title));
             assert!(
                 panels.contains(panel),
                 "{} names an unknown panel {panel:?}",
