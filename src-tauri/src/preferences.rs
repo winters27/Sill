@@ -243,6 +243,15 @@ pub struct Sources {
     pub windows_settings: bool,
     /// Entries whose name or path contains any of these are never shown.
     pub excluded: Vec<String>,
+    /// Individual entries switched off by id.
+    ///
+    /// Separate from `excluded`, which is a list of words matched against
+    /// every title and path. That is the right tool for "never show me
+    /// anything from this vendor" and the wrong one for "not this one":
+    /// hiding a single entry by typing its name would take every other entry
+    /// containing that word with it.
+    #[serde(default)]
+    pub hidden: Vec<String>,
 }
 
 /// Fields that are encrypted on their way to disk.
@@ -340,6 +349,7 @@ impl Default for Sources {
             path_executables: false,
             windows_settings: true,
             excluded: Vec::new(),
+            hidden: Vec::new(),
         }
     }
 }

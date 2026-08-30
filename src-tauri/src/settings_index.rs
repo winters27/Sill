@@ -371,6 +371,12 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "sources",
         "Sources",
+        "What Sill found",
+        "alias hotkey nickname shortcut name list index everything hide",
+    ),
+    s(
+        "sources",
+        "Sources",
         "Hidden entries",
         "exclude filter block ignore hide",
     ),

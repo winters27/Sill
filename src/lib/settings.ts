@@ -49,6 +49,8 @@ export interface Sources {
   pathExecutables: boolean;
   windowsSettings: boolean;
   excluded: string[];
+  /** Individual entries switched off by id. */
+  hidden: string[];
 }
 
 export interface FileSearch {
@@ -250,4 +252,52 @@ export function hotkeyConflicts(): Promise<string[]> {
  */
 export function setAlias(command: string, alias: string): Promise<Preferences> {
   return invoke<Preferences>("set_alias", { command, alias });
+}
+
+/** One indexed thing, as the settings list shows it. */
+export interface IndexRow {
+  id: string;
+  title: string;
+  /** The index mode, which the window turns into a readable kind. */
+  mode: string;
+  icon: string | null;
+  alias: string | null;
+  /** The accelerator bound to opening this, if any. */
+  hotkey: string | null;
+  /** Switched off individually, so it never appears in the launcher. */
+  hidden: boolean;
+}
+
+/** A page of the list, and how many matched in total. */
+export interface IndexPage {
+  rows: IndexRow[];
+  total: number;
+}
+
+/**
+ * Everything in the index, filtered and capped.
+ *
+ * The total comes back so the list can say "200 of 1,502" rather than quietly
+ * showing the first two hundred as though that were all of them.
+ */
+export function indexRows(query: string, mode?: string): Promise<IndexPage> {
+  return invoke<IndexPage>("index_rows", { query, mode }).catch(() => ({
+    rows: [],
+    total: 0,
+  }));
+}
+
+/**
+ * Binds a key to opening one indexed thing, or unbinds it.
+ *
+ * Writes an ordinary binding rather than a second kind of hotkey, so the
+ * Shortcuts panel keeps showing it. One model, two ways in.
+ */
+export function setCommandHotkey(command: string, accelerator: string): Promise<Preferences> {
+  return invoke<Preferences>("set_command_hotkey", { command, accelerator });
+}
+
+/** Switches one indexed entry off, or back on. */
+export function setHidden(command: string, hidden: boolean): Promise<Preferences> {
+  return invoke<Preferences>("set_hidden", { command, hidden });
 }

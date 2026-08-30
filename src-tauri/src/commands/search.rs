@@ -12,7 +12,10 @@ pub(crate) async fn search_commands(
     prefs: State<'_, PrefsState>,
     query: String,
 ) -> Result<Vec<registry::SearchResult>, String> {
-    let excluded = prefs.inner.lock().await.sources.excluded.clone();
+    let (excluded, hidden) = {
+        let prefs = prefs.inner.lock().await;
+        (prefs.sources.excluded.clone(), prefs.sources.hidden.clone())
+    };
     let registry = state.inner.lock().await;
 
     // Chained, not collected: both sides are borrowed and nothing is copied.
@@ -28,7 +31,10 @@ pub(crate) async fn search_commands(
         &registry.aliases,
         now_seconds(),
         registry::SEARCH_LIMIT,
-        &excluded,
+        registry::Excluded {
+            terms: &excluded,
+            ids: &hidden,
+        },
     );
 
     // Above everything, because when a query IS a sum the answer is the only
@@ -108,7 +114,7 @@ pub(crate) async fn search_windows(
         &registry::Aliases::default(),
         now_seconds(),
         registry::SEARCH_LIMIT,
-        &[],
+        registry::Excluded::none(),
     );
 
     Ok(results.into_iter().map(Into::into).collect())

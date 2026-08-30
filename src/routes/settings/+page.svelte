@@ -10,6 +10,7 @@
   import Slider from "$lib/components/settings/Slider.svelte";
   import PathList from "$lib/components/settings/PathList.svelte";
   import TermList from "$lib/components/settings/TermList.svelte";
+  import IndexList from "$lib/components/settings/IndexList.svelte";
   import Button from "$lib/components/settings/Button.svelte";
   import DictationPanel from "$lib/components/settings/DictationPanel.svelte";
   import ClipboardPanel from "$lib/components/settings/ClipboardPanel.svelte";
@@ -108,7 +109,7 @@
     },
   ];
 
-  type SourceKey = Exclude<keyof Preferences["sources"], "excluded">;
+  type SourceKey = Exclude<keyof Preferences["sources"], "excluded" | "hidden">;
 
   const SOURCES: [SourceKey, string, string][] = [
     [
@@ -652,13 +653,21 @@
 
           <Section
             label="Exclusions"
-            description="Matched against both the name and the path, so one folder name can hide a whole vendor at once."
+            description="Matched against both the name and the path, so one folder name can hide a whole vendor at once. To switch off a single entry, use the list below instead."
           >
             <Row title="Hidden entries">
               {#snippet children()}
                 <TermList bind:terms={p.sources.excluded} onchange={commit} />
               {/snippet}
             </Row>
+          </Section>
+
+          <Section
+            label="What Sill found"
+            description="An alias, a key and being in the list at all are the same question asked three ways, so they are three columns on one row. Setting an alias is also offered on the result itself in the launcher, which is where you usually notice you want one."
+            bare
+          >
+            <IndexList onchange={(next) => (prefs = next)} />
           </Section>
 
           {#if info}

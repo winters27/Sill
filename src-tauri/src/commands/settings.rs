@@ -224,3 +224,377 @@ pub(crate) async fn set_alias(
     set_preferences(app, prefs, next.clone()).await?;
     Ok(next)
 }
+
+/// One indexed thing, as the settings list shows it.
+///
+/// Deliberately not a [`crate::registry::SearchResult`]: that type answers
+/// "what did this query find", and this answers "what is in the index and how
+/// do you reach it". The three ways to reach something are an alias, a key,
+/// and being in the list at all, which is why they are three fields here and
+/// not three unrelated screens.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct IndexRow {
+    pub id: String,
+    pub title: String,
+    /// The index mode, which the window turns into a readable kind.
+    pub mode: String,
+    /// A file to draw an icon from.
+    pub icon: Option<String>,
+    pub alias: Option<String>,
+    /// The accelerator bound to opening this, if any.
+    pub hotkey: Option<String>,
+    /// Switched off individually, so it never appears in the launcher.
+    pub hidden: bool,
+}
+
+/// How many rows the settings list is given at once.
+///
+/// The index is around fifteen hundred entries and this is a browsable list,
+/// not a search. Sending all of it would be a third of a megabyte for a screen
+/// that shows twenty rows, which is the payload mistake the audit measured
+/// once already. The filter narrows in Rust and the count of what was left out
+/// is shown, so nothing is silently truncated.
+const ROWS: usize = 200;
+
+/// Everything in the index, for the settings list.
+#[tauri::command]
+pub(crate) async fn index_rows(
+    state: State<'_, crate::state::RegistryState>,
+    prefs: State<'_, crate::state::PrefsState>,
+    query: String,
+    // An index mode, or nothing for all of them.
+    mode: Option<String>,
+) -> Result<IndexPage, String> {
+    let (aliases, bindings, hidden) = {
+        let prefs = prefs.inner.lock().await;
+        (
+            crate::registry::Aliases::new(&prefs.aliases),
+            prefs.bindings.clone(),
+            prefs.sources.hidden.clone(),
+        )
+    };
+
+    let registry = state.inner.lock().await;
+
+    Ok(rows_for(
+        registry
+            .commands
+            .iter()
+            .chain(registry.snippets.iter())
+            .chain(registry.quicklinks.iter())
+            .chain(registry.own_settings.iter()),
+        &aliases,
+        &bindings,
+        &hidden,
+        &query,
+        mode.as_deref(),
+    ))
+}
+
+/// The list itself, without the plumbing that fetches its inputs.
+///
+/// Separated so it can be tested at all: the command needs Tauri state and a
+/// running app, and none of the decisions in here do.
+pub(crate) fn rows_for<'a>(
+    commands: impl IntoIterator<Item = &'a crate::registry::CommandRecord>,
+    aliases: &crate::registry::Aliases,
+    bindings: &[crate::bindings::Binding],
+    hidden: &[String],
+    query: &str,
+    mode: Option<&str>,
+) -> IndexPage {
+    let needle = query.trim().to_lowercase();
+    let wanted = mode.filter(|m| *m != "all");
+
+    let mut matched: Vec<&crate::registry::CommandRecord> = commands
+        .into_iter()
+        .filter(|c| wanted.is_none_or(|m| c.mode == m))
+        .filter(|c| needle.is_empty() || c.title.to_lowercase().contains(&needle))
+        .collect();
+
+    // Alphabetical, not by rank. This is a list to find a known thing in, and
+    // frecency order would move rows between visits for no reason the person
+    // browsing it can see.
+    matched.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+
+    let total = matched.len();
+    let rows = matched
+        .into_iter()
+        .take(ROWS)
+        .map(|command| IndexRow {
+            alias: aliases.for_command(&command.id).map(str::to_string),
+            hotkey: bindings
+                .iter()
+                .find(|b| {
+                    matches!(&b.source, crate::bindings::Source::Command { id } if id == &command.id)
+                })
+                .map(|b| b.accelerator.clone()),
+            hidden: hidden.iter().any(|id| id == &command.id),
+            id: command.id.clone(),
+            title: command.title.clone(),
+            mode: command.mode.clone(),
+            icon: command
+                .icon
+                .clone()
+                .or_else(|| Some(command.entrypoint.clone()))
+                .filter(|icon| !icon.is_empty()),
+        })
+        .collect();
+
+    IndexPage { rows, total }
+}
+
+/// A page of the settings list, and how many matched in total.
+///
+/// The total travels with it so the window can say "200 of 1,502" rather than
+/// quietly showing the first two hundred as though that were all of them.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct IndexPage {
+    pub rows: Vec<IndexRow>,
+    pub total: usize,
+}
+
+/// Binds a key to opening one indexed thing, or unbinds it.
+///
+/// Writes an ordinary binding with `Source::Command`, which the shortcut
+/// router already understands, rather than a second kind of hotkey. The
+/// Shortcuts panel keeps showing it: one model, two ways in.
+#[tauri::command]
+pub(crate) async fn set_command_hotkey(
+    app: AppHandle,
+    prefs: State<'_, crate::state::PrefsState>,
+    command: String,
+    accelerator: String,
+) -> Result<crate::preferences::Preferences, String> {
+    let wanted = accelerator.trim().to_string();
+
+    let next = {
+        let mut current = prefs.inner.lock().await;
+
+        // One command has at most one key, and one key means at most one
+        // thing. Setting either half replaces whatever held it, because two
+        // things answering to one key means whichever registered second
+        // silently does nothing.
+        current.bindings.retain(|b| {
+            let same_command =
+                matches!(&b.source, crate::bindings::Source::Command { id } if id == &command);
+            !same_command && (wanted.is_empty() || b.accelerator != wanted)
+        });
+
+        if !wanted.is_empty() {
+            current.bindings.push(crate::bindings::Binding {
+                accelerator: wanted,
+                action: crate::bindings::PRIMARY.to_string(),
+                source: crate::bindings::Source::Command { id: command },
+                replace: false,
+            });
+        }
+
+        current.clone()
+    };
+
+    set_preferences(app, prefs, next.clone()).await?;
+    Ok(next)
+}
+
+/// Switches one indexed entry off, or back on.
+#[tauri::command]
+pub(crate) async fn set_hidden(
+    app: AppHandle,
+    prefs: State<'_, crate::state::PrefsState>,
+    command: String,
+    hidden: bool,
+) -> Result<crate::preferences::Preferences, String> {
+    let next = {
+        let mut current = prefs.inner.lock().await;
+        current.sources.hidden.retain(|id| id != &command);
+        if hidden {
+            current.sources.hidden.push(command);
+        }
+        current.clone()
+    };
+
+    set_preferences(app, prefs, next.clone()).await?;
+    Ok(next)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bindings::{Binding, Source, PRIMARY};
+    use crate::registry::{Alias, Aliases, CommandRecord};
+
+    fn entry(id: &str, title: &str, mode: &str) -> CommandRecord {
+        CommandRecord {
+            id: id.into(),
+            extension: "app".into(),
+            extension_title: "App".into(),
+            command: title.into(),
+            title: title.into(),
+            subtitle: String::new(),
+            description: String::new(),
+            mode: mode.into(),
+            entrypoint: format!("C:/{title}.exe"),
+            keywords: Vec::new(),
+            icon: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+        }
+    }
+
+    fn corpus() -> Vec<CommandRecord> {
+        vec![
+            entry("app:zed", "Zed", "app"),
+            entry("app:code", "Visual Studio Code", "app"),
+            entry("app:arc", "arc", "app"),
+            entry("exe:7z", "7z.exe", "exe"),
+            entry("sill:clipboard", "Clipboard History", "builtin"),
+        ]
+    }
+
+    fn page(query: &str, mode: Option<&str>) -> IndexPage {
+        rows_for(corpus().iter(), &Aliases::default(), &[], &[], query, mode)
+    }
+
+    #[test]
+    fn rows_are_alphabetical_and_case_does_not_split_them() {
+        // A list to find a known thing in. Ranking order would move rows
+        // between visits for no reason the person browsing can see, and
+        // sorting on raw bytes would file every lowercase name after Z.
+        let titles: Vec<String> = page("", None).rows.into_iter().map(|r| r.title).collect();
+
+        assert_eq!(
+            titles,
+            vec![
+                "7z.exe",
+                "arc",
+                "Clipboard History",
+                "Visual Studio Code",
+                "Zed"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_kind_filter_and_the_text_filter_both_apply() {
+        assert_eq!(page("", Some("app")).total, 3);
+        assert_eq!(page("z", Some("app")).total, 1);
+
+        // "all" is not a mode; it means do not filter by one.
+        assert_eq!(page("", Some("all")).total, page("", None).total);
+    }
+
+    #[test]
+    fn the_total_counts_everything_that_matched_not_what_was_sent() {
+        // The window says "200 of 1,502" from this. If the total were the
+        // length of the page, a list that stopped at two hundred would look
+        // like two hundred was all there was.
+        let many: Vec<CommandRecord> = (0..500)
+            .map(|n| entry(&format!("app:{n}"), &format!("Thing {n:03}"), "app"))
+            .collect();
+
+        let page = rows_for(many.iter(), &Aliases::default(), &[], &[], "", None);
+
+        assert_eq!(page.total, 500);
+        assert_eq!(page.rows.len(), ROWS);
+        assert!(page.total > page.rows.len());
+    }
+
+    #[test]
+    fn a_row_carries_the_alias_the_key_and_whether_it_is_switched_off() {
+        // The three ways to reach something, on one row. They were in three
+        // unrelated places before, which is the whole reason for this list.
+        let commands = corpus();
+
+        let aliases = Aliases::new(&[Alias {
+            alias: "code".into(),
+            command: "app:code".into(),
+        }]);
+        let bindings = vec![Binding {
+            accelerator: "Ctrl+Alt+C".into(),
+            action: PRIMARY.into(),
+            source: Source::Command {
+                id: "app:code".into(),
+            },
+            replace: false,
+        }];
+        let hidden = vec!["exe:7z".to_string()];
+
+        let rows = rows_for(commands.iter(), &aliases, &bindings, &hidden, "", None).rows;
+
+        let code = rows.iter().find(|r| r.id == "app:code").expect("listed");
+        assert_eq!(code.alias.as_deref(), Some("code"));
+        assert_eq!(code.hotkey.as_deref(), Some("Ctrl+Alt+C"));
+        assert!(!code.hidden);
+
+        let seven = rows.iter().find(|r| r.id == "exe:7z").expect("listed");
+        assert!(seven.hidden, "a switched-off entry must still be listed");
+        assert_eq!(seven.alias, None);
+        assert_eq!(seven.hotkey, None);
+    }
+
+    #[test]
+    fn a_key_bound_to_something_else_is_not_reported_on_this_row() {
+        // Bindings are a flat list and most of them are not about a command
+        // at all: a transform on the selection has no command id. Reading the
+        // wrong one would show a key on a row that does not have it.
+        let commands = corpus();
+        let bindings = vec![
+            Binding {
+                accelerator: "Ctrl+Alt+U".into(),
+                action: "sill.text.upper".into(),
+                source: Source::Selection,
+                replace: true,
+            },
+            Binding {
+                accelerator: "Ctrl+Alt+Z".into(),
+                action: PRIMARY.into(),
+                source: Source::Command {
+                    id: "app:zed".into(),
+                },
+                replace: false,
+            },
+        ];
+
+        let rows = rows_for(
+            commands.iter(),
+            &Aliases::default(),
+            &bindings,
+            &[],
+            "",
+            None,
+        )
+        .rows;
+
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.id == "app:zed")
+                .unwrap()
+                .hotkey
+                .as_deref(),
+            Some("Ctrl+Alt+Z")
+        );
+        assert!(
+            rows.iter().all(|r| r.hotkey.is_none() || r.id == "app:zed"),
+            "a selection binding was attributed to a row"
+        );
+    }
+
+    #[test]
+    fn a_switched_off_entry_is_still_in_the_list() {
+        // It has to stay findable, or switching it back on means remembering
+        // that it existed. The launcher hides it; this list does not.
+        let commands = corpus();
+        let hidden = vec!["app:zed".to_string()];
+
+        let rows = rows_for(commands.iter(), &Aliases::default(), &[], &hidden, "", None).rows;
+
+        let zed = rows
+            .iter()
+            .find(|r| r.id == "app:zed")
+            .expect("still listed");
+        assert!(zed.hidden);
+    }
+}

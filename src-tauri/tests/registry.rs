@@ -3,7 +3,7 @@
 //! This is the part of a launcher users judge hardest, so the tests are about
 //! ordering outcomes rather than the arithmetic that produces them.
 
-use sill_lib::registry::{self, search, Alias, Aliases, CommandRecord, Frecency};
+use sill_lib::registry::{self, search, Alias, Aliases, CommandRecord, Excluded, Frecency};
 
 const NOW: i64 = 1_756_000_000;
 const HOUR: i64 = 3600;
@@ -713,7 +713,7 @@ fn an_exclusion_term_hides_matching_entries() {
         &Aliases::default(),
         NOW,
         50,
-        &[],
+        Excluded::none(),
     );
     let after = sill_lib::registry::search_excluding(
         &commands,
@@ -722,7 +722,10 @@ fn an_exclusion_term_hides_matching_entries() {
         &Aliases::default(),
         NOW,
         50,
-        &["history".to_string()],
+        Excluded {
+            terms: &["history".to_string()],
+            ids: &[],
+        },
     );
 
     assert!(
@@ -756,7 +759,10 @@ fn an_exclusion_term_is_case_insensitive_and_ignores_blanks() {
         50,
         // A blank term matches every string. Left in, it would empty the list
         // the moment someone opened the editor and did not type.
-        &["   ".to_string(), "HISTORY".to_string()],
+        Excluded {
+            terms: &["   ".to_string(), "HISTORY".to_string()],
+            ids: &[],
+        },
     );
 
     assert!(!results.is_empty(), "a blank term must not hide everything");
@@ -788,7 +794,7 @@ fn searching_borrows_its_corpus_from_more_than_one_source() {
         &Aliases::default(),
         NOW,
         20,
-        &[],
+        Excluded::none(),
     );
 
     assert!(
@@ -816,7 +822,7 @@ fn a_snippet_is_findable_by_what_is_inside_it() {
         &Aliases::default(),
         NOW,
         20,
-        &[],
+        Excluded::none(),
     );
 
     assert_eq!(results.len(), 1, "content should be searchable");
@@ -1189,7 +1195,7 @@ fn an_alias_finds_something_its_name_does_not_contain() {
         &aliases,
         NOW,
         50,
-        &[],
+        Excluded::none(),
     );
 
     assert_eq!(
@@ -1229,7 +1235,7 @@ fn an_alias_outranks_an_exact_title_match() {
         &aliases,
         NOW,
         50,
-        &[],
+        Excluded::none(),
     );
 
     assert_eq!(
@@ -1260,7 +1266,10 @@ fn an_alias_only_applies_when_it_is_typed_in_full() {
             &aliases,
             NOW,
             50,
-            &[],
+            Excluded {
+                terms: &[],
+                ids: &[],
+            },
         );
 
         assert_ne!(
@@ -1295,7 +1304,10 @@ fn an_alias_is_matched_regardless_of_case() {
             &aliases,
             NOW,
             50,
-            &[],
+            Excluded {
+                terms: &[],
+                ids: &[],
+            },
         );
 
         assert_eq!(
@@ -1323,7 +1335,7 @@ fn an_alias_pointing_at_something_that_is_gone_changes_nothing() {
         &aliases,
         NOW,
         50,
-        &[],
+        Excluded::none(),
     );
     let without = registry::search_excluding(
         commands.iter(),
@@ -1332,7 +1344,7 @@ fn an_alias_pointing_at_something_that_is_gone_changes_nothing() {
         &Aliases::default(),
         NOW,
         50,
-        &[],
+        Excluded::none(),
     );
 
     let titles = |r: &[registry::RankedCommand]| {
@@ -1370,7 +1382,7 @@ fn a_blank_alias_is_not_an_alias_that_matches_everything() {
         &aliases,
         NOW,
         50,
-        &[],
+        Excluded::none(),
     );
     let without = registry::search_excluding(
         commands.iter(),
@@ -1379,7 +1391,7 @@ fn a_blank_alias_is_not_an_alias_that_matches_everything() {
         &Aliases::default(),
         NOW,
         50,
-        &[],
+        Excluded::none(),
     );
 
     let titles = |r: &[registry::RankedCommand]| {
@@ -1420,7 +1432,7 @@ fn ranked(commands: &[CommandRecord], query: &str, frecency: &Frecency) -> Vec<S
         &Aliases::default(),
         NOW,
         50,
-        &[],
+        Excluded::none(),
     )
     .into_iter()
     .map(|r| r.command.title)
@@ -1604,12 +1616,115 @@ fn an_alias_still_beats_something_learned() {
         command: spotify,
     }]);
 
-    let found =
-        registry::search_excluding(commands.iter(), "steam", &learned, &aliases, NOW, 50, &[]);
+    let found = registry::search_excluding(
+        commands.iter(),
+        "steam",
+        &learned,
+        &aliases,
+        NOW,
+        50,
+        Excluded::none(),
+    );
 
     assert_eq!(
         found.first().map(|r| r.command.title.as_str()),
         Some("Spotify"),
         "learning overruled an instruction"
     );
+}
+
+// -------------------------------------------------------- switched off
+
+#[test]
+fn hiding_one_entry_hides_exactly_that_one() {
+    // The reason this is not the term list. "Notepad" as a term would take
+    // Notepad++ with it; hiding by id has to mean this one and nothing else.
+    let commands = realistic();
+    let notepad = commands
+        .iter()
+        .find(|c| c.title == "Notepad")
+        .expect("in the corpus")
+        .id
+        .clone();
+
+    let found = registry::search_excluding(
+        commands.iter(),
+        "notepad",
+        &Frecency::default(),
+        &Aliases::default(),
+        NOW,
+        50,
+        Excluded {
+            terms: &[],
+            ids: &[notepad],
+        },
+    );
+
+    let titles: Vec<&str> = found.iter().map(|r| r.command.title.as_str()).collect();
+    assert!(!titles.contains(&"Notepad"), "it is still listed");
+    assert!(
+        titles.contains(&"Notepad++"),
+        "hiding one took its namesake with it: {titles:?}"
+    );
+}
+
+#[test]
+fn hiding_by_id_never_matches_a_title_that_merely_contains_it() {
+    // Ids are paths. If they were compared loosely, hiding one executable
+    // would hide every entry under the same directory.
+    let commands = realistic();
+
+    let found = registry::search_excluding(
+        commands.iter(),
+        "",
+        &Frecency::default(),
+        &Aliases::default(),
+        NOW,
+        2000,
+        Excluded {
+            terms: &[],
+            // A prefix of many real ids in the corpus.
+            ids: &["app:".to_string()],
+        },
+    );
+
+    assert_eq!(
+        found.len(),
+        commands.len(),
+        "a partial id hid entries it does not name"
+    );
+}
+
+#[test]
+fn the_term_list_and_the_hidden_list_both_apply() {
+    // Two different tools for two different jobs, and neither replaces the
+    // other: a term for "nothing from this vendor", an id for "not this one".
+    let commands = realistic();
+    let steam = commands
+        .iter()
+        .find(|c| c.title == "Steam")
+        .expect("in the corpus")
+        .id
+        .clone();
+
+    let found = registry::search_excluding(
+        commands.iter(),
+        "",
+        &Frecency::default(),
+        &Aliases::default(),
+        NOW,
+        2000,
+        Excluded {
+            terms: &["notepad".to_string()],
+            ids: &[steam],
+        },
+    );
+
+    let titles: Vec<&str> = found.iter().map(|r| r.command.title.as_str()).collect();
+    assert!(
+        !titles.iter().any(|t| t.starts_with("Notepad")),
+        "{titles:?}"
+    );
+    assert!(!titles.contains(&"Steam"), "{titles:?}");
+    assert!(titles.contains(&"Steam Link"), "the term-free one went too");
 }

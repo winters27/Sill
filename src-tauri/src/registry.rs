@@ -1065,7 +1065,7 @@ pub fn search(
         &Aliases::default(),
         now,
         limit,
-        &[],
+        Excluded::none(),
     )
 }
 
@@ -1088,7 +1088,7 @@ pub fn search_excluding<'a>(
     aliases: &Aliases,
     now: i64,
     limit: usize,
-    excluded: &[String],
+    off: Excluded<'_>,
 ) -> Vec<RankedCommand> {
     let query = query.trim();
 
@@ -1115,7 +1115,8 @@ pub fn search_excluding<'a>(
 
     // Filtered here rather than at scan time so removing a term brings its
     // entries straight back, with no reindex.
-    let excluded: Vec<String> = excluded
+    let excluded: Vec<String> = off
+        .terms
         .iter()
         .map(|t| t.trim().to_lowercase())
         .filter(|t| !t.is_empty())
@@ -1123,6 +1124,10 @@ pub fn search_excluding<'a>(
 
     for command in commands {
         if !excluded.is_empty() && is_excluded(command, &excluded) {
+            continue;
+        }
+
+        if !off.ids.is_empty() && is_hidden(command, off.ids) {
             continue;
         }
 
@@ -1194,6 +1199,36 @@ fn is_excluded(command: &CommandRecord, excluded: &[String]) -> bool {
     excluded
         .iter()
         .any(|term| title.contains(term.as_str()) || target.contains(term.as_str()))
+}
+
+/// What the user has switched off.
+///
+/// A type rather than two more arguments: the two are always passed together
+/// and always mean the same pair, and the signature was already at the point
+/// where the next `&[String]` would be indistinguishable from the last.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Excluded<'a> {
+    /// Words matched against every title and path.
+    pub terms: &'a [String],
+    /// Individual entries switched off by id.
+    pub ids: &'a [String],
+}
+
+impl Excluded<'_> {
+    pub const fn none() -> Self {
+        Self {
+            terms: &[],
+            ids: &[],
+        }
+    }
+}
+
+/// Whether this entry was switched off individually.
+///
+/// Checked by id and by exact match, unlike the term list, because "not this
+/// one" has to mean this one and nothing that happens to share a word with it.
+pub fn is_hidden(command: &CommandRecord, hidden: &[String]) -> bool {
+    hidden.iter().any(|id| id == &command.id)
 }
 
 /// Where the frecency file lives, given the app's data directory.

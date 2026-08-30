@@ -57,6 +57,16 @@ fn yes() -> bool {
     true
 }
 
+/// "Whatever this thing's primary action is."
+///
+/// A key bound to an application means "open it", and the action that opens
+/// one is not the action that opens a settings page or runs an extension
+/// command. Storing the concrete action id would mean the settings list
+/// guessing the kind at the moment the key is recorded, and getting it wrong
+/// silently the moment the index changes underneath. Resolved at fire time
+/// from the object instead, which is the only place the kind is a fact.
+pub const PRIMARY: &str = "sill.primary";
+
 /// Registers every binding, releasing whatever was registered before.
 ///
 /// Called on startup and whenever the bindings change. Releasing first matters:
@@ -124,14 +134,6 @@ pub fn apply(app: &AppHandle, previous: &[Binding], current: &[Binding]) {
 /// Runs one binding.
 async fn fire(app: &AppHandle, binding: &Binding) {
     let registry = app.state::<ActionRegistry>();
-    let Some(action) = registry.get(&binding.action) else {
-        crate::say!(
-            "{} is bound to {}, which does not exist",
-            binding.accelerator,
-            binding.action
-        );
-        return;
-    };
 
     // Taken before anything else runs, and given back at the end whatever
     // happens in between. One owner for the whole operation: the action itself
@@ -146,6 +148,25 @@ async fn fire(app: &AppHandle, binding: &Binding) {
             held.give_back();
             return;
         }
+    };
+
+    // Resolved now rather than when the key was recorded: `PRIMARY` means
+    // "open this", and which action opens a thing is a fact about the thing.
+    let action = if binding.action == PRIMARY {
+        registry.primary(object.kind)
+    } else {
+        registry.get(&binding.action)
+    };
+
+    let Some(action) = action else {
+        crate::say!(
+            "{} is bound to {}, which cannot be done to {:?}",
+            binding.accelerator,
+            binding.action,
+            object.kind
+        );
+        held.give_back();
+        return;
     };
 
     if !action.accepts(object.kind) {
