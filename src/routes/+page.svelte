@@ -879,16 +879,27 @@
    * is standing in for, and Enter fixes the thing it names.
    */
   function fileSearchRow(why: FileSearchMissing): RankedCommand {
-    const absent = why === "absent";
+    const said = {
+      indexing: {
+        title: "Reading your files",
+        subtitle: "Sill is going through your folders for the first time. This takes a moment and happens once.",
+      },
+      absent: {
+        title: "Turn on file search",
+        subtitle: "Sill is not indexing any folders and nothing else on this machine is either. Choose this to set it up.",
+      },
+      asleep: {
+        title: "Start file search",
+        subtitle: "Everything is installed but not running, so there is nothing to search. Choose this to start it.",
+      },
+    }[why];
 
     return {
       id: "sill:file-search",
       extension: "sill",
       extensionTitle: "Files",
-      title: absent ? "Turn on file search" : "Start file search",
-      subtitle: absent
-        ? "Searching files needs Everything, which is not installed. Choose this to install it."
-        : "Everything is installed but not running, so there is nothing to search. Choose this to start it.",
+      title: said.title,
+      subtitle: said.subtitle,
       mode: "file-setup",
       entrypoint: "",
       matched: [],

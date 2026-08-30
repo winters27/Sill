@@ -42,6 +42,173 @@ pub(crate) struct PrefsState {
     pub(crate) path: Arc<PathBuf>,
 }
 
+/// Sill's own index of the files under the folders it was told to watch.
+///
+/// An `ArcSwap` rather than a lock because the two things done to it are very
+/// different: searching happens while somebody is typing and must never wait,
+/// and rebuilding happens on a background thread and takes over a second. A
+/// rebuild produces a whole new catalog and swaps it in, so a search either
+/// sees the old one or the new one and never blocks on either.
+#[derive(Clone, Default)]
+pub(crate) struct CatalogState {
+    pub(crate) inner: Arc<arc_swap::ArcSwap<crate::catalog::Catalog>>,
+    /// Set while a rebuild is running, so two do not overlap.
+    ///
+    /// A walk is over a second of work and megabytes of allocation. Two at
+    /// once would cost twice that to produce the same answer.
+    pub(crate) building: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl CatalogState {
+    /// Rebuilds in the background, unless a rebuild is already running.
+    ///
+    /// Returns immediately. Nothing waits for the index: file search answers
+    /// from whatever is currently swapped in, which on a first run is empty
+    /// and a second later is not.
+    pub(crate) fn rebuild(&self, roots: Vec<PathBuf>) {
+        use std::sync::atomic::Ordering;
+
+        if self
+            .building
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+
+        let inner = self.inner.clone();
+        let building = self.building.clone();
+
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let catalog = crate::catalog::Catalog::build(&roots);
+
+            crate::say!(
+                "file index: {} entries in {} ms",
+                catalog.len(),
+                started.elapsed().as_millis()
+            );
+
+            inner.store(Arc::new(catalog));
+            building.store(false, Ordering::Release);
+        });
+    }
+}
+
+/// Notices files appearing and disappearing, and rebuilds when they do.
+///
+/// **Coalesced hard, on purpose.** Saving a file in an editor produces several
+/// events, a `git checkout` produces thousands, and a rebuild is over a second
+/// of work. So changes are collected and one rebuild runs after things have
+/// been quiet for a while, rather than one rebuild per event.
+///
+/// The quiet period is deliberately long. A file that appeared four seconds
+/// ago and cannot be found yet is a much smaller problem than a launcher that
+/// walks a home folder every time a build writes to disk, which is exactly the
+/// kind of idle cost rule 23 exists to prevent.
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// The least time between two rebuilds, however much is going on.
+///
+/// A backstop rather than the main defence. Filtering events is what stops the
+/// churn; this is what stops any filter that turns out to be incomplete from
+/// costing a second of walking every few seconds forever.
+///
+/// Measured before it existed: watching a home folder with no filter rebuilt
+/// the index **eight times in seven minutes** while nobody was doing anything,
+/// because a browser and half a dozen background applications write to
+/// `AppData` constantly.
+const FLOOR: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Whether a changed path is one the index would have contained.
+///
+/// The walk skips these directories, so a file appearing inside one changes
+/// nothing about what a search would find, and rebuilding is pure cost. This
+/// is the same list the walk uses, which is what makes the two agree.
+///
+/// A path with several components under watch is judged by all of them: a file
+/// deep inside `node_modules` is not interesting no matter how interesting its
+/// parent folder is.
+fn worth_rebuilding(path: &std::path::Path) -> bool {
+    !path.components().any(|part| {
+        part.as_os_str()
+            .to_str()
+            .is_some_and(|name| crate::catalog::NOISE.contains(&name))
+    })
+}
+
+/// Watches the indexed folders and keeps the index roughly current.
+///
+/// Held so the watcher lives as long as the app does. Dropping it stops the
+/// watching, which is what should happen when the folders change: the old
+/// watcher goes and a new one takes its place.
+pub(crate) struct CatalogWatcher {
+    // Behind a mutex because Tauri's managed state is shared across threads
+    // and a watcher is only `Send`. Nothing ever locks it: the field exists to
+    // keep the watcher alive, and dropping it is what stops the watching.
+    _watcher: std::sync::Mutex<Box<dyn notify::Watcher + Send>>,
+}
+
+impl CatalogWatcher {
+    /// Starts watching, and rebuilds after things settle.
+    ///
+    /// Failing to watch is not fatal and is not worth stopping over. The index
+    /// is still built once at startup and can still be rebuilt by hand; all
+    /// that is lost is noticing changes on its own.
+    pub(crate) fn start(state: CatalogState, roots: Vec<PathBuf>) -> Option<Self> {
+        use notify::{RecursiveMode, Watcher};
+
+        if roots.is_empty() {
+            return None;
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            let Ok(event) = event else { return };
+
+            // Watching is recursive and the walk is not, so most of what
+            // arrives here is from directories the index deliberately skips.
+            // Left unfiltered this rebuilt eight times in seven minutes on an
+            // idle machine, because `AppData` never stops changing.
+            if !event.paths.iter().any(|path| worth_rebuilding(path)) {
+                return;
+            }
+
+            let _ = tx.send(());
+        })
+        .ok()?;
+
+        for root in &roots {
+            if let Err(err) = watcher.watch(root, RecursiveMode::Recursive) {
+                crate::say!("file index: cannot watch {}: {err}", root.display());
+            }
+        }
+
+        std::thread::spawn(move || {
+            let mut last = std::time::Instant::now() - FLOOR;
+
+            while rx.recv().is_ok() {
+                // Drain whatever else arrived while things settle. A build
+                // writing a thousand files should cost one rebuild, not a
+                // thousand.
+                while rx.recv_timeout(SETTLE).is_ok() {}
+
+                if last.elapsed() < FLOOR {
+                    continue;
+                }
+
+                last = std::time::Instant::now();
+                state.rebuild(roots.clone());
+            }
+        });
+
+        Some(Self {
+            _watcher: std::sync::Mutex::new(Box::new(watcher)),
+        })
+    }
+}
+
 /// The installed command registry and its ranking state.
 #[derive(Clone)]
 pub(crate) struct RegistryState {

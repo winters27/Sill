@@ -53,7 +53,14 @@ fn client() -> Option<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Missing {
-    /// Not on the machine.
+    /// Sill is still reading the folders it was told to index.
+    ///
+    /// Not a fault and nothing to act on, but the difference between "no
+    /// results yet" and "no results" is the difference between waiting a
+    /// second and going to look for a setting.
+    Indexing,
+    /// Nothing to search: Sill indexes nothing of its own, and no
+    /// whole-volume indexer is on the machine either.
     Absent,
     /// On the machine, but not running. Every route to it talks to the
     /// process, so an installed copy sitting closed answers nothing.
@@ -65,8 +72,8 @@ pub enum Missing {
 /// `None` means file search works. Asked when the launcher is summoned rather
 /// than per keystroke: it is one window lookup, but the answer only changes
 /// when a program starts or stops, which is not something typing does.
-pub fn missing(enabled: bool) -> Option<Missing> {
-    verdict(enabled, available(), installed())
+pub fn missing(enabled: bool, indexed: usize, building: bool) -> Option<Missing> {
+    verdict(enabled, indexed, building, available(), installed())
 }
 
 /// The rule itself, with the machine taken out of it.
@@ -76,9 +83,27 @@ pub fn missing(enabled: bool) -> Option<Missing> {
 /// down: **switched off is not a problem to report**, and telling somebody
 /// their file search is broken when they turned it off themselves is the kind
 /// of thing that makes a launcher feel like it is nagging.
-fn verdict(enabled: bool, running: bool, installed: bool) -> Option<Missing> {
-    if !enabled || running {
+fn verdict(
+    enabled: bool,
+    indexed: usize,
+    building: bool,
+    running: bool,
+    installed: bool,
+) -> Option<Missing> {
+    // Switched off is not a problem to report: somebody turned it off.
+    if !enabled {
         return None;
+    }
+
+    // Sill has files of its own to search. That a whole-volume indexer is
+    // absent is then not worth a word: it would have found more, and nobody
+    // needs telling about results they were never going to see.
+    if indexed > 0 || running {
+        return None;
+    }
+
+    if building {
+        return Some(Missing::Indexing);
     }
 
     Some(if installed {
@@ -347,15 +372,35 @@ mod tests {
     fn switched_off_is_not_a_problem_to_report() {
         // Somebody turned it off. Offering to install a file indexer they
         // deliberately stopped using is nagging, not helping.
-        for running in [true, false] {
-            for installed in [true, false] {
-                assert_eq!(
-                    verdict(false, running, installed),
-                    None,
-                    "complained while switched off (running={running}, installed={installed})"
-                );
+        for building in [true, false] {
+            for running in [true, false] {
+                for installed in [true, false] {
+                    assert_eq!(
+                        verdict(false, 0, building, running, installed),
+                        None,
+                        "complained while switched off"
+                    );
+                }
             }
         }
+    }
+
+    #[test]
+    fn our_own_index_is_enough_and_nothing_else_is_mentioned() {
+        // The point of having one. A machine with no whole-volume indexer at
+        // all still has working file search, and telling somebody to install
+        // one would be advertising rather than helping.
+        assert_eq!(verdict(true, 40_000, false, false, false), None);
+        assert_eq!(verdict(true, 1, false, false, false), None);
+    }
+
+    #[test]
+    fn a_first_run_says_it_is_working_rather_than_that_it_is_broken() {
+        // The walk takes over a second. Offering to install something during
+        // it would be wrong twice over: nothing is missing, and by the time
+        // anybody read the row it would be gone.
+        assert_eq!(verdict(true, 0, true, false, false), Some(Missing::Indexing));
+        assert_eq!(verdict(true, 0, true, false, true), Some(Missing::Indexing));
     }
 
     #[test]
@@ -364,15 +409,15 @@ mod tests {
         // probe cannot see, which is the portable copy `installed` admits it
         // misses. Running is the fact that matters; installed is only how the
         // remedy is worded.
-        assert_eq!(verdict(true, true, false), None);
-        assert_eq!(verdict(true, true, true), None);
+        assert_eq!(verdict(true, 0, false, true, false), None);
+        assert_eq!(verdict(true, 0, false, true, true), None);
     }
 
     #[test]
     fn the_remedy_matches_what_is_actually_wrong() {
         // The whole reason there are two variants. "Install this" to somebody
         // who already has it reads as the launcher being broken.
-        assert_eq!(verdict(true, false, true), Some(Missing::Asleep));
-        assert_eq!(verdict(true, false, false), Some(Missing::Absent));
+        assert_eq!(verdict(true, 0, false, false, true), Some(Missing::Asleep));
+        assert_eq!(verdict(true, 0, false, false, false), Some(Missing::Absent));
     }
 }

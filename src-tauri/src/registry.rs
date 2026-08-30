@@ -906,6 +906,67 @@ pub enum MatchClass {
 }
 
 /// Whether a character begins a word, by the same rule [`fuzzy`] scores.
+/// Reads a query as the initials of the words in a name.
+///
+/// Only the positions where a word begins are considered, in order, so `vsc`
+/// on "Visual Studio Code" matches V, S and C and never the s inside "Visual".
+/// Returns nothing when the query cannot be read that way at all.
+fn initials(needle: &[char], hay: &[char]) -> Option<Vec<usize>> {
+    if needle.is_empty() {
+        return None;
+    }
+
+    let mut matched = Vec::with_capacity(needle.len());
+    let mut want = needle.iter().copied();
+    let mut next = want.next()?;
+
+    for at in 0..hay.len() {
+        if !begins_a_word(hay, at) {
+            continue;
+        }
+
+        if lower_one(hay[at]) == next {
+            matched.push(at);
+            match want.next() {
+                Some(after) => next = after,
+                // Every character placed, each at the start of a word.
+                None => return Some(matched),
+            }
+        }
+    }
+
+    None
+}
+
+/// How many characters a scattered match may skip in one jump.
+///
+/// Skipping a letter is a near miss worth offering: `steam` reaches
+/// StreamNook over a gap of one, and `disc` reaches Disk Cleanup over two.
+/// Skipping fifty is not a match at all, it is a coincidence of a long name
+/// containing common letters.
+///
+/// Three, measured. On real data the matches worth keeping had widest gaps of
+/// 1, 2 and 2; the ones worth dropping had 7, 11 and 51. There is a wide empty
+/// band between those, and this sits in it on the conservative side.
+///
+/// This is fzf's affine gap penalty as a limit rather than as a cost. A cost
+/// would only reorder this class, and this class is already last.
+const MAX_GAP: usize = 3;
+
+/// The largest jump between two consecutive matched characters.
+///
+/// Not the span from first to last, which was tried and does not separate
+/// anything: a short query over a short name and a long query over a long one
+/// can span the same distance while being nothing alike. What tells them apart
+/// is whether any single jump is implausible.
+fn widest_gap(matched: &[usize]) -> usize {
+    matched
+        .windows(2)
+        .map(|pair| pair[1].saturating_sub(pair[0]).saturating_sub(1))
+        .max()
+        .unwrap_or(0)
+}
+
 fn begins_a_word(hay: &[char], at: usize) -> bool {
     at == 0
         || matches!(hay[at - 1], ' ' | '-' | '_' | '.' | '/' | ':')
@@ -975,9 +1036,16 @@ fn lower_one(c: char) -> char {
 }
 
 /// How this command matched on its own text, with nothing learned or stated.
-fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass, Vec<usize>)> {
-    let hay: Vec<char> = command.title.chars().collect();
-    let hay_lower: Vec<char> = command.title.to_lowercase().chars().collect();
+/// How a query matches one piece of text.
+///
+/// Split out of [`classify_text`] because the file index ranks bare names: a
+/// file has a name and nothing else, no keywords and no extension it belongs
+/// to. Two implementations of "does this text match" would have drifted the
+/// first time either one learned something, and the point of a file behaving
+/// like every other row is that the same code decides.
+pub fn match_name(needle: &[char], text: &str) -> Option<(MatchClass, Vec<usize>)> {
+    let hay: Vec<char> = text.chars().collect();
+    let hay_lower: Vec<char> = text.to_lowercase().chars().collect();
 
     // Lowercasing can change length in some scripts, and these indices are
     // handed to the window to slice the *original* title.
@@ -1001,7 +1069,20 @@ fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass
         }
     }
 
-    let scattered = fuzzy_with(needle, &command.title);
+    // Asked directly rather than hoped for. `fuzzy_with` takes the first
+    // occurrence of each character, so on "Visual Studio Code" it matches the
+    // s inside "Visual" and then has to reach eleven characters for the c.
+    // That reads as a scattered near miss when it is really an acronym, and
+    // the gap limit below then throws it away.
+    //
+    // fzf avoids this with a dynamic program that finds the best alignment
+    // rather than the first one. The whole of the difference here is whether
+    // initials are read as initials, so this asks that one question instead.
+    if let Some(matched) = initials(needle, &hay) {
+        return Some((MatchClass::TitleWordStarts, matched));
+    }
+
+    let scattered = fuzzy_with(needle, &text);
 
     // Checked before the substring case on purpose. Typing initials is a
     // deliberate act and `sc` should find Screen Capture ahead of Discord,
@@ -1035,9 +1116,19 @@ fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass
     // stops offering Character Map, and `steam` still finds StreamNook, which
     // is the one scattered match on that machine anybody would have wanted.
     if let Some((_, matched)) = scattered {
-        if matched.first().is_some_and(|&at| begins_a_word(&hay, at)) {
+        if matched.first().is_some_and(|&at| begins_a_word(&hay, at))
+            && widest_gap(&matched) <= MAX_GAP
+        {
             return Some((MatchClass::TitleSubsequence, matched));
         }
+    }
+
+    None
+}
+
+fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass, Vec<usize>)> {
+    if let Some(found) = match_name(needle, &command.title) {
+        return Some(found);
     }
 
     // Nothing in the title. The other sources are searched but never

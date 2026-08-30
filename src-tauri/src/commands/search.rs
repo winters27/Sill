@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use crate::state::{now_seconds, PrefsState, RegistryState};
+use crate::state::{now_seconds, CatalogState, PrefsState, RegistryState};
 use crate::{calculator, files, registry, windowing};
 
 /// The root list, or what matches a query.
@@ -207,6 +207,7 @@ pub(crate) async fn list_monitors() -> Result<Vec<windowing::Monitor>, String> {
 #[tauri::command]
 pub(crate) async fn search_files(
     state: State<'_, PrefsState>,
+    catalog: State<'_, CatalogState>,
     query: String,
 ) -> Result<Vec<files::FileHit>, String> {
     let settings = state.inner.lock().await.files.clone();
@@ -215,12 +216,20 @@ pub(crate) async fn search_files(
         return Ok(Vec::new());
     }
 
-    let query = files::scope(&query, &settings.only_in);
+    let wanted = settings.max_results as usize;
 
-    let hits = tokio::task::spawn_blocking(move || {
+    // Sill's own index first. It knows the folders somebody actually works in
+    // and it answers in a few milliseconds without a second program being
+    // installed, so it is the answer rather than the fallback.
+    let ours = catalog.inner.load().search(query.trim(), wanted);
+
+    // Then a whole-volume indexer, when one is running. It sees the rest of
+    // the machine, which our index deliberately does not.
+    let scoped = files::scope(&query, &settings.only_in);
+    let theirs = tokio::task::spawn_blocking(move || {
         files::search_with(
-            &query,
-            settings.max_results as usize,
+            &scoped,
+            wanted,
             settings.match_path,
             settings.match_case,
             settings.regex,
@@ -229,7 +238,40 @@ pub(crate) async fn search_files(
     .await
     .unwrap_or_default();
 
-    Ok(hits)
+    Ok(merge(ours, theirs, wanted))
+}
+
+/// Puts two sets of file results together without repeating anything.
+///
+/// Ours first and in its own order, because it ranks with the same code as
+/// every other row and a whole-volume indexer has its own idea of relevance
+/// that does not agree. Theirs fills the rest, which is where anything outside
+/// the indexed folders comes from.
+///
+/// Paths are compared case-insensitively: Windows does, and the same file
+/// arriving from both sources under different capitalisation would otherwise
+/// be listed twice.
+pub fn merge(
+    ours: Vec<files::FileHit>,
+    theirs: Vec<files::FileHit>,
+    limit: usize,
+) -> Vec<files::FileHit> {
+    let mut seen: std::collections::HashSet<String> =
+        ours.iter().map(|hit| hit.path.to_lowercase()).collect();
+    let mut out = ours;
+
+    for hit in theirs {
+        if out.len() >= limit {
+            break;
+        }
+
+        if seen.insert(hit.path.to_lowercase()) {
+            out.push(hit);
+        }
+    }
+
+    out.truncate(limit);
+    out
 }
 
 /// What is stopping file search from answering, if anything.
@@ -243,10 +285,16 @@ pub(crate) async fn search_files(
 #[tauri::command]
 pub(crate) async fn file_search_missing(
     state: State<'_, PrefsState>,
+    catalog: State<'_, CatalogState>,
 ) -> Result<Option<files::Missing>, String> {
     let enabled = state.inner.lock().await.files.enabled;
 
-    Ok(files::missing(enabled))
+    Ok(files::missing(enabled, catalog.inner.load().len(), busy(&catalog)))
+}
+
+/// Whether the index is being rebuilt right now.
+fn busy(catalog: &CatalogState) -> bool {
+    catalog.building.load(std::sync::atomic::Ordering::Acquire)
 }
 
 /// Does whatever the thing standing in the way needs.
@@ -260,10 +308,15 @@ pub(crate) async fn file_search_missing(
 /// swallowed all of that and reported nothing would be worse than one that
 /// shows the same output a person would have seen typing it themselves.
 #[tauri::command]
-pub(crate) async fn start_file_search(state: State<'_, PrefsState>) -> Result<String, String> {
+pub(crate) async fn start_file_search(
+    state: State<'_, PrefsState>,
+    catalog: State<'_, CatalogState>,
+) -> Result<String, String> {
     let enabled = state.inner.lock().await.files.enabled;
+    let indexed = catalog.inner.load().len();
 
-    match files::missing(enabled) {
+    match files::missing(enabled, indexed, busy(&catalog)) {
+        Some(files::Missing::Indexing) => Ok("Still reading your files.".to_string()),
         None => Ok("File search is already working.".to_string()),
         Some(files::Missing::Asleep) => {
             files::start().map(|()| "Starting file search.".to_string())

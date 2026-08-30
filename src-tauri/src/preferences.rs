@@ -354,7 +354,12 @@ impl Default for Sources {
     }
 }
 
-/// File search, which is delegated to Everything.
+/// File search.
+///
+/// Sill keeps its own index of the folders listed in `roots`, and additionally
+/// asks a whole-volume indexer when one happens to be running. The two answer
+/// different questions: ours knows the files somebody works on, and a
+/// whole-volume index knows every file on the machine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct FileSearch {
@@ -368,7 +373,60 @@ pub struct FileSearch {
     /// Treat the query as a regular expression.
     pub regex: bool,
     /// Only search these folders, when any are listed.
+    ///
+    /// A filter on what a whole-volume indexer returns, which is not the same
+    /// thing as `roots`: this narrows results that already exist, where roots
+    /// decide what gets indexed in the first place.
     pub only_in: Vec<String>,
+    /// The folders Sill indexes itself.
+    ///
+    /// Empty means the home folder, resolved when the index is built rather
+    /// than written into the file: a path baked into saved settings would be
+    /// wrong for anybody who moved their profile, and would have to be
+    /// migrated rather than simply meaning "wherever home is now".
+    pub roots: Vec<String>,
+    /// Whether to index anything at all.
+    ///
+    /// Separate from `enabled` because the two costs are different. Turning
+    /// this off leaves file search working through a whole-volume indexer if
+    /// one is running, and stops Sill holding an index of its own.
+    pub index: bool,
+}
+
+impl FileSearch {
+    /// The folders to index, with the default resolved.
+    ///
+    /// Home rather than a whole drive, which is what every launcher that
+    /// builds its own index settles on. Measured here: a whole home folder is
+    /// 2,272,143 files, and 42,976 once what `.gitignore` and the noise list
+    /// rule out is left alone. The first number is not indexable at this
+    /// budget and the second is.
+    pub fn indexed_roots(&self) -> Vec<std::path::PathBuf> {
+        if !self.index {
+            return Vec::new();
+        }
+
+        let listed: Vec<std::path::PathBuf> = self
+            .roots
+            .iter()
+            .map(|root| root.trim())
+            .filter(|root| !root.is_empty())
+            .map(std::path::PathBuf::from)
+            .collect();
+
+        if !listed.is_empty() {
+            return listed;
+        }
+
+        home().into_iter().collect()
+    }
+}
+
+/// Where the person using this keeps their own files.
+fn home() -> Option<std::path::PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_dir())
 }
 
 impl Default for FileSearch {
@@ -380,6 +438,8 @@ impl Default for FileSearch {
             match_case: false,
             regex: false,
             only_in: Vec::new(),
+            roots: Vec::new(),
+            index: true,
         }
     }
 }

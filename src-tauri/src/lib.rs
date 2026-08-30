@@ -3,6 +3,7 @@ pub mod actions;
 pub mod apps;
 pub mod bindings;
 pub mod calculator;
+pub mod catalog;
 pub mod clipboard;
 pub mod commands;
 pub mod dictation;
@@ -684,6 +685,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(state::CatalogState::default())
         .manage(actions::builtins())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
@@ -839,6 +841,25 @@ pub fn run() {
             // After the manage calls above: this resolves the service out of
             // managed state, which panics if it is not there yet.
             apply_dictation(&handle, &prefs.dictation);
+
+            // Started here rather than waited for. The walk is over a second
+            // of work, and nothing needs it until somebody types: file search
+            // answers from an empty index for that second and from a full one
+            // afterwards, which is a better first run than a launcher that
+            // will not open until it has read the disk.
+            {
+                let roots = prefs.files.indexed_roots();
+                if !roots.is_empty() {
+                    let catalog = app.state::<state::CatalogState>();
+                    catalog.rebuild(roots.clone());
+
+                    if let Some(watcher) =
+                        state::CatalogWatcher::start(catalog.inner().clone(), roots)
+                    {
+                        app.manage(watcher);
+                    }
+                }
+            }
 
             app.manage(PrefsState {
                 inner: Arc::new(tokio::sync::Mutex::new(prefs)),

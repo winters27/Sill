@@ -2120,10 +2120,9 @@ fn a_scattered_match_has_to_start_where_a_word_starts() {
 
     let found = ids(&search(&corpus, "tada", &Frecency::default(), NOW, 50));
 
-    assert_eq!(
-        found,
-        vec!["setting:team"],
-        "the one starting at a word should be the only one left"
+    assert!(
+        !found.contains(&"app:mtws".to_string()),
+        "a match starting mid-word survived: {found:?}"
     );
 }
 
@@ -2165,4 +2164,85 @@ fn typing_a_whole_word_finds_it_wherever_it_sits_in_the_title() {
         Some("emoji:red"),
         "got {found:?}"
     );
+}
+
+// ------------------------------------------------- how far a match may skip
+
+#[test]
+fn skipping_a_letter_is_a_match_and_skipping_fifty_is_not() {
+    // Measured on real data before the number was chosen. The matches worth
+    // keeping had widest gaps of 1, 2 and 2; the ones worth dropping had 7, 11
+    // and 51. Both sides are pinned here so the number cannot drift into
+    // either of them unnoticed.
+    let keep = vec![
+        command("app:streamnook", "StreamNook", "Application"),
+        command("app:disk", "Disk Cleanup", "Application"),
+    ];
+
+    for (typed, wanted) in [("steam", "app:streamnook"), ("disc", "app:disk")] {
+        let found = ids(&search(&keep, typed, &Frecency::default(), NOW, 50));
+        assert!(
+            found.contains(&wanted.to_string()),
+            "{typed:?} lost {wanted}: {found:?}"
+        );
+    }
+
+    // A long name whose letters happen to contain a short query in order.
+    // This is not a near miss, it is a coincidence of spelling.
+    let junk = vec![command(
+        "note:radio",
+        "An app that allows anyone to be a radio dj, playing music from your \
+         library live to whoever wants to listen",
+        "Notes",
+    )];
+
+    let found = ids(&search(&junk, "registry.rs", &Frecency::default(), NOW, 50));
+    assert!(found.is_empty(), "matched by coincidence: {found:?}");
+}
+
+#[test]
+fn the_widest_jump_is_what_counts_and_not_the_distance_covered() {
+    // Span was tried first and separates nothing: a short query over a short
+    // name and a long query over a long one cover the same distance while
+    // being nothing alike. "StreamNook" and a sentence both span about six
+    // characters per matched letter. What tells them apart is whether any
+    // single jump is implausible.
+    let corpus = vec![
+        // Five letters, one skipped, spanning six.
+        command("app:streamnook", "StreamNook", "Application"),
+        // Four letters, spanning fourteen, because one jump is seven.
+        command("setting:team", "Team Device Management", "Settings"),
+    ];
+
+    let found = ids(&search(&corpus, "steam", &Frecency::default(), NOW, 50));
+    assert!(found.contains(&"app:streamnook".to_string()), "{found:?}");
+
+    let found = ids(&search(&corpus, "tada", &Frecency::default(), NOW, 50));
+    assert!(found.is_empty(), "a seven-character jump matched: {found:?}");
+}
+
+#[test]
+fn initials_are_read_as_initials_and_not_as_a_lucky_subsequence() {
+    // The regression the gap limit caused, and why it is worth a pass of its
+    // own. Matching greedily takes the s inside "Visual" and then has to reach
+    // eleven characters for the c, which reads as a scattered near miss rather
+    // than as somebody typing initials, and the gap limit then discards it.
+    let corpus = vec![command("app:vscode", "Visual Studio Code", "Application")];
+
+    let class = match_class("vsc", &corpus[0]).expect("initials should match");
+    assert_eq!(class, MatchClass::TitleWordStarts, "read as {class:?}");
+
+    let found = ids(&search(&corpus, "vsc", &Frecency::default(), NOW, 50));
+    assert_eq!(found, vec!["app:vscode"]);
+}
+
+#[test]
+fn initials_only_count_where_words_actually_begin() {
+    // Otherwise it is just a subsequence with a nicer name, and it would put
+    // every long title in front of the thing somebody meant.
+    let corpus = vec![command("app:logcat", "Logcat Viewer", "Application")];
+
+    // g and c sit next to each other inside "Logcat", starting no words.
+    let class = match_class("gc", &corpus[0]).expect("still matches somehow");
+    assert_ne!(class, MatchClass::TitleWordStarts, "read as initials");
 }

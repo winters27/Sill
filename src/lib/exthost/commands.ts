@@ -181,7 +181,7 @@ export interface FileHit {
 }
 
 /** Why file search cannot answer, or nothing when it can. */
-export type FileSearchMissing = "absent" | "asleep";
+export type FileSearchMissing = "indexing" | "absent" | "asleep";
 
 /**
  * What is standing between a typed query and a list of files.
