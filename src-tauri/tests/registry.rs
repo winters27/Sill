@@ -1728,3 +1728,74 @@ fn the_term_list_and_the_hidden_list_both_apply() {
     assert!(!titles.contains(&"Steam"), "{titles:?}");
     assert!(titles.contains(&"Steam Link"), "the term-free one went too");
 }
+
+// --------------------------------------------------------------- history
+
+#[test]
+fn the_most_recent_query_is_first() {
+    let mut frecency = Frecency::default();
+    frecency.remember("docker");
+    frecency.remember("spotify");
+    frecency.remember("notepad");
+
+    assert_eq!(frecency.history(), ["notepad", "spotify", "docker"]);
+}
+
+#[test]
+fn searching_for_the_same_thing_twice_moves_it_rather_than_repeating_it() {
+    // Both halves matter. Refusing the duplicate leaves it buried under
+    // everything done since, and keeping both fills the history with one
+    // query typed over and over.
+    let mut frecency = Frecency::default();
+    frecency.remember("docker");
+    frecency.remember("spotify");
+    frecency.remember("docker");
+
+    assert_eq!(frecency.history(), ["docker", "spotify"]);
+}
+
+#[test]
+fn the_history_is_bounded() {
+    // It is written to disk and read on every launch, and walking back
+    // through hundreds of entries is slower than retyping.
+    let mut frecency = Frecency::default();
+    for n in 0..200 {
+        frecency.remember(&format!("query {n}"));
+    }
+
+    assert!(
+        frecency.history().len() <= 50,
+        "{}",
+        frecency.history().len()
+    );
+    assert_eq!(
+        frecency.history().first().map(String::as_str),
+        Some("query 199")
+    );
+}
+
+#[test]
+fn an_empty_query_is_not_remembered() {
+    // Summoning and pressing Enter on the root list is not a search, and
+    // offering it back later would be offering nothing back.
+    let mut frecency = Frecency::default();
+    frecency.remember("");
+    frecency.remember("   ");
+
+    assert!(frecency.history().is_empty());
+}
+
+#[test]
+fn a_long_query_is_remembered_even_though_it_teaches_nothing() {
+    // The two are different questions. Learning ignores a long query because
+    // whoever typed the whole name had already found the thing; history keeps
+    // it because getting it back without retyping is the entire point.
+    let mut frecency = Frecency::default();
+    let long = "a very long thing somebody actually searched for once";
+
+    frecency.record_query(long, "app:x", NOW);
+    frecency.remember(long);
+
+    assert_eq!(frecency.learned_len(), 0, "it should teach nothing");
+    assert_eq!(frecency.history(), [long], "but it should be recallable");
+}

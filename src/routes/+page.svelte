@@ -27,6 +27,7 @@
     searchFiles,
     searchWindows,
     recordUse,
+    queryHistory,
     openPath,
     fileAsCommand,
     actionsFor,
@@ -427,6 +428,10 @@
     const current = query;
     const id = ++searchId;
 
+    // Typing leaves the history behind. Anything else would make the next Up
+    // continue walking from a place the user has already edited away from.
+    if (!current) walked = -1;
+
     clearTimeout(fileTimer);
 
     // The switcher is windows and nothing else. Mixing applications in would
@@ -700,6 +705,44 @@
 
   /** How far a screenful moves. Matches the rows the window shows at once. */
   const PAGE = 8;
+
+  /**
+   * Past queries, and how far back through them the user has walked.
+   *
+   * Up recalls only from the top of an empty root list, which is the one
+   * moment pressing Up means nothing else: there is no row above to move to
+   * and no text to move through. Overloading it anywhere else would take the
+   * arrow key away from navigating, which is the same mistake the navigation
+   * presets are careful not to make.
+   */
+  let past = $state<string[]>([]);
+  let walked = $state(-1);
+
+  /**
+   * Whether Up should reach for a past query rather than move the selection.
+   *
+   * Two conditions, and the second one is the part that took a real test to
+   * find. "Nothing above to move to" is `selected === 0`. "Not in the middle
+   * of editing" is **not** the same as an empty field: the launcher keeps the
+   * last query across summons by default and selects it so typing replaces it,
+   * so the field is almost never actually empty and a rule that required that
+   * made this unreachable in ordinary use.
+   *
+   * Fully selected counts as empty, which is the same rule a shell follows and
+   * the same thing `selectQueryOnSummon` already means: this text is about to
+   * be replaced.
+   */
+  function recalling(): boolean {
+    if (mode !== "root" || selected !== 0 || past.length === 0) return false;
+    if (!query.trim()) return true;
+
+    const field = searchInput;
+    return (
+      !!field &&
+      field.selectionStart === 0 &&
+      field.selectionEnd === query.length
+    );
+  }
 
   let rootList = $state<ReturnType<typeof RootList> | null>(null);
 
@@ -1112,9 +1155,23 @@
 
     switch (movement) {
       case "next":
+        // Walking forward out of the history, before it is navigation again.
+        if (walked >= 0) {
+          walked -= 1;
+          query = walked >= 0 ? past[walked] : "";
+          return;
+        }
         if (count) selected = (selected + 1) % count;
         break;
       case "previous":
+        if (recalling()) {
+          walked = Math.min(walked + 1, past.length - 1);
+          query = past[walked];
+          // The recalled text arrives selected, so a second Up keeps
+          // recalling and typing still replaces it.
+          requestAnimationFrame(() => searchInput?.select());
+          return;
+        }
         if (count) selected = (selected - 1 + count) % count;
         break;
       case "pageDown":
@@ -1225,6 +1282,11 @@
         // if you meant to come back to it.
         if (prefs?.hotkey.resetOnSummon && mode === "command") void goBack();
 
+        // Re-read on every summon rather than only at startup: a search done
+        // a minute ago should be one Up away, and the launcher is long-lived.
+        walked = -1;
+        void queryHistory().then((seen) => (past = seen));
+
         // A frame's grace so focus lands after the window is actually up.
         requestAnimationFrame(() => {
           searchInput?.focus();
@@ -1257,6 +1319,7 @@
       prefs = await getPreferences();
       applyAppearance(prefs);
       navKeys = await navigationChords();
+      past = await queryHistory();
       await refreshRoot();
       searchInput?.focus();
     })();

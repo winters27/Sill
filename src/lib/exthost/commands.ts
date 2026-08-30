@@ -105,6 +105,17 @@ export function recordUse(id: string, query?: string): Promise<void> {
   return invoke<void>("record_use", { id, query }).catch(() => undefined);
 }
 
+/**
+ * What was typed before, most recent first.
+ *
+ * Only queries that reached something. A shell recalls everything typed
+ * including the typos; a launcher offering back the half-finished strings
+ * somebody abandoned would mostly be offering them their mistakes.
+ */
+export function queryHistory(): Promise<string[]> {
+  return invoke<string[]>("query_history").catch(() => []);
+}
+
 export function unloadExtension(session: string): Promise<boolean> {
   return invoke<boolean>("unload_extension", { session });
 }

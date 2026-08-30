@@ -876,6 +876,7 @@ pub fn run() {
             commands::search::open_path,
             commands::launch::launch_command,
             commands::launch::record_use,
+            commands::launch::query_history,
             commands::launch::actions_for,
             commands::launch::run_action,
             commands::launch::undo_action,

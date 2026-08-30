@@ -49,6 +49,7 @@ pub(crate) async fn launch_command(
         // the thing worth learning; the full name teaches nothing.
         if let Some(query) = query.as_deref() {
             registry.frecency.record_query(query, &id, now);
+            registry.frecency.remember(query);
         }
         let path = registry.frecency_path.clone();
         if let Err(err) = registry.frecency.save(&path) {
@@ -278,6 +279,7 @@ pub(crate) async fn record_use(
     registry.frecency.record(&id, now);
     if let Some(query) = query.as_deref() {
         registry.frecency.record_query(query, &id, now);
+        registry.frecency.remember(query);
     }
 
     let path = registry.frecency_path.clone();
@@ -286,4 +288,14 @@ pub(crate) async fn record_use(
     }
 
     Ok(())
+}
+
+/// What was typed before, most recent first.
+///
+/// For walking back through past queries in an empty field. Only queries that
+/// reached something: a launcher offering back the half-finished strings
+/// somebody abandoned would mostly be offering them their mistakes.
+#[tauri::command]
+pub(crate) async fn query_history(state: State<'_, RegistryState>) -> Result<Vec<String>, String> {
+    Ok(state.inner.lock().await.frecency.history().to_vec())
 }

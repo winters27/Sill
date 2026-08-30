@@ -546,7 +546,25 @@ pub struct Frecency {
     /// inner map is fetched once and then asked about each id.
     #[serde(default)]
     learned: HashMap<String, HashMap<String, (u32, i64)>>,
+    /// Queries that reached something, most recent first.
+    ///
+    /// Separate from `learned`, which answers "what does this query mean".
+    /// This answers "what did I type last", which is a different question and
+    /// needs an order rather than a map.
+    ///
+    /// Only queries that led somewhere. A shell recalls everything typed
+    /// including the typos; a launcher recalling the half-finished strings
+    /// somebody abandoned would mostly offer back their mistakes.
+    #[serde(default)]
+    history: Vec<String>,
 }
+
+/// How many past queries are kept.
+///
+/// Enough to hold a working session and short enough that walking back
+/// through it stays faster than retyping. Beyond that, searching is the answer
+/// rather than pressing Up forty times.
+const HISTORY: usize = 50;
 
 /// How many times one query has to reach one command before it counts.
 ///
@@ -678,6 +696,27 @@ impl Frecency {
     /// How many distinct queries have taught something. For diagnostics.
     pub fn learned_len(&self) -> usize {
         self.learned.len()
+    }
+
+    /// Puts a query at the front of the history.
+    ///
+    /// Deduplicated by moving rather than by refusing: searching for the same
+    /// thing twice should not leave it buried under everything done since, and
+    /// it should not appear twice either.
+    pub fn remember(&mut self, query: &str) {
+        let query = query.trim().to_string();
+        if query.is_empty() {
+            return;
+        }
+
+        self.history.retain(|past| past != &query);
+        self.history.insert(0, query);
+        self.history.truncate(HISTORY);
+    }
+
+    /// What was typed before, most recent first.
+    pub fn history(&self) -> &[String] {
+        &self.history
     }
 
     /// Higher is more likely to be what the user wants.
