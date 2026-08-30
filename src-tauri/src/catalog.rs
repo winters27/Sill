@@ -245,6 +245,47 @@ fn same_root(root: &Path, drive: &str) -> bool {
     same_folder(&root.to_string_lossy(), drive)
 }
 
+/// Whether a change can alter what the index holds.
+///
+/// The index holds names and where they are, and nothing else. **Writing to a
+/// file does not change either of them**, and writing to files is nearly
+/// everything a watcher reports: every save in an editor, every log line,
+/// every application touching its own state. Rebuilding for those is a walk of
+/// the whole tree to arrive back at exactly the list already held.
+///
+/// What does change it: a file appearing, a file going away, and a file being
+/// renamed, which is both at once.
+pub fn changes_the_index(kind: &notify::EventKind) -> bool {
+    use notify::event::{EventKind, ModifyKind};
+
+    match kind {
+        EventKind::Create(_) | EventKind::Remove(_) => true,
+        EventKind::Modify(ModifyKind::Name(_)) => true,
+        EventKind::Modify(_) | EventKind::Access(_) => false,
+        // `Any` and `Other` are what a platform reports when it will not say.
+        // Treated as a change, because missing one leaves the index wrong
+        // until something else happens, and the floor limits what that costs.
+        EventKind::Any | EventKind::Other => true,
+    }
+}
+
+/// Whether a changed path is one the index would have contained.
+///
+/// The walk skips these directories, so a file appearing inside one changes
+/// nothing about what a search would find, and rebuilding is pure cost. This
+/// is the same list the walk uses, which is what makes the two agree.
+///
+/// A path with several components under watch is judged by all of them: a file
+/// deep inside `node_modules` is not interesting no matter how interesting its
+/// parent folder is.
+pub fn worth_indexing(path: &Path) -> bool {
+    !path.components().any(|part| {
+        part.as_os_str()
+            .to_str()
+            .is_some_and(|name| NOISE.contains(&name))
+    })
+}
+
 /// Where one file's path sits in the arena.
 ///
 /// Sixteen bytes and no allocation of its own. The first version gave every

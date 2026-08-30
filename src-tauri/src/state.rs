@@ -52,6 +52,11 @@ pub(crate) struct PrefsState {
 #[derive(Clone, Default)]
 pub(crate) struct CatalogState {
     pub(crate) inner: Arc<arc_swap::ArcSwap<crate::catalog::Catalog>>,
+    /// How long the last walk took, which is what paces the next one.
+    ///
+    /// Milliseconds, because an atomic is what a watcher thread can read
+    /// without waiting on whatever the rebuild thread is doing.
+    pub(crate) cost: Arc<std::sync::atomic::AtomicU64>,
     /// Set while a rebuild is running, so two do not overlap.
     ///
     /// A walk is over a second of work and megabytes of allocation. Two at
@@ -81,10 +86,12 @@ impl CatalogState {
         let inner = self.inner.clone();
         let building = self.building.clone();
         let cache = self.cache.clone();
+        let cost = self.cost.clone();
 
         std::thread::spawn(move || {
             let started = std::time::Instant::now();
             let catalog = crate::catalog::Catalog::build(&roots);
+            cost.store(started.elapsed().as_millis() as u64, Ordering::Release);
 
             crate::say!(
                 "file index: {} entries in {} ms",
@@ -147,33 +154,26 @@ impl CatalogState {
 /// kind of idle cost rule 23 exists to prevent.
 const SETTLE: std::time::Duration = std::time::Duration::from_secs(4);
 
-/// The least time between two rebuilds, however much is going on.
+/// The share of one processor a rebuild may take, over the long run.
 ///
-/// A backstop rather than the main defence. Filtering events is what stops the
-/// churn; this is what stops any filter that turns out to be incomplete from
-/// costing a second of walking every few seconds forever.
-///
-/// Measured before it existed: watching a home folder with no filter rebuilt
-/// the index **eight times in seven minutes** while nobody was doing anything,
-/// because a browser and half a dozen background applications write to
-/// `AppData` constantly.
-const FLOOR: std::time::Duration = std::time::Duration::from_secs(120);
+/// The wait between two rebuilds is the last one's cost multiplied by this, so
+/// a walk that takes a second earns a twenty second wait and one that takes
+/// six earns two minutes. Indexing therefore costs about a twentieth of one
+/// core while files are changing constantly, whether the folder is small or a
+/// whole drive, without a number anywhere that has to be guessed per machine.
+const ONE_IN: u32 = 20;
 
-/// Whether a changed path is one the index would have contained.
+/// The least time between two rebuilds, whatever the arithmetic says.
 ///
-/// The walk skips these directories, so a file appearing inside one changes
-/// nothing about what a search would find, and rebuilding is pure cost. This
-/// is the same list the walk uses, which is what makes the two agree.
+/// Stops a very fast walk from rebuilding on every keystroke of somebody's
+/// editor, and covers the first rebuild, which has no previous cost to go on.
+const FLOOR: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// How long to leave the index alone after a rebuild that took this long.
 ///
-/// A path with several components under watch is judged by all of them: a file
-/// deep inside `node_modules` is not interesting no matter how interesting its
-/// parent folder is.
-fn worth_rebuilding(path: &std::path::Path) -> bool {
-    !path.components().any(|part| {
-        part.as_os_str()
-            .to_str()
-            .is_some_and(|name| crate::catalog::NOISE.contains(&name))
-    })
+/// Pure arithmetic, so it can be checked without waiting for any of it.
+pub fn quiet_after(build: std::time::Duration) -> std::time::Duration {
+    (build * ONE_IN).max(FLOOR)
 }
 
 /// Watches the indexed folders and keeps the index roughly current.
@@ -202,15 +202,22 @@ impl CatalogWatcher {
         }
 
         let (tx, rx) = std::sync::mpsc::channel();
+        let cost = state.cost.clone();
 
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             let Ok(event) = event else { return };
+
+            // Saving a file cannot change a list of file names, and saving
+            // files is most of what a watcher ever reports.
+            if !crate::catalog::changes_the_index(&event.kind) {
+                return;
+            }
 
             // Watching is recursive and the walk is not, so most of what
             // arrives here is from directories the index deliberately skips.
             // Left unfiltered this rebuilt eight times in seven minutes on an
             // idle machine, because `AppData` never stops changing.
-            if !event.paths.iter().any(|path| worth_rebuilding(path)) {
+            if !event.paths.iter().any(|path| crate::catalog::worth_indexing(path)) {
                 return;
             }
 
@@ -225,20 +232,35 @@ impl CatalogWatcher {
         }
 
         std::thread::spawn(move || {
+            use std::sync::atomic::Ordering;
+
             // Starts as if a rebuild just happened, because one did: the
-            // caller walks once at startup. Starting a floor in the past meant
-            // the first event to arrive rebuilt immediately, so an ordinary
-            // launch walked the whole drive twice, seven seconds apart.
+            // caller walks once at startup. Starting the wait in the past
+            // meant the first event to arrive rebuilt immediately, so an
+            // ordinary launch walked the whole drive twice, seven seconds
+            // apart.
             let mut last = std::time::Instant::now();
 
             while rx.recv().is_ok() {
-                // Drain whatever else arrived while things settle. A build
-                // writing a thousand files should cost one rebuild, not a
-                // thousand.
+                // Drain whatever else arrived while things settle. Checking
+                // out a branch writes a thousand files and should cost one
+                // rebuild, not a thousand.
                 while rx.recv_timeout(SETTLE).is_ok() {}
 
-                if last.elapsed() < FLOOR {
-                    continue;
+                // Waited out rather than dropped. Skipping the rebuild while
+                // inside the quiet period threw the change away with it, so a
+                // file created in the first two minutes after a launch stayed
+                // unfindable until something else happened to change.
+                let quiet = quiet_after(std::time::Duration::from_millis(
+                    cost.load(Ordering::Acquire),
+                ));
+
+                if let Some(wait) = quiet.checked_sub(last.elapsed()) {
+                    std::thread::sleep(wait);
+
+                    // Anything that arrived during the wait is covered by the
+                    // rebuild about to happen.
+                    while rx.try_recv().is_ok() {}
                 }
 
                 last = std::time::Instant::now();
