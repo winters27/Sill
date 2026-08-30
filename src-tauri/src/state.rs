@@ -201,6 +201,8 @@ impl CatalogWatcher {
             return None;
         }
 
+        // Cloned for the callback, which outlives this function.
+        let watched = roots.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         let cost = state.cost.clone();
 
@@ -217,7 +219,11 @@ impl CatalogWatcher {
             // arrives here is from directories the index deliberately skips.
             // Left unfiltered this rebuilt eight times in seven minutes on an
             // idle machine, because `AppData` never stops changing.
-            if !event.paths.iter().any(|path| crate::catalog::worth_indexing(path)) {
+            if !event
+                .paths
+                .iter()
+                .any(|path| crate::catalog::worth_indexing(path, &watched))
+            {
                 return;
             }
 

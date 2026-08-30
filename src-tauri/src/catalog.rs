@@ -278,8 +278,20 @@ pub fn changes_the_index(kind: &notify::EventKind) -> bool {
 /// A path with several components under watch is judged by all of them: a file
 /// deep inside `node_modules` is not interesting no matter how interesting its
 /// parent folder is.
-pub fn worth_indexing(path: &Path) -> bool {
-    !path.components().any(|part| {
+pub fn worth_indexing(path: &Path, roots: &[PathBuf]) -> bool {
+    // Judged from the root down, exactly as the walk judges it.
+    //
+    // The walk's filter only ever sees entries *below* a root, so a root of
+    // `%TEMP%\\work` indexes everything in it however the path to it is
+    // spelled. Checking the whole path instead made the watcher disagree:
+    // every file under that root contains `AppData`, so nothing in a folder
+    // somebody had deliberately added was ever noticed changing.
+    let below = roots
+        .iter()
+        .find_map(|root| path.strip_prefix(root).ok())
+        .unwrap_or(path);
+
+    !below.components().any(|part| {
         part.as_os_str()
             .to_str()
             .is_some_and(|name| NOISE.contains(&name))

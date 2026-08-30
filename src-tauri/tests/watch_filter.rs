@@ -9,6 +9,7 @@
 //! this file re-implemented both judgements, which meant it could pass while
 //! the watcher was wrong, and a deliberate break confirmed exactly that.
 use sill_lib::catalog::{changes_the_index, worth_indexing, NOISE, SYSTEM};
+use std::path::PathBuf;
 use std::path::Path;
 
 // ------------------------------------------------------- where it happened
@@ -20,7 +21,7 @@ fn a_file_somebody_wrote_is_worth_rebuilding_for() {
         r"C:\Users\me\code\thing\src\main.rs",
         r"C:\Users\me\Desktop\photo.png",
     ] {
-        assert!(worth_indexing(Path::new(path)), "{path}");
+        assert!(worth_indexing(Path::new(path), &[]), "{path}");
     }
 }
 
@@ -35,7 +36,7 @@ fn churn_in_a_directory_the_walk_skips_is_not() {
         r"C:\Users\me\code\thing\target\debug\build.log",
         r"C:\Users\me\code\thing\.git\index.lock",
     ] {
-        assert!(!worth_indexing(Path::new(path)), "{path}");
+        assert!(!worth_indexing(Path::new(path), &[]), "{path}");
     }
 }
 
@@ -43,12 +44,68 @@ fn churn_in_a_directory_the_walk_skips_is_not() {
 fn a_skipped_directory_anywhere_in_the_path_is_enough() {
     // Judged by every component, not just the last one. A file deep inside a
     // package cache is not interesting however interesting its parent is.
-    assert!(!worth_indexing(Path::new(
-        r"C:\Users\me\work\important\node_modules\pkg\deep\deeper\file.js"
-    )));
-    assert!(worth_indexing(Path::new(
-        r"C:\Users\me\work\important\deep\file.js"
-    )));
+    assert!(!worth_indexing(
+        Path::new(r"C:\Users\me\work\important\node_modules\pkg\deep\deeper\file.js"),
+        &[]
+    ));
+    assert!(worth_indexing(
+        Path::new(r"C:\Users\me\work\important\deep\file.js"),
+        &[]
+    ));
+}
+
+// --------------------------------------- a folder somebody deliberately added
+
+#[test]
+fn a_folder_somebody_added_is_watched_even_inside_one_normally_skipped() {
+    // The walk's filter only ever sees entries *below* a root, so adding
+    // `%TEMP%\work` indexes everything in it however the path to it is
+    // spelled. Checking the whole path made the watcher disagree: every file
+    // under that root contains `AppData`, so nothing in a folder somebody had
+    // deliberately chosen was ever noticed changing.
+    //
+    // Found by a device test whose own scratch folder lived in `%TEMP%`, where
+    // writes correctly caused no rebuild and creates caused none either.
+    let root = PathBuf::from(r"C:\Users\me\AppData\Local\Temp\work");
+    let inside = Path::new(r"C:\Users\me\AppData\Local\Temp\work\notes.md");
+
+    assert!(
+        !worth_indexing(inside, &[]),
+        "the whole path really does look skippable"
+    );
+    assert!(
+        worth_indexing(inside, std::slice::from_ref(&root)),
+        "a folder that was deliberately added is not being watched"
+    );
+}
+
+#[test]
+fn what_is_skipped_below_an_added_folder_is_still_skipped() {
+    // Judging from the root down must not turn the skip list off. A build
+    // directory inside a chosen folder is still a build directory.
+    let root = PathBuf::from(r"C:\Users\me\AppData\Local\Temp\work");
+    let roots = std::slice::from_ref(&root);
+
+    assert!(!worth_indexing(
+        Path::new(r"C:\Users\me\AppData\Local\Temp\work\node_modules\x\a.js"),
+        roots
+    ));
+    assert!(!worth_indexing(
+        Path::new(r"C:\Users\me\AppData\Local\Temp\work\target\debug\a.log"),
+        roots
+    ));
+}
+
+#[test]
+fn a_path_under_no_root_at_all_is_judged_whole() {
+    // Events can arrive for paths outside every root, and the old rule is the
+    // right one for those.
+    let root = PathBuf::from(r"C:\work");
+
+    assert!(!worth_indexing(
+        Path::new(r"C:\Users\me\AppData\Local\thing.tmp"),
+        std::slice::from_ref(&root)
+    ));
 }
 
 #[test]

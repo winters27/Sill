@@ -162,29 +162,67 @@ function Test-Watcher {
     # Writing to a file cannot change a list of file names, and writes are
     # nearly everything a watcher reports. Creating and removing one can.
     #
-    # Only a file this script created is ever touched.
-    $probe = Join-Path $env:USERPROFILE "sill-device-test-probe.txt"
-    Remove-Item $probe -ErrorAction SilentlyContinue
+    # Measured against a folder this test owns, not against the home folder.
+    # The first version watched home and failed: other programs create and
+    # delete files there constantly, so it was measuring the machine rather
+    # than the code, and an earlier hand-run that passed had simply been lucky.
+    $root = Join-Path $env:TEMP "sill-watch-root"
+    $prefs = Join-Path $script:Data "preferences.json"
+    $backup = Join-Path $env:TEMP "sill-prefs-before-watch-test.json"
 
-    "start" | Set-Content $probe
-    Note "created a probe file, waiting for the index to settle"
-    Start-Sleep -Seconds 45
-    $afterCreate = Rebuilds
+    Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    "seed" | Set-Content (Join-Path $root "seed.txt")
 
-    1..30 | ForEach-Object { Add-Content $probe "line $_"; Start-Sleep -Milliseconds 150 }
-    Note "wrote to it thirty times, waiting out a full rest period"
-    Start-Sleep -Seconds 50
-    $afterWrites = Rebuilds
+    Copy-Item $prefs $backup -Force
+    try {
+        $j = Get-Content $prefs -Raw | ConvertFrom-Json
+        $j.files | Add-Member -NotePropertyName roots -NotePropertyValue @($root) -Force
+        $j.files | Add-Member -NotePropertyName index -NotePropertyValue $true -Force
+        $j | ConvertTo-Json -Depth 12 | Set-Content $prefs -Encoding UTF8
 
-    Record "writing to a file rebuilds nothing" ($afterWrites -eq $afterCreate) `
-        "$($afterWrites - $afterCreate) rebuild(s) after 30 writes, wanted 0"
+        # A cache built for other folders is ignored, but clearing it keeps the
+        # startup log unambiguous.
+        Remove-Item (Join-Path $script:Data "file-index.bin") -ErrorAction SilentlyContinue
+        Start-Sill
+        Note "indexing only $root, so nothing else on the machine can wake the watcher"
 
-    Remove-Item $probe -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 45
-    $afterDelete = Rebuilds
+        # A tiny folder walks in milliseconds, so the rest between rebuilds is
+        # the floor: twenty seconds.
+        $quiet = 26
 
-    Record "removing a file does rebuild" ($afterDelete -gt $afterWrites) `
-        "$($afterDelete - $afterWrites) rebuild(s) after a delete, wanted at least 1"
+        $before = Rebuilds
+        1..30 | ForEach-Object {
+            Add-Content (Join-Path $root "seed.txt") "line $_"
+            Start-Sleep -Milliseconds 100
+        }
+        Start-Sleep -Seconds $quiet
+        $afterWrites = Rebuilds
+
+        Record "writing to a file rebuilds nothing" ($afterWrites -eq $before) `
+            "$($afterWrites - $before) rebuild(s) after 30 writes, wanted 0"
+
+        "new" | Set-Content (Join-Path $root "appeared.txt")
+        Start-Sleep -Seconds $quiet
+        $afterCreate = Rebuilds
+
+        Record "a file appearing does rebuild" ($afterCreate -gt $afterWrites) `
+            "$($afterCreate - $afterWrites) rebuild(s) after a create, wanted at least 1"
+
+        Remove-Item (Join-Path $root "appeared.txt")
+        Start-Sleep -Seconds $quiet
+
+        Record "a file going away does rebuild" ((Rebuilds) -gt $afterCreate) `
+            "$((Rebuilds) - $afterCreate) rebuild(s) after a delete, wanted at least 1"
+    } finally {
+        # Whatever happened, the settings go back to what they were.
+        Copy-Item $backup $prefs -Force
+        Remove-Item $backup -ErrorAction SilentlyContinue
+        Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:Data "file-index.bin") -ErrorAction SilentlyContinue
+        Start-Sill
+        Note "settings restored"
+    }
 }
 
 function Test-IndexCache {
