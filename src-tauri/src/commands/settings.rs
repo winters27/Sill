@@ -598,3 +598,47 @@ mod tests {
         assert!(zed.hidden);
     }
 }
+
+/// Every chord that moves around the launcher, and what it means.
+///
+/// Resolved in Rust so the settings screen and the key handler cannot hold two
+/// opinions about what Ctrl+N does. The window normalises a key event into one
+/// chord string and looks it up, rather than testing eleven movements against
+/// every press.
+#[tauri::command]
+pub(crate) async fn navigation_chords(
+    prefs: State<'_, crate::state::PrefsState>,
+) -> Result<std::collections::BTreeMap<String, crate::navigation::Move>, String> {
+    let navigation = prefs.inner.lock().await.navigation.clone();
+    Ok(crate::navigation::chords(&navigation))
+}
+
+/// What each movement resolves to, for the settings rows.
+#[tauri::command]
+pub(crate) async fn navigation_keys(
+    prefs: State<'_, crate::state::PrefsState>,
+) -> Result<Vec<NavigationKey>, String> {
+    let navigation = prefs.inner.lock().await.navigation.clone();
+
+    Ok(crate::navigation::Move::ALL
+        .into_iter()
+        .map(|movement| NavigationKey {
+            id: movement,
+            title: movement.title(),
+            chord: crate::navigation::effective(&navigation, movement),
+            overridden: navigation.overrides.contains_key(&movement),
+        })
+        .collect())
+}
+
+/// One movement, as a settings row shows it.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NavigationKey {
+    pub id: crate::navigation::Move,
+    pub title: &'static str,
+    /// What actually happens, not what was preferred. See `navigation::effective`.
+    pub chord: String,
+    /// Whether this was set by hand rather than coming from the preset.
+    pub overridden: bool,
+}

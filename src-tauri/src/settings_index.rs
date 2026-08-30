@@ -278,6 +278,12 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "shortcuts",
         "Shortcuts",
+        "Moving around",
+        "vim emacs arrows navigation keys preset page section jump number",
+    ),
+    s(
+        "shortcuts",
+        "Shortcuts",
         "Shortcuts",
         "hotkey key global selection transform text case",
     ),

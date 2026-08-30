@@ -17,6 +17,15 @@ export interface General {
   showInTray: boolean;
 }
 
+/** Which keys move around the launcher. */
+export interface NavigationSettings {
+  preset: "standard" | "vim" | "emacs";
+  /** Ctrl and a digit jumps straight to that row. */
+  numeric: boolean;
+  /** One chord replacing whatever a movement would otherwise have. */
+  overrides: Partial<Record<Move, string>>;
+}
+
 /** A name the user chose for one thing in the index. */
 export interface Alias {
   alias: string;
@@ -106,6 +115,7 @@ export interface Preferences {
   files: FileSearch;
   bindings: Binding[];
   aliases: Alias[];
+  navigation: NavigationSettings;
 }
 
 /**
@@ -300,4 +310,70 @@ export function setCommandHotkey(command: string, accelerator: string): Promise<
 /** Switches one indexed entry off, or back on. */
 export function setHidden(command: string, hidden: boolean): Promise<Preferences> {
   return invoke<Preferences>("set_hidden", { command, hidden });
+}
+
+/**
+ * A key event as one chord string, for looking up in the navigation map.
+ *
+ * Separate from `acceleratorFrom`, which requires a modifier because a global
+ * hotkey without one would swallow that key system wide. A navigation key has
+ * no such problem: Down means Down, and only while the launcher has focus.
+ */
+export function chordFrom(event: KeyboardEvent): string | null {
+  const key = event.key;
+  if (["Control", "Alt", "Shift", "Meta", "OS"].includes(key)) return null;
+
+  const parts: string[] = [];
+  if (event.ctrlKey) parts.push("Ctrl");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+  if (event.metaKey) parts.push("Super");
+
+  const named: Record<string, string> = {
+    " ": "Space",
+    ArrowUp: "Up",
+    ArrowDown: "Down",
+    ArrowLeft: "Left",
+    ArrowRight: "Right",
+  };
+
+  parts.push(named[key] ?? (key.length === 1 ? key.toUpperCase() : key));
+  return parts.join("+");
+}
+
+/** What a key does while moving around the launcher. */
+export type Move =
+  | "next"
+  | "previous"
+  | "pageDown"
+  | "pageUp"
+  | "first"
+  | "last"
+  | "sectionNext"
+  | "sectionPrevious"
+  | "open"
+  | "actions"
+  | "back";
+
+/**
+ * Every chord that moves around the launcher, and what it means.
+ *
+ * Resolved in Rust so this and the settings screen cannot hold two opinions
+ * about what Ctrl+N does.
+ */
+export function navigationChords(): Promise<Record<string, Move>> {
+  return invoke<Record<string, Move>>("navigation_chords").catch(() => ({}));
+}
+
+/** One movement, as a settings row shows it. */
+export interface NavigationKey {
+  id: Move;
+  title: string;
+  /** What actually happens, not what was preferred. */
+  chord: string;
+  overridden: boolean;
+}
+
+export function navigationKeys(): Promise<NavigationKey[]> {
+  return invoke<NavigationKey[]>("navigation_keys").catch(() => []);
 }

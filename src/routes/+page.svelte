@@ -11,7 +11,12 @@
   import ClipboardView from "$lib/components/ClipboardView.svelte";
   import { collectActions, isRunnable } from "$lib/exthost/actions";
   import { clipboardMerge } from "$lib/clipboard";
-  import { setAlias } from "$lib/settings";
+  import {
+    chordFrom,
+    navigationChords,
+    setAlias,
+    type Move as MoveKey,
+  } from "$lib/settings";
   import {
     activateHandler,
     dismiss,
@@ -685,6 +690,19 @@
    */
   let openCollection = $state<{ id: number; name: string } | null>(null);
 
+  /**
+   * Every chord that moves around, and what it means.
+   *
+   * Fetched rather than written here: the answer depends on a preset and on
+   * whatever has been overridden, and Rust is where that is resolved.
+   */
+  let navKeys = $state<Record<string, MoveKey>>({});
+
+  /** How far a screenful moves. Matches the rows the window shows at once. */
+  const PAGE = 8;
+
+  let rootList = $state<ReturnType<typeof RootList> | null>(null);
+
   /** The result being given a name, while the field holds the name. */
   let naming = $state<{ id: string; title: string } | null>(null);
 
@@ -1068,18 +1086,67 @@
       }
     }
 
-    if (event.key === "ArrowDown") {
+    // Ctrl and a digit jumps straight to a row, when that is switched on.
+    // Checked before the map so a digit is never a chord anybody has to bind.
+    if (
+      prefs?.navigation.numeric &&
+      (event.ctrlKey || event.metaKey) &&
+      /^[1-9]$/.test(event.key)
+    ) {
       event.preventDefault();
-      if (count) selected = (selected + 1) % count;
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (count) selected = (selected - 1 + count) % count;
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      void openSelected();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      void goBack();
+      const at = Number(event.key) - 1;
+      if (at < count) {
+        selected = at;
+        void openSelected();
+      }
+      return;
+    }
+
+    // One lookup rather than a chain of comparisons. Which chord means what is
+    // decided in Rust, so this and the settings screen cannot disagree.
+    const chord = chordFrom(event);
+    const movement = chord ? navKeys[chord] : undefined;
+    if (!movement) return;
+
+    event.preventDefault();
+
+    switch (movement) {
+      case "next":
+        if (count) selected = (selected + 1) % count;
+        break;
+      case "previous":
+        if (count) selected = (selected - 1 + count) % count;
+        break;
+      case "pageDown":
+        if (count) selected = Math.min(count - 1, selected + PAGE);
+        break;
+      case "pageUp":
+        if (count) selected = Math.max(0, selected - PAGE);
+        break;
+      case "first":
+        selected = 0;
+        break;
+      case "last":
+        if (count) selected = count - 1;
+        break;
+      case "sectionNext":
+        selected = rootList?.nextSection(selected) ?? selected;
+        break;
+      case "sectionPrevious":
+        selected = rootList?.previousSection(selected) ?? selected;
+        break;
+      case "open":
+        void openSelected();
+        break;
+      case "actions":
+        if (actions.length) {
+          panelOpen = true;
+          panelSelected = 0;
+        }
+        break;
+      case "back":
+        void goBack();
+        break;
     }
   }
 
@@ -1177,15 +1244,19 @@
 
       // The settings window writes preferences in another webview, so the
       // launcher hears about them rather than re-reading on a timer.
-      changed = await listen<Preferences>("sill://preferences-changed", ({ payload }) => {
+      changed = await listen<Preferences>("sill://preferences-changed", async ({ payload }) => {
         prefs = payload;
         applyAppearance(payload);
+        // The navigation preset may have changed, and the map is resolved in
+        // Rust, so it is asked for again rather than recomputed here.
+        navKeys = await navigationChords();
       });
 
       if (disposed) return;
       clipboardActions = await actionsFor("clipboard");
       prefs = await getPreferences();
       applyAppearance(prefs);
+      navKeys = await navigationChords();
       await refreshRoot();
       searchInput?.focus();
     })();
@@ -1274,6 +1345,7 @@
     <!-- Kept on screen while a name is typed, so what is being named stays
          visible. -->
     <RootList
+      bind:this={rootList}
       {commands}
       {selected}
       onselect={(i) => (selected = i)}

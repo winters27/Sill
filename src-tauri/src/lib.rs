@@ -15,6 +15,7 @@ pub mod icons;
 pub mod input;
 pub mod lnk;
 pub mod log;
+pub mod navigation;
 pub mod object;
 pub mod preferences;
 pub mod quicklinks;
@@ -869,6 +870,8 @@ pub fn run() {
             commands::settings::index_rows,
             commands::settings::set_command_hotkey,
             commands::settings::set_hidden,
+            commands::settings::navigation_chords,
+            commands::settings::navigation_keys,
             commands::search::list_monitors,
             commands::search::open_path,
             commands::launch::launch_command,

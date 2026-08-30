@@ -252,6 +252,40 @@
    * Coarser than the row's own label on purpose: five or six headings is a
    * structure, and fifteen is a list of headings with a row under each.
    */
+  /**
+   * The first row of the next group after `from`.
+   *
+   * Here rather than in the launcher because the grouping is computed here and
+   * nowhere else. Asking the page to work out where the headings are would
+   * mean two implementations of the same grouping, drifting apart the first
+   * time a kind is added.
+   *
+   * Returns `from` unchanged when there is nowhere to go, so holding the key
+   * stops at the end rather than wrapping into the middle of the list.
+   */
+  export function nextSection(from: number): number {
+    const heads = headings();
+    return heads.find((at) => at > from) ?? (heads.length ? heads[heads.length - 1] : from);
+  }
+
+  export function previousSection(from: number): number {
+    const heads = headings();
+    const before = heads.filter((at) => at < from);
+    return before.length ? before[before.length - 1] : (heads[0] ?? from);
+  }
+
+  /** The row index each group starts at, in order. */
+  function headings(): number[] {
+    const out: number[] = [];
+    for (const line of lines) {
+      if (line.kind === "header") continue;
+      if (out.length === 0 || groupOf(commands[out[out.length - 1]]) !== groupOf(line.command)) {
+        out.push(line.index);
+      }
+    }
+    return out;
+  }
+
   function groupOf(command: RankedCommand): string {
     switch (command.mode) {
       case "answer":

@@ -408,6 +408,9 @@ pub struct Preferences {
     /// than a map so the order shown in settings is the order they were made.
     #[serde(default)]
     pub aliases: Vec<crate::registry::Alias>,
+    /// Which keys move around the launcher.
+    #[serde(default)]
+    pub navigation: crate::navigation::Navigation,
 }
 
 impl Appearance {

@@ -11,7 +11,9 @@
   import Row from "./Row.svelte";
   import Button from "./Button.svelte";
   import Toggle from "../Toggle.svelte";
+  import Segmented from "./Segmented.svelte";
   import { actionsFor, searchCommands, type ActionInfo } from "$lib/exthost/commands";
+  import { chordFrom, navigationKeys, type NavigationKey } from "$lib/settings";
   import type { Binding, BindingSource, Preferences } from "$lib/settings";
 
   interface Props {
@@ -30,6 +32,79 @@
 
   let recording = $state<number | null>(null);
   let status = $state("");
+
+  /**
+   * How the launcher is moved around.
+   *
+   * Here rather than in its own panel because this is where somebody looks
+   * for "what keys does Sill use", and the two answers being in two places
+   * is the fragmentation the index list was built to undo.
+   */
+  const PRESETS = [
+    { value: "standard", label: "Arrows only" },
+    { value: "vim", label: "Vim" },
+    { value: "emacs", label: "Emacs" },
+  ];
+
+  /**
+   * What each movement resolves to.
+   *
+   * Asked for rather than derived: the answer depends on the preset and on
+   * what has been overridden, and a preset can take a key another movement
+   * preferred. Working it out again here is how a settings screen ends up
+   * naming a key that does something else.
+   */
+  let moves = $state<NavigationKey[]>([]);
+  let rebinding = $state<string | null>(null);
+
+  async function loadMoves() {
+    moves = await navigationKeys();
+  }
+
+  onMount(() => void loadMoves());
+
+  async function setPreset(next: string) {
+    commit({
+      ...prefs,
+      navigation: { ...prefs.navigation, preset: next as "standard" | "vim" | "emacs" },
+    });
+    // The commit is asynchronous and the resolved map lives in Rust, so the
+    // rows are re-read rather than guessed at.
+    setTimeout(() => void loadMoves(), 120);
+  }
+
+  function rebind(event: KeyboardEvent, move: NavigationKey) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.key === "Escape") {
+      rebinding = null;
+      return;
+    }
+
+    // Backspace gives the movement back to the preset.
+    if (event.key === "Backspace") {
+      const overrides = { ...prefs.navigation.overrides };
+      delete overrides[move.id];
+      commit({ ...prefs, navigation: { ...prefs.navigation, overrides } });
+      rebinding = null;
+      setTimeout(() => void loadMoves(), 120);
+      return;
+    }
+
+    const chord = chordFrom(event);
+    if (!chord) return;
+
+    commit({
+      ...prefs,
+      navigation: {
+        ...prefs.navigation,
+        overrides: { ...prefs.navigation.overrides, [move.id]: chord },
+      },
+    });
+    rebinding = null;
+    setTimeout(() => void loadMoves(), 120);
+  }
 
   onMount(async () => {
     textActions = await actionsFor("text");
@@ -199,6 +274,56 @@
     <Button label="Add a shortcut" onclick={add} />
     {#if status}<span class="status">{status}</span>{/if}
   </div>
+</Section>
+
+<Section
+  label="Moving around"
+  description="A preset adds keys, it never takes the arrows away. Where a preset wants a key something else was using, the displaced one falls back to its second choice and the row below shows what actually happens."
+>
+  <Row
+    title="Extra keys"
+    description="Ctrl rather than bare letters throughout, and that is forced rather than chosen: the search field has focus the whole time, so a bare j is the letter j."
+  >
+    {#snippet control()}
+      <Segmented
+        value={prefs.navigation.preset}
+        options={PRESETS}
+        onchange={(next) => void setPreset(next)}
+      />
+    {/snippet}
+  </Row>
+
+  <Row
+    title="Jump to a row by number"
+    description="Ctrl and a digit opens that result. Ctrl for the same reason as the presets: a bare 3 is the character three."
+  >
+    {#snippet control()}
+      <Toggle
+        checked={prefs.navigation.numeric}
+        onchange={(on: boolean) =>
+          commit({ ...prefs, navigation: { ...prefs.navigation, numeric: on } })}
+      />
+    {/snippet}
+  </Row>
+
+  {#each moves as move (move.id)}
+    <Row title={move.title} description={move.overridden ? "Set by hand" : ""}>
+      {#snippet control()}
+        <button
+          class="key"
+          class:recording={rebinding === move.id}
+          onclick={() => (rebinding = rebinding === move.id ? null : move.id)}
+          onkeydown={(e) => rebinding === move.id && rebind(e, move)}
+        >
+          {#if rebinding === move.id}
+            Press a key…
+          {:else}
+            {move.chord.split("+").join(" ")}
+          {/if}
+        </button>
+      {/snippet}
+    </Row>
+  {/each}
 </Section>
 
 <style>
