@@ -9,6 +9,7 @@
   import Segmented from "$lib/components/settings/Segmented.svelte";
   import Slider from "$lib/components/settings/Slider.svelte";
   import PathList from "$lib/components/settings/PathList.svelte";
+  import DriveList from "$lib/components/settings/DriveList.svelte";
   import TermList from "$lib/components/settings/TermList.svelte";
   import IndexList from "$lib/components/settings/IndexList.svelte";
   import EmojiPanel from "$lib/components/settings/EmojiPanel.svelte";
@@ -762,10 +763,34 @@
           </Section>
 
           <Section
-            label="Scope"
-            description="With no folders listed Sill searches everywhere Everything indexes."
+            label="What Sill reads"
+            description="Sill keeps its own index so file search works without anything else installed. Build output and the folders listed in .gitignore are left out, which is what keeps it small: a home folder is 2.2 million files raw and 43,000 once they are."
           >
-            <Row title="Folders to search" disabled={!p.files.enabled}>
+            <Row
+              title="Drives"
+              description="A whole drive skips Windows and installed programs. Folders you add are read in full."
+              disabled={!p.files.enabled}
+            >
+              {#snippet children()}
+                <DriveList onchange={(roots) => (p.files.roots = roots)} />
+              {/snippet}
+            </Row>
+            <Row
+              title="Folders"
+              description="Anything else worth reading. Leave empty and Sill reads your home folder."
+              disabled={!p.files.enabled}
+            >
+              {#snippet children()}
+                <PathList bind:paths={p.files.roots} onchange={commit} />
+              {/snippet}
+            </Row>
+          </Section>
+
+          <Section
+            label="Narrowing results"
+            description="A filter on what comes back, which is not the same as what gets read. With nothing listed, everything indexed can be found."
+          >
+            <Row title="Only show results in" disabled={!p.files.enabled}>
               {#snippet children()}
                 <PathList bind:paths={p.files.onlyIn} onchange={commit} />
               {/snippet}

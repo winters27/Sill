@@ -685,7 +685,6 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .manage(state::CatalogState::default())
         .manage(actions::builtins())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
@@ -850,7 +849,20 @@ pub fn run() {
             {
                 let roots = prefs.files.indexed_roots();
                 if !roots.is_empty() {
+                    // Managed here rather than as a default, because it needs
+                    // to know where this machine keeps application data.
+                    app.manage(state::CatalogState {
+                        cache: Arc::new(
+                            Some(state::data_dir(&handle).join("file-index.bin")),
+                        ),
+                        ..Default::default()
+                    });
+
                     let catalog = app.state::<state::CatalogState>();
+
+                    // Last run's index first, so searching works immediately,
+                    // then a fresh walk behind it.
+                    catalog.warm(&roots);
                     catalog.rebuild(roots.clone());
 
                     if let Some(watcher) =
@@ -889,6 +901,8 @@ pub fn run() {
             commands::search::search_windows,
             commands::search::search_emoji,
             commands::search::file_search_missing,
+            commands::search::list_drives,
+            commands::search::index_folder,
             commands::search::start_file_search,
             commands::settings::hotkey_conflicts,
             commands::settings::set_alias,

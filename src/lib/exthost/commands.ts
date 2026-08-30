@@ -198,6 +198,29 @@ export function startFileSearch(): Promise<string> {
   return invoke<string>("start_file_search");
 }
 
+/** A drive that could be indexed. */
+export interface Drive {
+  root: string;
+  label: string;
+  kind: "fixed" | "removable" | "network" | "optical";
+  indexed: boolean;
+}
+
+/** Every mounted drive, and whether Sill reads it. */
+export function listDrives(): Promise<Drive[]> {
+  return invoke<Drive[]>("list_drives").catch(() => []);
+}
+
+/**
+ * Starts or stops indexing one folder.
+ *
+ * Answers with the folders indexed afterwards, so the caller does not have to
+ * guess what its own change produced.
+ */
+export function indexFolder(path: string, wanted: boolean): Promise<string[]> {
+  return invoke<string[]>("index_folder", { path, wanted });
+}
+
 export function searchFiles(query: string): Promise<FileHit[]> {
   return invoke<FileHit[]>("search_files", { query }).catch(() => []);
 }

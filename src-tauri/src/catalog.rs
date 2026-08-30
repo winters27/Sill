@@ -61,9 +61,176 @@ pub const NOISE: &[&str] = &[
     "vendor",
     ".pnpm-store",
     ".cache",
-    "$RECYCLE.BIN",
-    "System Volume Information",
 ];
+
+/// Directories skipped only where a drive begins.
+///
+/// Separate from [`NOISE`], which is skipped wherever it appears. These are
+/// Windows itself and the machinery around it: nobody searching for a file
+/// means the one inside `Program Files`, and indexing them turns a drive from
+/// a hundred thousand files into a million.
+///
+/// Only at depth one, so somebody who deliberately adds `C:\Windows` as a root
+/// still gets it. Skipping a name everywhere would make that impossible to ask
+/// for.
+///
+/// `Documents and Settings` is here because it is a junction that points back
+/// into `Users`, and walking it indexes a home folder twice under two names.
+pub const SYSTEM: &[&str] = &[
+    "Windows",
+    "Program Files",
+    "Program Files (x86)",
+    "ProgramData",
+    "$Recycle.Bin",
+    "System Volume Information",
+    "Recovery",
+    "PerfLogs",
+    "Config.Msi",
+    "Documents and Settings",
+    "inetpub",
+    "MSOCache",
+    "$WinREAgent",
+    "OneDriveTemp",
+];
+
+/// What kind of thing a drive is, which decides whether indexing it is sane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Kind {
+    /// An internal disk. The ordinary case, and the only one offered by
+    /// default.
+    Fixed,
+    /// A stick or an external disk. Indexing one is fine and the index is
+    /// wrong the moment it is unplugged, so it is opt in.
+    Removable,
+    /// A share, or a cloud folder pretending to be a disk. **Walking one can
+    /// mean a round trip per directory, and on a cloud drive it can mean
+    /// downloading the files.** Never offered by default.
+    Network,
+    /// A disc. Listed for completeness and never worth indexing.
+    Optical,
+}
+
+/// A drive that could be indexed.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Drive {
+    /// Where it starts, as a root would be written: `C:\`.
+    pub root: String,
+    /// What the volume calls itself, when it says.
+    pub label: String,
+    pub kind: Kind,
+    /// Whether Sill is indexing it right now.
+    pub indexed: bool,
+}
+
+/// Every drive currently mounted.
+///
+/// Asked when somebody opens the settings that show them, never on a timer.
+/// A drive appearing is something a person did, and they are looking at the
+/// list when they did it.
+#[cfg(windows)]
+pub fn drives(roots: &[PathBuf]) -> Vec<Drive> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW,
+    };
+
+    // `GetDriveTypeW` answers with a bare number and this version of the
+    // bindings does not name them, so they are named here. The values are
+    // fixed by the Windows API and cannot change.
+    const REMOVABLE: u32 = 2;
+    const FIXED: u32 = 3;
+    const REMOTE: u32 = 4;
+    const CDROM: u32 = 5;
+
+    let mounted = unsafe { GetLogicalDrives() };
+    let mut found = Vec::new();
+
+    for bit in 0..26u32 {
+        if mounted & (1 << bit) == 0 {
+            continue;
+        }
+
+        let letter = (b'A' + bit as u8) as char;
+        let root = format!("{letter}:\\");
+        let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+
+        let kind = match unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) } {
+            FIXED => Kind::Fixed,
+            REMOVABLE => Kind::Removable,
+            REMOTE => Kind::Network,
+            CDROM => Kind::Optical,
+            // Unknown, unrecognised, or a RAM disk. Treated as removable,
+            // which is the cautious reading: offered, but never by default.
+            _ => Kind::Removable,
+        };
+
+        let mut label = [0u16; 261];
+        let named = unsafe {
+            GetVolumeInformationW(
+                PCWSTR(wide.as_ptr()),
+                Some(&mut label),
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .is_ok();
+
+        let label = if named {
+            String::from_utf16_lossy(&label)
+                .trim_end_matches('\0')
+                .trim()
+                .to_string()
+        } else {
+            String::new()
+        };
+
+        found.push(Drive {
+            indexed: roots.iter().any(|r| same_root(r, &root)),
+            root,
+            label,
+            kind,
+        });
+    }
+
+    found
+}
+
+#[cfg(not(windows))]
+pub fn drives(_roots: &[PathBuf]) -> Vec<Drive> {
+    Vec::new()
+}
+
+/// Whether a configured root is this drive, however it was written.
+///
+/// `C:\`, `C:/` and `C:` all mean the same drive and a person may type any of
+/// them. Getting this wrong shows a drive as unindexed while it is being
+/// indexed, and offering to add it again is how a root ends up in the list
+/// twice.
+pub fn same_folder(root: &str, other: &str) -> bool {
+    settled(root) == settled(other)
+}
+
+/// One folder, written one way.
+///
+/// Case is dropped because Windows does not care about it, and separators are
+/// made to agree because a person may type either and both open the same
+/// folder. Comparing what was typed rather than what it means is how the same
+/// folder ends up in the list twice and gets read twice.
+fn settled(path: &str) -> String {
+    path.trim()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
+}
+
+/// The same question, for a root already parsed into a path.
+fn same_root(root: &Path, drive: &str) -> bool {
+    same_folder(&root.to_string_lossy(), drive)
+}
 
 /// Where one file's path sits in the arena.
 ///
@@ -147,10 +314,18 @@ impl Catalog {
                 .follow_links(false)
                 .threads(threads())
                 .filter_entry(|entry| {
-                    !entry
-                        .file_name()
-                        .to_str()
-                        .is_some_and(|name| NOISE.contains(&name))
+                    let Some(name) = entry.file_name().to_str() else {
+                        return false;
+                    };
+
+                    if NOISE.contains(&name) {
+                        return false;
+                    }
+
+                    // Depth one is a direct child of the root, so this only
+                    // takes effect when the root is a whole drive. Adding
+                    // `C:\Windows` deliberately still indexes it.
+                    entry.depth() != 1 || !SYSTEM.contains(&name)
                 });
 
             for found in walker.build().flatten() {
@@ -354,6 +529,141 @@ fn threads() -> usize {
         .unwrap_or(2)
 }
 
+// ------------------------------------------------------------ keeping it
+
+/// What the saved index starts with, so an old or foreign file is not read.
+///
+/// The version changes whenever the layout below does. A cache written by a
+/// different version is not migrated, it is ignored and rebuilt: it is a copy
+/// of something that can be regenerated in seconds, and migration code for a
+/// throwaway file is code that can be wrong.
+const MAGIC: &[u8; 8] = b"SILLIDX1";
+
+impl Catalog {
+    /// Writes the index where the next start can find it.
+    ///
+    /// Walking a whole drive takes nine seconds, which is far too long to do
+    /// before somebody can search. Every launcher that indexes files keeps one
+    /// of these: a whole-volume indexer on this machine holds a 154 MB
+    /// database on disk for the same reason.
+    ///
+    /// Written whole and then renamed, so a start that happens during a save
+    /// reads either the old file or the new one and never half of either.
+    pub fn save(&self, to: &Path) -> std::io::Result<()> {
+        let mut out = Vec::with_capacity(self.paths.len() + self.entries.len() * 16 + 64);
+
+        out.extend_from_slice(MAGIC);
+
+        // The roots are stored so the file can be recognised as answering a
+        // different question than the one now being asked. Changing which
+        // folders are indexed makes the saved index wrong rather than stale.
+        put_u32(&mut out, self.roots.len() as u32);
+        for root in &self.roots {
+            let text = root.to_string_lossy();
+            put_u32(&mut out, text.len() as u32);
+            out.extend_from_slice(text.as_bytes());
+        }
+
+        put_u32(&mut out, self.paths.len() as u32);
+        out.extend_from_slice(self.paths.as_bytes());
+
+        put_u32(&mut out, self.entries.len() as u32);
+        for slot in &self.entries {
+            put_u32(&mut out, slot.at);
+            put_u32(&mut out, slot.end);
+            put_u32(&mut out, slot.name_at);
+            put_u32(&mut out, u32::from(slot.is_dir));
+        }
+
+        let beside = to.with_extension("writing");
+        std::fs::write(&beside, &out)?;
+        std::fs::rename(&beside, to)
+    }
+
+    /// Reads back a saved index, if there is one and it answers this question.
+    ///
+    /// Returns nothing for anything unexpected rather than an error. A cache
+    /// is an optimisation: every reason it might not load ends the same way,
+    /// with a walk that would have happened anyway.
+    pub fn load(from: &Path, roots: &[PathBuf]) -> Option<Self> {
+        let raw = std::fs::read(from).ok()?;
+        let mut at = 0usize;
+
+        if raw.len() < MAGIC.len() || &raw[..MAGIC.len()] != MAGIC {
+            return None;
+        }
+        at += MAGIC.len();
+
+        let saved_roots = take_u32(&raw, &mut at)? as usize;
+        let mut had: Vec<PathBuf> = Vec::with_capacity(saved_roots.min(64));
+        for _ in 0..saved_roots {
+            let len = take_u32(&raw, &mut at)? as usize;
+            let text = std::str::from_utf8(raw.get(at..at + len)?).ok()?;
+            at += len;
+            had.push(PathBuf::from(text));
+        }
+
+        // Indexed somewhere else. Not stale, simply about other folders.
+        if had != roots {
+            return None;
+        }
+
+        let arena = take_u32(&raw, &mut at)? as usize;
+        let paths = std::str::from_utf8(raw.get(at..at + arena)?).ok()?.to_string();
+        at += arena;
+
+        let count = take_u32(&raw, &mut at)? as usize;
+        let mut entries = Vec::with_capacity(count);
+        for _ in 0..count {
+            let slot = Slot {
+                at: take_u32(&raw, &mut at)?,
+                end: take_u32(&raw, &mut at)?,
+                name_at: take_u32(&raw, &mut at)?,
+                is_dir: take_u32(&raw, &mut at)? != 0,
+            };
+
+            // The file is on disk and anything may have happened to it. Every
+            // offset is checked against the arena rather than trusted, because
+            // a wrong one would slice a string out of bounds and take the
+            // process with it.
+            let sane = slot.at <= slot.name_at
+                && slot.name_at <= slot.end
+                && slot.end as usize <= paths.len()
+                && paths.is_char_boundary(slot.at as usize)
+                && paths.is_char_boundary(slot.name_at as usize)
+                && paths.is_char_boundary(slot.end as usize);
+
+            if !sane {
+                return None;
+            }
+
+            entries.push(slot);
+        }
+
+        // Rebuilt rather than stored. It is derived from the names, it takes a
+        // fraction of what the walk takes, and a stored one is another thing
+        // that can disagree with what it was derived from.
+        let buckets = index(&paths, &entries);
+
+        Some(Self {
+            paths,
+            entries,
+            buckets,
+            roots: roots.to_vec(),
+        })
+    }
+}
+
+fn put_u32(out: &mut Vec<u8>, value: u32) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn take_u32(raw: &[u8], at: &mut usize) -> Option<u32> {
+    let bytes = raw.get(*at..*at + 4)?;
+    *at += 4;
+    Some(u32::from_le_bytes(bytes.try_into().ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,5 +850,162 @@ mod tests {
 
         assert!(used >= 2 && used <= 6, "{used}");
         assert!(used <= have.max(2), "asked for more threads than there are");
+    }
+
+    #[test]
+    fn a_saved_index_reads_back_the_same() {
+        let dir = std::env::temp_dir().join("sill-catalog-roundtrip");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("index.bin");
+
+        let mut original = catalog(&[
+            (r"C:\work\notes.md", false),
+            (r"C:\work\src", true),
+            (r"C:\work\src\main.rs", false),
+        ]);
+        original.roots = vec![PathBuf::from(r"C:\work")];
+
+        original.save(&file).unwrap();
+        let back = Catalog::load(&file, &[PathBuf::from(r"C:\work")]).expect("reads back");
+
+        assert_eq!(back.len(), original.len());
+        assert_eq!(back.paths, original.paths);
+
+        let found = back.search("main", 10);
+        assert_eq!(found[0].path, r"C:\work\src\main.rs");
+
+        let dirs = back.search("src", 10);
+        assert!(dirs[0].is_dir, "lost which entries are folders");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_index_saved_for_other_folders_is_not_used() {
+        // Not stale: about a different question. Loading it would silently
+        // search folders somebody has stopped asking about and miss the ones
+        // they just added.
+        let dir = std::env::temp_dir().join("sill-catalog-roots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("index.bin");
+
+        let mut saved = catalog(&[(r"C:\one\a.md", false)]);
+        saved.roots = vec![PathBuf::from(r"C:\one")];
+        saved.save(&file).unwrap();
+
+        assert!(Catalog::load(&file, &[PathBuf::from(r"C:\two")]).is_none());
+        assert!(Catalog::load(&file, &[]).is_none());
+        assert!(Catalog::load(&file, &[PathBuf::from(r"C:\one")]).is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn nonsense_on_disk_is_ignored_rather_than_trusted() {
+        // The file can be anything: truncated by a power cut, half-written by
+        // an older version, or edited. Every offset in it indexes a string, so
+        // a wrong one is not a wrong answer, it is a crash.
+        let dir = std::env::temp_dir().join("sill-catalog-junk");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("index.bin");
+        let roots = vec![PathBuf::from(r"C:\work")];
+
+        for bad in [
+            b"".to_vec(),
+            b"not an index at all".to_vec(),
+            MAGIC.to_vec(),
+        ] {
+            std::fs::write(&file, &bad).unwrap();
+            assert!(Catalog::load(&file, &roots).is_none(), "{bad:?}");
+        }
+
+        // A real one, truncated part way through.
+        let mut real = catalog(&[(r"C:\work\a.md", false)]);
+        real.roots = roots.clone();
+        real.save(&file).unwrap();
+        let whole = std::fs::read(&file).unwrap();
+        for cut in [whole.len() / 3, whole.len() / 2, whole.len() - 1] {
+            std::fs::write(&file, &whole[..cut]).unwrap();
+            assert!(Catalog::load(&file, &roots).is_none(), "survived a cut at {cut}");
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_missing_file_is_not_a_problem() {
+        // The ordinary first run.
+        let nowhere = std::env::temp_dir().join("sill-no-such-index.bin");
+        std::fs::remove_file(&nowhere).ok();
+
+        assert!(Catalog::load(&nowhere, &[PathBuf::from(r"C:\work")]).is_none());
+    }
+
+    #[test]
+    fn a_drive_is_recognised_however_the_root_was_written() {
+        // Somebody may type any of these into a settings field, and all three
+        // mean the same disk. Reading them as different roots would show a
+        // drive as unindexed while it is being indexed, and adding it again
+        // would put it in the list twice.
+        for written in [r"C:\", "C:/", "C:", r"c:\", "C:\\\\"] {
+            assert!(
+                same_root(Path::new(written), r"C:\"),
+                "{written} was not read as C:"
+            );
+        }
+
+        assert!(!same_root(Path::new(r"D:\"), r"C:\"));
+        assert!(!same_root(Path::new(r"C:\Users"), r"C:\"));
+    }
+
+    #[test]
+    fn windows_itself_is_skipped_where_a_drive_begins() {
+        // Measured: a whole drive is 127,733 files with these left out. With
+        // Windows and the two Program Files folders in, it is over a million,
+        // and none of them is a file anybody searches for by name.
+        for wanted in ["Windows", "Program Files", "ProgramData", "$Recycle.Bin"] {
+            assert!(SYSTEM.contains(&wanted), "{wanted} is indexed");
+        }
+    }
+
+    #[test]
+    fn a_junction_that_loops_back_is_skipped() {
+        // `Documents and Settings` points into `Users`. Walking it indexes a
+        // whole home folder a second time under a second name.
+        assert!(SYSTEM.contains(&"Documents and Settings"));
+    }
+
+    #[test]
+    fn the_two_skip_lists_do_not_overlap() {
+        // They mean different things: one is skipped wherever it appears, the
+        // other only where a drive begins. A name in both is a name whose
+        // second listing does nothing, which reads as if it did.
+        //
+        // Compared without case, because Windows paths are matched without
+        // case and the same folder was once listed as `$RECYCLE.BIN` in one
+        // and `$Recycle.Bin` in the other. Neither spelling matched the folder
+        // on disk, so one of the two entries had never done anything.
+        for name in SYSTEM {
+            let clash = NOISE
+                .iter()
+                .any(|other| other.eq_ignore_ascii_case(name));
+
+            assert!(!clash, "{name} is in both lists");
+        }
+    }
+
+    #[test]
+    fn a_skipped_name_is_matched_the_way_windows_matches_names() {
+        // Windows does not care about case and neither does anybody typing a
+        // folder name. Two lists that disagree about capitalisation are two
+        // lists where one of them silently does nothing.
+        for name in NOISE.iter().chain(SYSTEM) {
+            assert_eq!(
+                name.trim(),
+                *name,
+                "{name:?} has whitespace, which no directory does"
+            );
+            assert!(!name.is_empty());
+        }
     }
 }

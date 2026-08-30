@@ -74,7 +74,12 @@ export interface FileSearch {
   matchPath: boolean;
   matchCase: boolean;
   regex: boolean;
+  /** A filter on results, not on what gets read. */
   onlyIn: string[];
+  /** The folders Sill reads. Empty means the home folder. */
+  roots: string[];
+  /** Whether Sill keeps an index of its own at all. */
+  index: boolean;
 }
 
 export interface ClipboardHistorySettings {

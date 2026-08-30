@@ -1611,6 +1611,7 @@
       bind:this={rootList}
       {commands}
       {selected}
+      asking={mode + " " + query}
       onselect={(i) => (selected = i)}
       onrun={(i) => {
         selected = i;

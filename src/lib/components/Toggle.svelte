@@ -3,11 +3,15 @@
     checked: boolean;
     onchange: (value: boolean) => void;
     label?: string;
+    /** Set while the change it would make is still being carried out. */
+    disabled?: boolean;
   }
 
-  let { checked = $bindable(), onchange, label }: Props = $props();
+  let { checked = $bindable(), onchange, label, disabled = false }: Props = $props();
 
   function flip() {
+    if (disabled) return;
+
     checked = !checked;
     onchange(checked);
   }
@@ -26,12 +30,20 @@
   aria-label={label}
   class="switch"
   class:on={checked}
+  {disabled}
   onclick={flip}
 >
   <span class="knob"></span>
 </button>
 
 <style>
+  /* Dimmed rather than hidden while it is busy: the row still says what it is
+     set to, it simply cannot be set again until the last change has landed. */
+  .switch:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
   .switch {
     flex: none;
     position: relative;

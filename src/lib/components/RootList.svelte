@@ -8,9 +8,21 @@
     selected: number;
     onselect: (index: number) => void;
     onrun: (index: number) => void;
+    /**
+     * Changes when the list is answering a different question.
+     *
+     * The query, in practice. A new search starts at the top, and without
+     * being told when that has happened the list stays wherever it was left,
+     * which reads as results failing to appear until you scroll back up.
+     *
+     * Not the results themselves: those arrive in several parts as windows,
+     * emoji and files come in, and jumping to the top for each would yank the
+     * list out from under somebody who had started scrolling.
+     */
+    asking?: string;
   }
 
-  let { commands, selected, onselect, onrun }: Props = $props();
+  let { commands, selected, onselect, onrun, asking = "" }: Props = $props();
 
   /**
    * Row and header heights, measured rather than assumed.
@@ -103,9 +115,21 @@
    * makes each keystroke re-create the lot. Two spacers stand in for what is
    * above and below, so the scrollbar still describes the whole list.
    */
-  const first = $derived(Math.max(0, lineAt(scrollTop) - OVERSCAN));
+  /**
+   * Where the list actually is, rather than where it was last heard to be.
+   *
+   * `scrollTop` is only refreshed by a scroll event, and the browser clamps
+   * the real scroll position on its own whenever the content gets shorter.
+   * Between those two the remembered value can be past the end of a list that
+   * has just shrunk, and every line then renders below the viewport: a screen
+   * of blank space with the results pushed off the bottom, which only comes
+   * right if you scroll and provoke an event.
+   */
+  const at = $derived(Math.max(0, Math.min(scrollTop, total - height)));
+
+  const first = $derived(Math.max(0, lineAt(at) - OVERSCAN));
   const last = $derived(
-    Math.min(lines.length, lineAt(scrollTop + height) + 1 + OVERSCAN),
+    Math.min(lines.length, lineAt(at + height) + 1 + OVERSCAN),
   );
   const slice = $derived(lines.slice(first, last));
 
@@ -115,6 +139,17 @@
    * Sets scrollTop directly rather than calling `scrollIntoView`, because a
    * row outside the window is not in the DOM to scroll to.
    */
+  /** A new question is answered from the top of the list. */
+  $effect(() => {
+    // Read so the effect runs when it changes, and only then.
+    asking;
+
+    if (viewport) {
+      viewport.scrollTop = 0;
+      scrollTop = 0;
+    }
+  });
+
   $effect(() => {
     const target = selected;
     if (!viewport) return;
@@ -128,10 +163,16 @@
     const top = offsets[line] - leadIn;
     const bottom = offsets[line + 1];
 
+    // Both branches record where they moved to. Setting `scrollTop` on the
+    // element fires a scroll event, but not until the browser gets round to
+    // it, and a keystroke landing first would slice the list from a position
+    // it is no longer at.
     if (top < viewport.scrollTop) {
       viewport.scrollTop = top;
+      scrollTop = top;
     } else if (bottom > viewport.scrollTop + viewport.clientHeight) {
       viewport.scrollTop = bottom - viewport.clientHeight;
+      scrollTop = viewport.scrollTop;
     }
   });
 

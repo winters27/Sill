@@ -60,3 +60,29 @@ fn the_watcher_and_the_walk_agree_on_what_to_skip() {
     assert!(NOISE.contains(&"AppData"));
     assert!(NOISE.contains(&".git"));
 }
+
+// ------------------------------------------------------------------ drives
+
+#[test]
+fn a_drive_root_is_recognised_however_it_is_written() {
+    use sill_lib::catalog::same_folder;
+
+    // Somebody may type any of these, and all mean the same disk. Reading them
+    // as different folders is how a root ends up in the list twice and the
+    // same files get indexed twice.
+    for written in [r"C:\", "C:/", "C:", r"c:\", "  C:\\  "] {
+        assert!(same_folder(written, r"C:\"), "{written:?}");
+    }
+
+    assert!(!same_folder(r"D:\", r"C:\"));
+    assert!(!same_folder(r"C:\Users", r"C:\"));
+}
+
+#[test]
+fn a_folder_is_recognised_however_its_separators_lean() {
+    use sill_lib::catalog::same_folder;
+
+    assert!(same_folder(r"C:\work\thing", "C:/work/thing"));
+    assert!(same_folder(r"C:\work\thing\", r"C:\work\thing"));
+    assert!(!same_folder(r"C:\work\thing", r"C:\work\other"));
+}

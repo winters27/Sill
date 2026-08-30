@@ -327,6 +327,82 @@ pub(crate) async fn start_file_search(
     }
 }
 
+/// Every mounted drive, and whether Sill is indexing it.
+///
+/// Asked when the settings that show them are opened, never on a timer. A
+/// drive appearing is something a person did, and they are looking at the
+/// list when they do it.
+#[tauri::command]
+pub(crate) async fn list_drives(
+    state: State<'_, PrefsState>,
+) -> Result<Vec<crate::catalog::Drive>, String> {
+    let roots = state.inner.lock().await.files.indexed_roots();
+
+    Ok(crate::catalog::drives(&roots))
+}
+
+/// Starts or stops indexing one folder, and rebuilds either way.
+///
+/// One command for both directions because the settings offer one switch. What
+/// it does is decided by what the folder is now, not by what the window
+/// believed when it drew itself.
+#[tauri::command]
+pub(crate) async fn index_folder(
+    state: State<'_, PrefsState>,
+    catalog: State<'_, CatalogState>,
+    path: String,
+    wanted: bool,
+) -> Result<Vec<String>, String> {
+    let path = path.trim().to_string();
+    if path.is_empty() {
+        return Err("No folder given.".to_string());
+    }
+
+    let roots = {
+        let mut prefs = state.inner.lock().await;
+
+        // Written into the list as it was given, but compared without case or
+        // trailing separators, since `C:/` and `C:\` are the same folder and
+        // adding both would index it twice.
+        let already = prefs
+            .files
+            .roots
+            .iter()
+            .position(|root| crate::catalog::same_folder(root, &path));
+
+        match (wanted, already) {
+            (true, None) => prefs.files.roots.push(path),
+            (false, Some(at)) => {
+                prefs.files.roots.remove(at);
+            }
+            // Already as asked. Falling through would rebuild for nothing.
+            _ => return Ok(prefs.files.roots.clone()),
+        }
+
+        // Empty means the home folder, which is not the same as indexing
+        // nothing. Somebody who removes their last root means to stop, so it
+        // is written down rather than left to be read as the default.
+        if prefs.files.roots.is_empty() {
+            prefs.files.index = false;
+        } else {
+            prefs.files.index = true;
+        }
+
+        // Reported rather than dropped. A change that cannot be written down
+        // comes back on the next start, and silently indexing a folder
+        // somebody removed is worse than saying the save failed.
+        prefs
+            .save(&state.path)
+            .map_err(|err| format!("Could not save: {err}"))?;
+
+        prefs.files.clone()
+    };
+
+    catalog.rebuild(roots.indexed_roots());
+
+    Ok(roots.roots)
+}
+
 /// Opens a file or folder in its default application.
 #[tauri::command]
 pub(crate) async fn open_path(path: String) -> Result<(), String> {

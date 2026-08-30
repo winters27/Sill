@@ -57,6 +57,8 @@ pub(crate) struct CatalogState {
     /// A walk is over a second of work and megabytes of allocation. Two at
     /// once would cost twice that to produce the same answer.
     pub(crate) building: Arc<std::sync::atomic::AtomicBool>,
+    /// Where the index is kept between runs.
+    pub(crate) cache: Arc<Option<PathBuf>>,
 }
 
 impl CatalogState {
@@ -78,6 +80,7 @@ impl CatalogState {
 
         let inner = self.inner.clone();
         let building = self.building.clone();
+        let cache = self.cache.clone();
 
         std::thread::spawn(move || {
             let started = std::time::Instant::now();
@@ -89,9 +92,45 @@ impl CatalogState {
                 started.elapsed().as_millis()
             );
 
-            inner.store(Arc::new(catalog));
+            // Saved after it is swapped in, not before. Searching gets the new
+            // index a moment sooner, and writing a file is not something to
+            // make anybody wait behind.
+            let saved = Arc::new(catalog);
+            inner.store(saved.clone());
             building.store(false, Ordering::Release);
+
+            if let Some(path) = cache.as_ref() {
+                if let Err(err) = saved.save(path) {
+                    crate::say!("file index: could not save: {err}");
+                }
+            }
         });
+    }
+
+    /// Reads last run's index, so searching works before the walk finishes.
+    ///
+    /// Walking a whole drive takes nine seconds and a home folder over one.
+    /// Nobody should wait either of those out to search for a file they know
+    /// is there, and it was there last time too.
+    ///
+    /// The index is used exactly as saved and then replaced by a fresh walk a
+    /// second or so later. In between it is as right as it was when the
+    /// application last closed, which is a far better answer than nothing.
+    pub(crate) fn warm(&self, roots: &[PathBuf]) {
+        let Some(path) = self.cache.as_ref() else {
+            return;
+        };
+
+        let started = std::time::Instant::now();
+
+        if let Some(catalog) = crate::catalog::Catalog::load(path, roots) {
+            crate::say!(
+                "file index: {} entries read from last run in {} ms",
+                catalog.len(),
+                started.elapsed().as_millis()
+            );
+            self.inner.store(Arc::new(catalog));
+        }
     }
 }
 
@@ -186,7 +225,11 @@ impl CatalogWatcher {
         }
 
         std::thread::spawn(move || {
-            let mut last = std::time::Instant::now() - FLOOR;
+            // Starts as if a rebuild just happened, because one did: the
+            // caller walks once at startup. Starting a floor in the past meant
+            // the first event to arrive rebuilt immediately, so an ordinary
+            // launch walked the whole drive twice, seven seconds apart.
+            let mut last = std::time::Instant::now();
 
             while rx.recv().is_ok() {
                 // Drain whatever else arrived while things settle. A build
