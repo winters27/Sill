@@ -277,7 +277,7 @@ pub fn builtins() -> Vec<CommandRecord> {
         ),
         builtin(
             "emoji",
-            "snippets",
+            "emoji",
             "Emoji",
             "Search every emoji by name and paste one",
             &[

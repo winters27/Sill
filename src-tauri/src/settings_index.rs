@@ -36,6 +36,7 @@ pub const PANELS: &[&str] = &[
     "appearance",
     "dictation",
     "snippets",
+    "emoji",
     "shortcuts",
     "quicklinks",
     "clipboard",
@@ -273,6 +274,19 @@ pub const SETTINGS: &[Setting] = &[
         "Snippets",
         "Snippets",
         "template saved text signature placeholder",
+    ),
+    // --------------------------------------------------------------- emoji
+    s(
+        "emoji",
+        "Emoji",
+        "Skin tone",
+        "emoji hand colour color diverse tone people",
+    ),
+    s(
+        "emoji",
+        "Emoji",
+        "What Enter does",
+        "emoji paste copy primary action",
     ),
     // ----------------------------------------------------------- shortcuts
     s(

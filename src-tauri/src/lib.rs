@@ -874,6 +874,7 @@ pub fn run() {
             commands::settings::set_hidden,
             commands::settings::navigation_chords,
             commands::settings::navigation_keys,
+            commands::settings::emoji_tones,
             commands::search::list_monitors,
             commands::search::open_path,
             commands::launch::launch_command,

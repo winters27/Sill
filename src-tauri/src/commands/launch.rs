@@ -272,6 +272,13 @@ pub(crate) async fn record_use(
     state: State<'_, RegistryState>,
     id: String,
     query: Option<String>,
+    // Whether the query belongs in the history that Up walks back through.
+    //
+    // The history is what was typed at the root. A query typed into the emoji
+    // picker taught something useful about emoji and nothing about the root
+    // list, and offering it back there would recall a search that now finds
+    // nothing. Defaults to true, because every other caller is the root.
+    history: Option<bool>,
 ) -> Result<(), String> {
     let mut registry = state.inner.lock().await;
 
@@ -279,7 +286,9 @@ pub(crate) async fn record_use(
     registry.frecency.record(&id, now);
     if let Some(query) = query.as_deref() {
         registry.frecency.record_query(query, &id, now);
-        registry.frecency.remember(query);
+        if history.unwrap_or(true) {
+            registry.frecency.remember(query);
+        }
     }
 
     let path = registry.frecency_path.clone();

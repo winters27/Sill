@@ -17,6 +17,12 @@ export interface General {
   showInTray: boolean;
 }
 
+/** Skin tone and what Enter does, for the emoji picker. */
+export interface EmojiSettings {
+  tone: "default" | "light" | "mediumLight" | "medium" | "mediumDark" | "dark";
+  primary: "paste" | "copy";
+}
+
 /** Which keys move around the launcher. */
 export interface NavigationSettings {
   preset: "standard" | "vim" | "emacs";
@@ -116,6 +122,7 @@ export interface Preferences {
   bindings: Binding[];
   aliases: Alias[];
   navigation: NavigationSettings;
+  emoji: EmojiSettings;
 }
 
 /**
@@ -376,4 +383,21 @@ export interface NavigationKey {
 
 export function navigationKeys(): Promise<NavigationKey[]> {
   return invoke<NavigationKey[]>("navigation_keys").catch(() => []);
+}
+
+/** One skin tone, shown as a hand rather than named. */
+export interface ToneChoice {
+  id: EmojiSettings["tone"];
+  swatch: string;
+}
+
+/**
+ * The skin tones, each with the hand that shows it.
+ *
+ * From Rust because the swatch is the emoji itself and the set is a fact about
+ * Unicode. Naming them in words is both awkward and less clear than the thing:
+ * nobody picks "medium-light" off a list, they pick the one that looks right.
+ */
+export function emojiTones(): Promise<ToneChoice[]> {
+  return invoke<ToneChoice[]>("emoji_tones").catch(() => []);
 }

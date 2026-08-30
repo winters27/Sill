@@ -649,3 +649,27 @@ pub(crate) struct NavigationKey {
     /// Whether this was set by hand rather than coming from the preset.
     pub overridden: bool,
 }
+
+/// The skin tones, each shown as a hand rather than named.
+///
+/// Built in Rust because the swatch is the emoji itself and the set of tones
+/// is a fact about Unicode, not about the window. Naming them in words is both
+/// awkward and less clear than the thing: nobody picks "medium-light" off a
+/// list, they pick the one that looks right.
+#[tauri::command]
+pub(crate) async fn emoji_tones() -> Vec<ToneChoice> {
+    crate::emoji::Tone::ALL
+        .into_iter()
+        .map(|tone| ToneChoice {
+            id: tone,
+            swatch: tone.swatch(),
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToneChoice {
+    pub id: crate::emoji::Tone,
+    pub swatch: String,
+}

@@ -11,6 +11,7 @@
   import PathList from "$lib/components/settings/PathList.svelte";
   import TermList from "$lib/components/settings/TermList.svelte";
   import IndexList from "$lib/components/settings/IndexList.svelte";
+  import EmojiPanel from "$lib/components/settings/EmojiPanel.svelte";
   import Button from "$lib/components/settings/Button.svelte";
   import DictationPanel from "$lib/components/settings/DictationPanel.svelte";
   import ClipboardPanel from "$lib/components/settings/ClipboardPanel.svelte";
@@ -66,6 +67,11 @@
       id: "snippets",
       name: "Snippets",
       blurb: "Saved text, expanded by keyword or pasted from the launcher",
+    },
+    {
+      id: "emoji",
+      name: "Emoji",
+      blurb: "Skin tone, and what Enter does with the one you picked",
     },
     {
       id: "shortcuts",
@@ -635,6 +641,8 @@
             <ShortcutsPanel prefs={p} {commit} />
           {:else if active === "quicklinks"}
             <QuicklinksPanel />
+          {:else if active === "emoji"}
+            <EmojiPanel prefs={p} {commit} />
           {:else if active === "clipboard"}
             <ClipboardPanel prefs={p} {commit} />
           {:else if active === "sources"}

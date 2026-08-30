@@ -4,6 +4,7 @@
     | "appearance"
     | "dictation"
     | "snippets"
+    | "emoji"
     | "shortcuts"
     | "quicklinks"
     | "clipboard"
@@ -121,6 +122,12 @@
     <circle cx="6" cy="6.5" r="2.6" />
     <circle cx="6" cy="17.5" r="2.6" />
     <path d="M8.3 8 20 17M20 7 8.3 16" />
+  {:else if name === "emoji"}
+    <!-- A face, because that is what the set is mostly for and it is the one
+         glyph nobody has to be taught. -->
+    <circle cx="12" cy="12" r="9" />
+    <path d="M8.5 10h.01M15.5 10h.01" />
+    <path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" />
   {:else if name === "shortcuts"}
     <!-- A keycap. These settings are keys, and a key is what a key looks
          like; a lightning bolt would be saying "fast" about a binding. -->

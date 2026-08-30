@@ -105,8 +105,12 @@ export function launchCommand(id: string, query?: string): Promise<LaunchedComma
  * so without this neither is visible to ranking at all: `sill:clipboard` had
  * never been recorded once, however often it was opened.
  */
-export function recordUse(id: string, query?: string): Promise<void> {
-  return invoke<void>("record_use", { id, query }).catch(() => undefined);
+export function recordUse(
+  id: string,
+  query?: string,
+  history = true,
+): Promise<void> {
+  return invoke<void>("record_use", { id, query, history }).catch(() => undefined);
 }
 
 /**

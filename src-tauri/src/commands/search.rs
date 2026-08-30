@@ -129,9 +129,12 @@ pub(crate) async fn search_windows(
 #[tauri::command]
 pub(crate) async fn search_emoji(
     state: State<'_, RegistryState>,
+    prefs: State<'_, PrefsState>,
     query: String,
 ) -> Result<Vec<registry::SearchResult>, String> {
-    let records = tokio::task::spawn_blocking(crate::emoji::records)
+    let tone = prefs.inner.lock().await.emoji.tone;
+
+    let records = tokio::task::spawn_blocking(move || crate::emoji::records(tone))
         .await
         .unwrap_or_default();
 

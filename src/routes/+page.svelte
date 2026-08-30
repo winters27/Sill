@@ -566,12 +566,28 @@
       const emoji = commands[selected];
       if (!emoji) return;
 
+      // What was typed to reach it, remembered against the emoji itself.
+      // Search "party", choose the popper, and next time "party" finds it
+      // first. Raycast does this with a model; Sill already learns query to
+      // result for everything else, so here it is the same mechanism.
+      //
+      // Not into the history Up walks back through: that is what was typed at
+      // the root, and this taught nothing about the root list.
+      void recordUse(emoji.id, query, false);
+
+      const paste = (prefs?.emoji.primary ?? "paste") === "paste";
+
       try {
-        // Dismissed first: pasting means putting it back where the user was
-        // typing, and Sill has to stop being the foreground window for that
-        // to mean anything.
-        await dismiss();
-        await runObjectAction("sill.emoji.paste", asTarget(emoji));
+        if (paste) {
+          // Dismissed first: pasting means putting it back where the user was
+          // typing, and Sill has to stop being the foreground window for that
+          // to mean anything.
+          await dismiss();
+          await runObjectAction("sill.emoji.paste", asTarget(emoji));
+        } else {
+          await runObjectAction("sill.clipboard.copy", asTarget(emoji));
+          await dismiss();
+        }
       } catch (err) {
         status = `${err}`;
       }

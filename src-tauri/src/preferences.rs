@@ -411,6 +411,9 @@ pub struct Preferences {
     /// Which keys move around the launcher.
     #[serde(default)]
     pub navigation: crate::navigation::Navigation,
+    /// Skin tone and what Enter does, for the emoji picker.
+    #[serde(default)]
+    pub emoji: crate::emoji::Settings,
 }
 
 impl Appearance {
