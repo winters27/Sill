@@ -155,6 +155,8 @@ export interface Diagnostics {
   version: string;
   dataDir: string;
   everythingRunning: boolean;
+  /** Whether the machine has the interpreter extensions run in. */
+  nodeInstalled: boolean;
   indexedCommands: number;
   launchedEntries: number;
   extensions: ExtensionInfo[];

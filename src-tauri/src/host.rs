@@ -46,6 +46,64 @@ pub(crate) fn index_paths(app: &AppHandle) -> Vec<PathBuf> {
     paths
 }
 
+/// What to say when Node is not on the machine.
+///
+/// Named as a sentence somebody can act on. Extensions are Node programs and
+/// Sill runs them in a Node process, which is a requirement nothing in the
+/// application had ever mentioned: the first sign of it was a spawn failing
+/// with "the system cannot find the file specified", naming a file the person
+/// reading it had never heard of.
+pub(crate) const NO_NODE: &str =
+    "Extensions need Node.js, which is not installed. Get it from nodejs.org, \
+     or run: winget install OpenJS.NodeJS.LTS";
+
+/// The Node interpreter, if this machine has one.
+///
+/// `PATH` first, because that is what a developer's shell would find and what
+/// version managers arrange. Then the usual install locations, because a
+/// desktop application does not inherit the shell's `PATH` on Windows in the
+/// way a terminal does, and a Node installed while Sill was running is not in
+/// the environment Sill started with.
+pub(crate) fn node_exe() -> Option<PathBuf> {
+    if which("node").is_some() {
+        return Some(PathBuf::from("node"));
+    }
+
+    [
+        r"C:\Program Files\nodejs\node.exe",
+        r"C:\Program Files (x86)\nodejs\node.exe",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|candidate| candidate.is_file())
+}
+
+/// Whether a bare program name resolves on this machine.
+///
+/// Asked by running it rather than by walking `PATH` by hand: `PATHEXT`,
+/// shims, and the store aliases all make the second one wrong in ways that
+/// only show up on somebody else's computer.
+fn which(program: &str) -> Option<()> {
+    use std::process::{Command, Stdio};
+
+    let mut command = Command::new(program);
+    command
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // No console window. Without this every check flashes one up.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    command.status().ok().filter(|it| it.success()).map(|_| ())
+}
+
 /// Where the extension host bundle is.
 ///
 /// This used to be the development path and only the development path, which
@@ -134,7 +192,14 @@ pub(crate) async fn host_of(state: &HostState) -> Result<Arc<ExtHost>, String> {
         ));
     }
 
-    let host = ExtHost::spawn(&PathBuf::from("node"), &state.host_js, state.api.clone())
+    // Asked before spawning, so the answer names the missing thing rather
+    // than the symptom. Failing at the spawn gives "The system cannot find the
+    // file specified", which is true of an interpreter nobody knew was needed.
+    let Some(node) = node_exe() else {
+        return Err(NO_NODE.to_string());
+    };
+
+    let host = ExtHost::spawn(&node, &state.host_js, state.api.clone())
         .await
         .map_err(|err| format!("could not start the extension host: {err}"))?;
 

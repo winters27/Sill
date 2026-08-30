@@ -21,6 +21,14 @@ pub(crate) struct Diagnostics {
     launched_entries: usize,
     /// One per installed extension, with how many commands it contributes.
     extensions: Vec<ExtensionInfo>,
+    /// Whether the machine has the interpreter extensions run in.
+    ///
+    /// Reported rather than discovered on first use. Extensions are Node
+    /// programs, which is a requirement nothing in the application had ever
+    /// mentioned: the first sign of it was a spawn failing with "the system
+    /// cannot find the file specified", naming a file the person reading it
+    /// had never heard of.
+    node_installed: bool,
     /// How many entries each source contributed, for the Sources panel.
     by_source: Vec<SourceCount>,
 }
@@ -53,6 +61,10 @@ pub(crate) async fn diagnostics(
         everything_running: everything_ipc::available(),
         indexed_commands: guard.commands.len(),
         launched_entries: guard.frecency.len(),
+        // Asked live for the same reason Everything is: somebody can install
+        // Node while Sill is open, and the panel showing this is exactly where
+        // they would look afterwards.
+        node_installed: crate::host::node_exe().is_some(),
         extensions: extension_summary(&guard.commands),
         by_source: source_summary(&guard.commands),
     })

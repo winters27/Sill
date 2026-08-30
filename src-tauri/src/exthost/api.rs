@@ -262,6 +262,27 @@ impl ApiLayer {
                 Ok(Value::Null)
             }
 
+            "Application/getDefault" => {
+                let target = string("target");
+                if target.is_empty() {
+                    return Err(RpcError::internal("getDefault was given nothing"));
+                }
+
+                let found = self
+                    .blocking(move |bridge| bridge.default_application(&target))
+                    .await?;
+
+                // Null rather than an error when nothing is registered. An
+                // address with no handler is an ordinary state of a machine,
+                // not a fault in the extension that asked about it.
+                match found {
+                    Some(app) => serde_json::to_value(app).map_err(|err| {
+                        RpcError::internal(format!("could not describe it: {err}"))
+                    }),
+                    None => Ok(Value::Null),
+                }
+            }
+
             "Application/list" => {
                 let apps = self.blocking(|bridge| bridge.applications()).await?;
                 serde_json::to_value(apps).map_err(|err| {
@@ -270,6 +291,15 @@ impl ApiLayer {
             }
 
             // ------------------------------------------------------------- ui
+            "UI/getSelectedText" => {
+                let selected = self.blocking(|bridge| bridge.selected_text()).await?;
+
+                // An empty string rather than null when nothing is selected,
+                // because the call is typed as returning a string and every
+                // extension using it goes straight to `.trim()`.
+                Ok(Value::String(selected.unwrap_or_default()))
+            }
+
             "UI/confirmAlert" => {
                 let alert = alert_from(params.get("payload").unwrap_or(params));
                 let answered = self.blocking(move |bridge| bridge.confirm(&alert)).await?;

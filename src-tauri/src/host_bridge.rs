@@ -108,6 +108,41 @@ impl Bridge for SillBridge {
             .map_err(|err| format!("could not open {target}: {err}"))
     }
 
+    fn selected_text(&self) -> Result<Option<String>, String> {
+        // The same capture the launcher's own text actions use, so an
+        // extension asking what is selected gets exactly what a built-in
+        // action would have acted on, including the part where the clipboard
+        // is put back afterwards.
+        Ok(crate::selection::capture(&self.app))
+    }
+
+    fn default_application(&self, target: &str) -> Result<Option<AppInfo>, String> {
+        let Some(program) = default_program(target) else {
+            return Ok(None);
+        };
+
+        // Named from the index where the index knows it, so an extension sees
+        // "Visual Studio Code" rather than "Code.exe". Falling back to the
+        // file name is still better than nothing.
+        let name = self
+            .app
+            .try_state::<crate::RegistryState>()
+            .and_then(|state| state.inner.try_lock().ok().map(|held| named(&held, &program)))
+            .flatten()
+            .unwrap_or_else(|| {
+                std::path::Path::new(&program)
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().to_string())
+                    .unwrap_or_else(|| program.clone())
+            });
+
+        Ok(Some(AppInfo {
+            name,
+            path: program.clone(),
+            bundle_id: Some(program),
+        }))
+    }
+
     fn applications(&self) -> Result<Vec<AppInfo>, String> {
         // Read out of the index the launcher already holds rather than
         // scanned. A scan is a PowerShell round trip and a few thousand
@@ -167,4 +202,88 @@ impl Bridge for SillBridge {
             .kind(kind)
             .blocking_show())
     }
+}
+
+/// What the index calls the program at this path, if it holds it at all.
+fn named(registry: &crate::state::Registry, program: &str) -> Option<String> {
+    let wanted = program.to_lowercase();
+
+    registry
+        .commands
+        .iter()
+        .find(|command| command.entrypoint.to_lowercase() == wanted)
+        .map(|command| command.title.clone())
+}
+
+/// The program Windows would use to open this path or address.
+///
+/// Asked of the shell rather than worked out from the registry by hand: file
+/// associations live in several places that override each other, and the
+/// answer people actually get is the one the shell gives.
+#[cfg(windows)]
+fn default_program(target: &str) -> Option<String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::{AssocQueryStringW, ASSOCF_NONE, ASSOCSTR_EXECUTABLE};
+
+    // An address is looked up by its scheme and a file by its extension, which
+    // is what the shell wants in each case.
+    let key = match target.split_once("://") {
+        Some((scheme, _)) if !scheme.is_empty() && !scheme.contains(['\\', '/', '.']) => {
+            scheme.to_string()
+        }
+        _ => format!(
+            ".{}",
+            std::path::Path::new(target).extension()?.to_string_lossy()
+        ),
+    };
+
+    let wide: Vec<u16> = key.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut room = 0u32;
+
+    // Asked twice: once for the length, once for the value. Passing a buffer
+    // that is too small is the usual way to get a truncated path back.
+    unsafe {
+        AssocQueryStringW(
+            ASSOCF_NONE,
+            ASSOCSTR_EXECUTABLE,
+            PCWSTR(wide.as_ptr()),
+            PCWSTR::null(),
+            None,
+            &mut room,
+        )
+        .ok()
+        .ok()?;
+    }
+
+    let mut buffer = vec![0u16; room as usize];
+
+    unsafe {
+        AssocQueryStringW(
+            ASSOCF_NONE,
+            ASSOCSTR_EXECUTABLE,
+            PCWSTR(wide.as_ptr()),
+            PCWSTR::null(),
+            Some(windows::core::PWSTR(buffer.as_mut_ptr())),
+            &mut room,
+        )
+        .ok()
+        .ok()?;
+    }
+
+    let path = String::from_utf16_lossy(&buffer)
+        .trim_end_matches('\0')
+        .to_string();
+
+    // The shell answers with this for anything it has no handler for, which
+    // is a way of saying nothing rather than an application to open.
+    if path.is_empty() || path.to_lowercase().ends_with("openwith.exe") {
+        return None;
+    }
+
+    Some(path)
+}
+
+#[cfg(not(windows))]
+fn default_program(_target: &str) -> Option<String> {
+    None
 }

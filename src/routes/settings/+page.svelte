@@ -693,14 +693,14 @@
           {/if}
           {:else if active === "files"}
           <Section
-            label="Everything"
-            description="File search is provided by voidtools Everything, which has to be installed and running. Sill talks to it over its own IPC, so nothing is spawned per keystroke."
+            label="File search"
+            description="Sill keeps its own index of the folders below, so this works with nothing else installed. Where a whole-volume indexer is also running it is asked as well, and it sees the rest of the machine."
           >
             <Row
               title="Search files"
               description={info?.everythingRunning
-                ? "Everything is running and answering."
-                : "Everything is not running, so file results will be empty."}
+                ? "Sill's own index, plus Everything, which is running and answering for the rest of the machine."
+                : "Sill's own index of the folders below. Everything is not running, so nothing outside them is searched."}
             >
               {#snippet control()}
                 <Toggle bind:checked={p.files.enabled} onchange={commit} label="Search files" />
@@ -798,8 +798,20 @@
           </Section>
           {:else if active === "extensions"}
           <Section
+            label="Runs extensions in"
+            description="Extensions are Node programs and Sill runs them in a Node process, so one has to be on the machine. Nothing else in Sill needs it."
+          >
+            <Row
+              title="Node.js"
+              description={info?.nodeInstalled
+                ? "Found. Extensions can run."
+                : "Not found, so no extension can start. Get it from nodejs.org, or run: winget install OpenJS.NodeJS.LTS"}
+            />
+          </Section>
+
+          <Section
             label="Installed"
-            description="Raycast extensions running in Sill's host. Each contributes its commands to the root list."
+            description="Extensions running in Sill's host. Each contributes its commands to the root list."
             bare={!info?.extensions.length}
           >
             {#if info?.extensions.length}

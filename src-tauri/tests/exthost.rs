@@ -159,6 +159,7 @@ struct Asked {
     opened: Vec<(String, Option<String>)>,
     cleared: usize,
     confirmed: Vec<String>,
+    defaults: Vec<String>,
 }
 
 /// A bridge that records rather than acts.
@@ -172,6 +173,8 @@ struct StubBridge {
     holds: Option<String>,
     /// What the person says to `confirmAlert`.
     answer: bool,
+    /// What is highlighted in the window the launcher came up over.
+    selection: Option<String>,
 }
 
 impl StubBridge {
@@ -180,6 +183,7 @@ impl StubBridge {
             asked: Mutex::new(Asked::default()),
             holds: Some("already on the clipboard".to_string()),
             answer: true,
+            selection: Some("what was highlighted".to_string()),
         })
     }
 
@@ -229,6 +233,27 @@ impl Bridge for StubBridge {
     fn confirm(&self, alert: &Alert) -> Result<bool, String> {
         self.asked().confirmed.push(alert.title.clone());
         Ok(self.answer)
+    }
+
+    fn selected_text(&self) -> Result<Option<String>, String> {
+        Ok(self.selection.clone())
+    }
+
+    fn default_application(&self, target: &str) -> Result<Option<AppInfo>, String> {
+        self.asked().defaults.push(target.to_string());
+
+        // Only one thing has a handler here, so the other case is exercised
+        // too: an address nothing is registered for is an ordinary state of a
+        // machine rather than a fault.
+        if target.ends_with(".txt") {
+            return Ok(Some(AppInfo {
+                name: "Notepad".into(),
+                path: r"C:\Windows\notepad.exe".into(),
+                bundle_id: Some(r"C:\Windows\notepad.exe".into()),
+            }));
+        }
+
+        Ok(None)
     }
 }
 
@@ -405,11 +430,16 @@ async fn opening_nothing_is_an_error_rather_than_a_silent_no_op() {
 
 /// Methods the host is allowed to call without Rust answering them.
 ///
-/// Each one is a decision, not an oversight. Both need work that belongs
-/// elsewhere: reading the foreground selection is UI Automation, and the
-/// default application for a file type is `AssocQueryString`. Until then they
-/// fail loudly, naming themselves, which is the house rule for a gap.
-const DECLARED_GAPS: &[&str] = &["UI/getSelectedText", "Application/getDefault"];
+/// Empty, and the test below is what keeps it honest: adding a call on the
+/// host side without an answer on this side fails until it is either
+/// implemented or written down here as a decision.
+///
+/// The last two came out on 2026-08-30. Neither needed the work their note
+/// claimed: reading the selection is the capture the launcher already does for
+/// its own text actions, and the default application is one `AssocQueryString`
+/// call. **A gap listed as needing a large piece of work is worth re-reading
+/// before it is believed.**
+const DECLARED_GAPS: &[&str] = &[];
 
 /// JSON-RPC's code for a method the server does not have.
 const METHOD_NOT_FOUND: i32 = -32601;
@@ -572,4 +602,95 @@ fn the_built_index_carries_preferences_through_to_the_record() {
          stopped emitting them or the record stopped reading them",
         commands.len()
     );
+}
+
+// ------------------------------------- the last two calls that reached nothing
+
+#[tokio::test]
+async fn an_extension_can_read_what_is_selected() {
+    // The host has always offered `getSelectedText`. Rust answered
+    // `method not found`, so every extension acting on a selection failed at
+    // the first line of its own command.
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let (layer, _bridge) = layer(tx);
+
+    let answered = layer
+        .dispatch("s1", "ext", "UI/getSelectedText", &json!({}))
+        .await
+        .expect("answered");
+
+    assert_eq!(answered, json!("what was highlighted"));
+}
+
+#[tokio::test]
+async fn nothing_selected_reads_as_empty_rather_than_as_a_failure() {
+    // The call is typed as returning a string and extensions go straight to
+    // `.trim()` on it. Null would be a crash in somebody else's code.
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let bridge = Arc::new(StubBridge {
+        asked: Mutex::new(Asked::default()),
+        holds: None,
+        answer: true,
+        selection: None,
+    });
+    let storage = Arc::new(Storage::memory().expect("in-memory store"));
+    let layer = Arc::new(ApiLayer::new(tx, bridge.clone(), storage));
+
+    let answered = layer
+        .dispatch("s1", "ext", "UI/getSelectedText", &json!({}))
+        .await
+        .expect("answered");
+
+    assert_eq!(answered, json!(""));
+}
+
+#[tokio::test]
+async fn an_extension_can_ask_what_opens_a_file() {
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let (layer, bridge) = layer(tx);
+
+    let answered = layer
+        .dispatch(
+            "s1",
+            "ext",
+            "Application/getDefault",
+            &json!({ "target": "notes.txt" }),
+        )
+        .await
+        .expect("answered");
+
+    assert_eq!(answered["name"], json!("Notepad"));
+    assert_eq!(bridge.asked().defaults, vec!["notes.txt".to_string()]);
+}
+
+#[tokio::test]
+async fn an_address_nothing_handles_answers_null_rather_than_failing() {
+    // A machine with no handler registered for something is an ordinary
+    // machine, not a fault in the extension that asked about it.
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let (layer, _bridge) = layer(tx);
+
+    let answered = layer
+        .dispatch(
+            "s1",
+            "ext",
+            "Application/getDefault",
+            &json!({ "target": "weird://thing" }),
+        )
+        .await
+        .expect("answered");
+
+    assert_eq!(answered, json!(null));
+}
+
+#[tokio::test]
+async fn getting_a_default_for_nothing_is_refused() {
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let (layer, _bridge) = layer(tx);
+
+    let refused = layer
+        .dispatch("s1", "ext", "Application/getDefault", &json!({ "target": "" }))
+        .await;
+
+    assert!(refused.is_err(), "an empty target was accepted");
 }

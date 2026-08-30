@@ -81,6 +81,13 @@ pub trait Bridge: Send + Sync {
     fn applications(&self) -> Result<Vec<AppInfo>, String>;
     /// Blocks until the user answers.
     fn confirm(&self, alert: &Alert) -> Result<bool, String>;
+    /// Whatever is selected in the window the launcher came up over.
+    ///
+    /// Nothing selected is not an error: an extension asking what is selected
+    /// when nothing is has asked a fair question and got a fair answer.
+    fn selected_text(&self) -> Result<Option<String>, String>;
+    /// The application Windows would use to open this path or address.
+    fn default_application(&self, target: &str) -> Result<Option<AppInfo>, String>;
 }
 
 #[cfg(test)]
