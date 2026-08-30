@@ -50,7 +50,7 @@
 
   /** Root browses installed commands; command shows one that is running. */
   let mode = $state<
-    "root" | "command" | "clipboard" | "argument" | "switcher"
+    "root" | "command" | "clipboard" | "argument" | "switcher" | "collection"
   >("root");
   /**
    * The quicklink waiting for something to be typed into it.
@@ -135,6 +135,8 @@
 
   const count = $derived.by(() => {
     if (mode === "root" || mode === "switcher") return commands.length;
+    // The field is a name, not a filter, so there is nothing to arrow through.
+    if (mode === "collection") return 0;
     if (mode === "clipboard") return clipboardCount;
     return items.length;
   });
@@ -189,8 +191,41 @@
           ]
         : [];
 
+      const collecting = [
+        ...(picked.length
+          ? [
+              {
+                id: -33,
+                title: `Add ${picked.length} to a Collection`,
+                tag: "Sill.ClipboardCollect",
+                props: {},
+                shortcut: undefined,
+              },
+            ]
+          : []),
+        ...(openCollection
+          ? [
+              {
+                id: -34,
+                title: `Remove from ${openCollection.name}`,
+                tag: "Sill.ClipboardUncollect",
+                props: {},
+                shortcut: undefined,
+              },
+              {
+                id: -35,
+                title: `Delete the ${openCollection.name} Collection`,
+                tag: "Sill.ClipboardForgetCollection",
+                props: {},
+                shortcut: undefined,
+              },
+            ]
+          : []),
+      ];
+
       return [
         ...merging,
+        ...collecting,
         {
           id: -10,
           title: "Paste",
@@ -422,6 +457,23 @@
       return;
     }
 
+    if (mode === "collection") {
+      const name = query.trim();
+      if (!name) return;
+
+      try {
+        const added = await clipboardView?.addPickedTo(name);
+        status = added ? `Added ${added} to ${name}` : `Nothing added to ${name}`;
+      } catch (err) {
+        status = `${err}`;
+      }
+
+      mode = "clipboard";
+      query = "";
+      selected = 0;
+      return;
+    }
+
     if (mode === "switcher") {
       const window = commands[selected];
       if (!window) return;
@@ -555,6 +607,16 @@
    */
   let richEntry = $state(false);
 
+  /**
+   * The collection open in the history, when one is.
+   *
+   * Mirrored up here with the picks and the rich flag, for the same reason:
+   * the action panel is drawn by this component and has to know which actions
+   * apply. Removing something from a collection is only a thing while looking
+   * at one.
+   */
+  let openCollection = $state<{ id: number; name: string } | null>(null);
+
   /** The separator a plain merge uses: one entry per line. */
   const NEWLINE = String.fromCharCode(10);
 
@@ -628,6 +690,19 @@
           break;
         case "Sill.ClipboardPastePlain":
           await clipboardView?.paste(true, true);
+          break;
+        case "Sill.ClipboardCollect":
+          // The field becomes the name, the way it does for a quicklink that
+          // needs a query. One way of asking for a word, not two.
+          mode = "collection";
+          query = "";
+          panelOpen = false;
+          return;
+        case "Sill.ClipboardUncollect":
+          await clipboardView?.removeFromCollection();
+          break;
+        case "Sill.ClipboardForgetCollection":
+          await clipboardView?.forgetCollection();
           break;
         case "Sill.ClipboardPin":
           await clipboardView?.togglePin();
@@ -760,6 +835,15 @@
       return;
     }
 
+    // Naming a collection steps back to the history with the picks intact,
+    // so changing your mind about the name does not undo the picking.
+    if (mode === "collection") {
+      mode = "clipboard";
+      query = "";
+      selected = 0;
+      return;
+    }
+
     // Escape leaves the switcher rather than stepping back to the root list.
     // It was opened by its own key to do one thing, and dropping into a
     // general search on the way out is not what "never mind" means.
@@ -842,7 +926,8 @@
       return;
     }
 
-    // The clipboard's own keys, which only exist while it is open.
+    // The clipboard's own keys, which only exist while it is open. Not while
+    // naming a collection: Ctrl and M there is somebody typing a name.
     if (mode === "clipboard") {
       const ctrl = event.ctrlKey || event.metaKey;
       if (ctrl && event.key.toLowerCase() === "c") {
@@ -1025,6 +1110,8 @@
       <span class="crumb">Clipboard History</span>
     {:else if mode === "switcher"}
       <span class="crumb">Open Windows</span>
+    {:else if mode === "collection"}
+      <span class="crumb">Collection</span>
     {:else if running}
       <span class="crumb">{running.extensionTitle}</span>
     {/if}
@@ -1033,8 +1120,10 @@
       bind:value={query}
       placeholder={mode === "argument"
         ? "Type what to search for, then Enter…"
-        : mode === "clipboard"
-          ? "Filter what you have copied…"
+        : mode === "collection"
+          ? "Name the collection, then Enter…"
+          : mode === "clipboard"
+            ? "Filter what you have copied…"
           : mode === "switcher"
             ? "Switch to a window…"
             : mode === "root"
@@ -1059,15 +1148,19 @@
           : "Type the words to search for. They are escaped before they go into the address."}
       </p>
     </div>
-  {:else if mode === "clipboard"}
+  {:else if mode === "clipboard" || mode === "collection"}
+    <!-- Kept mounted while the name is being typed. Unmounting it would take
+         the picks with it, so changing your mind about the name would silently
+         undo the picking that led to it. -->
     <ClipboardView
       bind:this={clipboardView}
-      {query}
+      query={mode === "collection" ? "" : query}
       {selected}
       onselect={(i) => (selected = i)}
       oncount={(n) => (clipboardCount = n)}
       onpick={(ids) => (picked = ids)}
       onrich={(rich) => (richEntry = rich)}
+      oncollection={(open) => (openCollection = open)}
     />
   {:else if mode === "root" || mode === "switcher"}
     <RootList

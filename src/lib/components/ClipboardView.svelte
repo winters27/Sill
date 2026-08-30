@@ -19,6 +19,13 @@
     type ClipKind,
     clipboardLastSkipped,
     clipboardKeepCurrent,
+    clipboardCollections,
+    clipboardCollectionEntries,
+    clipboardCreateCollection,
+    clipboardAddToCollection,
+    clipboardRemoveFromCollection,
+    clipboardDeleteCollection,
+    type Collection,
     type Skipped,
   } from "$lib/clipboard";
 
@@ -39,9 +46,19 @@
     onpick: (ids: number[]) => void;
     /** Whether the highlighted entry kept a formatted version. */
     onrich: (rich: boolean) => void;
+    /** Which collection is being looked at, if any. */
+    oncollection: (open: Collection | null) => void;
   }
 
-  let { query, selected, onselect, oncount, onpick, onrich }: Props = $props();
+  let {
+    query,
+    selected,
+    onselect,
+    oncount,
+    onpick,
+    onrich,
+    oncollection,
+  }: Props = $props();
 
   let entries = $state<ClipEntry[]>([]);
   let kind = $state<ClipKind | "all">("all");
@@ -73,8 +90,40 @@
     return out;
   });
 
+  /**
+   * The collection being looked at, or null for the whole history.
+   *
+   * A separate axis from the kind filter rather than another value in it. A
+   * collection is a set somebody arranged and the kinds are a property of the
+   * content, so "images in Release notes" is a sensible thing to ask for and
+   * folding the two into one dropdown would make it unaskable.
+   */
+  let inside = $state<Collection | null>(null);
+  let collections = $state<Collection[]>([]);
+
+  async function loadCollections() {
+    collections = await clipboardCollections();
+
+    // The one being looked at may have been renamed or removed elsewhere.
+    if (inside) inside = collections.find((c) => c.id === inside?.id) ?? null;
+  }
+
   async function refresh() {
-    entries = await clipboardSearch(query, kind);
+    if (inside) {
+      // Arranged order, and filtered here rather than in SQL: a collection is
+      // a set somebody curated by hand, so it is small, and a second query
+      // shape for it would be two orderings to keep in step.
+      const all = await clipboardCollectionEntries(inside.id);
+      const needle = query.trim().toLowerCase();
+      entries = all.filter(
+        (entry) =>
+          (kind === "all" || entry.kind === kind) &&
+          (!needle || entry.text.toLowerCase().includes(needle)),
+      );
+    } else {
+      entries = await clipboardSearch(query, kind);
+    }
+
     oncount(entries.length);
   }
 
@@ -83,6 +132,7 @@
   $effect(() => {
     query;
     kind;
+    inside;
     void refresh();
   });
 
@@ -122,6 +172,7 @@
    * copy arriving underneath it.
    */
   let picked = $state<number[]>([]);
+  let collectionsOpen = $state(false);
 
   const pickedCount = $derived(picked.length);
 
@@ -154,6 +205,10 @@
     onrich(current?.rich ?? false);
   });
 
+  $effect(() => {
+    oncollection(inside);
+  });
+
   export async function togglePin() {
     if (!current) return;
     await clipboardPin(current.id, !current.pinned);
@@ -173,6 +228,43 @@
   /** The row the actions apply to, for the panel the parent draws. */
   export function selection(): { id: number; text: string; kind: string } | null {
     return current && { id: current.id, text: current.text, kind: current.kind };
+  }
+
+  /** Puts the picked entries into a collection, making it if it is new. */
+  export async function addPickedTo(name: string): Promise<number> {
+    if (picked.length === 0) return 0;
+
+    const id = await clipboardCreateCollection(name);
+    const added = await clipboardAddToCollection(id, picked);
+
+    picked = [];
+    onpick(picked);
+    await loadCollections();
+    return added;
+  }
+
+  /** Takes the highlighted entry out of the collection being looked at. */
+  export async function removeFromCollection() {
+    if (!inside || !current) return;
+    await clipboardRemoveFromCollection(inside.id, current.id);
+    await loadCollections();
+    await refresh();
+  }
+
+  export async function forgetCollection() {
+    if (!inside) return;
+    await clipboardDeleteCollection(inside.id);
+    inside = null;
+    await loadCollections();
+  }
+
+  /** Which collection is open, for the launcher's action panel. */
+  export function openCollection(): Collection | null {
+    return inside;
+  }
+
+  export function haveCollections(): boolean {
+    return collections.length > 0;
   }
 
   export function cycleFilter(by: number) {
@@ -243,6 +335,7 @@
     (async () => {
       await refresh();
       skipped = await clipboardLastSkipped();
+      await loadCollections();
 
       // Something copied while this is open has to appear, or the history
       // looks broken at the exact moment it is being watched.
@@ -283,7 +376,71 @@
         {entries.length === 1 ? "entry" : "entries"}
       {/if}
     </span>
+    {#if inside}
+      <!-- Which set is being looked at, and the way back out of it. The whole
+           history is not a collection, so it is not another entry in a
+           dropdown; it is what you get when you leave this one. -->
+      <button class="crumb" onclick={() => (inside = null)}>
+        {inside.name}
+        <svg width="9" height="9" viewBox="0 0 12 12" aria-hidden="true">
+          <path
+            d="M3 3l6 6M9 3l-6 6"
+            stroke="currentColor"
+            stroke-width="1.5"
+            fill="none"
+            stroke-linecap="round"
+          />
+        </svg>
+      </button>
+    {/if}
+
     <span class="spacer"></span>
+
+    {#if collections.length && !inside}
+      <div class="filter">
+        <button
+          class="trigger"
+          onclick={() => (collectionsOpen = !collectionsOpen)}
+          aria-haspopup="menu"
+        >
+          Collections
+          <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true">
+            <path
+              d="M2.5 4.5 6 8l3.5-3.5"
+              stroke="currentColor"
+              stroke-width="1.4"
+              fill="none"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+
+        {#if collectionsOpen}
+          <div
+            class="scrim"
+            role="presentation"
+            onclick={() => (collectionsOpen = false)}
+          ></div>
+          <div class="menu" role="menu">
+            {#each collections as collection (collection.id)}
+              <button
+                class="option"
+                role="menuitem"
+                onclick={() => {
+                  inside = collection;
+                  collectionsOpen = false;
+                  onselect(0);
+                }}
+              >
+                <span class="label">{collection.name}</span>
+                <span class="tally">{collection.count}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <div class="filter">
       <button class="trigger" onclick={() => (filterOpen = !filterOpen)} aria-haspopup="menu">
@@ -461,6 +618,33 @@
      empty on every row the rest of the time. */
   .row.picked {
     background: rgba(var(--accent-rgb), 0.09);
+  }
+
+  /* Which collection is open. A button because its whole job is leaving. */
+  .crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 7px;
+    font: inherit;
+    font-size: 11px;
+    color: var(--text);
+    background: rgba(var(--accent-rgb), 0.12);
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+
+  .crumb:hover {
+    color: var(--accent-bright);
+  }
+
+  .tally {
+    margin-left: auto;
+    padding-left: 12px;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
   }
 
   .order {

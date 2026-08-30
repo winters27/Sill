@@ -53,6 +53,17 @@ pub struct Store {
     connection: Connection,
 }
 
+/// A named group of history entries.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Collection {
+    pub id: i64,
+    pub name: String,
+    pub created: i64,
+    /// How many entries are in it right now.
+    pub count: i64,
+}
+
 /// One thing copied, as it is written down.
 ///
 /// A struct rather than eight positional arguments. Two of them are
@@ -139,6 +150,33 @@ impl Store {
                 entry_id INTEGER PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
                 data     BLOB NOT NULL
             );
+
+            -- Named groups of entries.
+            --
+            -- Names are unique because a collection is chosen by name, and two
+            -- with the same one would be indistinguishable in every list that
+            -- offers them.
+            CREATE TABLE IF NOT EXISTS collections (
+                id      INTEGER PRIMARY KEY,
+                name    TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                created INTEGER NOT NULL
+            );
+
+            -- Membership, with the order the entries were put in.
+            --
+            -- ON DELETE CASCADE both ways: deleting an entry has to remove it
+            -- from every collection, and deleting a collection must not leave
+            -- rows pointing at nothing. Retention prunes entries on its own
+            -- schedule, so this is not a rare case.
+            CREATE TABLE IF NOT EXISTS collection_entries (
+                collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+                entry_id      INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                position      INTEGER NOT NULL,
+                PRIMARY KEY (collection_id, entry_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS collection_order
+                ON collection_entries(collection_id, position);
             "#,
         )?;
 
@@ -339,6 +377,126 @@ impl Store {
             "DELETE FROM entries WHERE pinned = 0 AND last_seen < ?1",
             [cutoff],
         )
+    }
+
+    // ----------------------------------------------------------- collections
+
+    /// Every collection, with how many entries each holds.
+    ///
+    /// The count comes from the same query rather than a second one per row.
+    /// A collection whose entries have all aged out shows zero rather than
+    /// disappearing: it was named deliberately and is still somewhere to put
+    /// things.
+    pub fn collections(&self) -> rusqlite::Result<Vec<Collection>> {
+        let mut statement = self.connection.prepare(
+            r#"
+            SELECT c.id, c.name, c.created, COUNT(m.entry_id)
+            FROM collections c
+            LEFT JOIN collection_entries m ON m.collection_id = c.id
+            GROUP BY c.id
+            ORDER BY c.name COLLATE NOCASE
+            "#,
+        )?;
+
+        let rows = statement.query_map([], |row| {
+            Ok(Collection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                created: row.get(2)?,
+                count: row.get(3)?,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    /// Makes a collection, or returns the one already called that.
+    ///
+    /// Idempotent because the name is how a person refers to it. Asking for
+    /// "Release notes" twice means the same collection both times, not a
+    /// second one that shadows the first.
+    pub fn create_collection(&self, name: &str, now: i64) -> rusqlite::Result<i64> {
+        let name = name.trim();
+
+        self.connection.execute(
+            "INSERT OR IGNORE INTO collections (name, created) VALUES (?1, ?2)",
+            params![name, now],
+        )?;
+
+        self.connection.query_row(
+            "SELECT id FROM collections WHERE name = ?1 COLLATE NOCASE",
+            [name],
+            |row| row.get(0),
+        )
+    }
+
+    pub fn rename_collection(&self, id: i64, name: &str) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "UPDATE collections SET name = ?2 WHERE id = ?1",
+            params![id, name.trim()],
+        )?;
+        Ok(())
+    }
+
+    /// Removes a collection. The entries in it are untouched.
+    ///
+    /// A collection is a way of grouping the history, not a container that
+    /// owns it. Deleting the group must not delete what somebody copied.
+    pub fn delete_collection(&self, id: i64) -> rusqlite::Result<()> {
+        self.connection
+            .execute("DELETE FROM collections WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Adds entries to a collection, keeping the order they were given in.
+    ///
+    /// Already-present entries keep their original position rather than
+    /// jumping to the end, so adding a batch that overlaps one already there
+    /// does not reshuffle what was arranged.
+    pub fn add_to_collection(&self, collection: i64, ids: &[i64]) -> rusqlite::Result<usize> {
+        let next: i64 = self.connection.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM collection_entries WHERE collection_id = ?1",
+            [collection],
+            |row| row.get(0),
+        )?;
+
+        let mut added = 0;
+        for (offset, id) in ids.iter().enumerate() {
+            added += self.connection.execute(
+                "INSERT OR IGNORE INTO collection_entries (collection_id, entry_id, position)
+                 VALUES (?1, ?2, ?3)",
+                params![collection, id, next + offset as i64],
+            )?;
+        }
+
+        Ok(added)
+    }
+
+    pub fn remove_from_collection(&self, collection: i64, id: i64) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "DELETE FROM collection_entries WHERE collection_id = ?1 AND entry_id = ?2",
+            params![collection, id],
+        )?;
+        Ok(())
+    }
+
+    /// The entries in a collection, in the order they were added.
+    ///
+    /// Not newest first. A collection is something somebody arranged, and
+    /// re-sorting it by when things were copied would throw that away.
+    pub fn collection_entries(&self, collection: i64) -> rusqlite::Result<Vec<Entry>> {
+        let mut statement = self.connection.prepare(
+            r#"
+            SELECT e.id, e.kind, e.text, e.first_seen, e.last_seen, e.uses, e.pinned, e.app, e.bytes, e.app_path, e.html
+            FROM entries e
+            JOIN collection_entries m ON m.entry_id = e.id
+            WHERE m.collection_id = ?1
+            ORDER BY m.position
+            "#,
+        )?;
+
+        let rows = statement.query_map([collection], read_entry)?;
+        rows.collect()
     }
 
     /// The formatted version of an entry, when it kept one.

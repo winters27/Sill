@@ -188,3 +188,43 @@ export function clipboardKeepCurrent(): Promise<void> {
 export function clipboardMerge(ids: number[], separator: string): Promise<string> {
   return invoke<string>("clipboard_merge", { ids, separator });
 }
+
+/** A named group of history entries. */
+export interface Collection {
+  id: number;
+  name: string;
+  created: number;
+  /** How many entries are in it right now. */
+  count: number;
+}
+
+export function clipboardCollections(): Promise<Collection[]> {
+  return invoke<Collection[]>("clipboard_collections").catch(() => []);
+}
+
+/** Makes a collection, or returns the one already called that. */
+export function clipboardCreateCollection(name: string): Promise<number> {
+  return invoke<number>("clipboard_create_collection", { name });
+}
+
+export function clipboardRenameCollection(id: number, name: string): Promise<void> {
+  return invoke("clipboard_rename_collection", { id, name });
+}
+
+/** Removes a collection. The entries in it are untouched. */
+export function clipboardDeleteCollection(id: number): Promise<void> {
+  return invoke("clipboard_delete_collection", { id });
+}
+
+export function clipboardAddToCollection(collection: number, ids: number[]): Promise<number> {
+  return invoke<number>("clipboard_add_to_collection", { collection, ids });
+}
+
+export function clipboardRemoveFromCollection(collection: number, id: number): Promise<void> {
+  return invoke("clipboard_remove_from_collection", { collection, id });
+}
+
+/** What is in a collection, in the order it was arranged. */
+export function clipboardCollectionEntries(collection: number): Promise<ClipEntry[]> {
+  return invoke<ClipEntry[]>("clipboard_collection_entries", { collection }).catch(() => []);
+}

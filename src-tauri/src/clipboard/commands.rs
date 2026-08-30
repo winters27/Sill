@@ -231,3 +231,90 @@ pub fn clipboard_merge(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "nothing left to merge".to_string())
 }
+
+// ------------------------------------------------------------- collections
+
+#[tauri::command]
+pub fn clipboard_collections(
+    clipboard: State<'_, Clipboard>,
+) -> Result<Vec<crate::clipboard::store::Collection>, String> {
+    clipboard.store().collections().map_err(|e| e.to_string())
+}
+
+/// Makes a collection, or returns the one already called that.
+#[tauri::command]
+pub fn clipboard_create_collection(
+    clipboard: State<'_, Clipboard>,
+    name: String,
+) -> Result<i64, String> {
+    if name.trim().is_empty() {
+        return Err("a collection needs a name".to_string());
+    }
+
+    clipboard
+        .store()
+        .create_collection(&name, now_seconds())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clipboard_rename_collection(
+    clipboard: State<'_, Clipboard>,
+    id: i64,
+    name: String,
+) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err("a collection needs a name".to_string());
+    }
+
+    clipboard
+        .store()
+        .rename_collection(id, &name)
+        .map_err(|e| e.to_string())
+}
+
+/// Removes a collection. The entries in it are untouched.
+#[tauri::command]
+pub fn clipboard_delete_collection(clipboard: State<'_, Clipboard>, id: i64) -> Result<(), String> {
+    clipboard
+        .store()
+        .delete_collection(id)
+        .map_err(|e| e.to_string())
+}
+
+/// Puts entries into a collection, keeping the order they were given in.
+#[tauri::command]
+pub fn clipboard_add_to_collection(
+    clipboard: State<'_, Clipboard>,
+    collection: i64,
+    ids: Vec<i64>,
+) -> Result<usize, String> {
+    clipboard
+        .store()
+        .add_to_collection(collection, &ids)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clipboard_remove_from_collection(
+    clipboard: State<'_, Clipboard>,
+    collection: i64,
+    id: i64,
+) -> Result<(), String> {
+    clipboard
+        .store()
+        .remove_from_collection(collection, id)
+        .map_err(|e| e.to_string())
+}
+
+/// What is in a collection, in the order it was arranged.
+#[tauri::command]
+pub fn clipboard_collection_entries(
+    clipboard: State<'_, Clipboard>,
+    collection: i64,
+) -> Result<Vec<Entry>, String> {
+    clipboard
+        .store()
+        .collection_entries(collection)
+        .map_err(|e| e.to_string())
+}
