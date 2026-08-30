@@ -214,6 +214,19 @@ pub fn same_folder(root: &str, other: &str) -> bool {
     settled(root) == settled(other)
 }
 
+/// Whether a path sits inside any of the folders somebody narrowed to.
+///
+/// The folders arrive already settled and already ending in a separator, so
+/// this is a prefix test and nothing more. Doing the settling here instead
+/// would redo it for every candidate in the bucket.
+fn under(path: &str, folders: &[String]) -> bool {
+    let settled = settled(path);
+
+    folders
+        .iter()
+        .any(|folder| settled.starts_with(folder.as_str()))
+}
+
 /// One folder, written one way.
 ///
 /// Case is dropped because Windows does not care about it, and separators are
@@ -371,11 +384,27 @@ impl Catalog {
     /// Ranked by the same code that ranks everything else, so a file behaves
     /// like every other row rather than having a second idea of what a good
     /// match is.
-    pub fn search(&self, query: &str, limit: usize) -> Vec<FileHit> {
+    pub fn search(&self, query: &str, limit: usize, only_in: &[String]) -> Vec<FileHit> {
         let query = query.trim();
         if query.is_empty() || self.entries.is_empty() {
             return Vec::new();
         }
+
+        // Compared the way folders are compared everywhere else here: without
+        // case, and with the separators made to agree. Somebody typing
+        // `C:/work` into the settings means the same folder as `C:\work`.
+        let inside: Vec<String> = only_in
+            .iter()
+            .map(|folder| folder.trim())
+            .filter(|folder| !folder.is_empty())
+            .map(|folder| {
+                let mut settled = settled(folder);
+                // With the separator on the end, so `C:\work` does not also
+                // match `C:\workshop`.
+                settled.push('\\');
+                settled
+            })
+            .collect();
 
         let candidates = self.candidates(query);
         let needle: Vec<char> = query.to_lowercase().chars().collect();
@@ -383,7 +412,13 @@ impl Catalog {
         let mut scored: Vec<(crate::registry::MatchClass, usize, u32)> = Vec::new();
 
         for &at in candidates.iter() {
-            let name = self.name(&self.entries[at as usize]);
+            let slot = self.entries[at as usize];
+
+            if !inside.is_empty() && !under(self.path(&slot), &inside) {
+                continue;
+            }
+
+            let name = self.name(&slot);
 
             if let Some((class, _)) = crate::registry::match_name(&needle, name) {
                 scored.push((class, name.chars().count(), at));
@@ -768,7 +803,7 @@ mod tests {
             (r"C:\Sill\src-tauri\src\registry.rs", false),
             (r"C:\Sill\src-tauri\src\emoji.rs", false),
         ])
-        .search("registry", 10);
+        .search("registry", 10, &[]);
 
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].name, "registry.rs");
@@ -783,7 +818,7 @@ mod tests {
             (r"C:\p\registry-of-everything-ever.rs", false),
             (r"C:\p\registry.rs", false),
         ])
-        .search("registry", 10);
+        .search("registry", 10, &[]);
 
         assert_eq!(found[0].name, "registry.rs");
     }
@@ -800,7 +835,7 @@ mod tests {
             (r"C:\p\unrelated.bin", false),
         ]);
 
-        let found: Vec<String> = all.search("re", 10).into_iter().map(|f| f.name).collect();
+        let found: Vec<String> = all.search("re", 10, &[]).into_iter().map(|f| f.name).collect();
 
         assert_eq!(found.len(), 4, "{found:?}");
         assert!(found.iter().all(|name| name != "unrelated.bin"));
@@ -808,7 +843,7 @@ mod tests {
 
     #[test]
     fn a_directory_says_that_it_is_one() {
-        let found = catalog(&[(r"C:\Sill\src-tauri", true)]).search("src-tauri", 10);
+        let found = catalog(&[(r"C:\Sill\src-tauri", true)]).search("src-tauri", 10, &[]);
 
         assert!(found[0].is_dir);
     }
@@ -817,8 +852,8 @@ mod tests {
     fn an_empty_query_finds_nothing_rather_than_everything() {
         // The root list is not a file listing, and forty thousand rows is not
         // an answer to a question nobody asked.
-        assert!(catalog(&[(r"C:\p\a.txt", false)]).search("", 10).is_empty());
-        assert!(catalog(&[(r"C:\p\a.txt", false)]).search("   ", 10).is_empty());
+        assert!(catalog(&[(r"C:\p\a.txt", false)]).search("", 10, &[]).is_empty());
+        assert!(catalog(&[(r"C:\p\a.txt", false)]).search("   ", 10, &[]).is_empty());
     }
 
     #[test]
@@ -829,7 +864,7 @@ mod tests {
             (r"C:\p\test-three.txt", false),
         ];
 
-        assert_eq!(catalog(&files).search("test", 2).len(), 2);
+        assert_eq!(catalog(&files).search("test", 2, &[]).len(), 2);
     }
 
     #[test]
@@ -871,10 +906,10 @@ mod tests {
         assert_eq!(back.len(), original.len());
         assert_eq!(back.paths, original.paths);
 
-        let found = back.search("main", 10);
+        let found = back.search("main", 10, &[]);
         assert_eq!(found[0].path, r"C:\work\src\main.rs");
 
-        let dirs = back.search("src", 10);
+        let dirs = back.search("src", 10, &[]);
         assert!(dirs[0].is_dir, "lost which entries are folders");
 
         std::fs::remove_dir_all(&dir).ok();
@@ -1007,5 +1042,78 @@ mod tests {
             );
             assert!(!name.is_empty());
         }
+    }
+
+    // ------------------------------------------------ narrowing to folders
+
+    fn narrowed(only_in: &[&str]) -> Vec<String> {
+        let folders: Vec<String> = only_in.iter().map(|f| f.to_string()).collect();
+
+        catalog(&[
+            (r"C:\work\notes.md", false),
+            (r"C:\workshop\notes.md", false),
+            (r"C:\play\notes.md", false),
+            (r"C:\work\deep\down\notes.md", false),
+        ])
+        .search("notes", 10, &folders)
+        .into_iter()
+        .map(|hit| hit.path)
+        .collect()
+    }
+
+    #[test]
+    fn narrowing_to_nothing_narrows_nothing() {
+        assert_eq!(narrowed(&[]).len(), 4);
+    }
+
+    #[test]
+    fn narrowing_keeps_only_what_is_inside() {
+        let found = narrowed(&[r"C:\work"]);
+
+        // Membership, not order: both are named `notes.md`, so they tie on
+        // every ranking key and the path decides, alphabetically.
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().all(|path| path.starts_with(r"C:\work\")));
+    }
+
+    #[test]
+    fn a_folder_does_not_match_one_whose_name_merely_starts_the_same() {
+        // The trap in doing this as a prefix test. `C:\work` must not take in
+        // `C:\workshop`, which is a different folder that happens to begin
+        // with the same letters.
+        let found = narrowed(&[r"C:\work"]);
+
+        assert!(
+            !found.iter().any(|path| path.contains("workshop")),
+            "workshop leaked in: {found:?}"
+        );
+    }
+
+    #[test]
+    fn narrowing_reads_a_folder_however_it_was_typed() {
+        // Settings take whatever somebody types. All of these mean `C:\work`.
+        for written in [r"C:\work", "C:/work", r"C:\work\", r"c:\WORK", "  C:/work  "] {
+            let found = narrowed(&[written]);
+
+            assert_eq!(found.len(), 2, "{written:?} gave {found:?}");
+        }
+    }
+
+    #[test]
+    fn narrowing_to_several_folders_keeps_all_of_them() {
+        let found = narrowed(&[r"C:\play", r"C:\workshop"]);
+
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().any(|path| path.contains("play")));
+        assert!(found.iter().any(|path| path.contains("workshop")));
+    }
+
+    #[test]
+    fn a_blank_folder_in_the_list_is_ignored_rather_than_matching_everything() {
+        // An empty string is a prefix of every path. Left in, one stray blank
+        // row in the settings would quietly undo the whole setting.
+        let found = narrowed(&["", "   ", r"C:\play"]);
+
+        assert_eq!(found, vec![r"C:\play\notes.md"], "{found:?}");
     }
 }

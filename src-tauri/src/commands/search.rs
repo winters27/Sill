@@ -221,7 +221,15 @@ pub(crate) async fn search_files(
     // Sill's own index first. It knows the folders somebody actually works in
     // and it answers in a few milliseconds without a second program being
     // installed, so it is the answer rather than the fallback.
-    let ours = catalog.inner.load().search(query.trim(), wanted);
+    //
+    // Narrowed by the same setting that narrows the other source. It says
+    // "only show results in", and a filter that only applied to one of two
+    // sources would be a setting that half worked, which is worse than one
+    // that does not exist.
+    let ours = catalog
+        .inner
+        .load()
+        .search(query.trim(), wanted, &settings.only_in);
 
     // Then a whole-volume indexer, when one is running. It sees the rest of
     // the machine, which our index deliberately does not.

@@ -18,7 +18,7 @@ fn cost() {
         let start = std::time::Instant::now();
         let mut hits = 0;
         for _ in 0..10 {
-            hits = catalog.search(query, 60).len();
+            hits = catalog.search(query, 60, &[]).len();
         }
         println!(
             "  {query:>14} -> {hits:>3} hits, {:>6.2} ms each",
@@ -26,7 +26,7 @@ fn cost() {
         );
     }
 
-    let found = catalog.search("registry.rs", 5);
+    let found = catalog.search("registry.rs", 5, &[]);
     println!("\n  registry.rs resolves to:");
     for hit in found.iter().take(3) {
         println!("    {}", hit.path);
