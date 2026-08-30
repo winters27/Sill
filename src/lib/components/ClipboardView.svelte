@@ -583,12 +583,12 @@
   .skipped {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 7px 12px;
-    font-size: 12px;
-    color: var(--text-dim);
-    background: rgba(var(--accent-rgb), 0.07);
-    border-bottom: 1px solid var(--line);
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-meta);
+    color: var(--text-2);
+    background: var(--fill-1);
+    border-bottom: 1px solid var(--hairline);
   }
 
   .said {
@@ -598,13 +598,13 @@
 
   .keep {
     flex: none;
-    padding: 3px 9px;
+    padding: 2px var(--space-2);
     font: inherit;
-    font-size: 11px;
+    font-size: var(--text-label);
     color: var(--text);
     background: transparent;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     text-decoration: underline;
     text-underline-offset: 2px;
@@ -617,21 +617,21 @@
   /* A picked row reads as picked without a checkbox column that would be
      empty on every row the rest of the time. */
   .row.picked {
-    background: rgba(var(--accent-rgb), 0.09);
+    background: var(--fill-2);
   }
 
   /* Which collection is open. A button because its whole job is leaving. */
   .crumb {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 2px 7px;
+    gap: var(--space-1);
+    padding: 2px var(--space-2);
     font: inherit;
-    font-size: 11px;
+    font-size: var(--text-label);
     color: var(--text);
-    background: rgba(var(--accent-rgb), 0.12);
+    background: var(--fill-2);
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
   }
 
@@ -641,10 +641,10 @@
 
   .tally {
     margin-left: auto;
-    padding-left: 12px;
-    font-size: 10px;
+    padding-left: var(--space-3);
+    font-size: var(--text-micro);
     font-variant-numeric: tabular-nums;
-    color: var(--text-dim);
+    color: var(--text-2);
   }
 
   .order {
@@ -654,8 +654,8 @@
     width: 15px;
     height: 15px;
     margin-right: 2px;
-    font-size: 9px;
-    font-weight: 600;
+    font-size: var(--text-micro);
+    font-weight: var(--weight-strong);
     font-variant-numeric: tabular-nums;
     color: var(--core-background, #fff);
     background: var(--accent-bright);
@@ -672,16 +672,16 @@
   .bar {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2);
     flex: none;
     height: 34px;
-    padding: 0 10px 0 12px;
+    padding: 0 var(--space-2) 0 var(--space-3);
     border-bottom: 1px solid var(--hairline);
   }
 
   .count {
     font-size: var(--text-meta);
-    color: var(--text-faint);
+    color: var(--text-3);
     font-variant-numeric: tabular-nums;
   }
 
@@ -696,12 +696,12 @@
   .trigger {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
     border: 0;
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.08);
-    color: var(--core-foreground);
+    background: var(--fill-2);
+    color: var(--text-1);
     font: inherit;
     font-size: var(--text-meta);
     cursor: pointer;
@@ -709,7 +709,7 @@
   }
 
   .trigger:hover {
-    background: rgba(var(--accent-rgb), 0.16);
+    background: var(--fill-3);
   }
 
   .scrim {
@@ -724,33 +724,33 @@
     right: 0;
     z-index: 21;
     width: 168px;
-    padding: 5px;
+    padding: var(--space-1);
   }
 
   .option {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: var(--space-2);
     width: 100%;
-    padding: 6px 8px;
+    padding: var(--space-1) var(--space-2);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-2);
     font: inherit;
-    font-size: var(--text-row);
+    font-size: var(--text-body);
     text-align: left;
     cursor: pointer;
     transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
   }
 
   .option:hover {
-    background: rgba(var(--accent-rgb), 0.1);
-    color: var(--core-foreground);
+    background: var(--fill-2);
+    color: var(--text-1);
   }
 
   .option.on {
-    color: var(--core-foreground);
+    color: var(--text-1);
   }
 
   .glyph {
@@ -772,30 +772,39 @@
     width: 268px;
     flex: none;
     overflow-y: auto;
-    padding: 5px;
+    padding: var(--space-1);
     border-right: 1px solid var(--hairline);
     scrollbar-width: thin;
-    scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
+  /*
+   * The same anatomy as `.sill-row`, deliberately.
+   *
+   * This list used to be its own thing: 32px tall against the root list's 38,
+   * 9px of padding against 11, a chip radius against the row radius. Two
+   * lists in one window that agree about nothing read as two applications.
+   */
   .row {
     display: flex;
     align-items: center;
-    gap: 9px;
-    height: 32px;
-    padding: 0 9px;
-    border-radius: var(--radius-sm);
+    gap: var(--space-3);
+    height: var(--row-height);
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-md);
     cursor: default;
-    transition: background-color 0.18s var(--ease);
+    transition:
+      background-color 0.18s var(--ease),
+      box-shadow 0.18s var(--ease);
   }
 
   .row:hover:not(.selected) {
-    background-color: rgba(var(--accent-rgb), 0.07);
+    background-color: var(--fill-1);
   }
 
   .row.selected {
-    background-color: var(--surface);
-    box-shadow: var(--bevel-tile);
+    background-color: var(--accent-fill);
+    box-shadow: var(--catch);
   }
 
   .mark {
@@ -803,7 +812,7 @@
     place-items: center;
     width: 16px;
     flex: none;
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .line {
@@ -812,7 +821,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--text-row);
+    font-size: var(--text-body);
   }
 
   .pin {
@@ -822,10 +831,10 @@
 
   .empty {
     margin: 0;
-    padding: 26px 10px;
-    font-size: var(--text-row);
+    padding: var(--space-6) var(--space-2);
+    font-size: var(--text-body);
     line-height: 1.6;
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .detail {
@@ -839,9 +848,9 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 16px;
+    padding: var(--space-4);
     scrollbar-width: thin;
-    scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .preview pre {
@@ -852,15 +861,15 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     font-family: var(--font);
-    font-size: var(--text-row);
+    font-size: var(--text-body);
     line-height: 1.6;
-    color: var(--core-foreground);
+    color: var(--text-1);
   }
 
   .preview[data-kind="file"] pre,
   .preview[data-kind="link"] pre {
     font-family: var(--font-mono);
-    font-size: 12.5px;
+    font-size: var(--text-meta);
   }
 
   .preview img {
@@ -879,16 +888,17 @@
     place-items: center;
     height: 100%;
     min-height: 120px;
-    border-radius: var(--radius);
+    /* A preview panel is a card, not a row. */
+    border-radius: var(--radius-lg);
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
   }
 
   .colour span {
-    padding: 4px 10px;
-    border-radius: 999px;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-pill);
     background: rgba(0, 0, 0, 0.55);
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-meta);
     color: #fff;
   }
 
@@ -896,44 +906,48 @@
     flex: none;
     max-height: 44%;
     overflow-y: auto;
-    padding: 12px 16px 14px;
+    padding: var(--space-3) var(--space-4) var(--space-3);
     border-top: 1px solid var(--hairline);
     scrollbar-width: thin;
-    scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
+  /* Structural, not a list separator: it heads a table of metadata rather
+     than a run of rows, so it takes the uppercase settings label. */
   .facts-label {
-    margin-bottom: 8px;
-    font-size: var(--text-group);
-    font-weight: 500;
-    color: var(--text-faint);
+    margin-bottom: var(--space-2);
+    font-size: var(--text-label);
+    font-weight: var(--weight-strong);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--text-3);
   }
 
   .fact {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 7px 0;
+    gap: var(--space-4);
+    padding: var(--space-2) 0;
   }
 
   /* A hairline BETWEEN rows only, so the table reads as one block rather
      than a boxed grid. The adjacent-sibling selector skips the first. */
   .fact + .fact {
-    border-top: 1px solid color-mix(in srgb, var(--hairline) 85%, transparent);
+    border-top: 1px solid var(--hairline);
   }
 
   .fact .name {
     flex: none;
     width: 92px;
     font-size: var(--text-meta);
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .fact .value {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 7px;
+    gap: var(--space-2);
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -941,7 +955,7 @@
     white-space: nowrap;
     font-size: var(--text-meta);
     text-align: right;
-    color: var(--core-foreground);
+    color: var(--text-1);
     font-variant-numeric: tabular-nums;
   }
 
@@ -949,7 +963,7 @@
     flex: none;
     width: 14px;
     height: 14px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
   }
 
   .nothing {

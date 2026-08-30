@@ -246,11 +246,11 @@
     align-items: center;
     justify-content: center;
     min-width: 174px;
-    padding: 10px 16px;
-    border-radius: 9999px;
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-pill);
     background: rgba(8, 8, 10, 0.86);
     box-shadow:
-      inset 0 0 0 1px rgba(var(--accent-rgb), 0.18),
+      inset 0 0 0 1px var(--fill-3),
       0 10px 30px -8px rgba(0, 0, 0, 0.7);
   }
 
@@ -261,8 +261,8 @@
 
   .label {
     font-family: var(--font);
-    font-size: 12.5px;
-    font-weight: 500;
+    font-size: var(--text-meta);
+    font-weight: var(--weight-medium);
     letter-spacing: 0.02em;
     color: var(--accent-bright);
     white-space: nowrap;

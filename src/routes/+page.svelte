@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { beginCapture, captureScreen, lastImage, openMarkup } from "$lib/capture";
   import { openQuicklink } from "$lib/quicklinks";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import ListView from "$lib/components/ListView.svelte";
@@ -25,6 +26,7 @@
     searchCommands,
     unloadExtension,
     performBuiltin,
+    searchBrowsers,
     searchFiles,
     searchWindows,
     searchEmoji,
@@ -34,6 +36,10 @@
     recordUse,
     queryHistory,
     openPath,
+    browserAsCommand,
+    defaultBrowser,
+    extractTextFromLastImage,
+    webSearchRow,
     fileAsCommand,
     actionsFor,
     // `runAction` here already means "run the panel entry at this index".
@@ -103,6 +109,23 @@
   let panelOpen = $state(false);
   let panelSelected = $state(0);
   let prefs = $state<Preferences | null>(null);
+  /**
+   * Whether to offer looking it up on the web.
+   *
+   * Read from the settings Sill already loads rather than asked for again, and
+   * true until they arrive: the row costs nothing and appearing a moment late
+   * on the first summon of a session would be more surprising than the
+   * alternative.
+   */
+  const webSearchEnabled = $derived(prefs?.webSearch?.enabled ?? true);
+  /**
+   * The program a web search will open in, for the row's icon.
+   *
+   * Asked once on the way in. The default browser does not change while
+   * somebody is typing, and a row that has to wait on a lookup before it can
+   * be drawn would be the slowest row in the list.
+   */
+  let browser = $state<string | null>(null);
   let clipboardView = $state<ReturnType<typeof ClipboardView> | null>(null);
   let clipboardCount = $state(0);
 
@@ -539,8 +562,13 @@
       commands = [...commands, fileSearchRow(fileSearchGap)];
     }
 
-    // Files are appended after the commands, so a slower file query can never
-    // reorder or delay what is already shown.
+    // Files and browser pages are appended after the commands, so a slower
+    // query against either can never reorder or delay what is already shown.
+    //
+    // One timer for both. They are the two sources that read somebody else's
+    // files rather than Sill's index, they are the two that are worth waiting
+    // a moment before asking, and giving them separate timers would only mean
+    // two chances to fire on a query that has already been replaced.
     fileTimer = setTimeout(async () => {
       try {
         const hits = await searchFiles(current);
@@ -549,6 +577,31 @@
         commands = [...commands, ...hits.map(fileAsCommand)];
       } catch (err) {
         if (id === searchId) status = `file search failed: ${err}`;
+      }
+
+      try {
+        const pages = await searchBrowsers(current);
+        if (id !== searchId) return;
+
+        commands = [...commands, ...pages.map(browserAsCommand)];
+      } catch (err) {
+        if (id === searchId) status = `browser search failed: ${err}`;
+      }
+
+      /*
+       * Looking it up on the web is the last thing offered, always.
+       *
+       * Last because it answers anything. A row that matches every query would
+       * displace a real result the moment it ranked above one, so it is not
+       * ranked at all: it goes at the bottom, after everything that actually
+       * matched, and is only reached by somebody who has looked past all of it.
+       *
+       * Here rather than earlier so it lands after the files and pages that
+       * this same timer appends. It costs nothing to build and asks Rust for
+       * nothing, so it is not what the wait is for.
+       */
+      if (webSearchEnabled && id === searchId) {
+        commands = [...commands, webSearchRow(current.trim(), browser ?? undefined)];
       }
     }, FILE_SEARCH_DEBOUNCE_MS);
   }
@@ -667,6 +720,64 @@
         return;
       }
 
+      /*
+       * Reads the last picture copied, without opening anything.
+       *
+       * A row rather than only an action buried in the clipboard's panel,
+       * because a capability nobody can find is a capability nobody has. This
+       * one is reached by typing "ocr", "read text" or "screenshot", and the
+       * key bound to it goes through the same action against the same picture.
+       */
+      // Picking an area puts an overlay over every screen, so the launcher
+      // has nothing more to do than get out of the way, which Rust does.
+      if (command.id === "sill:capture-area") {
+        void recordUse(command.id, query);
+        try {
+          await beginCapture();
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
+      if (command.id === "sill:capture-screen") {
+        void recordUse(command.id, query);
+        try {
+          status = await captureScreen();
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
+      // Marking up opens a window of its own on the last picture copied. It
+      // goes through the action registry, so the row and the clipboard's own
+      // panel entry are one implementation.
+      if (command.id === "sill:mark-up") {
+        void recordUse(command.id, query);
+        try {
+          const image = await lastImage();
+          if (image === null) {
+            status = "nothing has been copied as a picture yet";
+            return;
+          }
+          await openMarkup(image);
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
+      if (command.id === "sill:extract-text") {
+        void recordUse(command.id, query);
+        try {
+          status = await extractTextFromLastImage();
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
       if (command.id === "sill:clipboard") {
         // Opened here rather than launched, but it is still a use, and
         // ranking has to see it or the history can never rise in the root
@@ -690,6 +801,32 @@
         mode = "argument";
         selected = 0;
         query = "";
+        return;
+      }
+
+      // A search is not in the index either, and there is not even an address
+      // yet: the words are carried and Rust turns them into one, because which
+      // engine to use is a setting and the escaping is the part that is easy to
+      // get wrong.
+      if (command.mode === "websearch") {
+        try {
+          await runObjectAction("sill.searchWeb", asTarget(command));
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
+      // Neither is a page a browser remembers, and for the same reason: it
+      // was read out of somebody else's database when the query was typed and
+      // it is gone again afterwards. The action registry knows how to open an
+      // address, so that is what opens it.
+      if (command.mode === "url") {
+        try {
+          await runObjectAction("sill.openUrl", asTarget(command));
+        } catch (err) {
+          status = `${err}`;
+        }
         return;
       }
 
@@ -1407,6 +1544,7 @@
     let switcher: UnlistenFn | undefined;
     let indexed: UnlistenFn | undefined;
     let changed: UnlistenFn | undefined;
+    let ran: UnlistenFn | undefined;
     let disposed = false;
 
     (async () => {
@@ -1496,6 +1634,15 @@
         void openSwitcher();
       });
 
+      // Something outside the launcher asked for a command, which today means
+      // the notification-area menu. Rust has already put the window up; this
+      // is only what to show now that it is there.
+      ran = await listen<string>("sill://run", ({ payload }) => {
+        void launchCommand(payload).catch((err) => {
+          status = `${err}`;
+        });
+      });
+
       // The settings window writes preferences in another webview, so the
       // launcher hears about them rather than re-reading on a timer.
       changed = await listen<Preferences>("sill://preferences-changed", async ({ payload }) => {
@@ -1510,6 +1657,7 @@
       clipboardActions = await actionsFor("clipboard");
       prefs = await getPreferences();
       applyAppearance(prefs);
+      browser = await defaultBrowser();
       navKeys = await navigationChords();
       past = await queryHistory();
       await refreshRoot();
@@ -1525,6 +1673,7 @@
       switcher?.();
       indexed?.();
       changed?.();
+      ran?.();
     };
   });
 </script>
@@ -1533,7 +1682,7 @@
 
 <main>
   <div class="search">
-    <img class="mark" src="/sill.png" alt="" width="24" height="24" draggable="false" />
+    <img class="mark" src="/sill.png" alt="" width="26" height="26" draggable="false" />
     {#if mode === "argument" && awaiting}
       <span class="crumb">{awaiting.title}</span>
     {:else if mode === "clipboard"}
@@ -1623,6 +1772,7 @@
       bind:this={rootList}
       {commands}
       {selected}
+      numeric={prefs?.navigation.numeric ?? false}
       asking={`${mode}:${query}`}
       onselect={(i) => (selected = i)}
       onrun={(i) => {
@@ -1658,7 +1808,13 @@
   {:else if view?.tag === "Detail"}
     <div class="detail">{tree.text(view) || String(view.props.markdown ?? "")}</div>
   {:else}
-    <div class="status">{status || "loading…"}</div>
+    <!-- No spinner. The launcher is meant to feel instant and a spinner
+         advertises that it is not; the mark plus a line of text says the same
+         thing without making the wait the subject. -->
+    <div class="sill-empty">
+      <img src="/sill.png" alt="" width="32" height="32" draggable="false" />
+      <span class="headline">{status || "Starting the command"}</span>
+    </div>
   {/if}
 
   {#if panelOpen}
@@ -1670,8 +1826,13 @@
     />
   {/if}
 
-  <div class="divider"></div>
+  <!--
+    No divider above the footer.
 
+    The window already carries one under the search field, and the raised
+    pill below is its own edge. A second full-width rule turned the quietest
+    part of the window into a boxed-in strip.
+  -->
   <footer>
     <LauncherMenu
       onbuiltin={(id) => {
@@ -1685,17 +1846,48 @@
       <span class="toast">{status}</span>
     {/if}
     <span class="spacer"></span>
-    <span class="hint">
-      {mode === "clipboard" ? "Paste" : mode === "root" ? "Open" : view?.tag === "Form" ? "Submit" : "Run"}
-      <span class="keys">↵</span>
-    </span>
-    {#if actions.length}
-      <span class="hint">Actions <span class="keys">Ctrl K</span></span>
-    {/if}
-    <span class="hint">
+
+    <!-- Escape sits outside the pill and stays plain, so the pill holds
+         exactly the two things somebody reaches for. -->
+    <span class="escape">
       {mode === "root" ? "Close" : "Back"}
-      <span class="keys">Esc</span>
+      <span class="esc-key">Esc</span>
     </span>
+
+    <!--
+      The action pill.
+
+      `tabindex="-1"` and a prevented mousedown on both segments, because the
+      search field must keep document focus. A plain button would take it on
+      click, and the arrow keys would stop moving the selection with no
+      visible cause.
+    -->
+    <div class="pill">
+      <button
+        class="segment"
+        tabindex="-1"
+        onmousedown={(e) => e.preventDefault()}
+        onclick={() => void openSelected()}
+      >
+        {mode === "clipboard" ? "Paste" : mode === "root" ? "Open" : view?.tag === "Form" ? "Submit" : "Run"}
+        <span class="sill-key">↵</span>
+      </button>
+      {#if actions.length}
+        <span class="split"></span>
+        <button
+          class="segment"
+          tabindex="-1"
+          onmousedown={(e) => e.preventDefault()}
+          onclick={() => {
+            panelOpen = !panelOpen;
+            panelSelected = 0;
+          }}
+        >
+          Actions
+          <span class="sill-key">Ctrl K</span>
+        </button>
+      {/if}
+    </div>
   </footer>
 </main>
 
@@ -1712,7 +1904,9 @@
       var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
       var(--surface-base)
     );
-    background-image: linear-gradient(var(--tint), var(--tint));
+    /* Chroma above the tint. `none` in every theme but Oilslick, and `none`
+       is a valid layer, so there is no conditional here. */
+    background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
     border-radius: var(--radius-window);
     /* No border: DWM already clips the window to this radius, so a border here
        only stacks onto that edge. The single light inset is the glass catch. */
@@ -1720,11 +1914,20 @@
     overflow: hidden;
   }
 
+  /*
+   * 60px, and stated rather than left to the input's line box.
+   *
+   * The window's corner radius is fixed at 8px by DWM, so the launcher cannot
+   * be made to feel less boxy at the edges. It can be made to feel less
+   * cramped inside, and the query row is where that reads first: this is the
+   * one element somebody looks at before anything has been typed.
+   */
   .search {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding-left: var(--pad);
+    gap: var(--space-3);
+    height: var(--search-height);
+    padding-left: var(--space-4);
     flex: none;
   }
 
@@ -1736,44 +1939,44 @@
      on the taskbar is already the right thing to put here. */
   .mark {
     flex: none;
-    width: 24px;
-    height: 24px;
+    width: 26px;
+    height: 26px;
     -webkit-user-drag: none;
   }
 
+  /* A chip, not a tile. The sheen-and-bevel recipe belongs to something that
+     reads as a raised object; this is a label saying where you are. */
   .crumb {
     flex: none;
-    font-size: var(--text-row);
-    padding: 5px 10px;
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
-    background-image: var(--sheen);
-    box-shadow: var(--bevel-tile);
-    color: var(--text-muted);
-    font-size: 12px;
+    background: var(--fill-2);
+    color: var(--text-2);
+    font-size: var(--text-meta);
     white-space: nowrap;
   }
 
   .search input {
     flex: 1;
     min-width: 0;
-    padding: 14px var(--pad) 14px 0;
+    padding: 0 var(--space-3) 0 0;
     border: 0;
     background: transparent;
-    color: var(--core-foreground);
+    color: var(--text-1);
     /* Segoe has a separate cut for text this size; Inter resolves this back
        to itself. */
     font-family: var(--font-display);
     font-size: var(--text-query);
     font-weight: 400;
-    /* Large text wants a touch of negative tracking; at 17px Inter's default
+    /* Large text wants a touch of negative tracking; at 17px the default
        spacing reads loose next to a 13px list. */
-    letter-spacing: -0.01em;
+    letter-spacing: var(--track-tight);
     outline: none;
     user-select: text;
   }
 
   .search input::placeholder {
-    color: var(--text-faint);
+    color: var(--text-4);
   }
 
   .divider {
@@ -1785,15 +1988,15 @@
   .argument-hint {
     display: flex;
     flex-direction: column;
-    gap: 7px;
-    padding: 18px var(--pad);
+    gap: var(--space-2);
+    padding: var(--space-5) var(--space-3);
   }
 
   .going {
     margin: 0;
     font-family: var(--font-mono);
     font-size: var(--text-meta);
-    color: var(--text-muted);
+    color: var(--text-2);
     word-break: break-all;
   }
 
@@ -1802,53 +2005,116 @@
     max-width: 62ch;
     font-size: var(--text-meta);
     line-height: 1.6;
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .detail {
     flex: 1;
     overflow-y: auto;
-    padding: 16px var(--pad);
-    color: var(--core-foreground);
+    padding: var(--space-4) var(--space-3);
+    color: var(--text-1);
     line-height: 1.6;
     white-space: pre-wrap;
     user-select: text;
   }
 
-  .status {
-    flex: 1;
-    display: grid;
-    place-items: center;
-    color: var(--text-faint);
-  }
-
+  /*
+   * The chin, and it carries no surface of its own.
+   *
+   * It briefly had a dark wash, on the reasoning that a plane has to recede
+   * for the pill to read as raised. That was wrong in practice: a full-width
+   * band draws a hard line across the window and cuts the list off, which is a
+   * lot of weight to spend on something whose whole job is to hold two
+   * controls.
+   *
+   * The controls carry the layering instead. The pill is genuinely raised, on
+   * its own fill and bevel, and reads that way against the window exactly as
+   * the search row's chip does. Nothing else here needs a background at all.
+   *
+   * 8px of side padding puts the pill on the same right edge as the action
+   * panel that rises out of it.
+   */
+  /*
+   * The chin: a plane the two controls sit on, back in flow.
+   *
+   * It briefly had no surface and let the list dissolve underneath it, which
+   * was an attempt to get a blurred chin without an opaque window. That cannot
+   * work; see the note on `--chin` in theme.css. A plain recessed wash is what
+   * is left, and it is honest about being a bar.
+   */
   footer {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: var(--space-2);
     flex: none;
-    height: 32px;
-    padding: 0 var(--pad);
+    height: var(--chin-height);
+    padding: 0 var(--space-2);
+    background: var(--chin);
     font-size: var(--text-meta);
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
-  .hint {
+  /* Outside the pill and quieter than it. Escape is the key nobody needs
+     reminding of, so it does not get to sit in the affordance. */
+  /* Outside the pill and quieter than it. Escape is the key nobody needs
+     reminding of, so it does not get to sit in the affordance. */
+  .escape {
     display: flex;
     align-items: center;
-    gap: 6px;
-    color: var(--text-faint);
+    gap: var(--space-1);
+    color: var(--text-4);
   }
 
-  /* Plain type, not a keycap. A footer is the quietest row in the window and
-     six lit keycaps made it the loudest. */
-  /* The same face as the label, one step down and quieter. A monospace key
-     name beside a proportional label puts two typefaces on the quietest row
-     in the window. */
-  .keys {
+  .esc-key {
+    font-weight: var(--weight-medium);
+  }
+
+  /*
+   * The action pill.
+   *
+   * One raised cluster holding the primary action and the action menu, which
+   * is the shape every launcher uses and the thing Sill's flat row of five
+   * faint hints was standing in for. The bevel is the tile recipe: unlike the
+   * window, this sits ON a surface, so an outer edge has something to fall on.
+   */
+  /* Lifted off the chin, which is a known background again. */
+  .pill {
+    display: flex;
+    align-items: center;
+    flex: none;
+    height: 30px;
+    border-radius: var(--radius-lg);
+    background: var(--fill-2);
+    box-shadow: var(--bevel-tile);
+    overflow: hidden;
+  }
+
+  .segment {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 100%;
+    padding: 0 var(--space-2);
+    border: 0;
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
     font-size: var(--text-meta);
-    font-weight: 500;
-    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: default;
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+  }
+
+  .segment:hover {
+    background-color: var(--fill-2);
+    color: var(--text-1);
+  }
+
+  .split {
+    width: 1px;
+    height: 16px;
+    flex: none;
+    background: var(--hairline-strong);
   }
 
   .spacer {

@@ -50,6 +50,17 @@ pub struct Hotkey {
     /// and a prefix you have to type first spends that. Empty turns it off.
     #[serde(default = "default_switcher")]
     pub switcher: String,
+    /// Picks an area of the screen without opening the launcher first.
+    ///
+    /// Its own key for the same reason the switcher has one: the whole value
+    /// of a screenshot key is that it is one press. Empty turns it off, and it
+    /// is empty by default because there is no obvious free combination and a
+    /// default that collides is worse than none.
+    #[serde(default)]
+    pub capture: String,
+    /// Copies every screen at once, likewise.
+    #[serde(default)]
+    pub capture_screen: String,
     /// Dismiss when the window loses focus.
     pub dismiss_on_blur: bool,
     /// Select the existing query on summon so typing replaces it.
@@ -78,11 +89,42 @@ impl Default for Hotkey {
             // replaced.
             summon: "Alt+Space".to_string(),
             switcher: default_switcher(),
+            // Empty: there is no obviously free combination for these, and a
+            // default that collides is worse than asking somebody to choose.
+            capture: String::new(),
+            capture_screen: String::new(),
             dismiss_on_blur: true,
             select_query_on_summon: true,
             reset_on_summon: false,
         }
     }
+}
+
+/// Which palette the interface is drawn in.
+///
+/// A theme changes the canvas and the accent, and nothing else. The neutral
+/// ramp that owns text, hairlines and fills is white-alpha in every theme, so
+/// contrast, legibility and the whole layering system are identical whichever
+/// one is picked. That is what stops a theme becoming a second design system.
+///
+/// Rust only holds the choice. The palettes themselves are `[data-theme]`
+/// blocks in `theme.css`, because a colour is presentation and a preference is
+/// state, exactly as `InterfaceFont` already splits.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Theme {
+    /// Neutral near-black with a desaturated blue-grey accent. The default,
+    /// and the palette Sill shares with StreamNook.
+    WintersGlass,
+    /// The same restraint with a faint iridescent wash across the window.
+    /// The only theme that paints anything beyond a flat tint.
+    Oilslick,
+    /// No hue anywhere, accent included. The most restrained of the set.
+    Graphite,
+    /// Warm black and an amber accent.
+    Ember,
+    /// Cool green, slightly warmer canvas than the default.
+    Moss,
 }
 
 /// Which face the interface is set in.
@@ -127,6 +169,15 @@ pub enum Backdrop {
 #[serde(default, rename_all = "camelCase")]
 pub struct Appearance {
     pub backdrop: Backdrop,
+    /// Which palette everything is drawn in.
+    pub theme: Theme,
+    /// How strongly a theme's chroma wash is painted, 0 to 2.
+    ///
+    /// Only Oilslick has one. A multiplier rather than a set of alphas so the
+    /// relationship between the three washes is fixed and only their weight
+    /// moves: tuning them independently is how an iridescent sheen turns into
+    /// three coloured blobs.
+    pub chroma_strength: f32,
     /// Which face everything is set in.
     pub font: InterfaceFont,
     /// 0 is fully solid, 1 is pure tint over the desktop blur.
@@ -143,6 +194,8 @@ impl Default for Appearance {
     fn default() -> Self {
         Self {
             backdrop: Backdrop::Acrylic,
+            theme: Theme::WintersGlass,
+            chroma_strength: 1.0,
             font: InterfaceFont::Satoshi,
             glass_strength: 1.0,
             tint_alpha: 232,
@@ -429,6 +482,113 @@ fn home() -> Option<std::path::PathBuf> {
         .filter(|path| path.is_dir())
 }
 
+/// Looking something up on the web.
+///
+/// On by default, unlike browser search. This reads nothing and knows nothing:
+/// it is one row offering to open an address, and it only ever does anything
+/// when it is deliberately chosen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WebSearch {
+    pub enabled: bool,
+    /// Which engine, by id.
+    pub engine: String,
+    /// An address of somebody's own, with `{query}` in it.
+    ///
+    /// Wins over `engine` when it holds anything, so an engine Sill has never
+    /// heard of does not need a release.
+    pub custom_url: String,
+}
+
+impl Default for WebSearch {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            // The one that does not build a profile of whoever is typing.
+            // Every other engine here is two clicks away.
+            engine: "duckduckgo".to_string(),
+            custom_url: String::new(),
+        }
+    }
+}
+
+/// What a screenshot does once it has been taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AfterCapture {
+    /// Straight to the clipboard, which is the fast path.
+    Copy,
+    /// Straight into the editor, for anybody who marks up most of what they
+    /// take. It reaches the clipboard from there.
+    Edit,
+}
+
+/// Taking pictures of the screen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Screenshot {
+    pub after: AfterCapture,
+    /// Whether clicking a window in the picker captures that window.
+    ///
+    /// On by default: it is the difference between "drag a rectangle roughly
+    /// around the window" and "click the window", and the second is what
+    /// somebody meant nearly every time.
+    pub click_a_window: bool,
+    /// Which tool the editor opens with.
+    pub tool: String,
+    /// The colour it opens with.
+    pub colour: String,
+    /// The stroke width it opens with.
+    pub weight: u32,
+    /// The number the first badge shows.
+    ///
+    /// Somebody writing the second half of a walkthrough starts at seven, and
+    /// the alternative is placing six badges and deleting them.
+    pub step_from: u32,
+}
+
+impl Default for Screenshot {
+    fn default() -> Self {
+        Self {
+            after: AfterCapture::Copy,
+            click_a_window: true,
+            tool: "box".to_string(),
+            colour: "#ff3b30".to_string(),
+            weight: 4,
+            step_from: 1,
+        }
+    }
+}
+
+/// Reading what a browser remembers.
+///
+/// Off by default, and deliberately. Nothing else Sill reads is as personal as
+/// a browsing history, and a launcher that quietly starts answering with it
+/// because it was installed has helped itself to something nobody offered. It
+/// is one switch away for anybody who wants it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Browsers {
+    pub enabled: bool,
+    /// Pages that were visited.
+    pub history: bool,
+    /// Pages that were saved, which is the smaller and more deliberate set.
+    pub bookmarks: bool,
+    /// Results requested per query.
+    pub max_results: u32,
+}
+
+impl Default for Browsers {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            history: true,
+            bookmarks: true,
+            max_results: 6,
+        }
+    }
+}
+
 impl Default for FileSearch {
     fn default() -> Self {
         Self {
@@ -458,6 +618,9 @@ pub struct Preferences {
     pub appearance: Appearance,
     pub sources: Sources,
     pub files: FileSearch,
+    pub browsers: Browsers,
+    pub web_search: WebSearch,
+    pub screenshot: Screenshot,
     /// Global shortcuts that run an action without showing the launcher.
     #[serde(default)]
     pub bindings: Vec<crate::bindings::Binding>,
@@ -486,16 +649,17 @@ impl Appearance {
     /// Measured 2026-08-30, and it now adds up rather than being a number
     /// somebody landed on:
     ///
-    /// | part                  | px |
-    /// | --------------------- | -- |
-    /// | search row            | 52 |
-    /// | its hairline          |  1 |
-    /// | the list's own padding|  8 |
-    /// | footer                | 40 |
+    /// | part                   | px | token             |
+    /// | ---------------------- | -- | ----------------- |
+    /// | search row             | 60 | `--search-height` |
+    /// | its hairline           |  1 |                   |
+    /// | the list's own padding |  8 | `--space-1` x 2   |
+    /// | chin                   | 40 | `--chin-height`   |
     ///
-    /// The footer's hairline is gone; the action pill carries that edge now.
+    /// The chin's hairline is gone; it has its own recessed wash instead, and
+    /// the action pill sitting on it carries that edge.
     pub fn window_height(&self) -> f64 {
-        const CHROME: f64 = 101.0;
+        const CHROME: f64 = 109.0;
         /// Must equal `--row-height` in `src/lib/theme/theme.css`.
         ///
         /// Two sources of truth for one fact, because Rust sizes the window

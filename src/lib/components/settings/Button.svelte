@@ -16,22 +16,22 @@
 
 <style>
   button {
-    padding: 6px 14px;
+    padding: var(--space-1) var(--space-3);
     border: 0;
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.1);
+    background: var(--fill-2);
     box-shadow: var(--bevel-tile);
-    color: var(--core-foreground);
+    color: var(--text-1);
     font: inherit;
-    font-size: 12.5px;
-    font-weight: 500;
+    font-size: var(--text-meta);
+    font-weight: var(--weight-medium);
     white-space: nowrap;
     cursor: pointer;
     transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
   }
 
   button:hover:not(:disabled) {
-    background: rgba(var(--accent-rgb), 0.2);
+    background: var(--hairline-strong);
   }
 
   button:disabled {

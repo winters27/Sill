@@ -72,37 +72,37 @@
   .head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 0 2px 10px;
+    gap: var(--space-2);
+    padding: 0 2px var(--space-2);
   }
 
   .label {
-    font-size: 12px;
-    font-weight: 600;
+    font-size: var(--text-meta);
+    font-weight: var(--weight-strong);
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
 
   select {
-    padding: 3px 6px;
+    padding: 2px var(--space-1);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-2);
     font: inherit;
-    font-size: 12px;
+    font-size: var(--text-meta);
     outline: none;
     cursor: pointer;
     transition: color 0.15s var(--ease);
   }
 
   select:hover {
-    color: var(--core-foreground);
+    color: var(--text-1);
   }
 
   select option {
     background: var(--core-secondary-background);
-    color: var(--core-foreground);
+    color: var(--text-1);
   }
 
   .spacer {
@@ -110,16 +110,16 @@
   }
 
   .count {
-    font-size: 12px;
-    color: var(--text-faint);
+    font-size: var(--text-meta);
+    color: var(--text-3);
     font-variant-numeric: tabular-nums;
   }
 
   .board {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    margin-bottom: 26px;
-    border-radius: 10px;
+    margin-bottom: var(--space-6);
+    border-radius: var(--radius-lg);
     background: rgba(255, 255, 255, 0.02);
     overflow: hidden;
   }
@@ -134,18 +134,18 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    padding: 22px 16px 26px;
+    gap: var(--space-2);
+    padding: var(--space-5) var(--space-4) var(--space-6);
   }
 
   .name {
-    font-size: 11px;
+    font-size: var(--text-label);
     letter-spacing: 0.06em;
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .figure {
-    font-size: 40px;
+    font-size: var(--text-hero);
     font-weight: 300;
     line-height: 1;
     letter-spacing: -0.02em;
@@ -157,11 +157,11 @@
   /* The unit rides at the baseline, smaller and quieter, so "12h 17m" reads
      as one number rather than four things. */
   em {
-    margin: 0 5px 0 1px;
-    font-size: 17px;
+    margin: 0 var(--space-1) 0 1px;
+    font-size: var(--text-query);
     font-style: normal;
     font-weight: 400;
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   em:last-child {

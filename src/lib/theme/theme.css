@@ -22,8 +22,41 @@
 
 
 /*
- * Sill's default theme: StreamNook's "Winters' Glass" palette, expressed in
- * Vicinae's token schema so Vicinae theme files still port directly.
+ * Sill's design tokens. This file is the only place a colour, a size, a radius
+ * or a spacing value is chosen; every component reads them by name.
+ *
+ * That is enforced rather than hoped for. `scripts/verify-source.mjs` fails
+ * the build if a `.svelte` file writes a literal `font-size: <n>px` or reaches
+ * for `rgba(var(--accent-rgb), a)` directly, because both of those are how the
+ * system decayed the first time: 16 distinct font sizes across 101 sites, and
+ * 74 inline accent alphas at 21 different opacities.
+ *
+ * ---------------------------------------------------------------------------
+ * THE ONE RULE ABOUT COLOUR
+ *
+ * The neutral ramp owns text, hairlines, fills, borders, hovers and
+ * scrollbars. **Nothing that is merely a surface may be tinted.**
+ *
+ * The accent answers exactly one question: which one? It appears only where
+ * something is singled out, and there are four ways that happens:
+ *
+ *   1. Selection      the highlighted row, the open settings panel, the
+ *                     segmented control's thumb
+ *   2. Match          the letters the ranker actually matched
+ *   3. Focus          a focus ring, and only while focused
+ *   4. Affirmative    a control that is on or a state that is live: a switch,
+ *      state          a checkbox, a slider's thumb, a pinned entry, a status
+ *                     beacon
+ *
+ * A hover is not a selection and a border is not a state, so neither gets the
+ * accent. This is not a style preference: `#97b1b9` doubling as accent AND as
+ * every piece of body text, every hairline and every hover fill is precisely
+ * what made the interface read muddy, and it got there one reasonable-looking
+ * `rgba(var(--accent-rgb), 0.07)` at a time.
+ * ---------------------------------------------------------------------------
+ *
+ * The palette itself is StreamNook's "Winters' Glass", expressed in Vicinae's
+ * token schema so Vicinae theme files still port directly:
  *
  *   [colors.core]                  -> --core-*
  *   [colors.accents]               -> --accent-*
@@ -66,14 +99,77 @@
   --accent-yellow: #eab308;
   --accent-cyan: #c8e0e8;
 
-  /* Surfaces, as alpha over whatever is behind. */
+  /* Surfaces, as alpha over whatever is behind. Vicinae schema. */
   --surface: rgba(var(--accent-rgb), 0.15);
   --surface-hover: rgba(var(--accent-rgb), 0.25);
   --surface-active: rgba(var(--accent-rgb), 0.35);
 
-  --list-selection-background: rgba(var(--accent-rgb), 0.15);
+  --list-selection-background: rgba(var(--accent-rgb), 0.16);
   --list-selection-secondary-background: rgba(var(--accent-rgb), 0.1);
   --grid-item-background: #1a1a1b;
+
+  /*
+   * ---- The neutral ramp -------------------------------------------------
+   *
+   * Raised surfaces, as flat colours. Used where something must read as an
+   * object rather than as a wash: a keycap, a segmented thumb.
+   */
+  --grey-0: #0c0c0d;
+  --grey-1: #141416;
+  --grey-2: #1c1c1f;
+  --grey-3: #26262a;
+
+  /*
+   * Text. Four steps, all neutral.
+   *
+   * This is a contrast lift as well as a hue change, and that is deliberate.
+   * `#97b1b9` carries about 0.67 of white's luminance, so the old
+   * `--text-muted` at alpha 0.6 landed near white at 0.40 and `--text-faint`
+   * near white at 0.25. Everything moves one step brighter, which is where
+   * Raycast's own tokens sit (secondary `rgb(156,156,157)`, and
+   * `rgba(255,255,255,.4/.6)` throughout).
+   */
+  --text-1: #ffffff;
+  --text-2: rgba(255, 255, 255, 0.62);
+  /*
+   * 0.50 rather than the 0.40 Raycast uses, and the reason is Sill-specific.
+   *
+   * The window is transparent, so the surface under this text is the page
+   * tint composited over whatever desktop happens to be behind it. Measured
+   * against a light wallpaper the tint resolves to about #333, and white at
+   * 0.40 lands at a 3.4 contrast ratio there, under the 4.5 that small text
+   * needs. At 0.50 it is 4.46 on that worst case and 5.24 on a dark desktop.
+   *
+   * Greyscale antialiasing, which a transparent window forces, also renders
+   * small text lighter than its nominal alpha suggests, so the generic value
+   * has less headroom here than it would in an opaque window.
+   */
+  --text-3: rgba(255, 255, 255, 0.5);
+  /* Decorative only: placeholder text and the Escape hint. Never carries
+     information that has to be read, so the small-text threshold is not the
+     bar it is measured against. */
+  --text-4: rgba(255, 255, 255, 0.26);
+
+  /* Fills and lines. Neutral, so a hover state never tints. */
+  --fill-1: rgba(255, 255, 255, 0.04);
+  --fill-2: rgba(255, 255, 255, 0.07);
+  --fill-3: rgba(255, 255, 255, 0.1);
+  --hairline: rgba(255, 255, 255, 0.07);
+  --hairline-strong: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+
+
+  /*
+   * The accent, in its three sanctioned forms.
+   *
+   * `--accent-fill` points at the Vicinae selection slot rather than naming an
+   * alpha of its own, so a ported theme that sets `list.item.selection` now
+   * actually reaches the selected row.
+   */
+  --accent: var(--core-accent);
+  --accent-fill: var(--list-selection-background);
+  --accent-fill-strong: rgba(var(--accent-rgb), 0.24);
+  --accent-line: rgba(var(--accent-rgb), 0.32);
 
   /*
    * How glassy the surface is, 0 to 1. At 0 it goes fully solid; at 1 it is
@@ -86,7 +182,7 @@
    * Two different tints, matching how StreamNook layers them.
    *
    * The window is the analogue of .glass-modal, so it takes the tertiary
-   * surface at 78%: dark enough to read against any desktop, sheer enough for
+   * surface at 88%: dark enough to read against any desktop, sheer enough for
    * the acrylic blur behind it to show.
    *
    * Panels sitting ON that surface take --tint-panel, the near-transparent
@@ -95,10 +191,56 @@
   --tint: color-mix(in srgb, var(--core-secondary-background) 88%, transparent);
   --tint-panel: rgba(255, 255, 255, 0.03);
 
-  --text-muted: rgba(var(--accent-rgb), 0.6);
-  --text-faint: rgba(var(--accent-rgb), 0.38);
-  --hairline: rgba(var(--accent-rgb), 0.1);
-  --border-light: rgba(var(--accent-rgb), 0.2);
+  /*
+   * A window that is only a menu, which is a different problem again.
+   *
+   * `.sill-menu` is an IN-PAGE recipe: `backdrop-filter` blurs the launcher's
+   * own content behind the popover, and 0.82 of black over that is plenty. Give
+   * the same rules to a standalone transparent window and both halves fail at
+   * once, because there is no page content behind it: the filter has nothing to
+   * blur, and the remaining 18% is raw desktop.
+   *
+   * So the tray menu is built like the launcher instead, OS material plus a
+   * tint, and takes a heavier one. 216px is not enough surface for the eye to
+   * average out whatever is behind it the way it does over a 750px window.
+   */
+  --tint-menu: color-mix(in srgb, var(--core-secondary-background) 94%, transparent);
+
+  /*
+   * The chin's own surface, and it is the one wash that goes DARKER.
+   *
+   * Every other fill lifts, because everything else is an object sitting on
+   * the window. The chin is not an object, it is the plane underneath one, so
+   * it recedes instead.
+   *
+   * THE HISTORY IS THE POINT, because three alternatives were tried and each
+   * failed for a reason worth not rediscovering:
+   *
+   * 1. Fading the window tint out over the chin. Only worked on a dark
+   *    desktop: against a pale wallpaper the thinned chin composited nine
+   *    times brighter than the window above it, so the launcher glowed.
+   * 2. `backdrop-filter` frosted glass over the rows. **It is inert here.**
+   *    At `blur(40px)` an application icon behind the chin was still plainly
+   *    recognisable, which that radius would have destroyed. `backdrop-filter`
+   *    photographs the pixels behind an element and blurs the photograph;
+   *    Chromium takes that photograph against the page's own backdrop, and
+   *    this page has none, because the window is transparent and so is `body`.
+   *    `.sill-menu` has carried a `blur(12px)` for months and nobody noticed,
+   *    since its 0.82 black does all the visible work. **Do not reach for
+   *    `backdrop-filter` anywhere in this app without proving it on a real
+   *    build first.**
+   * 3. Per-row `filter: blur()`, which does work on a transparent window but
+   *    cannot have a clean edge: a row is 40px and so is the chin, so a row is
+   *    always straddling the line, and the instant a pixel of it enters, all
+   *    forty blur. No value fixes that.
+   *
+   * A blur confined to the chin needs an opaque window, which is what
+   * StreamNook has and Sill does not. Measured, that transparency is currently
+   * buying **1.1% desktop visibility** (acrylic tint 91% opaque, page tint 88%
+   * on top of it), so the trade is worth revisiting; until it is, the chin is
+   * a plain wash.
+   */
+  --chin: rgba(0, 0, 0, 0.16);
 
   /*
    * The canonical Winters' Glass bevels, taken verbatim from StreamNook so the
@@ -119,36 +261,177 @@
    */
   --bevel-window: inset 1px 1px 0 0 rgba(255, 255, 255, 0.08);
 
+  /* The single light catch a selected row takes. One bevel per edge, and a
+     row has no border to stack it on. */
+  --catch: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+
   --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
   --sheen-hover: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.028));
 
   /* StreamNook's spring. Slightly overshoots, which reads as physical. */
   --ease: cubic-bezier(0.175, 0.885, 0.32, 1.25);
 
-  /* Matches DWM's DWMWCP_ROUND, so the OS clip and the page agree. */
-  --radius-window: 8px;
-  --radius: 8px;
-  --radius-sm: 6px;
-  --row-height: 38px;
-  --pad: 12px;
+  /*
+   * ---- Motion -----------------------------------------------------------
+   *
+   * Read by `$lib/motion.ts` as well as by CSS, so the two cannot disagree.
+   *
+   * **Leaving is faster than arriving.** An exit that takes as long as an
+   * entrance feels like the interface is reluctant to get out of the way, and
+   * on a launcher that is summoned and dismissed dozens of times an hour it is
+   * the exit that is felt.
+   *
+   * These are short on purpose. The whole app is a thing you open, type into
+   * and dismiss inside a second; motion here is a settle, not a performance,
+   * and anything that delays reading the list is a cost rather than polish.
+   *
+   * Two things are deliberately NOT animated:
+   *   - the launcher's own summon, because instant is that window's entire
+   *     value and an entrance would make it feel slower at the same latency
+   *   - `backdrop-filter`, which is the WebView2 glass-flicker bug
+   */
+  --motion-enter: 150ms;
+  --motion-exit: 100ms;
+  /** Something already on screen changing: a hover, a selection. */
+  --motion-state: 120ms;
+
+  /* Decelerate on the way in, accelerate on the way out. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
 
   /*
-   * One type scale, so nothing in the launcher is sized by feel.
+   * ---- Radius -----------------------------------------------------------
    *
-   * Everything on a row is the same size and separated by colour and weight
-   * instead. Mixing an 11px uppercase label with 13px body on one line is
-   * what made the old list read as three unrelated things per row.
+   * Four steps and a pill. The window matches DWM's DWMWCP_ROUND so the OS
+   * clip and the page agree; a larger page radius cuts inside the OS corner
+   * and the OS drop shadow stops hugging the card.
    */
-  --text-query: 17px;
+  /*
+   * The window radius is not a choice, it is a constraint.
+   *
+   * `DWMWA_WINDOW_CORNER_PREFERENCE` takes four enum values and no radius, so
+   * `DWMWCP_ROUND` (8px on Windows 11) is the only rounded option there is.
+   * A larger page radius does not merely offset the drop shadow: DWM clips the
+   * **acrylic sheet** to the OS corner too, so a 12px card inside an 8px clip
+   * leaves a crescent of untinted acrylic at each corner, and acrylic always
+   * lightens. That is the "square haze past the corners" bug in miniature.
+   *
+   * A bigger radius is only available with `Backdrop::None`, where no OS
+   * material is drawn at all. Acrylic is the choice, so 8 it is, and the
+   * softness comes from the interior radii below instead.
+   */
+  --radius-window: 8px;
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 5px;
+  --radius-pill: 999px;
+
+  /*
+   * The three horizontal bands, as heights.
+   *
+   * Named because `preferences.rs::window_height` adds them up, and a number
+   * buried in a rule is a number Rust cannot be kept in step with.
+   */
+  --search-height: 60px;
+  --chin-height: 40px;
+
+  /*
+   * ---- Spacing ----------------------------------------------------------
+   *
+   * A 4px base. Before this there were about forty distinct padding
+   * shorthands in the frontend, every one of them chosen by feel.
+   */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /*
+   * Row height.
+   *
+   * 40, not 38 and not 42. `sourceOf()` in RootList returns nothing for apps,
+   * PATH executables and emoji, which is nearly all of the 1,400-odd indexed
+   * entries, so MOST rows carry no subtitle: a 42px row would spend 4px on
+   * almost every row to serve a minority. 40 fits a 17px title line box over
+   * a 14px subtitle line box, and a single-line row simply centres its 17.
+   *
+   * `preferences.rs::window_height` holds a copy of this number, because Rust
+   * sizes the window and cannot read CSS. verify-source.mjs fails if the two
+   * drift, since a window sized from a stale row height clips the last row
+   * and reads as a list that will not scroll.
+   */
+  --row-height: 40px;
+
+  /*
+   * ---- Type -------------------------------------------------------------
+   *
+   * One scale, obeyed by both windows. The settings window used to ignore the
+   * launcher's scale entirely and reach for 11, 11.5, 12, 12.5, 13, 16, 17
+   * and 18px literals, which is why the two never looked like one app.
+   *
+   *   token          size    tracking   weight   where
+   *   --text-hero     40    -0.02em      600     the one big figure
+   *   --text-display  26    -0.02em      600     calculator answer, figures
+   *   --text-title    20    -0.015em     600     settings panel title
+   *   --text-query    18    -0.01em      400     the launcher input
+   *   --text-heading  15    -0.01em      600     card and section headings
+   *   --text-body     13     0           450     row title, settings row
+   *   --text-meta     12     0           400     subtitles, hints, blurbs
+   *   --text-group    12     0           500     launcher group heading
+   *   --text-label    11     0.06em      600     settings section label, CAPS
+   *   --text-micro    10     0.02em      500     counters, dt labels
+   *
+   * Two label styles on purpose, because Raycast uses both. A launcher list
+   * heading is sentence case and quiet; a settings section label is uppercase
+   * and structural.
+   */
+  --text-hero: 40px;
+  --text-display: 26px;
+  --text-title: 20px;
+  --text-query: 18px;
+  --text-heading: 15px;
+  --text-body: 13px;
+  --text-meta: 12px;
+  --text-group: 12px;
+  --text-label: 11px;
+  --text-micro: 10px;
+
+  /*
+   * Glyph sizes are part of the system too.
+   *
+   * An emoji standing in for an icon, or the `=` on a calculator row, is sized
+   * with `font-size` but is not type. Naming them here is what lets the
+   * literal-font-size check in verify-source.mjs have no escape hatch at all,
+   * and a rule with an escape hatch decays into the default.
+   */
+  --glyph-lg: 26px;
+  --glyph-md: 19px;
+  --glyph-sm: 16px;
+
+  /* Variable faces, so the in-between weight is real. 450 reads as "slightly
+     more present" without the jump to a semibold. */
+  --weight-body: 450;
+  --weight-medium: 500;
+  --weight-strong: 600;
+
+  --track-tight: -0.01em;
+  --track-title: -0.015em;
+  --track-display: -0.02em;
+  --track-label: 0.06em;
+  --track-micro: 0.02em;
+
+  /* Line boxes stated in px, not as ratios, so a row's height does not move
+     when the interface face changes. Satoshi, Inter and Segoe UI Variable all
+     have different default metrics and Rust cannot see which one is active. */
+  --line-body: 17px;
+  --line-meta: 14px;
+
   /* Overridden per face: only Segoe has a separate display cut. */
   --font-display: var(--font);
-  --text-row: 13px;
-  --text-meta: 12px;
-  --text-group: 11.5px;
-
-  /* Inter is a variable font, so the in-between weights are real. 450 reads
-     as "slightly more present" without the jump to a semibold. */
-  --weight-row: 450;
 
   /*
    * Inter is bundled rather than named and hoped for: it is not installed on
@@ -163,6 +446,195 @@
    */
   --font: "Satoshi", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --font-mono: "Cascadia Mono", "Cascadia Code", "Consolas", ui-monospace, monospace;
+
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * THEMES
+ *
+ * A theme moves two things and nothing else: the canvas and the accent. The
+ * neutral ramp above owns text, hairlines, fills, hovers and scrollbars, and
+ * it is white-alpha in every theme, so contrast, legibility and the whole
+ * layering system are identical whichever palette is chosen. That is what
+ * stops a theme quietly becoming a second design system, and it is why adding
+ * one is five declarations rather than a review of the entire interface.
+ *
+ * The selector is `[data-theme]`, not `:root[data-theme]`, on purpose. Any
+ * element can carry it, so the settings picker renders each swatch inside the
+ * theme it is offering rather than duplicating the colours to preview them.
+ *
+ * `--chroma` is a `background-image` layer the window surfaces paint above
+ * their tint. It is `none` everywhere except Oilslick, and `none` is a valid
+ * layer, so the surfaces need no conditional.
+ */
+
+:root {
+  --chroma: none;
+  /* Scaled by the Appearance slider. Declared here so a theme with no chroma
+     still resolves the variable rather than invalidating the whole gradient. */
+  --chroma-strength: 1;
+}
+
+/* Neutral near-black, desaturated blue-grey accent. Shared with StreamNook. */
+[data-theme="winters-glass"] {
+  --core-background: #0c0c0d;
+  --core-secondary-background: #1a1a1b;
+  --core-accent: #97b1b9;
+  --accent-hover: #adc4cc;
+  --accent-bright: #c8e0e8;
+  --accent-rgb: 151, 177, 185;
+}
+
+/*
+ * Oilslick.
+ *
+ * The one theme that paints beyond a flat tint.
+ *
+ * > [!WARNING] Keep the gradient centres ON the canvas
+ * > The first cut placed them outside it (`at 4% -12%`), reasoning that a
+ * > colour stop in the middle of the list would read as a rendering fault.
+ * > True, but it also meant the **peak of each wash was never on screen**: by
+ * > the time the gradient reached a visible pixel it had already fallen away,
+ * > so a stated 11% arrived as perhaps 6%, and the whole theme read as flat
+ * > purple with no iridescence at all. Corners are on-canvas here, and the
+ * > large radii plus late `transparent` stops are what keep the falloff smooth
+ * > enough that no boundary is visible anyway.
+ *
+ * Three hues, and the RELATIONSHIP between them is the effect. They are scaled
+ * together by `--chroma-strength` rather than tuned individually, because
+ * moving one alpha independently is how an iridescent sheen becomes three
+ * coloured blobs.
+ */
+[data-theme="oilslick"] {
+  --core-background: #0b0a0e;
+  --core-secondary-background: #17151c;
+  --core-accent: #b9a8e8;
+  --accent-hover: #cbbdf0;
+  --accent-bright: #ded4f8;
+  --accent-rgb: 185, 168, 232;
+
+  /*
+   * One ellipse, one hue direction. Modelled on AuraKey's own wash:
+   *
+   *   radial-gradient(ellipse 80% 70% at 50% 30%, #0a0b14, #08090f 40%, #070709)
+   *
+   * Measuring that against what this used to be settled several rounds of
+   * argument in one go, and not the way anyone expected:
+   *
+   *              hue directions   luminance   saturation
+   *   AuraKey          1            1.63x        0.50
+   *   this, before     3            1.20x        0.42
+   *
+   * **AuraKey's is brighter and more saturated, and still reads as a faint
+   * wash.** So intensity was never the problem. The problem was structure:
+   * three hues in three corners, pulling in opposite directions (violet
+   * +5,+1,+10 against teal -7,+5,-1 against wine +11,-1,+1) never read as one
+   * material however faint they are made. They read as three colours.
+   *
+   * One ellipse, off-centre and high like AuraKey's, shifting along a single
+   * hue from the middle outward. The stops were solved to land on that same
+   * 1.63x / 0.50 profile over this canvas.
+   *
+   * > [!IMPORTANT] One DOMINANT hue, and anything else stays subordinate
+   * > Competing hues of equal weight failed repeatedly. A large soft wash in
+   * > one direction, with smaller and fainter patches sitting inside it on
+   * > adjacent hues, does not: that is a hierarchy rather than an argument,
+   * > and it is what an oil slick actually looks like. The test is whether a
+   * > patch could be mistaken for the base wash. If it could, it is too big,
+   * > too strong, or too far around the wheel.
+   */
+  /*
+   * TWO blotch layers, each carrying several hues as colour stops.
+   *
+   * > [!CAUTION] Stacked low-alpha gradients produce visible grain
+   * > Six separate blotches at 0.05 looked right and measured right on every
+   * > colour axis, and still showed a texture nothing else in the app has.
+   * > Compositing is 8-bit, so a ramp peaking at alpha 0.05 has only about
+   * > **13 distinct alpha steps** to spread over a 700px radius: a flat band
+   * > every 54px, which the browser then dithers to disguise. That dither is
+   * > the grain. Seven layers each dither independently and compound it, and
+   * > every other theme is a flat fill with no gradient at all, which is
+   * > exactly why it appeared here and nowhere else.
+   * >
+   * >   layers   peak alpha   alpha steps   band width   relative grain
+   * >      7        0.05          13           54px          1.00
+   * >      4        0.10          26           27px          0.29
+   * >      3        0.11          28           25px          0.20
+   * >
+   * > Fewer layers at a HIGHER alpha is the fix, and it is free: accumulated
+   * > alpha stays about 0.31, so occlusion does not move. A stronger ramp has
+   * > finer quantisation steps, which is the opposite of the intuition that a
+   * > fainter effect must be a smoother one.
+   *
+   * Hue variety is kept by putting several colours inside each gradient as
+   * stops rather than giving each its own layer: five hues here across two
+   * layers, plus the base wash's indigo, dithered three times instead of
+   * seven.
+   *
+   * Every colour still sits at the base wash's own luminance, so stacking
+   * cannot brighten the surface.
+   *
+   * > [!IMPORTANT] Match the ABSOLUTE luminance, not the ratio
+   * > The base wash was originally solved to AuraKey's 1.63x centre-to-edge
+   * > ratio. That was the wrong quantity to copy: **Sill's canvas is already
+   * > 3.7x brighter than AuraKey's** in absolute terms (8.0 against 2.2), so
+   * > the same ratio landed at 13.1 where the reference sits at 3.5, and read
+   * > as washed out. The ratio is a property of the reference's own canvas,
+   * > not a portable target.
+   * >
+   * > It is 1.25x now, absolute 10.0, and the fix was a DARKER stop at a
+   * > HIGHER alpha (stop brightness 66 against the old 123, alpha 0.165
+   * > against 0.13) rather than simply less of the bright one. Saturation was
+   * > never the problem and is held at 0.48 either way; lowering the alpha
+   * > alone would have taken the colour out with the brightness.
+   */
+  --chroma:
+    radial-gradient(ellipse 96% 93% at 28% 20%,
+      rgba(0, 29, 35, calc(0.11 * var(--chroma-strength))) 0%,
+      rgba(37, 24, 0, calc(0.09 * var(--chroma-strength))) 42%,
+      transparent 100%),
+    radial-gradient(ellipse 100% 96% at 76% 62%,
+      rgba(55, 0, 47, calc(0.11 * var(--chroma-strength))) 0%,
+      rgba(0, 30, 20, calc(0.09 * var(--chroma-strength))) 38%,
+      rgba(45, 19, 0, calc(0.07 * var(--chroma-strength))) 72%,
+      transparent 100%),
+    radial-gradient(
+      ellipse 80% 70% at 50% 30%,
+      rgba(48, 30, 120, calc(0.165 * var(--chroma-strength))) 0%,
+      rgba(42, 27, 102, calc(0.09 * var(--chroma-strength))) 42%,
+      transparent 100%
+    );
+}
+
+/* No hue anywhere, accent included. */
+[data-theme="graphite"] {
+  --core-background: #0c0c0c;
+  --core-secondary-background: #1a1a1a;
+  --core-accent: #b4b4b4;
+  --accent-hover: #c8c8c8;
+  --accent-bright: #e0e0e0;
+  --accent-rgb: 180, 180, 180;
+}
+
+/* Warm black, amber accent. */
+[data-theme="ember"] {
+  --core-background: #0e0b09;
+  --core-secondary-background: #1c1715;
+  --core-accent: #d8a171;
+  --accent-hover: #e6b689;
+  --accent-bright: #f2cfae;
+  --accent-rgb: 216, 161, 113;
+}
+
+/* Cool green on a slightly warmer canvas. */
+[data-theme="moss"] {
+  --core-background: #0a0c0a;
+  --core-secondary-background: #161a16;
+  --core-accent: #9dbb96;
+  --accent-hover: #b1cdaa;
+  --accent-bright: #cbe0c5;
+  --accent-rgb: 157, 187, 150;
 }
 
 :root[data-font="inter"] {
@@ -205,6 +677,27 @@
   --surface-base: transparent;
 }
 
+/*
+ * Somebody who has asked the OS for less movement has asked every application,
+ * including this one. A global guard rather than a per-component media query,
+ * because the failure mode of the per-component version is that the next
+ * component forgets and nobody notices.
+ *
+ * Not `animation: none`: killing an animation outright can leave an element
+ * stuck at its starting keyframe. Collapsing the duration lets everything run
+ * to its end state instantly, which is the same picture without the movement.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -215,26 +708,15 @@ body {
   height: 100%;
   overflow: hidden;
   /*
-   * Opaque, and this is the crispness fix rather than a colour choice.
-   *
-   * Chromium cannot use subpixel text rendering on a transparent surface:
-   * blending a glyph against pixels it cannot see has no correct answer, so
-   * it falls back to flat greyscale coverage for every character in the
-   * window. Measured on a 96 DPI display, 0% of Sill's text edges carried
-   * colour against 15-25% for every native window on the same screen.
-   *
-   * Nothing about the font fixes that, because the font is not what is being
-   * given up. Painting a known background is.
-   */
-  /*
    * Painted by `data-surface`, which is set from the backdrop preference.
-   * Opaque is the default and it is not a colour choice: see the note below
-   * on why it decides how every glyph in the window is rasterised.
+   * Transparent by default so the acrylic reaches the page: an opaque
+   * background here would throw the desktop blur away, and would also be the
+   * only way to get subpixel text back. That trade is settled; see above.
    */
   background: var(--surface-base);
-  color: var(--core-foreground);
+  color: var(--text-1);
   font-family: var(--font);
-  font-size: 13px;
+  font-size: var(--text-body);
   /*
    * Stated rather than left to chance, and matching StreamNook exactly.
    *
@@ -255,24 +737,37 @@ body {
   -webkit-user-select: none;
 }
 
-/* Shared list primitives, used by the root list and by a command's List. */
+/*
+ * Shared list primitives, used by the root list and by a command's List.
+ *
+ * The bottom padding is the chin's height. The chin is laid over this rather
+ * than sitting beside it, so without this the last row would be permanently
+ * underneath it: reachable by keyboard, invisible, and unclickable.
+ */
 .sill-list {
   flex: 1;
   overflow-y: auto;
-  padding: 5px;
+  padding: var(--space-1);
   outline: none;
   scrollbar-width: thin;
-  scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
+/*
+ * The row.
+ *
+ * No border, deliberately. A 1px transparent border plus a bevel is two edge
+ * treatments on one edge, and it also pushed the row's content to 12px while
+ * `.sill-group` sat at 11px, so the heading never quite lined up with the
+ * icons it headed. Both are on `--space-3` now and they agree.
+ */
 .sill-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   height: var(--row-height);
-  padding: 0 11px;
-  border-radius: var(--radius);
-  border: 1px solid transparent;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
   cursor: default;
   /*
    * Scoped, never `all`, and backdrop-filter is never animated: transitioning
@@ -280,18 +775,19 @@ body {
    */
   transition:
     background-color 0.22s var(--ease),
-    box-shadow 0.22s var(--ease),
-    border-color 0.22s var(--ease);
+    box-shadow 0.22s var(--ease);
 }
 
 .sill-row:hover:not(.selected) {
-  background-color: rgba(var(--accent-rgb), 0.07);
+  background-color: var(--fill-1);
 }
 
-/* The selected row is the one lit tile on the surface. */
+/* The selected row is the one lit tile on the surface, and the one place in
+   the list the accent appears. A single light catch, not the full tile bevel:
+   "bezels too big" came back twice, and lighter is the safe direction. */
 .sill-row.selected {
-  background-color: var(--surface);
-  box-shadow: var(--bevel-tile);
+  background-color: var(--accent-fill);
+  box-shadow: var(--catch);
 }
 
 /*
@@ -300,26 +796,89 @@ body {
  * A rule between groups would be a second horizontal line competing with the
  * two the window already has, above and below the list. The label alone
  * carries the break, which is what Raycast does and why its list reads calm.
+ *
+ * Sentence case, not uppercase. The uppercase treatment belongs to a settings
+ * section label, which is structural; this one is only a quiet separator.
  */
 .sill-group {
   display: flex;
   align-items: flex-end;
-  height: 28px;
-  /* 11 plus the list's own 5 puts the label on the same left edge as a row's
-     icon. A heading that does not line up with what it heads reads as a
-     stray line of text. */
-  padding: 0 11px 6px;
+  height: 30px;
+  padding: 0 var(--space-3) var(--space-2);
   font-size: var(--text-group);
-  font-weight: 500;
-  color: var(--text-faint);
+  font-weight: var(--weight-medium);
+  color: var(--text-3);
   cursor: default;
 }
 
+/*
+ * The keycap.
+ *
+ * Keycaps were pulled out of the footer once already, because six lit keys
+ * made the quietest row in the window the loudest. Two of them, inside one
+ * raised pill, are the signature instead of the noise. Recipe is StreamNook's
+ * `.sn-keycap` retuned onto the neutral ramp.
+ */
+.sill-key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  flex: none;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: radial-gradient(75% 75% at 50% 92%, var(--grey-2), #0e0f11);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.45);
+  color: var(--text-2);
+  font-size: var(--text-label);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+/*
+ * Empty and loading states, designed rather than written.
+ *
+ * A bare centred string is a placeholder, not a finished state. Every one of
+ * these gets the mark, a headline and an optional hint, so an empty list looks
+ * like a considered answer instead of a view that failed to load.
+ *
+ * No spinner anywhere: the launcher is meant to feel instant, and a spinner
+ * advertises that it is not.
+ */
 .sill-empty {
-  padding: 32px var(--pad);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-height: 132px;
+  padding: var(--space-6) var(--space-4);
   text-align: center;
-  color: var(--text-faint);
-  line-height: 1.7;
+}
+
+.sill-empty img {
+  width: 32px;
+  height: 32px;
+  opacity: 0.22;
+  -webkit-user-drag: none;
+}
+
+.sill-empty .headline {
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  color: var(--text-2);
+}
+
+.sill-empty .hint {
+  max-width: 46ch;
+  font-size: var(--text-meta);
+  line-height: 1.6;
+  color: var(--text-3);
 }
 
 /*
@@ -331,19 +890,19 @@ body {
  * and the space between sections does the rest.
  */
 .sill-card {
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 10px;
+  background: var(--fill-1);
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
 .sill-setting {
-  padding: 13px 16px;
+  padding: var(--space-3) var(--space-4);
   background: transparent;
   transition: background-color 0.1s linear;
 }
 
 .sill-setting:hover {
-  background: rgba(255, 255, 255, 0.045);
+  background: var(--fill-1);
 }
 
 /*
@@ -352,13 +911,13 @@ body {
  * row rather than beside it, so they stay grouped with no internal line.
  */
 .sill-card .sill-setting + .sill-setting {
-  border-top: 1px solid color-mix(in srgb, var(--hairline) 85%, transparent);
+  border-top: 1px solid var(--hairline);
 }
 
 /*
  * Menu surface, from StreamNook's .user-profile-card. A popover sits ON the
  * window rather than being the window, so unlike `main` it does get an in-page
- * blur and a real border.
+ * blur and a real border. A card radius, not a row radius.
  */
 .sill-menu {
   /* Deep enough that text on the popover stays crisp. At 0.65 the list rows
@@ -367,6 +926,6 @@ body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--hairline);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
 }

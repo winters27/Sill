@@ -2354,3 +2354,101 @@ mod one_id_per_row {
         );
     }
 }
+
+/// A capability nobody can find is a capability nobody has.
+///
+/// Text recognition is reachable three ways on purpose: as an action on a
+/// clipboard row, as a row in the list, and as a key bound to it. This holds
+/// the middle one, which is the one somebody discovers by typing.
+mod text_recognition_is_findable {
+    use super::*;
+
+    fn found(query: &str) -> Vec<String> {
+        let commands = registry::builtins();
+        search(&commands, query, &Frecency::default(), NOW, 60)
+            .into_iter()
+            .map(|hit| hit.command.title.clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_words_somebody_would_actually_type_find_it() {
+        for query in ["ocr", "read", "text", "scan", "picture", "screenshot", "extract text"] {
+            let titles = found(query);
+            assert!(
+                titles.iter().any(|t| t == "Extract Text from Image"),
+                "{query:?} did not find it, found {titles:?}",
+            );
+        }
+    }
+
+    /// A limitation this found, written down rather than worked around.
+    ///
+    /// A query of more than one word only matches when those words sit
+    /// together in one field. "extract text" finds this because both words are
+    /// in the title; "read text" does not, because "read" is a keyword and
+    /// "text" is in the title and nothing puts them together.
+    ///
+    /// Single words are covered well, which is what most people type, so this
+    /// is recorded rather than patched with a keyword for every phrase
+    /// somebody might think of. If it is fixed, this test says so by failing.
+    #[test]
+    fn words_split_across_a_title_and_a_keyword_do_not_match_together() {
+        let titles = found("read text");
+
+        assert!(
+            titles.is_empty(),
+            "multi-word matching across fields now works, which is an improvement:              fold this into the test above and delete this one. Found {titles:?}",
+        );
+    }
+}
+
+/// Sill's own settings are findable from the launcher.
+///
+/// They live in their own list rather than in the scanned index, so they are
+/// absent from `index-cache.json` and present in every search. Reading the
+/// cache and concluding otherwise is a mistake this test exists to stop.
+mod sills_own_settings_are_findable {
+    use super::*;
+
+    fn found(query: &str) -> Vec<String> {
+        let commands = registry::builtins();
+        let own = sill_lib::settings_index::records();
+
+        registry::search_excluding(
+            commands.iter().chain(own.iter()),
+            query,
+            &Frecency::default(),
+            &Aliases::default(),
+            NOW,
+            60,
+            Excluded { terms: &[], ids: &[] },
+        )
+        .into_iter()
+        .map(|hit| hit.command.title.clone())
+        .collect()
+    }
+
+    #[test]
+    fn a_setting_is_found_by_its_own_name() {
+        for query in ["stroke width", "engine", "bookmarks"] {
+            assert!(!found(query).is_empty(), "{query:?} found nothing");
+        }
+    }
+
+    #[test]
+    fn the_new_screenshot_settings_are_among_them() {
+        for (query, wanted) in [
+            ("screenshot hotkey", "Screenshot hotkey"),
+            ("badge", "Badges start at"),
+            ("walkthrough", "Badges start at"),
+            ("markup", "After taking one"),
+        ] {
+            let titles = found(query);
+            assert!(
+                titles.iter().any(|t| t == wanted),
+                "{query:?} did not find {wanted:?}, found {titles:?}",
+            );
+        }
+    }
+}

@@ -133,8 +133,8 @@
 
 <style>
   .card {
-    padding: 16px 18px;
-    border-radius: 10px;
+    padding: var(--space-4) var(--space-4);
+    border-radius: var(--radius-lg);
     background: rgba(255, 255, 255, 0.02);
     box-shadow: var(--bevel-tile);
     transition:
@@ -144,16 +144,16 @@
 
   .card[data-state="running"],
   .card[data-state="working"] {
-    background-color: rgba(var(--accent-rgb), 0.07);
+    background-color: var(--fill-1);
     box-shadow:
       var(--bevel-tile),
-      inset 0 0 0 1px rgba(var(--accent-rgb), 0.16);
+      inset 0 0 0 1px var(--fill-3);
   }
 
   .head {
     display: flex;
     align-items: center;
-    gap: 13px;
+    gap: var(--space-3);
   }
 
   /*
@@ -167,7 +167,7 @@
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    background: var(--text-faint);
+    background: var(--text-3);
     transition: background-color 0.3s var(--ease);
   }
 
@@ -222,17 +222,17 @@
 
   .headline {
     display: block;
-    font-size: 13px;
-    font-weight: 600;
+    font-size: var(--text-body);
+    font-weight: var(--weight-strong);
   }
 
   .detail {
     display: block;
-    margin-top: 3px;
+    margin-top: 2px;
     max-width: 62ch;
-    font-size: 12px;
+    font-size: var(--text-meta);
     line-height: 1.5;
-    color: var(--text-muted);
+    color: var(--text-2);
   }
 
   .actions {
@@ -241,15 +241,15 @@
 
   .bar {
     height: 4px;
-    margin-top: 16px;
-    border-radius: 999px;
-    background: rgba(var(--accent-rgb), 0.12);
+    margin-top: var(--space-4);
+    border-radius: var(--radius-pill);
+    background: var(--fill-2);
     overflow: hidden;
   }
 
   .fill {
     height: 100%;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--core-accent);
     transition: width 0.25s linear;
   }
@@ -257,9 +257,9 @@
   .facts {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px 28px;
-    margin: 16px 0 0;
-    padding-top: 14px;
+    gap: var(--space-2) var(--space-6);
+    margin: var(--space-4) 0 0;
+    padding-top: var(--space-3);
     border-top: 1px solid var(--hairline);
   }
 
@@ -268,22 +268,22 @@
   }
 
   dt {
-    font-size: 10.5px;
+    font-size: var(--text-micro);
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   dd {
-    margin: 3px 0 0;
-    font-size: 13px;
+    margin: 2px 0 0;
+    font-size: var(--text-body);
     /* Fixed width digits, so a counter that ticks does not shuffle the row. */
     font-variant-numeric: tabular-nums;
   }
 
   .mono {
     font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-muted);
+    font-size: var(--text-meta);
+    color: var(--text-2);
   }
 </style>

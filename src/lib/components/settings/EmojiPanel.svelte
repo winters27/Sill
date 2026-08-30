@@ -103,11 +103,11 @@
     width: 30px;
     height: 30px;
     padding: 0;
-    font-size: 17px;
+    font-size: var(--text-query);
     line-height: 1;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     cursor: pointer;
   }
 
@@ -116,6 +116,6 @@
   }
 
   .tone.on {
-    background: rgba(var(--accent-rgb), 0.16);
+    background: var(--fill-3);
   }
 </style>

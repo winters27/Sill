@@ -190,6 +190,24 @@ impl ObjectRef {
     }
 }
 
+/// Reads the words out of the last picture copied.
+///
+/// The row in the list and the key bound to it both end here, through the same
+/// action and the same idea of which picture is meant. Screenshot with the
+/// shortcut Windows already has, then ask for the words.
+#[tauri::command]
+pub(crate) async fn extract_text_from_last_image(app: AppHandle) -> Result<String, String> {
+    let object = crate::bindings::last_image(&app)?;
+
+    let registry = app.state::<ActionRegistry>();
+    let action = registry
+        .get("sill.extractText")
+        .ok_or_else(|| "text recognition is not available".to_string())?;
+
+    let outcome = action.run(&ActionCtx { app: app.clone() }, &object).await?;
+    Ok(outcome.message)
+}
+
 /// What can be done to the selected result.
 ///
 /// Keyed on the mode rather than looked up by id, because the answer depends

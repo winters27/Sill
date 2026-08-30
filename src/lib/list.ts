@@ -30,18 +30,39 @@ export function groupOf(command: RankedCommand): string {
     // Windows' own switches, under a heading that says so. Filed with Sill's
     // commands they read as Sill features, which is the opposite of true.
     case "system":
-      return "System";
+      return "System Controls";
+    /*
+     * Named for whose settings they are.
+     *
+     * "Settings" beside "Sill Settings" reads as though one of them is the
+     * general case and the other a special one, when they are simply two
+     * different programs' settings. Saying which is which costs a word.
+     */
     case "setting":
-      return "Settings";
+      return "Windows Settings";
     case "file":
     case "file-setup":
       return "Files";
     case "window":
       return "Open Windows";
+    /*
+     * Saved and visited under one heading.
+     *
+     * They are the same kind of answer to the same question, and splitting
+     * them puts two headings on a handful of rows. Which one a row is still
+     * shows: a saved page ranks above a visited one of equal strength, so the
+     * ordering carries it without a label.
+     */
+    case "url":
+      return "Browser";
+    case "websearch":
+      return "Web Search";
     case "emoji":
       return "Emoji";
+    // What they are rather than who uses them: plenty of these ship with
+    // Windows and have nothing to do with development.
     case "exe":
-      return "Developer";
+      return "Command Line";
     default:
       return "Applications";
   }

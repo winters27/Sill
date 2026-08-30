@@ -114,7 +114,11 @@
   </div>
 
   {#if cells.length === 0}
-    <div class="sill-empty">Nothing to show</div>
+    <div class="sill-empty">
+      <img src="/sill.png" alt="" width="32" height="32" draggable="false" />
+      <span class="headline">Nothing to show</span>
+      <span class="hint">This command returned an empty grid.</span>
+    </div>
   {/if}
 </div>
 
@@ -122,27 +126,27 @@
   .grid-scroll {
     flex: 1;
     overflow-y: auto;
-    padding: 10px;
+    padding: var(--space-2);
     outline: none;
     scrollbar-width: thin;
-    scrollbar-color: var(--hairline) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .grid {
     display: grid;
     grid-template-columns: repeat(var(--columns), 1fr);
-    gap: 8px;
+    gap: var(--space-2);
   }
 
-  /* A section heading interrupts the grid rather than sitting in one cell. */
+  /* A section heading interrupts the grid rather than sitting in one cell.
+     Sentence case, matching `.sill-group`: this is a list separator, not a
+     settings section label. */
   .section {
     grid-column: 1 / -1;
-    padding: 8px 4px 2px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-faint);
+    padding: var(--space-2) var(--space-1) var(--space-1);
+    font-size: var(--text-group);
+    font-weight: var(--weight-medium);
+    color: var(--text-3);
   }
 
   /*
@@ -153,20 +157,20 @@
   .cell {
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    padding: 6px;
-    border-radius: var(--radius);
+    gap: var(--space-1);
+    padding: var(--space-2);
+    border-radius: var(--radius-md);
     cursor: default;
     /* Scoped, and backdrop-filter is never animated: see the WebView2 note. */
     transition: background-color 0.22s var(--ease);
   }
 
   .cell:hover:not(.selected) {
-    background-color: rgba(var(--accent-rgb), 0.07);
+    background-color: var(--fill-1);
   }
 
   .cell.selected {
-    background-color: var(--surface);
+    background-color: var(--accent-fill);
   }
 
   .tile {
@@ -187,21 +191,21 @@
   }
 
   .glyph {
-    font-size: 26px;
+    font-size: var(--glyph-lg);
     line-height: 1;
   }
 
   .title {
-    font-size: 12px;
-    color: var(--core-foreground);
+    font-size: var(--text-meta);
+    color: var(--text-1);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .subtitle {
-    font-size: 11px;
-    color: var(--text-faint);
+    font-size: var(--text-meta);
+    color: var(--text-3);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

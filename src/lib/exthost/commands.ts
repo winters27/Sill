@@ -37,6 +37,21 @@ export interface RankedCommand {
     /** A window that is open right now. Never from the index. */
     | "window"
     /**
+     * A web address a browser remembers. Never from the index either.
+     *
+     * Read out of a browser's own database when the query was typed, and gone
+     * again afterwards, so like a window it is opened through the action
+     * registry rather than launched by id.
+     */
+    | "url"
+    /**
+     * Words to look up on the web.
+     *
+     * Not an address yet. Which engine turns them into one is a setting read
+     * when the row is chosen, so the window carries only what was typed.
+     */
+    | "websearch"
+    /**
      * A switch belonging to Windows: the volume, the theme, the lock screen.
      *
      * Its own kind so it groups apart and wears Windows' own icon. A row that
@@ -100,6 +115,21 @@ export interface LaunchedCommand {
     | "quicklink-arg"
     /** A window that is open right now. Never from the index. */
     | "window"
+    /**
+     * A web address a browser remembers. Never from the index either.
+     *
+     * Read out of a browser's own database when the query was typed, and gone
+     * again afterwards, so like a window it is opened through the action
+     * registry rather than launched by id.
+     */
+    | "url"
+    /**
+     * Words to look up on the web.
+     *
+     * Not an address yet. Which engine turns them into one is a setting read
+     * when the row is chosen, so the window carries only what was typed.
+     */
+    | "websearch"
     /** One emoji. Its own corpus, reached through its own command. */
     | "emoji";
 }
@@ -297,6 +327,107 @@ export function fileAsCommand(hit: FileHit): RankedCommand {
     mode: "file",
     entrypoint: hit.path,
     icon: hit.path,
+    matched: [],
+  };
+}
+
+/** A page a browser remembers. */
+export interface BrowserHit {
+  title: string;
+  url: string;
+  /** Which browser it came from, so two copies of a page are tellable apart. */
+  browser: string;
+  /** Saved rather than merely visited. */
+  bookmark: boolean;
+  visits: number;
+  /** The program behind the browser it came from, for the row's icon. */
+  icon: string | null;
+}
+
+/**
+ * Pages a browser remembers, visited or saved.
+ *
+ * Behind a debounce like files, and for the same reason: it reads databases
+ * that belong to running programs, and one of them on this machine is 31 MB.
+ * Ranked in Rust, so these arrive in order and merge straight in.
+ */
+export function searchBrowsers(query: string): Promise<BrowserHit[]> {
+  return invoke<BrowserHit[]>("search_browsers", { query }).catch(() => []);
+}
+
+/**
+ * A page as a result row.
+ *
+ * Reuses the command row, exactly as files do, so selection, grouping and the
+ * keyboard all work without knowing what a browser is.
+ *
+ * The address is the subtitle rather than the title because it is what tells
+ * two pages of the same name apart, and the title is what somebody is typing
+ * at. The browser it came from goes in the group heading, not the row: with
+ * one browser installed it would be the same word on every line.
+ */
+export function browserAsCommand(hit: BrowserHit): RankedCommand {
+  return {
+    id: `browser:${hit.url}`,
+    extension: "browser",
+    extensionTitle: hit.bookmark ? "Bookmarks" : "History",
+    title: hit.title,
+    subtitle: hit.url,
+    mode: "url",
+    entrypoint: hit.url,
+    // The browser it came out of, not Sill. A page from Edge and a page from
+    // Zen are told apart at a glance, and neither is dressed as one of Sill's
+    // own commands, which is the same rule the Windows switches follow.
+    icon: hit.icon ?? undefined,
+    matched: [],
+  };
+}
+
+/**
+ * Reads the words out of the last picture copied.
+ *
+ * Returns what happened, to be shown as it is: how many words were found, or
+ * that the picture had none, or why it could not be read.
+ */
+export function extractTextFromLastImage(): Promise<string> {
+  return invoke<string>("extract_text_from_last_image");
+}
+
+/**
+ * The program that opens a web address on this machine.
+ *
+ * Asked once, on the way in, rather than per keystroke: the default browser
+ * does not change while somebody is typing.
+ */
+export function defaultBrowser(): Promise<string | null> {
+  return invoke<string | null>("default_browser").catch(() => null);
+}
+
+/**
+ * The row that offers to look up what was typed.
+ *
+ * Built here rather than asked for, because asking Rust to compose one row per
+ * keystroke is exactly the chatter rule 18 is about, and there is nothing to
+ * decide until it is chosen: the address is not built until then.
+ *
+ * It carries the words, not a URL. Which engine turns them into one is a
+ * setting, and it can change between this being offered and being picked.
+ *
+ * `browser` is the program the search will open in, and it is what the row
+ * wears. Searching the web is not something Sill does; it is Sill handing the
+ * question to that browser, and a row marked with Sill's own gear would say
+ * otherwise. It is the same rule the Windows switches follow.
+ */
+export function webSearchRow(query: string, browser?: string): RankedCommand {
+  return {
+    id: "websearch:query",
+    extension: "websearch",
+    extensionTitle: "Web Search",
+    title: `Search for ${query}`,
+    subtitle: "",
+    mode: "websearch",
+    entrypoint: query,
+    icon: browser,
     matched: [],
   };
 }

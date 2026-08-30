@@ -51,7 +51,7 @@
   .swatch {
     display: block;
     flex: none;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     /* An inset edge rather than a border, so a white swatch still reads as a
        square on a dark row instead of dissolving into it. */
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);

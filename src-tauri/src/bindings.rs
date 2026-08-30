@@ -31,6 +31,13 @@ pub enum Source {
     Selection,
     /// What is on the clipboard, whatever is highlighted.
     Clipboard,
+    /// The newest picture in the clipboard history.
+    ///
+    /// Its own source because a picture is not text and the two above both
+    /// resolve to text. Screenshot something and press the key: there is
+    /// nothing to select and nothing to highlight, and the last picture copied
+    /// is the only thing it could sensibly mean.
+    ClipboardImage,
     /// One particular thing from the index, named once when the binding is
     /// made. This is how a key opens a specific application.
     Command { id: String },
@@ -270,6 +277,10 @@ async fn resolve(
             ))
         }
 
+        // No origin: there was no selection behind a screenshot to put
+        // anything back into.
+        Source::ClipboardImage => last_image(app).map(|object| (object, None)),
+
         Source::Command { id } => {
             let registry = app.state::<crate::state::RegistryState>();
             let record = registry
@@ -289,6 +300,35 @@ async fn resolve(
                 .ok_or_else(|| format!("{} is a kind of thing Sill cannot act on", record.title))
         }
     }
+}
+
+/// The last picture copied, as something an action can be run against.
+///
+/// One implementation, because two ways of reaching text recognition should
+/// not be able to disagree about which picture they mean: the key bound to it
+/// and the row in the list both come through here.
+pub(crate) fn last_image(app: &AppHandle) -> Result<Object, String> {
+    let clipboard = app
+        .try_state::<crate::clipboard::monitor::Clipboard>()
+        .ok_or_else(|| "clipboard history is not running".to_string())?;
+
+    let newest = clipboard
+        .store()
+        .search("", Some(crate::clipboard::kind::Kind::Image), 1)
+        .map_err(|err| format!("could not look for a picture: {err}"))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "nothing has been copied as a picture yet".to_string())?;
+
+    Ok(Object {
+        kind: ObjectKind::ClipboardEntry,
+        // The row number, which is what reaches the picture. A picture has no
+        // text, so the target cannot carry it.
+        id: newest.id.to_string(),
+        title: "the last picture copied".to_string(),
+        target: String::new(),
+        mode: "clipboard".to_string(),
+    })
 }
 
 /// A one-line stand-in for a block of text, for logs and messages.

@@ -33,6 +33,11 @@ pub fn builtins() -> ActionRegistry {
         Box::new(PasteSnippet),
         Box::new(PasteEmoji),
         Box::new(OpenQuicklink),
+        Box::new(ExtractText),
+        Box::new(MarkUp),
+        Box::new(SearchWeb),
+        Box::new(OpenUrl),
+        Box::new(CopyUrl),
         Box::new(CopyAnswer),
         Box::new(CopyPath),
         Box::new(RevealInFolder),
@@ -1226,4 +1231,231 @@ fn window_actions() -> Vec<Box<dyn Action>> {
     // and it should not sit next to the arrow keys.
     actions.push(Box::new(CloseWindow));
     actions
+}
+
+/// Opens a picture from the clipboard for marking up.
+///
+/// The same shape as reading the words out of one: a picture is already in the
+/// history, so this works on any of them rather than only on a fresh capture.
+struct MarkUp;
+
+#[async_trait]
+impl Action for MarkUp {
+    fn id(&self) -> &'static str {
+        "sill.markUp"
+    }
+
+    fn title(&self) -> &'static str {
+        "Mark Up"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::ClipboardEntry
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardRead, Capability::Ui]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let entry: i64 = object
+            .id
+            .parse()
+            .map_err(|_| "that clipboard row cannot be looked up".to_string())?;
+
+        crate::commands::system::open_markup(ctx.app.clone(), entry).await?;
+
+        // No undo: nothing has changed yet. The window is open and whatever
+        // comes out of it is a new picture on the clipboard, which the
+        // clipboard's own history already keeps.
+        Ok(Outcome::done("Opened for markup".to_string()))
+    }
+}
+
+/// Reads the words out of a picture on the clipboard.
+///
+/// Screenshot something, then take the text out of it. The picture is already
+/// in the clipboard history, so there is no capture surface to build and
+/// nothing new to point at a screen.
+///
+/// Only ever when it is asked for. Reading every image that passed through the
+/// clipboard would be a transcription service running over whatever happened
+/// to be copied, which is not a thing to switch on by default.
+struct ExtractText;
+
+#[async_trait]
+impl Action for ExtractText {
+    fn id(&self) -> &'static str {
+        "sill.extractText"
+    }
+
+    fn title(&self) -> &'static str {
+        "Extract Text"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::ClipboardEntry
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardRead, Capability::ClipboardWrite]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        // The row carries its own row number, which is what reaches the
+        // picture: the target is the entry's text, and an image has none.
+        let entry: i64 = object
+            .id
+            .parse()
+            .map_err(|_| "that clipboard row cannot be looked up".to_string())?;
+
+        let clipboard = ctx
+            .app
+            .try_state::<crate::clipboard::monitor::Clipboard>()
+            .ok_or_else(|| "clipboard history is not running".to_string())?;
+
+        let png = clipboard
+            .store()
+            .blob(entry)
+            .map_err(|err| format!("could not read that entry: {err}"))?
+            .ok_or_else(|| "there is no picture on that row to read".to_string())?;
+
+        // Off the async worker: decoding and recognition are both a solid
+        // chunk of blocking work, and this is the one call that does any.
+        let text = tokio::task::spawn_blocking(move || {
+            let (pixels, width, height) = crate::ocr::bgra_from_png(&png)?;
+            crate::ocr::read_bgra(&pixels, width, height)
+        })
+        .await
+        .map_err(|err| format!("reading that picture failed: {err}"))??;
+
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            // Not an error. Plenty of pictures have no words in them, and
+            // saying so is more useful than an empty clipboard.
+            return Ok(Outcome::done("No text in that picture".to_string()));
+        }
+
+        let words = text.split_whitespace().count();
+        copy_with_undo(ctx, &text, &format!("Copied {words} word(s)"))
+    }
+}
+
+/// Looks words up on the web.
+///
+/// The address is built here rather than by whatever offered the row, because
+/// which engine to use is a setting and the escaping is the part that is easy
+/// to get wrong. The window carries the words; Rust decides what they mean.
+struct SearchWeb;
+
+#[async_trait]
+impl Action for SearchWeb {
+    fn id(&self) -> &'static str {
+        "sill.searchWeb"
+    }
+
+    fn title(&self) -> &'static str {
+        "Search the Web"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Search
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ProcessLaunch]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let settings = {
+            let prefs = ctx.app.state::<crate::state::PrefsState>();
+            let held = prefs.inner.lock().await;
+            held.web_search.clone()
+        };
+
+        let url = crate::websearch::url_for(&settings.engine, &settings.custom_url, &object.target);
+
+        tauri_plugin_opener::open_url(url, None::<&str>)
+            .map_err(|err| format!("Could not open the search: {err}"))?;
+
+        crate::dismiss_main(&ctx.app);
+        Ok(Outcome::done(format!("Searched for {}", object.target)))
+    }
+}
+
+/// Opens a web address.
+///
+/// The address already exists somewhere else, which is what separates this from
+/// opening a saved link: there is no name, no owner and nothing to fill in, so
+/// there is nothing to do but hand it to whichever browser is the default.
+struct OpenUrl;
+
+#[async_trait]
+impl Action for OpenUrl {
+    fn id(&self) -> &'static str {
+        "sill.openUrl"
+    }
+
+    fn title(&self) -> &'static str {
+        "Open in Browser"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Url
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ProcessLaunch]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        tauri_plugin_opener::open_url(object.target.clone(), None::<&str>)
+            .map_err(|err| format!("Could not open that address: {err}"))?;
+
+        crate::dismiss_main(&ctx.app);
+
+        // No undo. Opening a page is not a change to anything Sill could put
+        // back, and closing whatever the browser did with it is not Sill's to
+        // do either.
+        Ok(Outcome::done(format!("Opened {}", object.title)))
+    }
+}
+
+/// Copies a web address.
+struct CopyUrl;
+
+#[async_trait]
+impl Action for CopyUrl {
+    fn id(&self) -> &'static str {
+        "sill.copyUrl"
+    }
+
+    fn title(&self) -> &'static str {
+        "Copy Address"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Url
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardWrite]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        ctx.app
+            .clipboard()
+            .write_text(object.target.clone())
+            .map_err(|err| format!("Could not copy the address: {err}"))?;
+
+        Ok(Outcome::done("Copied the address".to_string()))
+    }
 }

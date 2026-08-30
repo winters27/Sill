@@ -15,7 +15,7 @@ use windows::Win32::{
     Foundation::HWND,
     // AttachThreadInput lives under System::Threading in the windows crate,
     // not under UI::Input where the Win32 docs group it.
-    System::Threading::{AttachThreadInput, GetCurrentThreadId},
+    System::Threading::{AttachThreadInput, GetCurrentProcessId, GetCurrentThreadId},
     UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow},
 };
 
@@ -111,6 +111,25 @@ fn round_corners(window: &WebviewWindow) {
     }
 }
 
+/// Whether a window is worth handing focus back to on dismissal.
+///
+/// One of Sill's own never is. Windows that spend their lives hidden still hold
+/// the foreground if they are ever given it, and handing focus to a window
+/// nobody can see is a dead end: the application the user actually came from
+/// never gets it back, and their next keystroke goes nowhere.
+///
+/// That is not hypothetical. The tray menu is created hidden, and until its
+/// config said otherwise it took the foreground at startup and kept it. So
+/// every dismissal handed focus to an invisible window, and the launcher had to
+/// be clicked before it would take a keystroke or a scroll.
+///
+/// The config change stops that one window. This stops all of them, including
+/// whichever hidden window gets added next.
+#[cfg(windows)]
+fn worth_returning_to(window_pid: u32, our_pid: u32) -> bool {
+    window_pid != 0 && window_pid != our_pid
+}
+
 /// Records whatever currently has focus, so it can be restored on dismissal.
 pub fn remember_foreground() {
     #[cfg(windows)]
@@ -118,14 +137,24 @@ pub fn remember_foreground() {
         // SAFETY: GetForegroundWindow takes nothing and returns a handle or
         // null. Nothing is dereferenced.
         let hwnd = unsafe { GetForegroundWindow() };
+
+        let worth_keeping = if hwnd.0.is_null() {
+            None
+        } else {
+            let mut pid = 0u32;
+            // SAFETY: the handle came from GetForegroundWindow, and `pid` is a
+            // local the call only writes into.
+            unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+            // SAFETY: takes nothing, returns this process's id.
+            let ours = unsafe { GetCurrentProcessId() };
+
+            worth_returning_to(pid, ours).then_some(hwnd.0 as isize)
+        };
+
         let mut slot = PREVIOUS_FOREGROUND
             .lock()
             .expect("foreground slot poisoned");
-        *slot = if hwnd.0.is_null() {
-            None
-        } else {
-            Some(hwnd.0 as isize)
-        };
+        *slot = worth_keeping;
     }
 }
 
@@ -242,6 +271,27 @@ pub fn show_switcher(app: &tauri::AppHandle) {
     let _ = window.emit("sill://switcher", ());
 }
 
+/// Shows the launcher, optionally asking it to run something on arrival.
+///
+/// The same shape as `show_switcher`: Rust puts the window up and says what
+/// was asked for, and the page decides what that looks like. A tray entry that
+/// summoned the launcher and then left the user to type the command name again
+/// would not be worth having.
+///
+/// Always shows rather than toggling. Choosing "Clipboard History" from a menu
+/// means "put that on screen", never "put the launcher away".
+pub fn show_with(app: &tauri::AppHandle, command: Option<String>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    show(&window);
+
+    if let Some(id) = command {
+        let _ = window.emit("sill://run", id);
+    }
+}
+
 /// Hides the launcher and returns focus.
 pub fn hide(window: &WebviewWindow) {
     let _ = window.hide();
@@ -268,5 +318,28 @@ pub fn toggle(window: &WebviewWindow) {
 pub fn toggle_main(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         toggle(&window);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::worth_returning_to;
+
+    /// Dismissing the launcher has to give focus back to the application the
+    /// user came from, and one of Sill's own windows is never that.
+    #[test]
+    fn sills_own_windows_are_not_somewhere_to_return_to() {
+        assert!(!worth_returning_to(4321, 4321));
+    }
+
+    #[test]
+    fn another_application_is() {
+        assert!(worth_returning_to(1234, 4321));
+    }
+
+    /// A window that reports no owning process is gone or going.
+    #[test]
+    fn a_window_with_no_process_is_not() {
+        assert!(!worth_returning_to(0, 4321));
     }
 }

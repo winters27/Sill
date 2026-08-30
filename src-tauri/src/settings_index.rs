@@ -42,6 +42,9 @@ pub const PANELS: &[&str] = &[
     "clipboard",
     "sources",
     "files",
+    "browsers",
+    "websearch",
+    "screenshot",
     "extensions",
     "advanced",
     "about",
@@ -98,6 +101,12 @@ pub const SETTINGS: &[Setting] = &[
         "reset summon root back",
     ),
     // ---------------------------------------------------------- appearance
+    s(
+        "appearance",
+        "Appearance",
+        "Theme",
+        "colour color palette accent oilslick graphite ember moss chroma gradient dark",
+    ),
     s(
         "appearance",
         "Appearance",
@@ -399,6 +408,94 @@ pub const SETTINGS: &[Setting] = &[
         "Sources",
         "Hidden entries",
         "exclude filter block ignore hide",
+    ),
+    s(
+        "shortcuts",
+        "Shortcuts",
+        "Screenshot hotkey",
+        "screenshot capture key bind area region",
+    ),
+    s(
+        "shortcuts",
+        "Shortcuts",
+        "Whole screen hotkey",
+        "screenshot capture key bind fullscreen display",
+    ),
+    // ---------------------------------------------------------- screenshot
+    s(
+        "screenshot",
+        "Screenshots",
+        "After taking one",
+        "screenshot capture editor markup open copy",
+    ),
+    s(
+        "screenshot",
+        "Screenshots",
+        "Click a window to take it",
+        "screenshot window app capture click",
+    ),
+    s("screenshot", "Screenshots", "Tool", "screenshot editor markup default tool"),
+    s(
+        "screenshot",
+        "Screenshots",
+        "Colour",
+        "screenshot editor markup default colour color",
+    ),
+    s(
+        "screenshot",
+        "Screenshots",
+        "Badges start at",
+        "screenshot editor markup numbered badge step number start walkthrough",
+    ),
+    s(
+        "screenshot",
+        "Screenshots",
+        "Stroke width",
+        "screenshot editor markup default weight size",
+    ),
+    // ----------------------------------------------------------- websearch
+    s(
+        "websearch",
+        "Web Search",
+        "Offer to search the web",
+        "google duckduckgo bing brave engine internet lookup enable",
+    ),
+    s(
+        "websearch",
+        "Web Search",
+        "Engine",
+        "google duckduckgo bing brave startpage",
+    ),
+    s(
+        "websearch",
+        "Web Search",
+        "Your own address",
+        "custom engine url query template",
+    ),
+    // ------------------------------------------------------------ browsers
+    s(
+        "browsers",
+        "Browser Search",
+        "Search browser pages",
+        "browser history bookmarks chrome edge firefox zen web enable",
+    ),
+    s(
+        "browsers",
+        "Browser Search",
+        "Bookmarks",
+        "browser saved favourites favorites starred",
+    ),
+    s(
+        "browsers",
+        "Browser Search",
+        "History",
+        "browser visited pages recently",
+    ),
+    s(
+        "browsers",
+        "Browser Search",
+        "Maximum browser results",
+        "limit count results",
     ),
     // --------------------------------------------------------------- files
     s(

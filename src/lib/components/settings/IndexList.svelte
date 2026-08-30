@@ -250,26 +250,26 @@
   .controls {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding-bottom: 10px;
+    gap: var(--space-2);
+    padding-bottom: var(--space-2);
   }
 
   .chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: var(--space-1);
   }
 
   /* No border: a row of bordered pills reads as eight buttons competing for
      attention rather than one control with eight settings. */
   .chip {
-    padding: 3px 9px;
+    padding: 2px var(--space-2);
     font: inherit;
-    font-size: 11px;
-    color: var(--text-dim);
+    font-size: var(--text-label);
+    color: var(--text-2);
     background: transparent;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
   }
 
@@ -279,35 +279,35 @@
 
   .chip.on {
     color: var(--accent-bright);
-    background: rgba(var(--accent-rgb), 0.12);
+    background: var(--fill-2);
   }
 
   .filter {
     width: 100%;
-    padding: 6px 9px;
+    padding: var(--space-1) var(--space-2);
     font: inherit;
-    font-size: 12px;
+    font-size: var(--text-meta);
     color: var(--text);
     background: var(--surface-raised);
-    border: 1px solid var(--line);
-    border-radius: 6px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-md);
   }
 
   .head,
   .row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 92px 104px 26px;
-    gap: 0 10px;
+    gap: 0 var(--space-2);
     align-items: center;
   }
 
   .head {
-    padding: 0 4px 5px;
-    font-size: 10px;
+    padding: 0 var(--space-1) var(--space-1);
+    font-size: var(--text-micro);
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--text-faint);
-    border-bottom: 1px solid var(--line);
+    color: var(--text-3);
+    border-bottom: 1px solid var(--hairline);
   }
 
   .middle {
@@ -320,8 +320,8 @@
   }
 
   .row {
-    padding: 5px 4px;
-    border-bottom: 1px solid var(--line);
+    padding: var(--space-1) var(--space-1);
+    border-bottom: 1px solid var(--hairline);
   }
 
   .row:last-child {
@@ -331,12 +331,12 @@
   /* Dimmed rather than removed. A row you switched off has to stay findable,
      or switching it back on means remembering it existed. */
   .row.off .name {
-    color: var(--text-faint);
+    color: var(--text-3);
     text-decoration: line-through;
   }
 
   .name {
-    font-size: 12px;
+    font-size: var(--text-meta);
     color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -344,14 +344,14 @@
   }
 
   .cell {
-    padding: 2px 6px;
+    padding: 2px var(--space-1);
     font: inherit;
-    font-size: 11px;
+    font-size: var(--text-label);
     text-align: left;
-    color: var(--text-faint);
+    color: var(--text-3);
     background: transparent;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -369,7 +369,7 @@
 
   .cell.recording {
     color: var(--accent-bright);
-    background: rgba(var(--accent-rgb), 0.12);
+    background: var(--fill-2);
   }
 
   .cell.input {
@@ -384,10 +384,10 @@
     width: 20px;
     height: 20px;
     padding: 0;
-    color: var(--text-faint);
+    color: var(--text-3);
     background: transparent;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
   }
 
@@ -397,13 +397,13 @@
 
   .foot {
     margin: 0;
-    padding-top: 8px;
-    font-size: 11px;
-    color: var(--text-dim);
+    padding-top: var(--space-2);
+    font-size: var(--text-label);
+    color: var(--text-2);
   }
 
   .status {
-    padding-left: 10px;
+    padding-left: var(--space-2);
     color: var(--danger, #d24b4b);
   }
 </style>

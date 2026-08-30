@@ -5,7 +5,10 @@
   "windows": [
     "main",
     "settings",
-    "dictation"
+    "dictation",
+    "traymenu",
+    "capture",
+    "markup"
   ],
   "permissions": [
     "core:default",
@@ -22,6 +25,11 @@
     "core:window:allow-minimize",
     "core:window:allow-start-dragging",
     "core:window:allow-toggle-maximize",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "core:window:allow-set-size",
+    "core:window:allow-current-monitor",
+    "core:window:allow-scale-factor",
+    "core:window:allow-outer-position",
+    "clipboard-manager:allow-write-image"
   ]
 }

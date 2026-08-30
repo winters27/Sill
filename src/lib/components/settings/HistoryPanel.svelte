@@ -149,21 +149,21 @@
   .tools {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
   }
 
   .search {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: var(--space-2);
     width: 260px;
-    padding: 0 9px;
+    padding: 0 var(--space-2);
     height: 30px;
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.05);
+    background: var(--fill-1);
     box-shadow: inset 0 0 0 1px var(--hairline);
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .search input {
@@ -171,19 +171,19 @@
     min-width: 0;
     border: 0;
     background: transparent;
-    color: var(--core-foreground);
+    color: var(--text-1);
     font: inherit;
-    font-size: 12.5px;
+    font-size: var(--text-meta);
     outline: none;
     user-select: text;
   }
 
   .search input::placeholder {
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .status {
-    font-size: 12px;
+    font-size: var(--text-meta);
     color: var(--core-accent);
   }
 
@@ -194,15 +194,15 @@
   .entry {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-1);
   }
 
   .meta {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 11.5px;
-    color: var(--text-faint);
+    gap: var(--space-1);
+    font-size: var(--text-group);
+    color: var(--text-3);
   }
 
   .dot {
@@ -210,19 +210,19 @@
   }
 
   .at {
-    color: var(--text-muted);
+    color: var(--text-2);
   }
 
   /* Revealed on hover, so a long list is transcripts rather than a wall of
      buttons. They stay reachable by keyboard because focus shows them too. */
   .meta button {
-    padding: 2px 7px;
+    padding: 2px var(--space-2);
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-2);
     font: inherit;
-    font-size: 11.5px;
+    font-size: var(--text-group);
     cursor: pointer;
     opacity: 0;
     transition:
@@ -237,8 +237,8 @@
   }
 
   .meta button:hover {
-    background: rgba(var(--accent-rgb), 0.14);
-    color: var(--core-foreground);
+    background: var(--fill-3);
+    color: var(--text-1);
   }
 
   .meta button.danger:hover {
@@ -251,17 +251,17 @@
     /* Selectable: reading a transcript back and taking half of it is the
        point of keeping them. */
     user-select: text;
-    font-size: 13px;
+    font-size: var(--text-body);
     line-height: 1.55;
-    color: var(--core-foreground);
+    color: var(--text-1);
   }
 
   .empty {
     margin: 0;
-    padding: 22px 0;
+    padding: var(--space-5) 0;
     max-width: 56ch;
-    font-size: 13px;
+    font-size: var(--text-body);
     line-height: 1.7;
-    color: var(--text-muted);
+    color: var(--text-2);
   }
 </style>

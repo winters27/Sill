@@ -281,30 +281,30 @@
   .editor {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 16px 18px;
-    border-radius: 10px;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4);
+    border-radius: var(--radius-lg);
     background: rgba(255, 255, 255, 0.02);
     box-shadow: var(--bevel-tile);
   }
 
   .pair {
     display: flex;
-    gap: 12px;
+    gap: var(--space-3);
   }
 
   .field {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: var(--space-1);
     flex: 1;
     min-width: 0;
   }
 
   .field span {
     font-size: var(--text-group);
-    font-weight: 500;
-    color: var(--text-faint);
+    font-weight: var(--weight-medium);
+    color: var(--text-3);
   }
 
   .keyword {
@@ -313,14 +313,14 @@
 
   input,
   textarea {
-    padding: 7px 11px;
+    padding: var(--space-2) var(--space-3);
     border: 0;
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.05);
+    background: var(--fill-1);
     box-shadow: inset 0 0 0 1px var(--hairline);
-    color: var(--core-foreground);
+    color: var(--text-1);
     font: inherit;
-    font-size: 12.5px;
+    font-size: var(--text-meta);
     outline: none;
     user-select: text;
     transition: box-shadow 0.15s var(--ease);
@@ -328,18 +328,18 @@
 
   input:focus,
   textarea:focus {
-    box-shadow: inset 0 0 0 1px var(--border-light);
+    box-shadow: inset 0 0 0 1px var(--hairline-strong);
   }
 
   input::placeholder,
   textarea::placeholder {
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .keyword input,
   textarea {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-meta);
   }
 
   textarea {
@@ -352,30 +352,30 @@
   .placeholders {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--space-1);
   }
 
   .token {
-    padding: 3px 8px;
+    padding: 2px var(--space-2);
     border: 0;
-    border-radius: 999px;
-    background: rgba(var(--accent-rgb), 0.1);
-    color: var(--text-muted);
+    border-radius: var(--radius-pill);
+    background: var(--fill-2);
+    color: var(--text-2);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--text-label);
     cursor: pointer;
     transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
   }
 
   .token:hover {
-    background: rgba(var(--accent-rgb), 0.2);
-    color: var(--core-foreground);
+    background: var(--hairline-strong);
+    color: var(--text-1);
   }
 
   .check {
     display: flex;
     align-items: flex-start;
-    gap: 11px;
+    gap: var(--space-3);
     cursor: pointer;
   }
 
@@ -383,13 +383,13 @@
     max-width: 58ch;
     font-size: var(--text-meta);
     line-height: 1.55;
-    color: var(--text-muted);
+    color: var(--text-2);
   }
 
   code {
     font-family: var(--font-mono);
-    font-size: 11.5px;
-    color: var(--core-foreground);
+    font-size: var(--text-group);
+    color: var(--text-1);
   }
 
   .error {
@@ -401,7 +401,7 @@
   .actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
   }
 
   .spacer {
@@ -411,36 +411,36 @@
   .row-actions {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2);
   }
 
   .keyword-tag {
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: rgba(var(--accent-rgb), 0.12);
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-pill);
+    background: var(--fill-2);
     font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--core-foreground);
+    font-size: var(--text-label);
+    color: var(--text-1);
   }
 
   .no-keyword {
     font-size: var(--text-meta);
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .transfer {
     margin: 0;
-    padding: 2px 0 6px;
-    font-size: 12px;
-    color: var(--text-dim);
+    padding: 2px 0 var(--space-1);
+    font-size: var(--text-meta);
+    color: var(--text-2);
   }
 
   .empty {
     margin: 0;
-    padding: 18px 0;
+    padding: var(--space-4) 0;
     max-width: 56ch;
-    font-size: var(--text-row);
+    font-size: var(--text-body);
     line-height: 1.7;
-    color: var(--text-muted);
+    color: var(--text-2);
   }
 </style>

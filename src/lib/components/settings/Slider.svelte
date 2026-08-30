@@ -32,14 +32,14 @@
   .slider {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-3);
   }
 
   .value {
     min-width: 62px;
     font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-muted);
+    font-size: var(--text-meta);
+    color: var(--text-2);
     text-align: right;
     /* Fixed width, so the track does not shift as the number changes. */
     font-variant-numeric: tabular-nums;
@@ -50,8 +50,8 @@
     height: 4px;
     margin: 0;
     appearance: none;
-    border-radius: 999px;
-    background: rgba(var(--accent-rgb), 0.16);
+    border-radius: var(--radius-pill);
+    background: var(--fill-3);
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
     outline: none;
     cursor: pointer;
@@ -76,6 +76,6 @@
   input[type="range"]:focus-visible {
     box-shadow:
       inset 0 1px 2px rgba(0, 0, 0, 0.3),
-      0 0 0 2px rgba(var(--accent-rgb), 0.35);
+      0 0 0 2px var(--hairline-strong);
   }
 </style>

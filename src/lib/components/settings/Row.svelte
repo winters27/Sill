@@ -41,7 +41,7 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 20px;
+    gap: var(--space-5);
   }
 
   .label {
@@ -51,20 +51,20 @@
 
   .name {
     display: block;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--core-foreground);
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
+    color: var(--text-1);
   }
 
   .hint {
     display: block;
-    margin-top: 3px;
+    margin-top: 2px;
     /* Shorter than a section's, because a row's control sits at the end of
        the same line and prose running under it reads as a collision. */
     max-width: 68ch;
-    font-size: 12px;
+    font-size: var(--text-meta);
     line-height: 1.55;
-    color: var(--text-muted);
+    color: var(--text-2);
   }
 
   .control {
@@ -75,6 +75,6 @@
   }
 
   .wide {
-    margin-top: 12px;
+    margin-top: var(--space-3);
   }
 </style>

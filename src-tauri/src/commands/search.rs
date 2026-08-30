@@ -1,9 +1,9 @@
 //! Searching, and opening what was found.
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::state::{now_seconds, CatalogState, PrefsState, RegistryState};
-use crate::{calculator, files, registry, windowing};
+use crate::{browsers, calculator, files, registry, windowing};
 
 /// The root list, or what matches a query.
 #[tauri::command]
@@ -198,6 +198,95 @@ const INLINE_EMOJI: usize = 4;
 #[tauri::command]
 pub(crate) async fn list_monitors() -> Result<Vec<windowing::Monitor>, String> {
     Ok(windowing::monitors())
+}
+
+/// The program that opens a web address on this machine.
+///
+/// So the row offering to search the web can wear the mark of the browser it
+/// will open, rather than Sill's. The row is not Sill doing something; it is
+/// Sill handing the question to that program, and it should look like it.
+#[tauri::command]
+pub(crate) async fn default_browser() -> Result<Option<String>, String> {
+    Ok(browsers::default_browser().map(|path| path.to_string_lossy().into_owned()))
+}
+
+/// The search engines Sill knows.
+///
+/// Named by Rust so the list exists once. A settings pane holding its own copy
+/// is a second place to add an engine and a first place to forget one.
+#[tauri::command]
+pub(crate) async fn search_engines() -> Result<Vec<crate::websearch::Engine>, String> {
+    Ok(crate::websearch::ENGINES.to_vec())
+}
+
+/// Which browsers are on this machine, named.
+///
+/// So the settings page can say what would be read rather than leaving somebody
+/// to trust a switch. A feature that reads a browsing history should be able to
+/// answer "whose?" before it is turned on.
+///
+/// Names only, and each one once: a browser with four profiles is still one
+/// browser as far as the question goes.
+#[tauri::command]
+pub(crate) async fn browser_profiles() -> Result<Vec<KnownBrowser>, String> {
+    let mut found: Vec<KnownBrowser> = Vec::new();
+
+    for profile in browsers::profiles() {
+        if found.iter().any(|known| known.name == profile.browser) {
+            continue;
+        }
+
+        found.push(KnownBrowser {
+            name: profile.browser,
+            program: profile.program.map(|p| p.to_string_lossy().into_owned()),
+        });
+    }
+
+    Ok(found)
+}
+
+/// A browser Sill found, and the program behind it.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KnownBrowser {
+    pub name: String,
+    /// So the pane can show the browser's own mark rather than describing it.
+    pub program: Option<String>,
+}
+
+/// Pages a browser remembers, visited or saved.
+///
+/// Separate from `search_commands` for the same reason files are: it reads
+/// files that belong to other programs and are large, so the window asks for it
+/// behind a debounce and lets what Sill already knows appear first.
+///
+/// Copies live under Sill's own data directory rather than in the system
+/// temporary folder. They are derived from somebody's browsing history, and
+/// leaving that in a world-writable directory that nothing ever cleans is not
+/// where it belongs.
+#[tauri::command]
+pub(crate) async fn search_browsers(
+    app: AppHandle,
+    state: State<'_, PrefsState>,
+    query: String,
+) -> Result<Vec<browsers::Hit>, String> {
+    let settings = state.inner.lock().await.browsers.clone();
+
+    if !settings.enabled {
+        return Ok(Vec::new());
+    }
+
+    let scratch = crate::state::data_dir(&app).join("browser-copies");
+    let wanted = settings.max_results as usize;
+    let want = browsers::Want {
+        history: settings.history,
+        bookmarks: settings.bookmarks,
+    };
+
+    // Reads and copies files, so it never runs on an async worker.
+    tokio::task::spawn_blocking(move || browsers::search(&query, wanted, want, &scratch))
+        .await
+        .map_err(|err| format!("browser search failed: {err}"))
 }
 
 /// Files matching a query, from Everything.

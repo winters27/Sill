@@ -2,7 +2,9 @@ pub mod action;
 pub mod actions;
 pub mod apps;
 pub mod bindings;
+pub mod browsers;
 pub mod calculator;
+pub mod capture;
 pub mod catalog;
 pub mod clipboard;
 pub mod commands;
@@ -18,6 +20,7 @@ pub mod input;
 pub mod lnk;
 pub mod log;
 pub mod navigation;
+pub mod ocr;
 pub mod object;
 pub mod preferences;
 pub mod quicklinks;
@@ -32,6 +35,7 @@ pub mod system;
 pub mod summon;
 pub mod synthetic;
 pub mod text;
+pub mod websearch;
 pub mod windowing;
 
 use std::path::PathBuf;
@@ -255,6 +259,62 @@ pub(crate) fn rebind_summon(app: &AppHandle, previous: &str, next: &str) {
     }
 
     register_summon_shortcut(app, next);
+}
+
+/// Picks an area of the screen, without the launcher appearing first.
+///
+/// The whole value of a screenshot key is that it is one press, so this goes
+/// straight to the overlay rather than opening the launcher on a command.
+fn register_capture_shortcut(app: &AppHandle, accelerator: &str, whole_screen: bool) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    if accelerator.trim().is_empty() {
+        return;
+    }
+
+    let handle = app.clone();
+    let result = app
+        .global_shortcut()
+        .on_shortcut(accelerator, move |_, _, event| {
+            if event.state() != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                return;
+            }
+
+            let app = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let done = if whole_screen {
+                    commands::system::capture_screen(app.clone()).await
+                } else {
+                    commands::system::begin_capture(app.clone()).await.map(|()| String::new())
+                };
+
+                if let Err(reason) = done {
+                    crate::say!("capture key: {reason}");
+                }
+            });
+        });
+
+    if let Some(conflicts) = app.try_state::<HotkeyConflicts>() {
+        conflicts.note(accelerator, result.is_ok());
+    }
+
+    match result {
+        Ok(()) => println!("[sill] capture key registered: {accelerator}"),
+        Err(err) => crate::say!("could not register {accelerator}: {err}"),
+    }
+}
+
+/// Swaps one capture key for another.
+pub(crate) fn rebind_capture(app: &AppHandle, previous: &str, next: &str, whole_screen: bool) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    if !previous.trim().is_empty() {
+        if let Err(err) = app.global_shortcut().unregister(previous) {
+            crate::say!("could not release {previous}: {err}");
+        }
+    }
+
+    register_capture_shortcut(app, next, whole_screen);
 }
 
 /// Opens the launcher straight into the window switcher.
@@ -780,6 +840,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(actions::builtins())
+        .manage(commands::system::Marking::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
                 commands: Vec::new(),
@@ -852,6 +913,8 @@ pub fn run() {
             apply_window_size(&handle, &prefs.appearance);
             register_summon_shortcut(&handle, &prefs.hotkey.summon);
             register_switcher_shortcut(&handle, &prefs.hotkey.switcher);
+            register_capture_shortcut(&handle, &prefs.hotkey.capture, false);
+            register_capture_shortcut(&handle, &prefs.hotkey.capture_screen, true);
             // Nothing was bound before, so everything in the list is new.
             bindings::apply(&handle, &[], &prefs.bindings);
             apply_tray(&handle, prefs.general.show_in_tray);
@@ -991,6 +1054,23 @@ pub fn run() {
             commands::system::quit_app,
             commands::search::search_commands,
             commands::search::search_files,
+            commands::search::search_browsers,
+            commands::search::browser_profiles,
+            commands::search::search_engines,
+            commands::search::default_browser,
+            commands::launch::extract_text_from_last_image,
+            commands::system::begin_capture,
+            commands::system::cancel_capture,
+            commands::system::capture_area,
+            commands::system::capture_screen,
+            commands::system::capture_targets,
+            commands::system::capture_window,
+            commands::system::capture_display,
+            commands::system::last_image_entry,
+            commands::system::open_markup,
+            commands::system::markup_image,
+            commands::system::finish_markup,
+            commands::system::cancel_markup,
             commands::search::search_windows,
             commands::search::search_emoji,
             commands::search::file_search_missing,

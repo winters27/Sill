@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import SettingsIcon, { type IconName } from "$lib/components/SettingsIcon.svelte";
+  import LaunchIcon from "$lib/components/LaunchIcon.svelte";
+  import { COLOURS as MARKUP_COLOURS } from "$lib/markup";
   import TitleBar from "$lib/components/TitleBar.svelte";
   import Toggle from "$lib/components/Toggle.svelte";
   import Section from "$lib/components/settings/Section.svelte";
@@ -23,7 +25,12 @@
     acceleratorFrom,
     applyAppearance,
     clearUsageHistory,
+    browserProfiles,
     getDiagnostics,
+    type AfterCapture,
+    type KnownBrowser,
+    searchEngines,
+    type SearchEngine,
     getPreferences,
     hotkeyConflicts,
     openDataFolder,
@@ -34,9 +41,11 @@
     type Backdrop,
     type SettingEntry,
     type InterfaceFont,
+    type Theme,
     type Diagnostics,
     type Preferences,
   } from "$lib/settings";
+  import { swap } from "$lib/motion";
   import "$lib/theme/theme.css";
 
   type PanelId = IconName;
@@ -46,6 +55,16 @@
     name: string;
     /** The one line under the panel title. */
     blurb: string;
+    /**
+     * The heading this panel sits under in the sidebar.
+     *
+     * Set on the FIRST panel of a run; the sidebar emits a label whenever the
+     * value changes while walking the array in order, so the array's order is
+     * the grouping and the two cannot disagree. The first few panels carry no
+     * group on purpose: General and Appearance are the ones everybody opens,
+     * and putting a heading above them buries them.
+     */
+    group?: string;
   }
 
   const PANELS: Panel[] = [
@@ -60,24 +79,10 @@
       blurb: "Window size, backdrop material and how deep the glass sits",
     },
     {
-      id: "dictation",
-      name: "Dictation",
-      blurb: "The trigger, where the transcript goes, and which engine hears it",
-    },
-    {
       id: "snippets",
       name: "Snippets",
       blurb: "Saved text, expanded by keyword or pasted from the launcher",
-    },
-    {
-      id: "emoji",
-      name: "Emoji",
-      blurb: "Skin tone, and what Enter does with the one you picked",
-    },
-    {
-      id: "shortcuts",
-      name: "Shortcuts",
-      blurb: "Keys that act on the selected text without opening the launcher",
+      group: "Workflow",
     },
     {
       id: "quicklinks",
@@ -90,9 +95,20 @@
       blurb: "What is kept from everything you copy, and for how long",
     },
     {
+      id: "emoji",
+      name: "Emoji",
+      blurb: "Skin tone, and what Enter does with the one you picked",
+    },
+    {
+      id: "shortcuts",
+      name: "Shortcuts",
+      blurb: "Keys that act on the selected text without opening the launcher",
+    },
+    {
       id: "sources",
       name: "Sources",
       blurb: "Where Sill looks for applications, commands and settings pages",
+      group: "Search",
     },
     {
       id: "files",
@@ -100,20 +116,61 @@
       blurb: "Everything integration, match rules and the folders it covers",
     },
     {
+      id: "browsers",
+      name: "Browser Search",
+      blurb: "Pages your browsers remember, and which of them Sill may read",
+    },
+    {
+      id: "screenshot",
+      name: "Screenshots",
+      blurb: "The keys that take one, and what the editor opens with",
+    },
+    {
+      id: "websearch",
+      name: "Web Search",
+      blurb: "The engine behind the row that offers to look up what you typed",
+    },
+    {
       id: "extensions",
       name: "Extensions",
       blurb: "Raycast extensions installed into Sill's host",
     },
     {
+      id: "dictation",
+      name: "Dictation",
+      blurb: "The trigger, where the transcript goes, and which engine hears it",
+      group: "Voice",
+    },
+    {
       id: "advanced",
       name: "Advanced",
       blurb: "The index, usage history and where Sill keeps its data",
+      group: "System",
     },
     {
       id: "about",
       name: "About",
       blurb: "Version, licence and what Sill is built on",
     },
+  ];
+
+  /**
+   * The themes on offer, in the order they are shown.
+   *
+   * Names and one-line notes only. Not a colour in sight: the swatches render
+   * themselves from `[data-theme]`, so this list cannot drift from the
+   * palettes the way a table of hex values here would.
+   */
+  /** Themes that paint a chroma wash. A slider for a theme with none is a
+      control that visibly does nothing, which is worse than no control. */
+  const CHROMATIC: Theme[] = ["oilslick"];
+
+  const THEMES: { id: Theme; name: string; note: string }[] = [
+    { id: "winters-glass", name: "Winters' Glass", note: "Neutral, blue-grey accent" },
+    { id: "oilslick", name: "Oilslick", note: "A faint iridescent wash" },
+    { id: "graphite", name: "Graphite", note: "No hue anywhere" },
+    { id: "ember", name: "Ember", note: "Warm black, amber accent" },
+    { id: "moss", name: "Moss", note: "Cool green" },
   ];
 
   type SourceKey = Exclude<keyof Preferences["sources"], "excluded" | "hidden">;
@@ -162,6 +219,24 @@
 
   let prefs = $state<Preferences | null>(null);
   let info = $state<Diagnostics | null>(null);
+  /** The engines Sill knows, named by Rust so the list is stated once. */
+  let engines = $state<SearchEngine[]>([]);
+  /** Which browsers are installed, so the pane can show them. */
+  let browsers = $state<KnownBrowser[]>([]);
+
+  /**
+   * The browsers, written the way somebody would say them.
+   *
+   * Named rather than counted. "Reads 3 browsers" says how much is on offer
+   * and not one thing about whether you want it.
+   */
+  const browsersFound = $derived.by(() => {
+    const names = browsers.map((b) => b.name);
+    if (names.length === 0) return "";
+    if (names.length === 1) return names[0];
+
+    return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  });
   let active = $state<PanelId>("general");
   let status = $state("");
   /**
@@ -170,7 +245,40 @@
    * There is more than one now, and a shared boolean would send whatever the
    * user pressed to the summon key regardless of which row they clicked.
    */
-  let recording = $state<"summon" | "switcher" | null>(null);
+  /**
+   * Which key is being recorded, by the field it sets.
+   *
+   * A name rather than one of a fixed pair. There were two keys and now there
+   * are four, and a chain of `if` per key is how the third one gets forgotten
+   * in one of the three places that has to know about it.
+   */
+  type Bindable = "summon" | "switcher" | "capture" | "captureScreen";
+  let recording = $state<Bindable | null>(null);
+
+  /** The keys somebody can set, and what each one does. */
+  const BINDABLE: { id: Bindable; title: string; description: string; optional: boolean }[] = [
+    {
+      id: "switcher",
+      title: "Window switcher hotkey",
+      description:
+        "Opens Sill straight onto the windows you have open, most recent first. Backspace turns it off.",
+      optional: true,
+    },
+    {
+      id: "capture",
+      title: "Screenshot hotkey",
+      description:
+        "Picks an area of the screen without opening Sill first. Drag an area, or click a window. Backspace turns it off.",
+      optional: true,
+    },
+    {
+      id: "captureScreen",
+      title: "Whole screen hotkey",
+      description:
+        "Copies everything on every display at once, with nothing to pick. Backspace turns it off.",
+      optional: true,
+    },
+  ];
 
   /** Accelerators Windows refused because something else already has them. */
   let conflicts = $state<string[]>([]);
@@ -225,10 +333,11 @@
       return;
     }
 
-    // Backspace clears rather than binds. The switcher is allowed to be off,
-    // and there has to be a way back to off once a key is set.
-    if (event.key === "Backspace" && recording === "switcher") {
-      prefs.hotkey.switcher = "";
+    // Backspace clears rather than binds. Everything except the summon key is
+    // allowed to be off, and there has to be a way back to off once one is set.
+    const optional = recording !== "summon";
+    if (event.key === "Backspace" && optional) {
+      prefs.hotkey[recording] = "";
       recording = null;
       void commit();
       return;
@@ -237,23 +346,26 @@
     const accelerator = acceleratorFrom(event);
     if (!accelerator) return;
 
-    // One key cannot mean two things. Binding the switcher to the summon key
-    // would leave whichever registered second silently doing nothing.
-    const other =
-      recording === "summon" ? prefs.hotkey.switcher : prefs.hotkey.summon;
-    if (accelerator === other) {
+    /*
+     * One key cannot mean two things.
+     *
+     * Checked against every other key rather than against one of them.
+     * Windows registers the first and refuses the second, so a collision here
+     * is a key that silently does nothing, and which of the two it is depends
+     * on the order they happened to be registered in.
+     */
+    const clash = (["summon", "switcher", "capture", "captureScreen"] as Bindable[]).find(
+      (id) => id !== recording && prefs?.hotkey[id] === accelerator,
+    );
+
+    if (clash) {
       status = `${accelerator.split("+").join(" ")} is already used`;
       recording = null;
       setTimeout(() => (status = ""), 1600);
       return;
     }
 
-    if (recording === "summon") {
-      prefs.hotkey.summon = accelerator;
-    } else {
-      prefs.hotkey.switcher = accelerator;
-    }
-
+    prefs.hotkey[recording] = accelerator;
     recording = null;
     void commit();
   }
@@ -318,6 +430,8 @@
         applyAppearance(prefs);
         index = await listOwnSettings();
         info = await getDiagnostics();
+        browsers = await browserProfiles();
+        engines = await searchEngines();
       } catch (err) {
         status = `Could not load settings: ${err}`;
       }
@@ -381,9 +495,18 @@
           {/if}
         </nav>
       {:else}
-        <div class="group">Settings</div>
+        <!--
+          One flat list of thirteen panels was a wall. A heading appears
+          wherever `group` is set, which is the first panel of each run, so the
+          array's order IS the grouping and a panel cannot end up under the
+          wrong heading. General and Appearance lead with no heading at all,
+          because they are what somebody opening settings came for.
+        -->
         <nav>
           {#each PANELS as item (item.id)}
+            {#if item.group}
+              <div class="nav-label">{item.group}</div>
+            {/if}
             <button
               class="nav-item"
               class:selected={item.id === active}
@@ -412,6 +535,14 @@
           <div class="loading">{status || "Loading…"}</div>
         {:else}
           {@const p = prefs}
+          <!--
+            Keyed on the panel, so switching one out and the next one in is a
+            change the user can follow rather than a jump. Opacity and a 4px
+            lift only: the heading above does not move, so the window reads as
+            its contents being replaced rather than as the whole pane sliding.
+          -->
+          {#key active}
+          <div class="panel-body" in:swap out:swap={{ out: true }}>
           {#if active === "general"}
           <Section label="Startup">
             <Row
@@ -464,27 +595,29 @@
               {/snippet}
             </Row>
 
-            <Row
-              title="Window switcher hotkey"
-              description={p.hotkey.switcher && conflicts.includes(p.hotkey.switcher)
-                ? "Another application already has this combination, so it does nothing. Choose a different one."
-                : "Opens Sill straight onto the windows you have open, most recent first. Backspace turns it off."}
-            >
-              {#snippet control()}
-                <button
-                  class="recorder"
-                  class:taken={!!p.hotkey.switcher && conflicts.includes(p.hotkey.switcher)}
-                  class:recording={recording === "switcher"}
-                  onclick={() => (recording = recording === "switcher" ? null : "switcher")}
-                >
-                  {recording === "switcher"
-                    ? "Press a combination"
-                    : p.hotkey.switcher
-                      ? p.hotkey.switcher.split("+").join(" ")
-                      : "Off"}
-                </button>
-              {/snippet}
-            </Row>
+            {#each BINDABLE as key (key.id)}
+              <Row
+                title={key.title}
+                description={p.hotkey[key.id] && conflicts.includes(p.hotkey[key.id])
+                  ? "Another application already has this combination, so it does nothing. Choose a different one."
+                  : key.description}
+              >
+                {#snippet control()}
+                  <button
+                    class="recorder"
+                    class:taken={!!p.hotkey[key.id] && conflicts.includes(p.hotkey[key.id])}
+                    class:recording={recording === key.id}
+                    onclick={() => (recording = recording === key.id ? null : key.id)}
+                  >
+                    {recording === key.id
+                      ? "Press a combination"
+                      : p.hotkey[key.id]
+                        ? p.hotkey[key.id].split("+").join(" ")
+                        : "Off"}
+                  </button>
+                {/snippet}
+              </Row>
+            {/each}
           </Section>
 
           <Section label="Opening and closing">
@@ -526,6 +659,66 @@
             </Row>
           </Section>
           {:else if active === "appearance"}
+          <Section
+            label="Theme"
+            description="A theme moves the canvas and the accent. Everything that carries meaning, the text steps, the hairlines, the fills, is the same in all of them, so nothing gets harder to read whichever you pick."
+            bare
+          >
+            <!--
+              Each swatch carries its own `data-theme`, so it is rendered by the
+              palette it is offering rather than by a copy of that palette's
+              colours kept here. That is why the theme selectors are written
+              `[data-theme]` rather than `:root[data-theme]`.
+            -->
+            <div class="themes" role="radiogroup" aria-label="Theme">
+              {#each THEMES as t (t.id)}
+                <button
+                  class="theme"
+                  class:selected={p.appearance.theme === t.id}
+                  data-theme={t.id}
+                  role="radio"
+                  aria-checked={p.appearance.theme === t.id}
+                  onclick={() => {
+                    if (!prefs) return;
+                    p.appearance.theme = t.id;
+                    void commit();
+                  }}
+                >
+                  <span class="swatch" aria-hidden="true">
+                    <span class="swatch-row"></span>
+                    <span class="swatch-row lit"></span>
+                    <span class="swatch-row"></span>
+                  </span>
+                  <span class="theme-name">{t.name}</span>
+                  <span class="theme-note">{t.note}</span>
+                </button>
+              {/each}
+            </div>
+
+            {#if CHROMATIC.includes(p.appearance.theme)}
+              <Row
+                title="Chroma"
+                description="How strongly the iridescent wash is painted. The three hues move together, so this changes its weight without changing its balance."
+              >
+                {#snippet control()}
+                  <Slider
+                    value={Math.round(p.appearance.chromaStrength * 100)}
+                    min={0}
+                    max={160}
+                    step={5}
+                    label="Chroma"
+                    format={(v) => `${v}%`}
+                    onchange={(v) => {
+                      if (!prefs) return;
+                      p.appearance.chromaStrength = v / 100;
+                      void commit();
+                    }}
+                  />
+                {/snippet}
+              </Row>
+            {/if}
+          </Section>
+
           <Section
             label="Material"
             description="Windows composites the desktop behind the window. These decide how much of it shows through."
@@ -796,6 +989,249 @@
               {/snippet}
             </Row>
           </Section>
+          {:else if active === "screenshot"}
+          <Section
+            label="Screenshots"
+            description="Pick an area, click a window, or take every screen at once. Whatever you take goes to the clipboard, and to the editor if you want it."
+          >
+            <Row
+              title="After taking one"
+              description="The editor draws boxes, arrows, highlights and blocks over anything you have hidden. It reaches the clipboard from there either way."
+            >
+              {#snippet control()}
+                <Segmented
+                  value={p.screenshot.after}
+                  options={[
+                    { value: "copy", label: "Copy it" },
+                    { value: "edit", label: "Open the editor" },
+                  ]}
+                  onchange={(next) => {
+                    if (!prefs) return;
+                    p.screenshot.after = next as AfterCapture;
+                    void commit();
+                  }}
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="Click a window to take it"
+              description="While picking an area, the window under the pointer lights up and a click takes the whole of it, even the parts something else is covering."
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.screenshot.clickAWindow}
+                  onchange={commit}
+                  label="Click a window to take it"
+                />
+              {/snippet}
+            </Row>
+          </Section>
+
+          <Section
+            label="What the editor opens with"
+            description="Where it starts each time. Everything is still changeable once it is open."
+          >
+            <Row title="Tool">
+              {#snippet control()}
+                <Segmented
+                  value={p.screenshot.tool}
+                  options={[
+                    { value: "box", label: "Box" },
+                    { value: "arrow", label: "Arrow" },
+                    { value: "pen", label: "Pen" },
+                    { value: "highlight", label: "Highlight" },
+                    { value: "hide", label: "Hide" },
+                    { value: "step", label: "Badge" },
+                  ]}
+                  onchange={(next) => {
+                    if (!prefs) return;
+                    p.screenshot.tool = next;
+                    void commit();
+                  }}
+                />
+              {/snippet}
+            </Row>
+            <Row title="Colour">
+              {#snippet control()}
+                <div class="swatches">
+                  {#each MARKUP_COLOURS as swatch (swatch.value)}
+                    <button
+                      class="swatch"
+                      class:on={p.screenshot.colour === swatch.value}
+                      style:background={swatch.value}
+                      title={swatch.name}
+                      aria-label={swatch.name}
+                      aria-pressed={p.screenshot.colour === swatch.value}
+                      onclick={() => {
+                        if (!prefs) return;
+                        p.screenshot.colour = swatch.value;
+                        void commit();
+                      }}
+                    ></button>
+                  {/each}
+                </div>
+              {/snippet}
+            </Row>
+            <Row
+              title="Badges start at"
+              description="The number the first numbered badge shows. Writing the second half of a walkthrough starts at seven."
+            >
+              {#snippet control()}
+                <Slider
+                  bind:value={p.screenshot.stepFrom}
+                  min={0}
+                  max={20}
+                  step={1}
+                  label="Badges start at"
+                  format={(v) => `${v}`}
+                  onchange={commit}
+                />
+              {/snippet}
+            </Row>
+            <Row title="Stroke width">
+              {#snippet control()}
+                <Slider
+                  bind:value={p.screenshot.weight}
+                  min={1}
+                  max={12}
+                  step={1}
+                  label="Stroke width"
+                  format={(v) => `${v}`}
+                  onchange={commit}
+                />
+              {/snippet}
+            </Row>
+          </Section>
+          {:else if active === "websearch"}
+          <Section
+            label="Web search"
+            description="The last row Sill offers, after everything that actually matched. It reads nothing and sends nothing until you choose it."
+          >
+            <Row
+              title="Offer to search the web"
+              description="Appears at the bottom of the list whenever you have typed something, so it never displaces a result."
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.webSearch.enabled}
+                  onchange={commit}
+                  label="Offer to search the web"
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="Engine"
+              description="DuckDuckGo by default: it is the one that does not build a profile of whoever is typing."
+              disabled={!p.webSearch.enabled || p.webSearch.customUrl.trim() !== ""}
+            >
+              {#snippet control()}
+                <select
+                  value={p.webSearch.engine}
+                  onchange={(e) => {
+                    if (!prefs) return;
+                    p.webSearch.engine = e.currentTarget.value;
+                    void commit();
+                  }}
+                >
+                  {#each engines as option (option.id)}
+                    <option value={option.id}>{option.name}</option>
+                  {/each}
+                </select>
+              {/snippet}
+            </Row>
+            <Row
+              title="Your own address"
+              description="Put {'{query}'} where the words go. Anything here is used instead of the engine above."
+              disabled={!p.webSearch.enabled}
+            >
+              {#snippet children()}
+                <input
+                  bind:value={p.webSearch.customUrl}
+                  onchange={commit}
+                  placeholder="https://example.com/search?q={'{query}'}"
+                  spellcheck="false"
+                />
+              {/snippet}
+            </Row>
+          </Section>
+          {:else if active === "browsers"}
+          <Section
+            label="Browser search"
+            description="Pages your browsers remember, alongside everything else. Nothing is copied or read until you type, and it stays on this machine."
+          >
+            <Row
+              title="Search browser pages"
+              description={browsersFound
+                ? `Reads ${browsersFound}.`
+                : "No browser Sill knows how to read is installed on this machine."}
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.browsers.enabled}
+                  onchange={commit}
+                  label="Search browser pages"
+                />
+              {/snippet}
+            </Row>
+            {#if browsers.length}
+              <!--
+                The browsers themselves, wearing their own marks.
+                Naming what will be read is the point of this pane, and a row of
+                logos says it faster than a sentence and is harder to misread.
+              -->
+              <div class="browsers">
+                {#each browsers as found (found.name)}
+                  <span class="browser">
+                    <LaunchIcon
+                      path={found.program ?? ""}
+                      label={found.name}
+                      resolvable={!!found.program}
+                    />
+                    {found.name}
+                  </span>
+                {/each}
+              </div>
+            {/if}
+            <Row
+              title="Bookmarks"
+              description="Pages you saved. The smaller and more deliberate set, so these rank above history."
+              disabled={!p.browsers.enabled}
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.browsers.bookmarks}
+                  onchange={commit}
+                  label="Bookmarks"
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="History"
+              description="Pages you visited. Much the larger of the two, and the more revealing."
+              disabled={!p.browsers.enabled}
+            >
+              {#snippet control()}
+                <Toggle bind:checked={p.browsers.history} onchange={commit} label="History" />
+              {/snippet}
+            </Row>
+            <Row
+              title="Maximum browser results"
+              description="These rank below commands and files, so a high number mostly costs scrolling."
+              disabled={!p.browsers.enabled}
+            >
+              {#snippet control()}
+                <Slider
+                  bind:value={p.browsers.maxResults}
+                  min={2}
+                  max={20}
+                  step={2}
+                  label="Maximum browser results"
+                  format={(v) => `${v} pages`}
+                  onchange={commit}
+                />
+              {/snippet}
+            </Row>
+          </Section>
           {:else if active === "extensions"}
           <Section
             label="Runs extensions in"
@@ -938,6 +1374,8 @@
             />
           </Section>
         {/if}
+          </div>
+          {/key}
         {/if}
       </div>
     </main>
@@ -945,6 +1383,45 @@
 </div>
 
 <style>
+  .swatches {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+
+  .swatch {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.35);
+    cursor: default;
+  }
+
+  .swatch.on {
+    box-shadow:
+      inset 0 0 0 1px rgb(0 0 0 / 0.35),
+      0 0 0 2px var(--core-secondary-background),
+      0 0 0 3px var(--accent);
+  }
+
+  /* The browsers this pane is about, shown rather than described. */
+  .browsers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    padding: 0 var(--space-3) var(--space-3);
+  }
+
+  .browser {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--text-2);
+    font-size: var(--text-meta);
+  }
+
   .window {
     display: flex;
     flex-direction: column;
@@ -957,7 +1434,7 @@
       var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
       var(--surface-base)
     );
-    background-image: linear-gradient(var(--tint), var(--tint));
+    background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
     border-radius: var(--radius-window);
     box-shadow: var(--bevel-window);
     overflow: hidden;
@@ -969,34 +1446,39 @@
     min-height: 0;
   }
 
+  /* Both columns start on the same line, `--space-5` below the title bar.
+     They sat at 2px and 4px, which read as the content having been shoved up
+     against the chrome rather than placed under it. */
   aside {
     display: flex;
     flex-direction: column;
     width: 244px;
     flex: none;
-    padding: 2px 0 10px;
+    padding: var(--space-5) 0 var(--space-2);
     border-right: 1px solid var(--hairline);
   }
 
   .search {
     display: flex;
     align-items: center;
-    gap: 7px;
-    margin: 0 12px 14px;
-    padding: 0 8px;
+    gap: var(--space-2);
+    margin: 0 var(--space-3) var(--space-3);
+    padding: 0 var(--space-2);
     height: 30px;
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.05);
+    background: var(--fill-1);
     box-shadow: inset 0 0 0 1px var(--hairline);
-    color: var(--text-faint);
+    color: var(--text-3);
     transition:
       background-color 0.15s var(--ease),
       box-shadow 0.15s var(--ease);
   }
 
+  /* Focus is one of the four things the accent is for, and the only one that
+     applies to a text field. */
   .search:focus-within {
-    background: rgba(var(--accent-rgb), 0.08);
-    box-shadow: inset 0 0 0 1px var(--border-light);
+    background: var(--fill-2);
+    box-shadow: inset 0 0 0 1px var(--accent-line);
   }
 
   .search input {
@@ -1004,15 +1486,15 @@
     min-width: 0;
     border: 0;
     background: transparent;
-    color: var(--core-foreground);
+    color: var(--text-1);
     font: inherit;
-    font-size: 12.5px;
+    font-size: var(--text-meta);
     outline: none;
     user-select: text;
   }
 
   .search input::placeholder {
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .clear {
@@ -1021,47 +1503,58 @@
     width: 16px;
     height: 16px;
     border: 0;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-faint);
+    color: var(--text-3);
     cursor: pointer;
   }
 
   .clear:hover {
-    color: var(--core-foreground);
+    color: var(--text-1);
   }
 
-  .group {
-    padding: 0 16px 8px;
-    font-size: 11px;
-    letter-spacing: 0.12em;
+  /* The one over the search results. Same treatment as a group heading in
+     the nav below, so the sidebar reads as one system. */
+  .group,
+  .nav-label {
+    padding: 0 var(--space-2) var(--space-2);
+    font-size: var(--text-label);
+    font-weight: var(--weight-strong);
+    letter-spacing: var(--track-label);
     text-transform: uppercase;
-    color: var(--text-faint);
+    color: var(--text-3);
+  }
+
+  /* Space above a heading, none above the first: the gap is what makes a run
+     of items read as a group, and a gap at the top of the list is just a
+     hole. */
+  .nav-label {
+    margin-top: var(--space-5);
   }
 
   nav {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 0 8px;
+    padding: 0 var(--space-2);
     scrollbar-width: thin;
-    scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .nav-item {
     display: flex;
     align-items: center;
-    gap: 11px;
+    gap: var(--space-3);
     width: 100%;
-    padding: 6px 8px;
+    padding: var(--space-1) var(--space-2);
     margin-bottom: 2px;
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-2);
     font: inherit;
-    font-size: 13px;
-    font-weight: 500;
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
     text-align: left;
     cursor: pointer;
     transition:
@@ -1070,26 +1563,28 @@
   }
 
   .nav-item:hover {
-    background-color: rgba(var(--accent-rgb), 0.05);
-    color: var(--core-foreground);
+    background-color: var(--fill-1);
+    color: var(--text-1);
   }
 
+  /* Which panel is open is a selection, so it takes the accent. Hover above
+     stays neutral, which is what keeps the two states distinguishable. */
   .nav-item.selected {
-    background-color: rgba(var(--accent-rgb), 0.11);
-    color: var(--core-foreground);
+    background-color: var(--accent-fill);
+    color: var(--text-1);
   }
 
   .result {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2);
     width: 100%;
-    padding: 6px 9px;
+    padding: var(--space-1) var(--space-2);
     margin-bottom: 2px;
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--core-foreground);
+    color: var(--text-1);
     font: inherit;
     text-align: left;
     cursor: pointer;
@@ -1097,7 +1592,7 @@
   }
 
   .result:hover {
-    background-color: rgba(var(--accent-rgb), 0.07);
+    background-color: var(--fill-1);
   }
 
   .result-tile {
@@ -1106,10 +1601,10 @@
     width: 22px;
     height: 22px;
     flex: none;
-    border-radius: 5px;
-    background: rgba(var(--accent-rgb), 0.1);
+    border-radius: var(--radius-sm);
+    background: var(--fill-2);
     box-shadow: var(--bevel-tile);
-    color: var(--core-foreground);
+    color: var(--text-1);
   }
 
   .result-text {
@@ -1120,22 +1615,103 @@
   }
 
   .result-title {
-    font-size: 12.5px;
-    font-weight: 500;
+    font-size: var(--text-meta);
+    font-weight: var(--weight-medium);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
+  /* ---- Theme picker -------------------------------------------------- */
+
+  .themes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: var(--space-2);
+  }
+
+  /*
+   * Each card is rendered by the theme it offers, so `--core-*` and `--chroma`
+   * inside it are that theme's, not the active one's.
+   */
+  .theme {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border: 0;
+    border-radius: var(--radius-lg);
+    background: var(--fill-1);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    color: var(--text-1);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background-color 0.15s var(--ease),
+      box-shadow 0.15s var(--ease);
+  }
+
+  .theme:hover {
+    background: var(--fill-2);
+  }
+
+  /* Selection is the accent, same as everywhere else. The ring is drawn in
+     the card's OWN accent, so the chosen theme is showing you its highlight
+     colour at the same time as telling you it is chosen. */
+  .theme.selected {
+    background: var(--fill-2);
+    box-shadow: inset 0 0 0 2px var(--core-accent);
+  }
+
+  /* A launcher in miniature: the window surface, three rows, one of them lit
+     by the selection colour. Enough to judge a palette by. */
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    height: 56px;
+    padding: var(--space-2);
+    border-radius: var(--radius-md);
+    background-color: var(--core-secondary-background);
+    background-image: var(--chroma);
+    box-shadow: var(--bevel-tile);
+    overflow: hidden;
+  }
+
+  .swatch-row {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--fill-3);
+  }
+
+  .swatch-row.lit {
+    background: var(--core-accent);
+    opacity: 0.85;
+  }
+
+  .theme-name {
+    font-size: var(--text-meta);
+    font-weight: var(--weight-medium);
+  }
+
+  .theme-note {
+    margin-top: -4px;
+    font-size: var(--text-label);
+    color: var(--text-3);
+  }
+
   .result-panel {
-    font-size: 11px;
-    color: var(--text-faint);
+    font-size: var(--text-label);
+    color: var(--text-3);
   }
 
   .no-results {
-    margin: 4px 9px;
-    font-size: 12px;
-    color: var(--text-faint);
+    margin: var(--space-1) var(--space-2);
+    font-size: var(--text-meta);
+    color: var(--text-3);
   }
 
   main {
@@ -1148,9 +1724,9 @@
   header {
     display: flex;
     align-items: center;
-    gap: 13px;
+    gap: var(--space-4);
     flex: none;
-    padding: 2px 32px 20px;
+    padding: var(--space-5) var(--space-8) var(--space-6);
   }
 
 
@@ -1158,58 +1734,70 @@
     min-width: 0;
   }
 
+  /* The loudest thing in the window, and it should be. It names what is on
+     screen; the section labels beneath it are structure and stay quiet. */
   h2 {
     margin: 0;
-    font-size: 16px;
-    font-weight: 600;
+    font-size: var(--text-title);
+    font-weight: var(--weight-strong);
+    letter-spacing: var(--track-title);
     line-height: 1.2;
   }
 
   header p {
-    margin: 3px 0 0;
-    font-size: 12px;
-    color: var(--text-muted);
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-meta);
+    color: var(--text-2);
   }
 
   .status {
     margin-left: auto;
     flex: none;
-    font-size: 12px;
+    font-size: var(--text-meta);
     color: var(--core-accent);
   }
 
+  /* The outgoing and incoming panels overlap for the length of the exit, so
+     they are laid on top of each other rather than stacked vertically. Without
+     this the pane doubles in height for 100ms and the scrollbar flickers. */
   .content {
+    display: grid;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 0 32px 32px;
+    padding: 0 var(--space-8) var(--space-8);
     scrollbar-width: thin;
-    scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  .panel-body {
+    grid-area: 1 / 1;
+    min-width: 0;
   }
 
   .loading {
-    padding: 28px 0;
-    color: var(--text-faint);
+    padding: var(--space-6) 0;
+    color: var(--text-3);
   }
 
   .empty {
     margin: 0;
     max-width: 56ch;
-    font-size: 13px;
+    font-size: var(--text-body);
     line-height: 1.7;
-    color: var(--text-muted);
+    color: var(--text-2);
   }
 
   .recorder {
     min-width: 150px;
-    padding: 6px 14px;
+    padding: var(--space-1) var(--space-3);
     border: 0;
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.1);
+    background: var(--fill-2);
     box-shadow: var(--bevel-tile);
-    color: var(--core-foreground);
+    color: var(--text-1);
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-meta);
     letter-spacing: 0.04em;
     cursor: pointer;
     transition:
@@ -1218,7 +1806,7 @@
   }
 
   .recorder:hover {
-    background: rgba(var(--accent-rgb), 0.18);
+    background: var(--fill-3);
   }
 
   /* A key that Windows refused. Stated rather than merely styled: the colour
@@ -1229,58 +1817,58 @@
   }
 
   .recorder.recording {
-    background: rgba(var(--accent-rgb), 0.22);
+    background: var(--hairline-strong);
     color: var(--accent-bright);
   }
 
   .fact {
     font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-muted);
+    font-size: var(--text-meta);
+    color: var(--text-2);
   }
 
   .stats {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
-    gap: 8px;
+    gap: var(--space-2);
   }
 
   .stat {
-    padding: 11px 13px;
-    border-radius: 10px;
+    padding: var(--space-3) var(--space-3);
+    border-radius: var(--radius-lg);
     background: rgba(255, 255, 255, 0.02);
   }
 
   .stat-value {
     display: block;
-    font-size: 18px;
-    font-weight: 600;
+    font-size: var(--text-title);
+    font-weight: var(--weight-strong);
     font-variant-numeric: tabular-nums;
   }
 
   .stat-label {
     display: block;
     margin-top: 2px;
-    font-size: 11px;
-    color: var(--text-faint);
+    font-size: var(--text-label);
+    color: var(--text-3);
   }
 
   .about {
     display: flex;
     align-items: center;
-    gap: 16px;
-    margin-bottom: 30px;
+    gap: var(--space-4);
+    margin-bottom: var(--space-8);
   }
 
   .about h3 {
     margin: 0;
-    font-size: 17px;
-    font-weight: 600;
+    font-size: var(--text-query);
+    font-weight: var(--weight-strong);
   }
 
   .about p {
-    margin: 4px 0 0;
-    font-size: 13px;
-    color: var(--text-muted);
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-body);
+    color: var(--text-2);
   }
 </style>

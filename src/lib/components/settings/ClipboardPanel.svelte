@@ -164,23 +164,23 @@
   .stored {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 16px 18px;
-    border-radius: 10px;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4);
+    border-radius: var(--radius-lg);
     background: rgba(255, 255, 255, 0.02);
     box-shadow: var(--bevel-tile);
   }
 
   .figure {
-    font-size: 22px;
-    font-weight: 600;
+    font-size: var(--text-display);
+    font-weight: var(--weight-strong);
     font-variant-numeric: tabular-nums;
   }
 
   .unit {
-    margin-left: 6px;
+    margin-left: var(--space-1);
     font-size: var(--text-meta);
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .spacer {
@@ -193,8 +193,8 @@
   }
 
   .note {
-    margin: 8px 2px 0;
+    margin: var(--space-2) 2px 0;
     font-size: var(--text-meta);
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 </style>

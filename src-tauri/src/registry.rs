@@ -203,7 +203,17 @@ pub fn app_record(name: &str, path: &str, icon: Option<String>, kind: &str) -> C
 /// ranked below real applications so a CLI utility never displaces the app
 /// someone was reaching for.
 pub fn executable_record(name: &str, path: &str, kind: &str) -> CommandRecord {
-    app_entry(name, path, Some(path.to_string()), "exe", kind)
+    let mut record = app_entry(name, path, Some(path.to_string()), "exe", kind);
+
+    // Where it is, because that is the only thing telling two of them apart.
+    // A machine with three Pythons on PATH shows three identical rows without
+    // it, and which one runs is decided by an order nobody can see.
+    //
+    // Applications are left blank on purpose: there is one Chrome, its
+    // category already shows on the right, and a path under every row is a
+    // second line of noise for a question nobody asked.
+    record.subtitle = path.to_string();
+    record
 }
 
 fn app_entry(
@@ -342,6 +352,67 @@ pub fn builtins() -> Vec<CommandRecord> {
             "Clipboard History",
             "Everything you have copied, searchable",
             &["paste", "copy", "history", "recent", "pasteboard"],
+        ),
+        builtin(
+            "capture-area",
+            "clipboard",
+            "Capture Area",
+            "Drag a rectangle and copy it",
+            &[
+                "screenshot",
+                "screen",
+                "shot",
+                "grab",
+                "snip",
+                "region",
+                "area",
+                "crop",
+                "capture",
+            ],
+        ),
+        builtin(
+            "capture-screen",
+            "clipboard",
+            "Capture Whole Screen",
+            "Copies everything on every display",
+            &["screenshot", "screen", "shot", "grab", "fullscreen", "display", "capture"],
+        ),
+        builtin(
+            "mark-up",
+            "clipboard",
+            "Mark Up Last Image",
+            "Draw on the last picture you copied",
+            &[
+                "annotate",
+                "markup",
+                "draw",
+                "arrow",
+                "highlight",
+                "redact",
+                "blur",
+                "screenshot",
+                "edit image",
+            ],
+        ),
+        builtin(
+            "extract-text",
+            // Filed with the clipboard, because that is where the picture it
+            // reads comes from and where the words it finds go.
+            "clipboard",
+            "Extract Text from Image",
+            "Reads the words out of the last picture you copied",
+            &[
+                "ocr",
+                "text",
+                "read",
+                "recognise",
+                "recognize",
+                "image",
+                "picture",
+                "screenshot",
+                "scan",
+                "copy text",
+            ],
         ),
         builtin(
             "emoji",

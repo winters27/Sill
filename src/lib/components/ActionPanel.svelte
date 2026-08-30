@@ -1,5 +1,6 @@
 <script lang="ts">
   import { groupActions, isRunnable, shortcutKeys, type ActionEntry } from "$lib/exthost/actions";
+  import { popover } from "$lib/motion";
 
   interface Props {
     actions: ActionEntry[];
@@ -24,7 +25,13 @@
 <!-- Click-away closes, which is why the backdrop covers the whole window. -->
 <div class="scrim" role="presentation" onclick={() => onrun(-1)}></div>
 
-<div class="panel sill-menu" role="menu" tabindex="-1">
+<div
+  class="panel sill-menu"
+  role="menu"
+  tabindex="-1"
+  in:popover={{ origin: "bottom right" }}
+  out:popover={{ origin: "bottom right", out: true }}
+>
   <div class="scroll">
     {#each groups as group, g (g)}
       {#if group.section}
@@ -74,11 +81,12 @@
   }
 
   /* Anchored bottom right, above the footer, the way a launcher's action
-     menu rises out of its own affordance. */
+     menu rises out of its own affordance. `bottom` clears the 40px footer
+     and lands the panel on the same right edge as the action pill. */
   .panel {
     position: fixed;
-    right: 8px;
-    bottom: 36px;
+    right: var(--space-2);
+    bottom: 44px;
     z-index: 11;
     width: 320px;
     max-height: 60vh;
@@ -89,37 +97,37 @@
 
   .scroll {
     overflow-y: auto;
-    padding: 5px;
+    padding: var(--space-1);
     scrollbar-width: thin;
-    scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .section {
-    padding: 8px 9px 4px;
+    padding: var(--space-2) var(--space-2) var(--space-1);
     font-size: var(--text-group);
-    font-weight: 500;
-    color: var(--text-faint);
+    font-weight: var(--weight-medium);
+    color: var(--text-3);
   }
 
   .rule {
     height: 1px;
-    margin: 5px 4px;
+    margin: var(--space-1);
     background: var(--hairline);
   }
 
   .row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     height: 32px;
-    padding: 0 9px;
-    border-radius: var(--radius-sm);
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-md);
     cursor: default;
     transition: background-color 0.15s var(--ease);
   }
 
   .row.selected {
-    background-color: var(--surface);
+    background-color: var(--accent-fill);
   }
 
   .row.destructive .title {
@@ -127,8 +135,8 @@
   }
 
   .title {
-    font-size: var(--text-row);
-    font-weight: var(--weight-row);
+    font-size: var(--text-body);
+    font-weight: var(--weight-body);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -136,7 +144,7 @@
 
   .inert {
     font-size: var(--text-meta);
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .spacer {
@@ -146,14 +154,14 @@
   .keys {
     flex: none;
     font-size: var(--text-meta);
-    font-weight: 500;
-    color: var(--text-faint);
+    font-weight: var(--weight-medium);
+    color: var(--text-3);
   }
 
   .empty {
-    padding: 18px 9px;
+    padding: var(--space-5) var(--space-2);
     text-align: center;
-    color: var(--text-faint);
-    font-size: var(--text-row);
+    color: var(--text-3);
+    font-size: var(--text-body);
   }
 </style>

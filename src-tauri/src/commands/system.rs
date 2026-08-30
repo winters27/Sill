@@ -2,7 +2,7 @@
 
 use crate::reload_index;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::registry::Frecency;
 use crate::state::{data_dir, RegistryState};
@@ -16,6 +16,17 @@ use crate::{icons, log, summon};
 #[tauri::command]
 pub(crate) fn rebuild_index(app: AppHandle) {
     reload_index(&app);
+}
+
+/// Summons the launcher, optionally with something to run on arrival.
+///
+/// The notification-area menu is a separate window, so choosing an entry there
+/// is an intent expressed from outside the launcher. The command is a thin
+/// adapter over `summon::show_with`; which screen "clipboard" means is the
+/// page's business, not Rust's.
+#[tauri::command]
+pub(crate) fn summon_with(app: AppHandle, command: Option<String>) {
+    summon::show_with(&app, command);
 }
 
 /// Opens the log in whatever reads a text file.
@@ -68,4 +79,415 @@ pub(crate) fn quit_app(app: AppHandle) {
 #[tauri::command]
 pub(crate) fn dismiss(window: tauri::WebviewWindow) {
     summon::hide(&window);
+}
+
+/// Puts the picking overlay over every screen.
+///
+/// Sized and placed in physical pixels, deliberately. The overlay has to line
+/// up with the screen exactly or the rectangle somebody drags is not the
+/// rectangle that gets copied, and logical pixels differ from physical ones by
+/// the display's scaling. On a desk with a 150% display and a 100% one there is
+/// no single scale that would work.
+#[tauri::command]
+pub(crate) async fn begin_capture(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("capture")
+        .ok_or_else(|| "the capture overlay is missing".to_string())?;
+
+    let (left, top, width, height) = crate::capture::virtual_screen();
+    if width <= 0 || height <= 0 {
+        return Err("no screens were found".to_string());
+    }
+
+    // The launcher gets out of the way first, or it is in the picture.
+    crate::dismiss_main(&app);
+
+    window
+        .set_position(tauri::PhysicalPosition::new(left, top))
+        .map_err(|err| format!("could not place the overlay: {err}"))?;
+    window
+        .set_size(tauri::PhysicalSize::new(width as u32, height as u32))
+        .map_err(|err| format!("could not size the overlay: {err}"))?;
+
+    window
+        .show()
+        .map_err(|err| format!("could not show the overlay: {err}"))?;
+
+    // Focus, because the overlay reads Escape and the mouse. It is the one
+    // window here that genuinely wants the keyboard.
+    let _ = window.set_focus();
+    #[cfg(windows)]
+    if let Ok(handle) = window.hwnd() {
+        crate::summon::force_foreground(windows::Win32::Foundation::HWND(
+            handle.0 as *mut core::ffi::c_void,
+        ));
+    }
+
+    Ok(())
+}
+
+/// The windows the picker can offer, topmost first.
+///
+/// Asked for once when the overlay opens rather than per pointer move: a
+/// window list is a Win32 enumeration and the desk does not rearrange itself
+/// while somebody is choosing.
+///
+/// The overlay itself is left out, or it would be the answer everywhere.
+#[tauri::command]
+pub(crate) async fn capture_targets(app: AppHandle) -> Result<Vec<CaptureTarget>, String> {
+    let ours: Vec<isize> = ["capture", "main", "markup", "traymenu", "settings"]
+        .iter()
+        .filter_map(|label| app.get_webview_window(label))
+        .filter_map(|window| window.hwnd().ok())
+        .map(|handle| handle.0 as isize)
+        .collect();
+
+    Ok(crate::windowing::list()
+        .into_iter()
+        .filter(|window| !window.minimized && !ours.contains(&window.id))
+        .map(|window| CaptureTarget {
+            id: window.id,
+            title: window.title,
+            app: window.app,
+            left: window.rect.x,
+            top: window.rect.y,
+            width: window.rect.width,
+            height: window.rect.height,
+        })
+        .collect())
+}
+
+/// A window the picker can capture, in the screen's own pixels.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CaptureTarget {
+    pub id: isize,
+    pub title: String,
+    pub app: String,
+    pub left: i32,
+    pub top: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Copies one window, whole, even where something is sitting on top of it.
+#[tauri::command]
+pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, String> {
+    if let Some(window) = app.get_webview_window("capture") {
+        let _ = window.hide();
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+    // Read again rather than trusting what the overlay was told: a handle can
+    // be reused by a different window after the first one closes, and the one
+    // it was holding may have moved while somebody was choosing.
+    let found = crate::windowing::find(id)
+        .ok_or_else(|| "that window has gone".to_string())?;
+    let rect = (found.rect.x, found.rect.y, found.rect.width, found.rect.height);
+
+    let shot = tokio::task::spawn_blocking(move || crate::capture::window(id, rect))
+        .await
+        .map_err(|err| format!("the capture failed: {err}"))??;
+
+    let size = format!("{}x{}", shot.width, shot.height);
+    let named = if found.title.is_empty() { found.app } else { found.title };
+
+    after_capture(&app, shot).await?;
+    Ok(format!("Copied {named}, {size}"))
+}
+
+/// Copies one whole display.
+#[tauri::command]
+pub(crate) async fn capture_display(app: AppHandle, index: usize) -> Result<String, String> {
+    if let Some(window) = app.get_webview_window("capture") {
+        let _ = window.hide();
+    }
+    crate::dismiss_main(&app);
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+    let screen = crate::windowing::monitors()
+        .into_iter()
+        .find(|monitor| monitor.index == index)
+        .ok_or_else(|| "there is no display with that number".to_string())?;
+
+    let rect = screen.full;
+    let shot = tokio::task::spawn_blocking(move || {
+        crate::capture::region(rect.x, rect.y, rect.width, rect.height)
+    })
+    .await
+    .map_err(|err| format!("the capture failed: {err}"))??;
+
+    let size = format!("{}x{}", shot.width, shot.height);
+    after_capture(&app, shot).await?;
+
+    Ok(format!("Copied display {}, {size}", index + 1))
+}
+
+/// Takes the overlay away without capturing anything.
+#[tauri::command]
+pub(crate) async fn cancel_capture(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("capture") {
+        let _ = window.hide();
+    }
+
+    Ok(())
+}
+
+/// Copies a rectangle of the screen, in the screen's own physical pixels.
+///
+/// The overlay is hidden before anything is read, and the read waits a moment
+/// for that to actually happen: the overlay is a window like any other and
+/// would otherwise be in its own picture, dimming included.
+#[tauri::command]
+pub(crate) async fn capture_area(
+    app: AppHandle,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+) -> Result<String, String> {
+    if let Some(window) = app.get_webview_window("capture") {
+        let _ = window.hide();
+    }
+
+    // Hiding is a request to the compositor, not something that has happened
+    // by the time the call returns. Without this the overlay's dimming is in
+    // the picture, which looks like the capture darkened it.
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+    let shot = tokio::task::spawn_blocking(move || crate::capture::region(left, top, width, height))
+        .await
+        .map_err(|err| format!("the capture failed: {err}"))??;
+
+    let size = format!("{}x{}", shot.width, shot.height);
+    after_capture(&app, shot).await?;
+
+    Ok(format!("Copied a {size} picture"))
+}
+
+/// Copies the whole of every screen at once.
+#[tauri::command]
+pub(crate) async fn capture_screen(app: AppHandle) -> Result<String, String> {
+    crate::dismiss_main(&app);
+
+    // The launcher is a window and hiding it is a request, the same as above.
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+    let (left, top, width, height) = crate::capture::virtual_screen();
+
+    let shot = tokio::task::spawn_blocking(move || crate::capture::region(left, top, width, height))
+        .await
+        .map_err(|err| format!("the capture failed: {err}"))??;
+
+    let size = format!("{}x{}", shot.width, shot.height);
+    after_capture(&app, shot).await?;
+
+    Ok(format!("Copied a {size} picture"))
+}
+
+/// What happens to a picture once it has been taken.
+///
+/// One place, so the four ways of taking one cannot disagree about what
+/// follows. The clipboard always gets it; whether the editor opens on top is
+/// a setting, because somebody who marks up most of what they take should not
+/// have to ask for it every time, and somebody who never does should not have
+/// a window appear.
+async fn after_capture(app: &AppHandle, shot: crate::capture::Shot) -> Result<(), String> {
+    let png = shot.to_png()?;
+    put_image_on_clipboard(app, shot)?;
+
+    let wanted = {
+        let prefs = app.state::<crate::state::PrefsState>();
+        let held = prefs.inner.lock().await;
+        held.screenshot.after
+    };
+
+    if wanted == crate::preferences::AfterCapture::Edit {
+        // Straight from the picture rather than back out of the clipboard: the
+        // history writes on its own thread and reading it back would be a race
+        // with a listener.
+        {
+            let pending = app.state::<Marking>();
+            let mut held = pending.0.lock().map_err(|_| "markup slot poisoned".to_string())?;
+            *held = Some(png);
+        }
+
+        if let Some(window) = app.get_webview_window("markup") {
+            let _ = window.emit("sill://markup", ());
+            let _ = window.show();
+            let _ = window.set_focus();
+
+            #[cfg(windows)]
+            if let Ok(handle) = window.hwnd() {
+                crate::summon::force_foreground(windows::Win32::Foundation::HWND(
+                    handle.0 as *mut core::ffi::c_void,
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Hands a picture to the clipboard, which is where everything else finds it.
+///
+/// Deliberately not saved anywhere. The clipboard history already keeps
+/// pictures, already prunes them and already knows how to show one, so a
+/// second store of screenshots would be a second thing to manage and a second
+/// place for them to pile up.
+fn put_image_on_clipboard(app: &AppHandle, shot: crate::capture::Shot) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    // Rgba, which is what the clipboard plugin wants, and what the history
+    // stores. The same swap `to_png` does.
+    let mut rgba = shot.pixels;
+    for pixel in rgba.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+        pixel[3] = 255;
+    }
+
+    app.clipboard()
+        .write_image(&tauri::image::Image::new(
+            &rgba,
+            shot.width as u32,
+            shot.height as u32,
+        ))
+        .map_err(|err| format!("could not put that picture on the clipboard: {err}"))
+}
+
+/// The picture the markup window is currently working on.
+///
+/// Held rather than passed, because a window cannot be handed an argument when
+/// it is shown. It asks for this once it is up.
+///
+/// One at a time on purpose: there is one markup window, so a second request
+/// replaces the first rather than queueing behind it.
+#[derive(Default)]
+pub(crate) struct Marking(pub std::sync::Mutex<Option<Vec<u8>>>);
+
+/// The row number of the last picture copied.
+///
+/// The one place that knows, shared with the key bindings, so two ways of
+/// saying "the last picture" cannot mean two different pictures.
+#[tauri::command]
+pub(crate) async fn last_image_entry(app: AppHandle) -> Result<Option<i64>, String> {
+    match crate::bindings::last_image(&app) {
+        Ok(object) => Ok(object.id.parse().ok()),
+        // Nothing copied yet is an ordinary state, not a failure.
+        Err(_) => Ok(None),
+    }
+}
+
+/// Opens the markup window on a picture from the clipboard history.
+#[tauri::command]
+pub(crate) async fn open_markup(app: AppHandle, entry: i64) -> Result<(), String> {
+    let clipboard = app
+        .try_state::<crate::clipboard::monitor::Clipboard>()
+        .ok_or_else(|| "clipboard history is not running".to_string())?;
+
+    let png = clipboard
+        .store()
+        .blob(entry)
+        .map_err(|err| format!("could not read that entry: {err}"))?
+        .ok_or_else(|| "there is no picture on that row".to_string())?;
+
+    {
+        let pending = app.state::<Marking>();
+        let mut held = pending.0.lock().map_err(|_| "markup slot poisoned".to_string())?;
+        *held = Some(png);
+    }
+
+    let window = app
+        .get_webview_window("markup")
+        .ok_or_else(|| "the markup window is missing".to_string())?;
+
+    crate::dismiss_main(&app);
+
+    // Told after the picture is in place, so a window that is already open
+    // swaps to the new one rather than showing the last.
+    let _ = window.emit("sill://markup", ());
+
+    window
+        .show()
+        .map_err(|err| format!("could not show the markup window: {err}"))?;
+    let _ = window.set_focus();
+
+    #[cfg(windows)]
+    if let Ok(handle) = window.hwnd() {
+        crate::summon::force_foreground(windows::Win32::Foundation::HWND(
+            handle.0 as *mut core::ffi::c_void,
+        ));
+    }
+
+    Ok(())
+}
+
+/// The picture the markup window should be showing.
+///
+/// A data URI rather than bytes: it goes straight into an `img`, and the
+/// alternative is the window decoding a byte array it was handed over IPC.
+#[tauri::command]
+pub(crate) async fn markup_image(app: AppHandle) -> Result<Option<String>, String> {
+    use base64::Engine;
+
+    let pending = app.state::<Marking>();
+    let held = pending.0.lock().map_err(|_| "markup slot poisoned".to_string())?;
+
+    Ok(held.as_ref().map(|png| {
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        )
+    }))
+}
+
+/// Takes the marked-up picture back, and puts it on the clipboard.
+#[tauri::command]
+pub(crate) async fn finish_markup(app: AppHandle, png: String) -> Result<String, String> {
+    use base64::Engine;
+
+    let bytes = png
+        .strip_prefix("data:image/png;base64,")
+        .ok_or_else(|| "that is not a picture".to_string())
+        .and_then(|body| {
+            base64::engine::general_purpose::STANDARD
+                .decode(body)
+                .map_err(|err| format!("that picture could not be read: {err}"))
+        })?;
+
+    // Back through the same decode the recogniser uses, so the clipboard gets
+    // real pixels rather than a file the plugin would have to parse.
+    let (bgra, width, height) = crate::ocr::bgra_from_png(&bytes)?;
+
+    let shot = crate::capture::Shot {
+        pixels: bgra,
+        width,
+        height,
+    };
+
+    put_image_on_clipboard(&app, shot)?;
+
+    if let Some(window) = app.get_webview_window("markup") {
+        let _ = window.hide();
+    }
+
+    Ok(format!("Copied a marked-up {width}x{height} picture"))
+}
+
+/// Closes the markup window without keeping anything.
+#[tauri::command]
+pub(crate) async fn cancel_markup(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("markup") {
+        let _ = window.hide();
+    }
+
+    // Dropped rather than left lying about: it is a picture of somebody's
+    // screen and nothing needs it once the window is gone.
+    if let Some(pending) = app.try_state::<Marking>() {
+        if let Ok(mut held) = pending.0.lock() {
+            *held = None;
+        }
+    }
+
+    Ok(())
 }

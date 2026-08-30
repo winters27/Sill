@@ -34,35 +34,42 @@
 
 <style>
   section {
-    margin-bottom: 26px;
+    margin-bottom: var(--space-6);
   }
 
   .head {
-    padding: 0 2px 10px;
+    padding: 0 2px var(--space-2);
   }
 
+  /*
+   * A label, not a headline.
+   *
+   * This was white at 12px with 0.14em of tracking, which made it louder than
+   * the panel title above it. That is backwards: the title names what is on
+   * screen and the section label only says which part of it this is.
+   */
   h3 {
     margin: 0;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.14em;
+    font-size: var(--text-label);
+    font-weight: var(--weight-strong);
+    letter-spacing: var(--track-label);
     text-transform: uppercase;
-    color: var(--core-foreground);
+    color: var(--text-3);
   }
 
   p {
-    margin: 5px 0 0;
+    margin: var(--space-1) 0 0;
     /* A line of prose stops being readable somewhere past 80 characters, and
        a wide settings pane will happily run to 160. */
     max-width: 82ch;
-    font-size: 12px;
+    font-size: var(--text-meta);
     line-height: 1.55;
-    color: var(--text-muted);
+    color: var(--text-2);
   }
 
   .bare {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
   }
 </style>

@@ -1,8 +1,8 @@
 //! Reading and writing Sill's own preferences, and the window that edits them.
 
 use crate::{
-    apply_autostart, apply_dictation, apply_tray, apply_window_size, rebind_summon,
-    rebind_switcher, same_dictation,
+    apply_autostart, apply_dictation, apply_tray, apply_window_size, rebind_capture,
+    rebind_summon, rebind_switcher, same_dictation,
 };
 
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -108,16 +108,27 @@ pub(crate) async fn set_preferences(
         rebind_switcher(&app, &previous.hotkey.switcher, &prefs.hotkey.switcher);
     }
 
+    if previous.hotkey.capture != prefs.hotkey.capture {
+        rebind_capture(&app, &previous.hotkey.capture, &prefs.hotkey.capture, false);
+    }
+
+    if previous.hotkey.capture_screen != prefs.hotkey.capture_screen {
+        rebind_capture(
+            &app,
+            &previous.hotkey.capture_screen,
+            &prefs.hotkey.capture_screen,
+            true,
+        );
+    }
+
     if previous.appearance.backdrop != prefs.appearance.backdrop
         || previous.appearance.tint_alpha != prefs.appearance.tint_alpha
     {
-        if let Some(window) = app.get_webview_window("main") {
-            summon::apply_backdrop(
-                &window,
-                prefs.appearance.backdrop,
-                prefs.appearance.tint_alpha,
-            );
-        }
+        crate::apply_backdrops(
+            &app,
+            prefs.appearance.backdrop,
+            prefs.appearance.tint_alpha,
+        );
     }
 
     // The launcher window re-reads whatever it renders from.

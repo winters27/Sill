@@ -64,24 +64,24 @@
   .list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-2);
   }
 
   .chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--space-1);
   }
 
   .chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 5px 4px 10px;
-    border-radius: 999px;
-    background: rgba(var(--accent-rgb), 0.12);
-    font-size: 12px;
-    color: var(--core-foreground);
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+    border-radius: var(--radius-pill);
+    background: var(--fill-2);
+    font-size: var(--text-meta);
+    color: var(--text-1);
   }
 
   .chip button {
@@ -92,7 +92,7 @@
     border: 0;
     border-radius: 50%;
     background: transparent;
-    color: var(--text-faint);
+    color: var(--text-3);
     cursor: pointer;
     transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
   }
@@ -105,24 +105,24 @@
   input {
     width: 100%;
     max-width: 340px;
-    padding: 7px 11px;
+    padding: var(--space-2) var(--space-3);
     border: 0;
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.05);
+    background: var(--fill-1);
     box-shadow: inset 0 0 0 1px var(--hairline);
-    color: var(--core-foreground);
+    color: var(--text-1);
     font: inherit;
-    font-size: 12.5px;
+    font-size: var(--text-meta);
     outline: none;
     user-select: text;
     transition: box-shadow 0.15s var(--ease);
   }
 
   input:focus {
-    box-shadow: inset 0 0 0 1px var(--border-light);
+    box-shadow: inset 0 0 0 1px var(--hairline-strong);
   }
 
   input::placeholder {
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 </style>

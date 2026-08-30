@@ -46,20 +46,31 @@
 </span>
 
 <style>
+  /*
+   * 26px, which is the icon slot every row uses.
+   *
+   * This was 22 while `SettingsIcon`, the emoji glyph and the calculator's
+   * `=` were all 26, so an application sat visibly smaller than a Sill
+   * command directly above it in the same list. The slot is one size.
+   *
+   * Still well inside the source-resolution rule: `SHDefExtractIconW` is
+   * asked for 64px, so 26 is a 2.5x downscale and `icons_arrive_with_more_
+   * pixels_than_they_are_drawn_at` (which asserts at least 48) still holds.
+   */
   .icon {
     flex: none;
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
-    border-radius: 5px;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-sm);
     overflow: hidden;
   }
 
   /* The placeholder is a tile; a real icon sits on nothing, because most
      already carry their own shape and background. */
   .icon:not(.has-image) {
-    background-color: rgba(var(--accent-rgb), 0.12);
+    background-color: var(--fill-2);
     box-shadow: var(--bevel-tile);
   }
 
@@ -70,9 +81,9 @@
   }
 
   .initial {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
+    font-size: var(--text-meta);
+    font-weight: var(--weight-strong);
+    color: var(--text-2);
     line-height: 1;
   }
 </style>

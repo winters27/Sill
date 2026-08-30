@@ -133,7 +133,11 @@
   {/each}
 
   {#if fields.length === 0}
-    <div class="sill-empty">This form has no fields</div>
+    <div class="sill-empty">
+      <img src="/sill.png" alt="" width="32" height="32" draggable="false" />
+      <span class="headline">This form has no fields</span>
+      <span class="hint">The extension declared a form with nothing in it.</span>
+    </div>
   {/if}
 </div>
 
@@ -141,37 +145,37 @@
   .form {
     flex: 1;
     overflow-y: auto;
-    padding: 14px var(--pad);
+    padding: var(--space-4) var(--space-3);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
     scrollbar-width: thin;
-    scrollbar-color: var(--hairline) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .row {
     display: grid;
     grid-template-columns: 160px 1fr;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-3);
   }
 
   .label {
-    color: var(--text-muted);
-    font-size: 13px;
+    color: var(--text-2);
+    font-size: var(--text-body);
     text-align: right;
   }
 
   .description {
-    color: var(--text-faint);
-    font-size: 13px;
+    color: var(--text-3);
+    font-size: var(--text-body);
     line-height: 1.5;
   }
 
   .separator {
     height: 1px;
     background: var(--hairline);
-    margin: 6px 0;
+    margin: var(--space-1) 0;
   }
 
   input[type="text"],
@@ -179,14 +183,14 @@
   textarea,
   select {
     width: 100%;
-    padding: 9px 11px;
+    padding: var(--space-2) var(--space-3);
     border: 1px solid var(--hairline);
     border-radius: var(--radius-sm);
     background-color: color-mix(in srgb, var(--core-secondary-background) 55%, transparent);
     background-image: var(--sheen);
-    color: var(--core-foreground);
+    color: var(--text-1);
     font-family: inherit;
-    font-size: 14px;
+    font-size: var(--text-body);
     outline: none;
     user-select: text;
   }
@@ -196,23 +200,24 @@
     line-height: 1.5;
   }
 
+  /* The focus ring is one of the seven places the accent is allowed. */
   input:focus,
   textarea:focus,
   select:focus {
-    border-color: var(--core-accent);
+    border-color: var(--accent-line);
   }
 
   input::placeholder,
   textarea::placeholder {
-    color: var(--text-faint);
+    color: var(--text-4);
   }
 
   .checkbox {
     display: flex;
     align-items: center;
-    gap: 8px;
-    color: var(--core-foreground);
-    font-size: 14px;
+    gap: var(--space-2);
+    color: var(--text-1);
+    font-size: var(--text-body);
   }
 
   .checkbox input {

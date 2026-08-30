@@ -11,6 +11,9 @@
     | "history"
     | "sources"
     | "files"
+    | "browsers"
+    | "websearch"
+    | "screenshot"
     | "extensions"
     | "advanced"
     | "about";
@@ -157,6 +160,25 @@
     <path d="M4 6.5v11A1.5 1.5 0 0 0 5.5 19h9.2" />
     <circle cx="17.5" cy="16.5" r="3.5" />
     <path d="m21 20-1.1-1.1" />
+  {:else if name === "screenshot"}
+    <!-- A frame with a corner marked, which is what picking an area looks
+         like before anything has been picked. -->
+    <path d="M4 9V6a2 2 0 0 1 2-2h3" />
+    <path d="M15 4h3a2 2 0 0 1 2 2v3" />
+    <path d="M20 15v3a2 2 0 0 1-2 2h-3" />
+    <path d="M9 20H6a2 2 0 0 1-2-2v-3" />
+    <circle cx="12" cy="12" r="2.5" />
+  {:else if name === "websearch"}
+    <!-- A globe under a lens: the world, and looking something up in it. -->
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="M4.5 11h13" />
+    <path d="M11 4.5a10 10 0 0 1 0 13a10 10 0 0 1 0-13" />
+    <path d="m20 20-3.2-3.2" />
+  {:else if name === "browsers"}
+    <!-- A globe: the meridian and the equator are what read as one at this size. -->
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M3.5 12h17" />
+    <path d="M12 3.5a13 13 0 0 1 0 17a13 13 0 0 1 0-17" />
   {:else if name === "extensions"}
     <!-- Puzzle piece: the shape every extension gallery uses. -->
     <path
@@ -192,8 +214,8 @@
     height: var(--tile);
     flex: none;
     border-radius: 22%;
-    background: rgba(var(--accent-rgb), 0.1);
+    background: var(--fill-2);
     box-shadow: var(--bevel-tile);
-    color: var(--core-foreground);
+    color: var(--text-1);
   }
 </style>

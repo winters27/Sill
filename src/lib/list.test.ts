@@ -37,7 +37,20 @@ describe("what a row is filed under", () => {
     expect(groupOf(command("emoji"))).toBe("Emoji");
     expect(groupOf(command("window"))).toBe("Open Windows");
     expect(groupOf(command("answer"))).toBe("Answer");
-    expect(groupOf(command("exe"))).toBe("Developer");
+    expect(groupOf(command("exe"))).toBe("Command Line");
+  });
+
+  /**
+   * Whose settings they are, said out loud.
+   *
+   * "Settings" beside "Sill Settings" reads as though one is the general case
+   * and the other a special one, when they are two different programs'
+   * settings and the difference is the whole question.
+   */
+  test("settings say which program they belong to", () => {
+    expect(groupOf(command("setting"))).toBe("Windows Settings");
+    expect(groupOf(command("sill-setting"))).toBe("Sill Settings");
+    expect(groupOf(command("system"))).toBe("System Controls");
   });
 
   test("the row standing in for missing files sits with the files", () => {
@@ -172,8 +185,44 @@ describe("a repeated id", () => {
     expect(rows.map((r) => (r.kind === "row" ? r.command.title : `# ${r.label}`))).toEqual([
       "# Applications",
       "Terminal",
-      "# Settings",
+      "# Windows Settings",
       "Sound",
     ]);
+  });
+});
+
+describe("a page from a browser", () => {
+  test("groups under its own heading rather than with applications", () => {
+    expect(groupOf(command("url", "GitHub"))).toBe("Browser");
+  });
+
+  test("saved and visited share the heading", () => {
+    const rows = linesOf([command("url", "Saved"), command("url", "Visited")]);
+
+    // One group, so no heading at all: a single group is not a grouping.
+    expect(rows.every((r) => r.kind === "row")).toBe(true);
+  });
+});
+
+describe("the web search row", () => {
+  test("has a heading of its own rather than joining applications", () => {
+    expect(groupOf(command("websearch", "Search for cats"))).toBe("Web Search");
+  });
+
+  /**
+   * It answers every query, so ranking it would displace real results. It is
+   * appended last instead, and this holds that: whatever else is in the list,
+   * the search row is the final line.
+   */
+  test("is the last line whatever else is in the list", () => {
+    const rows = linesOf([
+      command("app", "Terminal"),
+      command("url", "GitHub"),
+      command("websearch", "Search for cats"),
+    ]);
+
+    const last = rows[rows.length - 1];
+    expect(last.kind).toBe("row");
+    expect(last.kind === "row" && last.command.mode).toBe("websearch");
   });
 });

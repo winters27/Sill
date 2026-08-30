@@ -633,14 +633,14 @@
 <style>
   .recorder {
     min-width: 150px;
-    padding: 6px 14px;
+    padding: var(--space-1) var(--space-3);
     border: 0;
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.1);
+    background: var(--fill-2);
     box-shadow: var(--bevel-tile);
-    color: var(--core-foreground);
+    color: var(--text-1);
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-meta);
     letter-spacing: 0.04em;
     cursor: pointer;
     transition:
@@ -649,18 +649,18 @@
   }
 
   .recorder:hover {
-    background: rgba(var(--accent-rgb), 0.18);
+    background: var(--fill-3);
   }
 
   .recorder.recording {
-    background: rgba(var(--accent-rgb), 0.22);
+    background: var(--hairline-strong);
     color: var(--accent-bright);
   }
 
   .hook-state {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2);
   }
 
   /* A lamp, because the useful reading is at a glance. Three states rather
@@ -673,7 +673,7 @@
     height: 8px;
     flex: none;
     border-radius: 50%;
-    background: var(--text-faint);
+    background: var(--text-3);
   }
 
   .lamp.ok {
@@ -690,20 +690,20 @@
 
   .hook-text {
     font-size: var(--text-meta);
-    color: var(--text-muted);
+    color: var(--text-2);
   }
 
   select,
   input,
   textarea {
-    padding: 6px 10px;
+    padding: var(--space-1) var(--space-2);
     border: 0;
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.06);
+    background: var(--fill-1);
     box-shadow: inset 0 0 0 1px var(--hairline);
-    color: var(--core-foreground);
+    color: var(--text-1);
     font: inherit;
-    font-size: 12.5px;
+    font-size: var(--text-meta);
     outline: none;
     user-select: text;
     transition: box-shadow 0.15s var(--ease);
@@ -712,7 +712,7 @@
   select:focus,
   input:focus,
   textarea:focus {
-    box-shadow: inset 0 0 0 1px var(--border-light);
+    box-shadow: inset 0 0 0 1px var(--hairline-strong);
   }
 
   select {
@@ -727,7 +727,7 @@
   input {
     width: 250px;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-meta);
   }
 
   textarea {
@@ -739,17 +739,17 @@
 
   textarea::placeholder,
   input::placeholder {
-    color: var(--text-faint);
+    color: var(--text-3);
   }
 
   .model-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
   }
 
   .chosen {
-    font-size: 12px;
+    font-size: var(--text-meta);
     color: var(--core-accent);
   }
 </style>

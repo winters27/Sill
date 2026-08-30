@@ -77,18 +77,20 @@
     gap: 2px;
     padding: 2px;
     border-radius: 8px;
-    background: rgba(var(--accent-rgb), 0.06);
+    background: var(--fill-1);
     box-shadow:
       inset 0 1px 2px rgba(0, 0, 0, 0.32),
-      inset 0 0 0 1px rgba(var(--accent-rgb), 0.12);
+      inset 0 0 0 1px var(--fill-2);
   }
 
+  /* The thumb marks which option is chosen, so it is one of the places the
+     accent is allowed. The track around it stays neutral. */
   .thumb {
     position: absolute;
     top: 2px;
     bottom: 2px;
-    border-radius: 6px;
-    background: rgba(var(--accent-rgb), 0.15);
+    border-radius: var(--radius-md);
+    background: var(--accent-fill);
     box-shadow:
       0 1px 1px rgba(0, 0, 0, 0.22),
       inset 0 0 0 1px rgba(255, 255, 255, 0.06);
@@ -111,24 +113,24 @@
   button {
     position: relative;
     z-index: 1;
-    padding: 5px 13px;
+    padding: var(--space-1) var(--space-3);
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-2);
     font: inherit;
-    font-size: 13px;
-    font-weight: 500;
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
     cursor: pointer;
     transition: color 0.15s var(--ease);
   }
 
   button:hover {
-    color: var(--core-foreground);
+    color: var(--text-1);
   }
 
   button.active {
-    color: var(--core-foreground);
+    color: var(--text-1);
   }
 
   @media (prefers-reduced-motion: reduce) {

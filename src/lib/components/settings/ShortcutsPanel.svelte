@@ -330,20 +330,20 @@
   .controls {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     flex-wrap: wrap;
   }
 
   .key {
     min-width: 118px;
-    padding: 5px 10px;
+    padding: var(--space-1) var(--space-2);
     font: inherit;
-    font-size: 12px;
+    font-size: var(--text-meta);
     font-variant-numeric: tabular-nums;
     color: var(--text);
     background: var(--surface-raised);
-    border: 1px solid var(--line);
-    border-radius: 6px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-md);
     cursor: pointer;
   }
 
@@ -353,31 +353,31 @@
   }
 
   select {
-    padding: 5px 8px;
+    padding: var(--space-1) var(--space-2);
     font: inherit;
-    font-size: 12px;
+    font-size: var(--text-meta);
     color: var(--text);
     background: var(--surface-raised);
-    border: 1px solid var(--line);
-    border-radius: 6px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-md);
   }
 
   .empty {
     margin: 0;
-    padding: 4px 0 8px;
-    font-size: 12px;
-    color: var(--text-dim);
+    padding: var(--space-1) 0 var(--space-2);
+    font-size: var(--text-meta);
+    color: var(--text-2);
   }
 
   .foot {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding-top: 8px;
+    gap: var(--space-3);
+    padding-top: var(--space-2);
   }
 
   .status {
-    font-size: 12px;
-    color: var(--text-dim);
+    font-size: var(--text-meta);
+    color: var(--text-2);
   }
 </style>

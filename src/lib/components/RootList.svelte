@@ -88,26 +88,6 @@
    */
   const lines = $derived(linesOf(commands));
 
-  /**
-   * Where each line sits, for the fade and nothing else.
-   *
-   * This used to decide which rows existed in the DOM. Now it only decides how
-   * blurred each one is on its way into the chin, which is a much smaller
-   * thing to be wrong about.
-   */
-  const offsets = $derived.by(() => {
-    const out = new Array<number>(lines.length + 1);
-    let y = 0;
-
-    for (let i = 0; i < lines.length; i++) {
-      out[i] = y;
-      y += lines[i].kind === "header" ? headerHeight : rowHeight;
-    }
-
-    out[lines.length] = y;
-    return out;
-  });
-
   /** A new question is answered from the top of the list. */
   $effect(() => {
     // Read so the effect runs when it changes, and only then.
@@ -164,38 +144,6 @@
     });
   });
 
-  /**
-   * How blurred a row is, from how far it has sunk into the chin.
-   *
-   * `filter`, not `backdrop-filter`. `backdrop-filter` photographs the pixels
-   * behind an element, blurs the photograph and pastes it back, and Chromium
-   * takes that photograph against the page's own backdrop. This page has none:
-   * the window is transparent and so is `body`, so the photograph comes back
-   * empty and there is nothing to smudge.
-   *
-   * `filter` blurs content it is handed. No photograph, nothing sampled, no
-   * dependence on what is behind the window. So the rows blur themselves as
-   * they reach the bottom, which is the same effect from the other direction.
-   *
-   * Only the one or two rows actually in the zone get a value, so only those
-   * get a compositing layer.
-   */
-  function blurAt(lineIndex: number): number {
-    if (fade <= 0) return 0;
-
-    // Where the row's bottom edge sits inside the visible box.
-    const bottom = (offsets[lineIndex + 1] ?? 0) - scrollTop;
-    const into = bottom - (height - inset);
-    if (into <= 0) return 0;
-
-    return Math.min(1, into / fade) * MAX_BLUR;
-  }
-
-  /** The deepest a row gets blurred, in pixels. */
-  const MAX_BLUR = 6;
-
-  /** How deep the fade zone is, from the stylesheet. */
-  let fade = $state(0);
 
   function onScroll() {
     if (!viewport) return;
@@ -225,16 +173,9 @@
       const header = viewport.querySelector<HTMLElement>(".sill-group");
       if (header && header.offsetHeight > 0) headerHeight = header.offsetHeight;
 
-      // Read here rather than per row. `getComputedStyle` forces a style
-      // recalculation, and the blur is computed for every rendered row on
-      // every scroll frame: asking thirty times a frame for two numbers that
-      // only change when the CSS does is exactly the kind of idle-adjacent
-      // waste the efficiency rule exists to stop.
+      // Read on layout rather than per row: `getComputedStyle` forces a style
+      // recalculation, and this is consulted every time the selection moves.
       inset = Number.parseFloat(getComputedStyle(viewport).paddingBottom) || 0;
-      fade =
-        Number.parseFloat(
-          getComputedStyle(document.documentElement).getPropertyValue("--chin-fade"),
-        ) || 0;
     };
 
     sync();
@@ -281,6 +222,19 @@
    * tile instead.
    */
   function hasIcon(command: RankedCommand): boolean {
+    /*
+     * An icon set on the row is a file somebody chose deliberately, so it is
+     * always worth asking about: the program behind a page from a browser, the
+     * browser a web search will open in, the program that owns a Windows
+     * switch. Whatever put it there knew what the row was.
+     *
+     * This used to be a list of modes, and every new kind of row silently drew
+     * a lettered tile until somebody remembered to add it here.
+     */
+    if (command.icon) return true;
+
+    // Otherwise there is only the entrypoint, and it is worth asking the shell
+    // about only when it is a real file.
     return (
       command.mode === "app" ||
       command.mode === "exe" ||
@@ -303,19 +257,31 @@
         return "Copy";
       case "snippet":
         return "Snippet";
+      // Whose setting it is. "Setting" beside a Windows one says nothing
+      // about which program it belongs to.
       case "sill-setting":
-        return "Setting";
+        return "Sill Setting";
       case "view":
       case "builtin":
         return "Command";
       case "no-view":
         return "Action";
+      // "Windows Settings", "Control Panel" or "Windows Tools", as Windows
+      // itself files them. The catalog already knows which.
       case "setting":
-        return "Setting";
+        return command.extensionTitle;
+      // File or Folder, which the search already worked out.
       case "file":
-        return "File";
+        return command.extensionTitle;
       case "exe":
-        return "Executable";
+        return command.extensionTitle;
+      // Saved or visited, which is the useful half of what it is.
+      case "url":
+        return command.extensionTitle;
+      case "websearch":
+        return "Web Search";
+      case "window":
+        return "Open Window";
       case "emoji":
         // The group, which is the only useful thing to say about one.
         return command.extensionTitle;
@@ -385,9 +351,15 @@
     if (command.mode === "sill-setting") return command.subtitle;
     if (command.mode === "view" || command.mode === "no-view") return command.extensionTitle;
     if (command.mode === "setting") return command.subtitle;
-    // A file's path is what tells two files with the same name apart.
+    // A file's path is what tells two files with the same name apart, and a
+    // command-line tool's is the only thing that does: a machine with three
+    // Pythons on PATH shows three identical rows without it.
     if (command.mode === "file") return command.subtitle;
+    if (command.mode === "exe") return command.subtitle;
     if (command.mode === "builtin") return command.subtitle;
+    // Where the page actually goes, which is what tells two pages of the same
+    // name apart and what says whether it is the one you meant.
+    if (command.mode === "url") return command.subtitle;
     return "";
   }
 </script>
@@ -413,14 +385,12 @@
     {:else}
       {@const command = line.command}
       {@const index = line.index}
-      {@const blur = blurAt(at)}
       <div
         id={optionId(index)}
         data-row={index}
         class="sill-row"
         class:answer={command.mode === "answer"}
         class:selected={index === selected}
-        style:filter={blur > 0.1 ? `blur(${blur.toFixed(1)}px)` : null}
         role="option"
         aria-selected={index === selected}
         tabindex="-1"

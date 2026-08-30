@@ -51,7 +51,7 @@
     height: 22px;
     padding: 0;
     border: 1px solid var(--hairline);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background-color: color-mix(in srgb, var(--core-background) 60%, transparent);
     cursor: pointer;
     /* Scoped, never `all`: see the WebView2 note in theme.css. */

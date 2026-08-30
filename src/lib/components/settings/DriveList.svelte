@@ -107,8 +107,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding: 7px 0;
+    gap: var(--space-4);
+    padding: var(--space-2) 0;
   }
 
   /* One hairline between rows and none around the group: the section already
@@ -125,21 +125,21 @@
   }
 
   .name {
-    font-size: 13px;
+    font-size: var(--text-body);
     color: var(--text);
   }
 
   .note {
-    font-size: 12px;
-    color: var(--text-dim);
+    font-size: var(--text-meta);
+    color: var(--text-2);
   }
 
   .empty,
   .trouble {
     margin: 0;
-    padding: 6px 0;
-    font-size: 12px;
-    color: var(--text-dim);
+    padding: var(--space-1) 0;
+    font-size: var(--text-meta);
+    color: var(--text-2);
   }
 
   .trouble {

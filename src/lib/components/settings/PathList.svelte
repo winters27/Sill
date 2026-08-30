@@ -49,18 +49,18 @@
   .list {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: var(--space-1);
     align-items: flex-start;
   }
 
   .entry {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     width: 100%;
-    padding: 6px 6px 6px 10px;
+    padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.06);
+    background: var(--fill-1);
   }
 
   .path {
@@ -71,8 +71,8 @@
     white-space: nowrap;
     /* A path is a machine string; reading one in the body face is harder. */
     font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--core-foreground);
+    font-size: var(--text-meta);
+    color: var(--text-1);
     direction: rtl;
     text-align: left;
   }
@@ -84,9 +84,9 @@
     width: 20px;
     height: 20px;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-faint);
+    color: var(--text-3);
     cursor: pointer;
     transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
   }
@@ -98,23 +98,23 @@
 
   .empty {
     margin: 0;
-    font-size: 12px;
-    color: var(--text-faint);
+    font-size: var(--text-meta);
+    color: var(--text-3);
   }
 
   .add {
-    padding: 6px 12px;
+    padding: var(--space-1) var(--space-3);
     border: 0;
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.1);
-    color: var(--core-foreground);
+    background: var(--fill-2);
+    color: var(--text-1);
     font: inherit;
-    font-size: 12px;
+    font-size: var(--text-meta);
     cursor: pointer;
     transition: background-color 0.15s var(--ease);
   }
 
   .add:hover {
-    background: rgba(var(--accent-rgb), 0.18);
+    background: var(--fill-3);
   }
 </style>

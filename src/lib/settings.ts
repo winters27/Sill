@@ -42,13 +42,27 @@ export interface Hotkey {
   summon: string;
   /** Opens straight onto the window list. Empty means off. */
   switcher: string;
+  /** Picks an area of the screen without the launcher. Empty means off. */
+  capture: string;
+  /** Copies every screen at once. Empty means off. */
+  captureScreen: string;
   dismissOnBlur: boolean;
   selectQueryOnSummon: boolean;
   resetOnSummon: boolean;
 }
 
+/**
+ * Which palette the interface is drawn in.
+ *
+ * The ids are the `[data-theme]` values in `theme.css`, so a new theme is a
+ * block there plus a variant here plus a variant in Rust, and nothing else.
+ */
+export type Theme = "winters-glass" | "oilslick" | "graphite" | "ember" | "moss";
+
 export interface Appearance {
   backdrop: Backdrop;
+  theme: Theme;
+  chromaStrength: number;
   font: InterfaceFont;
   glassStrength: number;
   tintAlpha: number;
@@ -66,6 +80,54 @@ export interface Sources {
   excluded: string[];
   /** Individual entries switched off by id. */
   hidden: string[];
+}
+
+/**
+ * Reading what a browser remembers.
+ *
+ * Off by default. Nothing else Sill reads is as personal as a browsing
+ * history, and helping itself to one because a browser happens to be installed
+ * is not a decision Sill gets to make.
+ */
+export interface Browsers {
+  enabled: boolean;
+  /** Pages that were visited. */
+  history: boolean;
+  /** Pages that were saved, which is the smaller and more deliberate set. */
+  bookmarks: boolean;
+  maxResults: number;
+}
+
+/**
+ * Looking something up on the web.
+ *
+ * On by default, unlike browser search: this reads nothing and knows nothing,
+ * it is one row offering to open an address.
+ */
+export interface WebSearch {
+  enabled: boolean;
+  /** Which engine, by id. */
+  engine: string;
+  /** An address of your own, with `{query}` in it. Wins over `engine`. */
+  customUrl: string;
+}
+
+/** What a screenshot does once it has been taken. */
+export type AfterCapture = "copy" | "edit";
+
+/** Taking pictures of the screen. */
+export interface Screenshot {
+  after: AfterCapture;
+  /** Whether clicking a window in the picker captures that window. */
+  clickAWindow: boolean;
+  /** Which tool the editor opens with. */
+  tool: string;
+  /** The colour it opens with. */
+  colour: string;
+  /** The stroke width it opens with. */
+  weight: number;
+  /** The number the first badge shows. */
+  stepFrom: number;
 }
 
 export interface FileSearch {
@@ -124,6 +186,9 @@ export interface Preferences {
   appearance: Appearance;
   sources: Sources;
   files: FileSearch;
+  browsers: Browsers;
+  webSearch: WebSearch;
+  screenshot: Screenshot;
   bindings: Binding[];
   aliases: Alias[];
   navigation: NavigationSettings;
@@ -143,6 +208,13 @@ export function applyAppearance(prefs: Preferences): void {
   // An attribute rather than a variable: the face is a whole block of tokens
   // (stack, features, display cut), and they have to change together.
   root.setAttribute("data-font", prefs.appearance.font);
+  // Same reasoning. A palette is a canvas, an accent and sometimes a chroma
+  // layer, and setting them one at a time would leave the window briefly
+  // wearing half of one theme and half of another.
+  root.setAttribute("data-theme", prefs.appearance.theme);
+  // A multiplier the chroma gradients apply to their own alphas, so one
+  // control moves all three washes together and keeps their balance.
+  root.style.setProperty("--chroma-strength", String(prefs.appearance.chromaStrength));
 }
 
 export interface ExtensionInfo {
@@ -165,6 +237,41 @@ export interface Diagnostics {
 
 export function getDiagnostics(): Promise<Diagnostics> {
   return invoke<Diagnostics>("diagnostics");
+}
+
+/** A search engine Sill knows. */
+export interface SearchEngine {
+  id: string;
+  name: string;
+  /** The address, with `{query}` where the words go. */
+  url: string;
+}
+
+/**
+ * The engines Sill knows.
+ *
+ * Asked for rather than listed here, so adding one is a line in Rust and not
+ * two edits that can disagree.
+ */
+export function searchEngines(): Promise<SearchEngine[]> {
+  return invoke<SearchEngine[]>("search_engines").catch(() => []);
+}
+
+/**
+ * Which browsers are on this machine, named.
+ *
+ * So the settings page can say what would be read rather than asking somebody
+ * to trust a switch. A feature that reads a browsing history should be able to
+ * answer "whose?" before it is turned on.
+ */
+export interface KnownBrowser {
+  name: string;
+  /** The program behind it, so the pane can show its own mark. */
+  program: string | null;
+}
+
+export function browserProfiles(): Promise<KnownBrowser[]> {
+  return invoke<KnownBrowser[]>("browser_profiles").catch(() => []);
 }
 
 export function rebuildIndex(): Promise<void> {

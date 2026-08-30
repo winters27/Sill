@@ -58,6 +58,18 @@ pub enum ObjectKind {
     /// enumerated at the moment it is searched for and its identity is a
     /// handle that stops being valid when it closes.
     Window,
+    /// Words to look up on the web.
+    ///
+    /// Not a [`ObjectKind::Url`]: there is no address yet. Which engine turns
+    /// these words into one is a setting, and it can change between this being
+    /// offered and being chosen.
+    Search,
+    /// A web address.
+    ///
+    /// Distinct from [`ObjectKind::Quicklink`], which is a saved link somebody
+    /// wrote and may carry a hole to fill in. This is an address that already
+    /// exists somewhere else, such as a page a browser remembers.
+    Url,
 }
 
 impl ObjectKind {
@@ -109,6 +121,8 @@ impl ObjectKind {
             // to ask is a property of the link, not of what it is.
             "quicklink" | "quicklink-arg" => Self::Quicklink,
             "answer" => Self::Answer,
+            "url" => Self::Url,
+            "websearch" => Self::Search,
             // Not index entries. A clipboard row and a piece of loose text
             // reach an action through the window rather than through a scan,
             // and they still need a name to be dispatched on.

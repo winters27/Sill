@@ -97,16 +97,16 @@
   .list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-1);
   }
 
   .row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 7px 8px 7px 10px;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-2);
     border-radius: var(--radius-sm);
-    background: rgba(var(--accent-rgb), 0.05);
+    background: var(--fill-1);
   }
 
   .absent {
@@ -117,8 +117,8 @@
     width: 14px;
     flex: none;
     font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-faint);
+    font-size: var(--text-label);
+    color: var(--text-3);
     text-align: center;
   }
 
@@ -127,13 +127,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12.5px;
+    font-size: var(--text-meta);
   }
 
   .tag {
     flex: none;
-    font-size: 11px;
-    color: var(--text-faint);
+    font-size: var(--text-label);
+    color: var(--text-3);
   }
 
   .spacer {
@@ -147,9 +147,9 @@
     height: 22px;
     flex: none;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-2);
     font: inherit;
     cursor: pointer;
     transition:
@@ -158,8 +158,8 @@
   }
 
   button:hover:not(:disabled) {
-    background: rgba(var(--accent-rgb), 0.14);
-    color: var(--core-foreground);
+    background: var(--fill-3);
+    color: var(--text-1);
   }
 
   button:disabled {
@@ -169,13 +169,13 @@
 
   .text {
     width: auto;
-    padding: 0 8px;
-    font-size: 12px;
+    padding: 0 var(--space-2);
+    font-size: var(--text-meta);
   }
 
   .hint {
     margin: 2px 0 0;
-    font-size: 12px;
-    color: var(--text-faint);
+    font-size: var(--text-meta);
+    color: var(--text-3);
   }
 </style>
