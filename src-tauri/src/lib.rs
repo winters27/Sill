@@ -905,6 +905,7 @@ pub fn run() {
             clipboard::commands::clipboard_count,
             clipboard::commands::clipboard_keep_current,
             clipboard::commands::clipboard_last_skipped,
+            clipboard::commands::clipboard_merge,
             commands::settings::list_own_settings,
             snippets::commands::list_snippets,
             snippets::commands::save_snippet,

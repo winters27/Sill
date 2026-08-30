@@ -171,3 +171,14 @@ export function clipboardLastSkipped(): Promise<Skipped | null> {
 export function clipboardKeepCurrent(): Promise<void> {
   return invoke("clipboard_keep_current");
 }
+
+/**
+ * Several entries joined into one piece of text.
+ *
+ * Built in Rust from ids rather than here from rows already on screen: the
+ * list picked from is not necessarily the list still showing, and reading the
+ * entries again means the result is what was chosen.
+ */
+export function clipboardMerge(ids: number[], separator: string): Promise<string> {
+  return invoke<string>("clipboard_merge", { ids, separator });
+}

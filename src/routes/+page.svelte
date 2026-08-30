@@ -10,6 +10,7 @@
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import ClipboardView from "$lib/components/ClipboardView.svelte";
   import { collectActions, isRunnable } from "$lib/exthost/actions";
+  import { clipboardMerge } from "$lib/clipboard";
   import {
     activateHandler,
     dismiss,
@@ -151,7 +152,31 @@
     // Raycast's Cmd+K works here too, and a menu that silently does nothing
     // in half the app is worse than no menu.
     if (mode === "clipboard") {
+      // Merging is only offered once there is something to merge. An action
+      // that is always listed and almost never applicable teaches people to
+      // scroll past the whole panel.
+      const merging =
+        picked.length > 1
+          ? [
+              {
+                id: -30,
+                title: `Merge ${picked.length} Entries`,
+                tag: "Sill.ClipboardMerge",
+                props: {},
+                shortcut: { modifiers: ["ctrl"], key: "m" },
+              },
+              {
+                id: -31,
+                title: `Merge ${picked.length} on One Line`,
+                tag: "Sill.ClipboardMergeInline",
+                props: {},
+                shortcut: undefined,
+              },
+            ]
+          : [];
+
       return [
+        ...merging,
         {
           id: -10,
           title: "Paste",
@@ -497,6 +522,47 @@
     await runAction(0);
   }
 
+  /**
+   * Which entries are picked for merging.
+   *
+   * Mirrored up here because the action panel is drawn by this component and
+   * has to know whether merging applies. The view owns the picking; this is a
+   * copy kept in step, not a second opinion about it.
+   */
+  let picked = $state<number[]>([]);
+
+  /** The separator a plain merge uses: one entry per line. */
+  const NEWLINE = String.fromCharCode(10);
+
+  /**
+   * Joins the picked entries and puts the result on the clipboard.
+   *
+   * Copies rather than pastes. A merge is usually assembled and then used
+   * somewhere deliberate, and pasting several entries into whatever happens to
+   * be behind the launcher is not something to do without being asked.
+   */
+  async function mergePicked(separator: string) {
+    if (picked.length < 2) return;
+
+    try {
+      const text = await clipboardMerge(picked, separator);
+      const outcome = await runObjectAction("sill.clipboard.copy", {
+        id: "merged",
+        mode: "text",
+        target: text,
+        title: `${picked.length} entries`,
+      });
+
+      lastUndo = outcome.undo ?? null;
+      status = `Merged ${picked.length} entries`;
+      clipboardView?.clearPicks();
+      picked = [];
+      panelOpen = false;
+    } catch (err) {
+      status = `${err}`;
+    }
+  }
+
   /** Runs an action chosen from the panel. -1 means dismiss without running. */
   async function runAction(index: number) {
     panelOpen = false;
@@ -538,6 +604,12 @@
           break;
         case "Sill.ClipboardPin":
           await clipboardView?.togglePin();
+          break;
+        case "Sill.ClipboardMerge":
+          await mergePicked(NEWLINE);
+          break;
+        case "Sill.ClipboardMergeInline":
+          await mergePicked(" ");
           break;
         case "Sill.ClipboardFilter":
           clipboardView?.cycleFilter(1);
@@ -646,6 +718,14 @@
     }
 
     if (mode === "clipboard") {
+      // A step back rather than a way out. Escape with entries picked means
+      // "not those", and closing the whole view would throw away the search
+      // that found them as well.
+      if (clipboardView?.clearPicks()) {
+        picked = [];
+        return;
+      }
+
       mode = "root";
       selected = 0;
       query = "";
@@ -751,6 +831,19 @@
       if (ctrl && event.key.toLowerCase() === "t") {
         event.preventDefault();
         clipboardView?.cycleFilter(event.shiftKey ? -1 : 1);
+        return;
+      }
+      // Ctrl and space rather than space alone: the search field has focus,
+      // so a bare space is a space.
+      if (ctrl && event.key === " ") {
+        event.preventDefault();
+        clipboardView?.togglePick();
+        picked = clipboardView?.picks() ?? [];
+        return;
+      }
+      if (ctrl && event.key.toLowerCase() === "m") {
+        event.preventDefault();
+        void mergePicked(NEWLINE);
         return;
       }
       if (event.key === "Delete") {
@@ -946,6 +1039,7 @@
       {selected}
       onselect={(i) => (selected = i)}
       oncount={(n) => (clipboardCount = n)}
+      onpick={(ids) => (picked = ids)}
     />
   {:else if mode === "root" || mode === "switcher"}
     <RootList

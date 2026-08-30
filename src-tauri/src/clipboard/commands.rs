@@ -33,10 +33,11 @@ pub fn clipboard_search(
     kind: Option<String>,
 ) -> Result<Vec<Entry>, String> {
     let filter = kind.as_deref().filter(|k| *k != "all").map(Kind::from_str);
-    clipboard
+    let out = clipboard
         .store()
         .search(&query, filter, LIMIT)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    out
 }
 
 /// One entry in full, with its image when it has one.
@@ -186,4 +187,23 @@ pub fn clipboard_keep_current(
     clipboard: State<'_, Clipboard>,
 ) -> Result<(), String> {
     crate::clipboard::monitor::keep_current(&app, &clipboard)
+}
+
+/// Several entries joined into one piece of text.
+///
+/// Built from ids rather than in the window from rows it already has, because
+/// the list the user picked from is not necessarily the list still on screen:
+/// a filter, a new copy or a deletion can have changed it in between. Reading
+/// the entries again means the result is what was chosen.
+#[tauri::command]
+pub fn clipboard_merge(
+    clipboard: State<'_, Clipboard>,
+    ids: Vec<i64>,
+    separator: String,
+) -> Result<String, String> {
+    clipboard
+        .store()
+        .merge(&ids, &separator)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "nothing left to merge".to_string())
 }

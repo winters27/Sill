@@ -300,6 +300,33 @@ impl Store {
         )
     }
 
+    /// Several entries joined into one piece of text.
+    ///
+    /// The order is the order of `ids`, which is the order they were picked
+    /// rather than the order they are listed in. Merging is composition, and
+    /// a list sorted newest-first would silently assemble it backwards.
+    ///
+    /// A missing entry is skipped rather than fatal: it was deleted between
+    /// being picked and being merged, and losing the rest of a selection over
+    /// one row would be worse than merging what remains.
+    pub fn merge(&self, ids: &[i64], separator: &str) -> rusqlite::Result<Option<String>> {
+        let mut parts = Vec::with_capacity(ids.len());
+
+        for id in ids {
+            if let Some(entry) = self.get(*id)? {
+                if !entry.text.is_empty() {
+                    parts.push(entry.text);
+                }
+            }
+        }
+
+        Ok(if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(separator))
+        })
+    }
+
     pub fn count(&self) -> rusqlite::Result<i64> {
         self.connection
             .query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))

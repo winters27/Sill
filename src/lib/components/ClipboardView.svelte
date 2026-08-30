@@ -28,9 +28,18 @@
     selected: number;
     onselect: (index: number) => void;
     oncount: (count: number) => void;
+    /**
+     * What is picked for merging, whenever it changes.
+     *
+     * The launcher draws the action panel, so it has to know whether merging
+     * applies. Picks can be made here with the mouse as well as from a key up
+     * there, so telling it is this component's job rather than something it
+     * can poll for.
+     */
+    onpick: (ids: number[]) => void;
   }
 
-  let { query, selected, onselect, oncount }: Props = $props();
+  let { query, selected, onselect, oncount, onpick }: Props = $props();
 
   let entries = $state<ClipEntry[]>([]);
   let kind = $state<ClipKind | "all">("all");
@@ -99,6 +108,38 @@
       ?.querySelector<HTMLElement>(".row.selected")
       ?.scrollIntoView({ block: "nearest" });
   });
+
+  /**
+   * Entries picked for merging, in the order they were picked.
+   *
+   * An array rather than a set, and the order is the whole reason. Merging is
+   * composing something, and a list sorted newest-first would silently
+   * assemble it backwards.
+   *
+   * Ids rather than rows, so a pick survives the list being filtered or a new
+   * copy arriving underneath it.
+   */
+  let picked = $state<number[]>([]);
+
+  const pickedCount = $derived(picked.length);
+
+  export function togglePick() {
+    if (!current) return;
+    const id = current.id;
+    picked = picked.includes(id) ? picked.filter((p) => p !== id) : [...picked, id];
+    onpick(picked);
+  }
+
+  export function clearPicks(): boolean {
+    if (picked.length === 0) return false;
+    picked = [];
+    onpick(picked);
+    return true;
+  }
+
+  export function picks(): number[] {
+    return picked;
+  }
 
   export async function paste(alsoPaste = true) {
     if (!current) return;
@@ -227,8 +268,12 @@
 
   <div class="bar">
     <span class="count">
-      {entries.length.toLocaleString()}
-      {entries.length === 1 ? "entry" : "entries"}
+      {#if pickedCount}
+        {pickedCount} picked
+      {:else}
+        {entries.length.toLocaleString()}
+        {entries.length === 1 ? "entry" : "entries"}
+      {/if}
     </span>
     <span class="spacer"></span>
 
@@ -287,10 +332,25 @@
           role="option"
           aria-selected={row.index === selected}
           tabindex="-1"
+          class:picked={picked.includes(row.entry.id)}
           onmousemove={() => onselect(row.index)}
-          onclick={() => void paste()}
+          onclick={(e) => {
+            // Ctrl-click picks rather than pastes, which is the one gesture
+            // everybody already has for "and this one too".
+            if (e.ctrlKey || e.metaKey) {
+              onselect(row.index);
+              togglePick();
+              return;
+            }
+            void paste();
+          }}
           onkeydown={(e) => e.key === "Enter" && void paste()}
         >
+          {#if picked.includes(row.entry.id)}
+            <!-- The position in the merge, not a tick. Which order they go in
+                 is the thing a person needs to see while picking. -->
+            <span class="order">{picked.indexOf(row.entry.id) + 1}</span>
+          {/if}
           <span class="mark">
             <ClipKindIcon kind={row.entry.kind} swatch={row.entry.text} size={14} />
           </span>
@@ -387,6 +447,27 @@
 
   .keep:hover {
     color: var(--accent-bright);
+  }
+
+  /* A picked row reads as picked without a checkbox column that would be
+     empty on every row the rest of the time. */
+  .row.picked {
+    background: rgba(var(--accent-rgb), 0.09);
+  }
+
+  .order {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    margin-right: 2px;
+    font-size: 9px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--core-background, #fff);
+    background: var(--accent-bright);
+    border-radius: 50%;
   }
 
   .clipboard {
