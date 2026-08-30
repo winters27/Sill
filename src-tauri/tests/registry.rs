@@ -2310,3 +2310,47 @@ fn a_system_switch_says_what_it_does_rather_than_what_the_machine_is_doing() {
         );
     }
 }
+
+/// The index has to hold each id once, whichever way it arrived.
+///
+/// An id is not a label. Aliases, hotkeys, hidden entries and frecency scores
+/// are all keyed on it, so two rows sharing one id share all four: running
+/// either promotes both, hiding either hides both. It is also the identity the
+/// result list is drawn by, and there a repeat costs the whole list rather than
+/// a row.
+///
+/// Four Windows settings pages reached the index as `setting:mmc.exe`, and the
+/// launcher opened on an empty list.
+mod one_id_per_row {
+    use super::*;
+
+    #[test]
+    fn the_first_of_a_repeated_id_is_the_one_kept() {
+        let out = registry::one_per_id(vec![
+            command("app:terminal", "Terminal", "Applications"),
+            command("app:browser", "Browser", "Applications"),
+            command("app:terminal", "Terminal, from somewhere else", "Applications"),
+        ]);
+
+        let titles: Vec<&str> = out.iter().map(|r| r.title.as_str()).collect();
+        assert_eq!(titles, ["Terminal", "Browser"]);
+    }
+
+    #[test]
+    fn a_list_with_no_repeats_is_left_exactly_as_it_was() {
+        let given = vec![
+            command("app:c", "C", "Applications"),
+            command("app:a", "A", "Applications"),
+            command("app:b", "B", "Applications"),
+        ];
+
+        let out = registry::one_per_id(given.clone());
+
+        assert_eq!(out.len(), given.len());
+        // Order matters as much as membership: it is the ranking's own.
+        assert_eq!(
+            out.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            given.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        );
+    }
+}

@@ -60,8 +60,30 @@ export function groupOf(command: RankedCommand): string {
 export function linesOf(commands: RankedCommand[]): Line[] {
   const order: string[] = [];
   const groups = new Map<string, Line[]>();
+  const rows: Line[] = [];
+  const seen = new Set<string>();
 
   commands.forEach((command, index) => {
+    /*
+     * A repeated id is drawn once, because the alternative is drawing nothing.
+     *
+     * The rows are rendered by a keyed loop, and a repeated key is a hard error
+     * there rather than a duplicated row: the whole block throws and the list
+     * comes up empty. Four Windows settings shared one id, and the launcher
+     * opened on a blank list until somebody thought to look for that.
+     *
+     * That is fixed at the source, and a test holds it fixed. This is here
+     * because the consequence is out of all proportion to the cause: every
+     * source of results feeds this one function, and none of them should be
+     * able to blank the screen by getting an id wrong. Losing the second copy
+     * of a row is a thing a person can miss. Losing all of them is not.
+     */
+    if (seen.has(command.id)) return;
+    seen.add(command.id);
+
+    const row: Line = { kind: "row", command, index };
+    rows.push(row);
+
     const label = groupOf(command);
     let bucket = groups.get(label);
     if (!bucket) {
@@ -69,12 +91,11 @@ export function linesOf(commands: RankedCommand[]): Line[] {
       groups.set(label, bucket);
       order.push(label);
     }
-    bucket.push({ kind: "row", command, index });
+    bucket.push(row);
   });
 
-  if (order.length < 2) {
-    return commands.map((command, index) => ({ kind: "row", command, index }));
-  }
+  // One group is not a grouping, so it goes unlabelled.
+  if (order.length < 2) return rows;
 
   return order.flatMap((label) => [
     { kind: "header", label } as Line,

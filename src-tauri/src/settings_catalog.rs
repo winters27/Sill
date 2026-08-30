@@ -10,6 +10,8 @@
 //! Corporation). It is embedded rather than read at runtime so the binary has
 //! no data file to lose.
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 
 use crate::registry::CommandRecord;
@@ -35,6 +37,55 @@ struct Entry {
     areas: Vec<String>,
     #[serde(rename = "AltNames", default)]
     alt_names: Vec<String>,
+    /// Microsoft's own caveat about the row, where it has one.
+    #[serde(rename = "Note", default)]
+    note: Option<String>,
+}
+
+/// The catalog's rows, one per page that can actually be opened.
+///
+/// Two things stop the raw catalog being a usable list of results.
+///
+/// Three rows carry `NoteNoMscFileExist`, Microsoft's note that the console
+/// file is not present. Their command is a bare `mmc.exe`, so choosing
+/// "IP Security Monitor" opens an empty management console. A row that does
+/// not do what its title says is worse than no row.
+///
+/// The rest name the same page more than once. "Shared Experiences", "Nearby
+/// Share Settings" and "Share Across Devices" are all
+/// `ms-settings:crossdevice`; three rows for one destination is three times
+/// the list and no more reach. They fold into one row that still answers to
+/// every name, which is shorter to read and no harder to find.
+///
+/// Folding them also makes the id unique, and that part is not cosmetic. The
+/// id is what an alias, a hotkey, a hidden entry and a frecency score are all
+/// keyed on, so four pages sharing one id means using any one of them promotes
+/// all four, and hiding one hides four.
+fn one_per_page(rows: Vec<Entry>) -> Vec<Entry> {
+    let mut out: Vec<Entry> = Vec::with_capacity(rows.len());
+    let mut at: HashMap<String, usize> = HashMap::new();
+
+    for row in rows {
+        if row.note.as_deref() == Some("NoteNoMscFileExist") {
+            continue;
+        }
+
+        match at.get(&row.command) {
+            // The first row names the page. Later ones only add ways to reach it.
+            Some(&i) => {
+                let held = &mut out[i];
+                if held.name != row.name && !held.alt_names.contains(&row.name) {
+                    held.alt_names.push(row.name);
+                }
+            }
+            None => {
+                at.insert(row.command.clone(), out.len());
+                out.push(row);
+            }
+        }
+    }
+
+    out
 }
 
 /// Splits a PascalCase identifier into words.
@@ -118,8 +169,7 @@ pub fn load() -> Vec<CommandRecord> {
         return Vec::new();
     };
 
-    catalog
-        .settings
+    one_per_page(catalog.settings)
         .into_iter()
         .map(|entry| {
             let title = humanize(&entry.name);
@@ -191,7 +241,71 @@ pub fn launch(command: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{humanize, icon_source};
+    use super::{humanize, icon_source, load};
+    use std::collections::HashMap;
+
+    /// The failure this guards against blanks the entire result list.
+    ///
+    /// The frontend draws results with a keyed loop, and a repeated key is a
+    /// hard error there rather than a duplicated row: nothing renders at all.
+    /// Four settings shared the id `setting:mmc.exe`, so the launcher opened on
+    /// an empty list until this was found.
+    ///
+    /// The id also carries meaning of its own. Aliases, hotkeys, hidden entries
+    /// and frecency scores are all keyed on it, so two rows sharing one id
+    /// silently share all four.
+    #[test]
+    fn no_two_pages_share_an_id() {
+        let mut seen: HashMap<String, String> = HashMap::new();
+
+        for row in load() {
+            if let Some(first) = seen.insert(row.id.clone(), row.title.clone()) {
+                panic!("{} is the id of both {first:?} and {:?}", row.id, row.title);
+            }
+        }
+    }
+
+    /// Microsoft ships three rows whose console file does not exist.
+    ///
+    /// Their command is a bare `mmc.exe`, so they open an empty management
+    /// console rather than the thing they are named after.
+    #[test]
+    fn pages_that_cannot_open_are_not_offered() {
+        let rows = load();
+
+        assert!(
+            !rows.iter().any(|r| r.entrypoint == "mmc.exe"
+                && r.title.starts_with("Ip Security")),
+            "a page with no console file is still being offered",
+        );
+    }
+
+    /// Folding rows must not cost the names they were found by.
+    ///
+    /// The cases here are ones the catalog does not already cover: the second
+    /// row's name is not among the first row's alternates, so the only way it
+    /// still finds the page is if folding carried it across.
+    #[test]
+    fn a_folded_page_answers_to_every_name_it_had() {
+        let rows = load();
+
+        for (command, name) in [
+            ("ms-settings:bluetooth", "Devices"),
+            ("ms-settings:windowsupdate", "Windows Update Check For Updates"),
+        ] {
+            let page = rows
+                .iter()
+                .find(|r| r.entrypoint == command)
+                .unwrap_or_else(|| panic!("{command} is missing entirely"));
+
+            assert!(
+                page.keywords.iter().any(|k| k == name),
+                "{name:?} no longer finds {command}, keywords: {:?}",
+                page.keywords,
+            );
+        }
+    }
+
 
     #[test]
     fn pascal_case_becomes_words() {

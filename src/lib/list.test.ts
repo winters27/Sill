@@ -126,3 +126,54 @@ describe("keeping the selected row in view", () => {
     expect(scrollFor({ ...base, scrollTop: 20, rowTop: 4 })).toBe(0);
   });
 });
+
+describe("a repeated id", () => {
+  /**
+   * The bug this reproduces blanked the entire launcher.
+   *
+   * The rows are drawn by a keyed loop, so a repeated key throws and takes the
+   * whole block with it: no rows, no headers, nothing. Four Windows settings
+   * pages shared the id `setting:mmc.exe`, and because the list used to draw
+   * only the rows in view, it went unnoticed until it drew all of them.
+   */
+  test("costs one row, not the list", () => {
+    const rows = linesOf([
+      command("app", "Terminal"),
+      command("app", "Terminal"),
+      command("app", "Browser"),
+    ]);
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => (r.kind === "row" ? r.command.title : r.label))).toEqual([
+      "Terminal",
+      "Browser",
+    ]);
+  });
+
+  test("does not disturb the positions selection is counted in", () => {
+    // The dropped row's own position goes with it; the ones after keep theirs,
+    // because selection indexes the results rather than the drawn rows.
+    const rows = linesOf([
+      command("app", "Terminal"),
+      command("app", "Terminal"),
+      command("app", "Browser"),
+    ]);
+
+    expect(rows.map((r) => (r.kind === "row" ? r.index : -1))).toEqual([0, 2]);
+  });
+
+  test("is dropped inside its group, leaving the headings intact", () => {
+    const rows = linesOf([
+      command("app", "Terminal"),
+      command("setting", "Sound"),
+      command("setting", "Sound"),
+    ]);
+
+    expect(rows.map((r) => (r.kind === "row" ? r.command.title : `# ${r.label}`))).toEqual([
+      "# Applications",
+      "Terminal",
+      "# Settings",
+      "Sound",
+    ]);
+  });
+});

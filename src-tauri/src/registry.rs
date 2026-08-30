@@ -238,11 +238,53 @@ fn app_entry(
 /// calls, which is a second or so of the launcher being half-populated on
 /// every start. The cache makes the full list available immediately; the scan
 /// still runs behind it and replaces this with fresh results.
+/// The index, with each id appearing once.
+///
+/// Every source above is already deduplicated in whatever terms suit it:
+/// extension indexes by id, applications by name and by the binary they run.
+/// Nothing looked at the finished list, and that gap is what let four Windows
+/// settings pages into the index under one id.
+///
+/// An id is not a label. It is what an alias, a hotkey, a hidden entry and a
+/// frecency score are all keyed on, so two rows sharing one id share all four:
+/// running either promotes both, hiding either hides both. It is also the
+/// identity the result list is drawn by, where a repeat is not a duplicated row
+/// but a thrown error that costs the whole list.
+///
+/// So it is checked in the two places an index can arrive from, a fresh scan
+/// and the cache the last one left, and nowhere else has to remember to. The
+/// first of a repeated id wins, because sources are added in order of how much
+/// they are trusted: Sill's own commands, then installed extensions, then the
+/// catalog, then whatever was found on disk.
+pub fn one_per_id(records: Vec<CommandRecord>) -> Vec<CommandRecord> {
+    let before = records.len();
+    let mut seen = std::collections::HashSet::with_capacity(before);
+
+    let out: Vec<CommandRecord> = records
+        .into_iter()
+        .filter(|record| seen.insert(record.id.clone()))
+        .collect();
+
+    if out.len() != before {
+        crate::say!(
+            "{} entries were left out for sharing an id with an earlier one",
+            before - out.len()
+        );
+    }
+
+    out
+}
+
 pub fn load_cache(path: &Path) -> Vec<CommandRecord> {
-    std::fs::read_to_string(path)
+    let cached: Vec<CommandRecord> = std::fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    // Checked on the way in as well as on the way out. A cache written before
+    // the scan enforced this is still on disk, and is read at every start until
+    // the first rescan finishes behind it.
+    one_per_id(cached)
 }
 
 /// Writes the index for the next start.

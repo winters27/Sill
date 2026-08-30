@@ -42,7 +42,6 @@ use tokio::sync::mpsc;
 
 use registry::{CommandRecord, Frecency};
 
-use commands::settings::open_settings;
 use host::{forward_events, host_js, index_paths};
 use state::{now_seconds, HostState, PrefsState, Registry, RegistryState};
 
@@ -240,7 +239,7 @@ pub(crate) fn scan_everything(
         on_path.len()
     );
 
-    out
+    registry::one_per_id(out)
 }
 
 /// Swaps one summon key for another.
@@ -412,7 +411,6 @@ const TRAY_ID: &str = "sill-tray";
 /// taskbar button by design, so without it there is nothing to click and no
 /// way to tell it apart from not running at all.
 pub(crate) fn apply_tray(app: &AppHandle, enabled: bool) {
-    use tauri::menu::{Menu, MenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
     if !enabled {
@@ -430,41 +428,34 @@ pub(crate) fn apply_tray(app: &AppHandle, enabled: bool) {
     };
 
     let build = || -> tauri::Result<()> {
-        let show = MenuItem::with_id(app, "tray-show", "Open Sill", true, None::<&str>)?;
-        let settings = MenuItem::with_id(app, "tray-settings", "Settings", true, None::<&str>)?;
-        let quit = MenuItem::with_id(app, "tray-quit", "Quit Sill", true, None::<&str>)?;
-        let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
-
         TrayIconBuilder::with_id(TRAY_ID)
             .icon(icon)
             .tooltip("Sill")
-            .menu(&menu)
-            // The menu belongs to the right button. A left click summons,
-            // which is what every launcher tray icon does.
-            .show_menu_on_left_click(false)
-            .on_menu_event(|app, event| match event.id().as_ref() {
-                "tray-show" => summon::toggle_main(app),
-                "tray-settings" => {
-                    let handle = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(err) = open_settings(handle, None).await {
-                            crate::say!("could not open settings: {err}");
-                        }
-                    });
-                }
-                "tray-quit" => app.exit(0),
-                _ => {}
-            })
+            /*
+             * No `tauri::menu::Menu`, deliberately.
+             *
+             * A native menu is drawn by the shell in the system font at the
+             * system size, and takes none of Sill's design: no glass, no
+             * keycaps, no glyphs. This is the one surface somebody meets
+             * without opening the launcher, so it gets a real window instead.
+             */
             .on_tray_icon_event(|tray, event| {
                 // A click reports both the press and the release. Acting on
                 // both would summon and immediately dismiss again.
-                if let TrayIconEvent::Click {
-                    button: MouseButton::Left,
+                let TrayIconEvent::Click {
+                    button,
                     button_state: MouseButtonState::Up,
+                    position,
                     ..
                 } = event
-                {
-                    summon::toggle_main(tray.app_handle());
+                else {
+                    return;
+                };
+
+                match button {
+                    MouseButton::Left => summon::toggle_main(tray.app_handle()),
+                    MouseButton::Right => show_tray_menu(tray.app_handle(), position),
+                    MouseButton::Middle => {}
                 }
             })
             .build(app)?;
@@ -475,6 +466,63 @@ pub(crate) fn apply_tray(app: &AppHandle, enabled: bool) {
     if let Err(err) = build() {
         crate::say!("could not create the tray icon: {err}");
     }
+}
+
+/// The tray menu's size, in logical pixels, and it is stated in one place.
+///
+/// The window is positioned by its top-left corner but anchors to its
+/// bottom-right, so the height has to be known before it is shown.
+///
+/// Six rows at 30, two separators at 9, and 4 of padding top and bottom.
+///
+/// There is no border in that sum, and there must not be one in the page
+/// either: `box-sizing: border-box` puts a border inside `height: 100vh`, so
+/// a 1px one clips the last row by two pixels, which reads as a rendering
+/// fault rather than as arithmetic. The window draws its own edge with an
+/// inset catch instead, exactly as the launcher does.
+const TRAY_MENU_SIZE: (f64, f64) = (216.0, 206.0);
+
+/// Puts the notification-area menu at the cursor.
+///
+/// Anchored bottom-right rather than top-left, because the tray is in the
+/// bottom-right corner of the screen and a menu drawn down-and-right from
+/// there lands off the display. Clamped to the monitor's work area so it never
+/// opens under the taskbar.
+fn show_tray_menu(app: &AppHandle, cursor: tauri::PhysicalPosition<f64>) {
+    let Some(window) = app.get_webview_window("traymenu") else {
+        crate::say!("no tray menu window, so the tray has nothing to show");
+        return;
+    };
+
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let (width, height) = TRAY_MENU_SIZE;
+    let (w, h) = (width * scale, height * scale);
+
+    // A gap, so the menu is not welded to the pointer.
+    let gap = 8.0 * scale;
+    let mut x = cursor.x - w;
+    let mut y = cursor.y - h - gap;
+
+    // The work area excludes the taskbar, which is exactly what must not be
+    // covered. Falling back to the full monitor is better than not showing.
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let area = monitor.size();
+        let origin = monitor.position();
+        let (min_x, min_y) = (f64::from(origin.x), f64::from(origin.y));
+        let max_x = min_x + f64::from(area.width) - w;
+        let max_y = min_y + f64::from(area.height) - h;
+        x = x.clamp(min_x, max_x.max(min_x));
+        y = y.clamp(min_y, max_y.max(min_y));
+    }
+
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    // Only a signal that it is up. The page starts each showing at the top,
+    // and reads the bound hotkey itself: preferences live behind an async
+    // mutex and a tray event handler is not a place to be waiting on one.
+    let _ = window.emit("sill://tray-menu-shown", ());
 }
 
 /// Reloads snippets into both the search index and the keyboard hook.
@@ -656,6 +704,51 @@ fn watch_focus(app: &AppHandle, dismiss_on_blur: bool) {
     });
 }
 
+/// Puts the OS material behind every window that floats over the desktop.
+///
+/// Both of them, and it has to be both. The launcher and the tray menu are the
+/// two windows with nothing of Sill's behind them, so both need the compositor
+/// to blur the desktop rather than an in-page `backdrop-filter`, which can only
+/// reach content the page can see. A menu given the popover recipe instead
+/// blurs nothing at all and shows the desktop straight through its own alpha.
+///
+/// `apply_backdrop` rounds the corners first, so this is also what keeps DWM's
+/// clip in agreement with each page's own radius.
+pub(crate) fn apply_backdrops(
+    app: &AppHandle,
+    backdrop: preferences::Backdrop,
+    tint_alpha: u8,
+) {
+    for label in ["main", "traymenu"] {
+        if let Some(window) = app.get_webview_window(label) {
+            summon::apply_backdrop(&window, backdrop, tint_alpha);
+        }
+    }
+}
+
+/// Makes the tray menu dismiss when it loses focus.
+///
+/// A menu is expected to go away when you click elsewhere, and this one is a
+/// real window, so nothing gives it that for free. Unconditional, unlike the
+/// launcher's own dismissal: `dismiss_on_blur` is a preference about the
+/// launcher, and a context menu that stayed on top of everything until it was
+/// clicked would be a bug rather than a setting.
+///
+/// Wired once at startup rather than on each showing, because
+/// `on_window_event` registers a handler rather than replacing one.
+pub(crate) fn autohide_tray_menu(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("traymenu") else {
+        return;
+    };
+
+    let handle = window.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::Focused(false) = event {
+            let _ = handle.hide();
+        }
+    });
+}
+
 /// Hides the launcher, so whatever was in front of it comes back.
 ///
 /// Used by the built-ins that act on another application: a dictation started
@@ -750,13 +843,11 @@ pub fn run() {
             let prefs_path = preferences::path(&data_dir);
             let prefs = preferences::Preferences::load(&prefs_path);
 
-            if let Some(window) = app.get_webview_window("main") {
-                summon::apply_backdrop(
-                    &window,
-                    prefs.appearance.backdrop,
-                    prefs.appearance.tint_alpha,
-                );
-            }
+            apply_backdrops(
+                &handle,
+                prefs.appearance.backdrop,
+                prefs.appearance.tint_alpha,
+            );
 
             apply_window_size(&handle, &prefs.appearance);
             register_summon_shortcut(&handle, &prefs.hotkey.summon);
@@ -764,6 +855,7 @@ pub fn run() {
             // Nothing was bound before, so everything in the list is new.
             bindings::apply(&handle, &[], &prefs.bindings);
             apply_tray(&handle, prefs.general.show_in_tray);
+            autohide_tray_menu(&handle);
             apply_autostart(&handle, prefs.general.open_at_login);
             watch_focus(&handle, prefs.hotkey.dismiss_on_blur);
 
@@ -928,6 +1020,7 @@ pub fn run() {
             commands::system::app_icon,
             commands::diagnostics::diagnostics,
             commands::system::rebuild_index,
+            commands::system::summon_with,
             commands::system::open_data_folder,
             commands::system::open_log,
             commands::system::clear_usage_history,
