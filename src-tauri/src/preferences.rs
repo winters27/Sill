@@ -479,13 +479,30 @@ pub struct Preferences {
 impl Appearance {
     /// Launcher height for the configured row count.
     ///
-    /// `CHROME` is the search bar, both hairlines and the footer, measured
-    /// from the rendered page rather than derived: the search bar's height
-    /// comes from its font's line box, which no constant here can predict.
+    /// Both constants are **measured from the rendered page**, not derived.
     /// Being a few pixels out shows as a partial row at the bottom, which
     /// reads as "there is more below" rather than as a mistake.
+    ///
+    /// Measured 2026-08-30, and it now adds up rather than being a number
+    /// somebody landed on:
+    ///
+    /// | part                  | px |
+    /// | --------------------- | -- |
+    /// | search row            | 52 |
+    /// | its hairline          |  1 |
+    /// | the list's own padding|  8 |
+    /// | footer                | 40 |
+    ///
+    /// The footer's hairline is gone; the action pill carries that edge now.
     pub fn window_height(&self) -> f64 {
-        const CHROME: f64 = 87.0;
+        const CHROME: f64 = 101.0;
+        /// Must equal `--row-height` in `src/lib/theme/theme.css`.
+        ///
+        /// Two sources of truth for one fact, because Rust sizes the window
+        /// and cannot read CSS. `scripts/verify-source.mjs` reads both and
+        /// fails if they drift, which is the only check that can: a Rust test
+        /// asserting `CHROME + rows * ROW` only restates this formula and
+        /// would pass for any pair of numbers.
         const ROW: f64 = 40.0;
         CHROME + f64::from(self.visible_rows.clamp(4, 16)) * ROW
     }

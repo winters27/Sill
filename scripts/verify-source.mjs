@@ -105,6 +105,58 @@ for (const file of sources(".")) {
   if (conflict) {
     fail(file, lineOf(text, conflict.index), `merge conflict marker ${conflict[1]}`);
   }
+
+  /*
+   * Design tokens, bypassed.
+   *
+   * `src/lib/theme/theme.css` is the only place a size or a colour is chosen.
+   * That is not a preference, it is what the frontend decayed away from: 16
+   * distinct font sizes across 101 sites and 74 inline accent alphas at 21
+   * different opacities, each one added by somebody being reasonable about
+   * one component.
+   *
+   * There is no escape hatch on purpose. Every size that existed has a token,
+   * including `--text-hero`, `--text-micro` and the three `--glyph-*` steps
+   * for glyphs that are sized like type but are not type. A rule with an
+   * opt-out marker becomes a rule nobody keeps.
+   */
+  if (extname(file) === ".svelte") {
+    for (const m of text.matchAll(/font-size:\s*[\d.]+px/g)) {
+      fail(file, lineOf(text, m.index), `${m[0]} is a literal; use a --text-* or --glyph-* token`);
+    }
+    for (const m of text.matchAll(/rgba\(var\(--accent-rgb\)/g)) {
+      fail(
+        file,
+        lineOf(text, m.index),
+        "inline accent alpha; the accent means selection, match, focus or an " +
+          "affirmative state, and each has a named token",
+      );
+    }
+  }
+}
+
+/*
+ * The row height, which lives in two places because it has to.
+ *
+ * Rust sizes the launcher window and cannot read CSS, so `window_height`
+ * carries a copy of `--row-height`. A window sized from a stale copy clips its
+ * last row, and that reads as a list refusing to scroll rather than as a
+ * number being wrong. Nothing else can catch this: a Rust test asserting
+ * `CHROME + rows * ROW` only restates the formula.
+ */
+const THEME = "src/lib/theme/theme.css";
+const PREFS = "src-tauri/src/preferences.rs";
+const css = readFileSync(THEME, "utf8").match(/--row-height:\s*([\d.]+)px/);
+const rust = readFileSync(PREFS, "utf8").match(/const ROW: f64 = ([\d.]+)/);
+
+if (!css) fail(THEME, null, "no --row-height, which preferences.rs mirrors");
+else if (!rust) fail(PREFS, null, "no `const ROW`, which mirrors --row-height");
+else if (Number(css[1]) !== Number(rust[1])) {
+  fail(
+    PREFS,
+    null,
+    `ROW is ${rust[1]} but --row-height is ${css[1]}px, so the window will clip its last row`,
+  );
 }
 
 console.log(

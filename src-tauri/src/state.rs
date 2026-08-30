@@ -154,13 +154,26 @@ impl CatalogState {
 /// kind of idle cost rule 23 exists to prevent.
 const SETTLE: std::time::Duration = std::time::Duration::from_secs(4);
 
-/// The share of one processor a rebuild may take, over the long run.
+/// The share of the machine a rebuild may take, over the long run.
 ///
-/// The wait between two rebuilds is the last one's cost multiplied by this, so
-/// a walk that takes a second earns a twenty second wait and one that takes
-/// six earns two minutes. Indexing therefore costs about a twentieth of one
-/// core while files are changing constantly, whether the folder is small or a
-/// whole drive, without a number anywhere that has to be guessed per machine.
+/// The wait between two rebuilds is the last one's wall-clock cost multiplied
+/// by this, so a walk that takes a second earns a twenty second wait and one
+/// that takes six earns two minutes. It self-tunes: a small folder and a whole
+/// drive both settle at the same share without a number to guess per machine.
+///
+/// **The machine, not one core.** The walk is parallel, so a rebuild taking
+/// 1.3 seconds of wall time on six threads spends up to 7.8 seconds of
+/// processor time, and pacing on the wall clock accounts for the first number
+/// rather than the second. Measured on a sixteen core machine with a home
+/// folder indexed and files changing: **3.4 seconds of processor over thirty,
+/// about a tenth of one core**, against the twentieth an earlier version of
+/// this comment claimed.
+///
+/// It is left as it is deliberately. Charging the full processor cost would
+/// mean two and a half minutes before a new file could be found, and the real
+/// answer is not a longer wait but a smaller unit of work: patching the index
+/// for the file that changed instead of walking everything again. That is
+/// worth doing and is not done yet.
 const ONE_IN: u32 = 20;
 
 /// The least time between two rebuilds, whatever the arithmetic says.
