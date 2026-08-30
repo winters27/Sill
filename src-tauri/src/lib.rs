@@ -12,6 +12,7 @@ pub mod dictation;
 pub mod emoji;
 pub mod everything_ipc;
 pub mod exthost;
+pub mod files_ops;
 pub mod files;
 pub mod host;
 pub mod host_bridge;
@@ -1059,6 +1060,7 @@ pub fn run() {
             commands::search::search_engines,
             commands::search::default_browser,
             commands::launch::extract_text_from_last_image,
+            commands::launch::rename_path,
             commands::system::begin_capture,
             commands::system::cancel_capture,
             commands::system::capture_area,

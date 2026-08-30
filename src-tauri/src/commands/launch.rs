@@ -190,6 +190,26 @@ impl ObjectRef {
     }
 }
 
+/// Renames a file or folder, keeping it where it is.
+///
+/// A command rather than an action for one reason: the launcher has to ask for
+/// the new name first, and an action is handed an object and acts. The asking
+/// is most of what renaming is.
+#[tauri::command]
+pub(crate) async fn rename_path(path: String, to: String) -> Result<String, String> {
+    let from = std::path::PathBuf::from(&path);
+    let was = crate::files_ops::name_of(&from);
+
+    let landed = tokio::task::spawn_blocking(move || crate::files_ops::rename(&from, &to))
+        .await
+        .map_err(|err| format!("could not rename that: {err}"))??;
+
+    Ok(format!(
+        "Renamed {was} to {}",
+        crate::files_ops::name_of(&landed)
+    ))
+}
+
 /// Reads the words out of the last picture copied.
 ///
 /// The row in the list and the key bound to it both end here, through the same

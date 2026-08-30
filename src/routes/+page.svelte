@@ -34,6 +34,7 @@
     startFileSearch,
     type FileSearchMissing,
     recordUse,
+    renamePath,
     queryHistory,
     openPath,
     browserAsCommand,
@@ -85,7 +86,20 @@
    * is not worth opening. So selecting one does not open it: it takes over
    * the field, and the next thing typed is what goes in the hole.
    */
-  let awaiting = $state<{ id: string; title: string; link: string } | null>(null);
+  /**
+   * What the field is being borrowed to collect, and what to do with it.
+   *
+   * A quicklink with a hole in it was the first thing to need this, and
+   * renaming a file is the second: both are "take over the field, then act on
+   * what was typed". `what` is the difference, so the two do not become two
+   * modes that behave almost the same.
+   */
+  let awaiting = $state<{
+    what: "quicklink" | "rename";
+    id: string;
+    title: string;
+    link: string;
+  } | null>(null);
   let session = $state<string | null>(null);
   let running = $state<{ title: string; extensionTitle: string } | null>(null);
 
@@ -613,11 +627,28 @@
     }
 
     if (mode === "argument") {
-      const link = awaiting;
-      if (!link) return;
+      const asked = awaiting;
+      if (!asked) return;
+
+      if (asked.what === "rename") {
+        try {
+          status = await renamePath(asked.id, query);
+          awaiting = null;
+          mode = "root";
+          query = "";
+          selected = 0;
+          await refreshRoot();
+        } catch (err) {
+          // Left in the field, because the name that failed is the one worth
+          // editing rather than retyping.
+          status = `${err}`;
+        }
+        return;
+      }
+
       try {
-        status = `opening ${link.title}`;
-        await openQuicklink(link.id, query);
+        status = `opening ${asked.title}`;
+        await openQuicklink(asked.id, query);
         await dismiss();
       } catch (err) {
         status = `${err}`;
@@ -794,6 +825,7 @@
       if (command.mode === "quicklink-arg") {
         void recordUse(command.id, query);
         awaiting = {
+          what: "quicklink",
           id: command.entrypoint,
           title: command.title,
           link: command.subtitle,
@@ -1204,6 +1236,29 @@
       // over the field, and an extension command switches the whole view.
       if (rootActions.find((a) => a.id === chosen)?.primary) {
         await openSelected();
+        return;
+      }
+
+      /*
+       * Renaming needs a name, and the asking is the feature.
+       *
+       * Kept here rather than in the action, which is why the action itself
+       * refuses to run: an action is handed an object and acts, and there is
+       * nowhere in that for a question. The field is borrowed exactly as a
+       * quicklink with a hole in it borrows it.
+       */
+      if (chosen === "sill.file.rename") {
+        awaiting = {
+          what: "rename",
+          id: command.entrypoint,
+          title: command.title,
+          link: command.subtitle,
+        };
+        mode = "argument";
+        selected = 0;
+        // The name it already has, so a small change is a small edit rather
+        // than typing the whole thing again.
+        query = command.title;
         return;
       }
 

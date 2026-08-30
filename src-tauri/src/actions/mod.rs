@@ -45,6 +45,9 @@ pub fn builtins() -> ActionRegistry {
         Box::new(TerminalHere),
         Box::new(ToggleSystem),
         Box::new(RecycleFile),
+        Box::new(HashFile),
+        Box::new(CompressFile),
+        Box::new(RenameFile),
         Box::new(CopyClipboardEntry),
     ];
 
@@ -1457,5 +1460,125 @@ impl Action for CopyUrl {
             .map_err(|err| format!("Could not copy the address: {err}"))?;
 
         Ok(Outcome::done("Copied the address".to_string()))
+    }
+}
+
+/// Copies a file's SHA-256.
+///
+/// The question this answers is "is this the same file as that one", which
+/// comes up when checking a download against what its publisher published.
+///
+/// Read in blocks rather than into memory: an installer is hundreds of
+/// megabytes and there is no reason for any of it to be resident at once.
+struct HashFile;
+
+#[async_trait]
+impl Action for HashFile {
+    fn id(&self) -> &'static str {
+        "sill.file.hash"
+    }
+
+    fn title(&self) -> &'static str {
+        "Copy SHA-256"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::File
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::FileRead, Capability::ClipboardWrite]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let path = std::path::PathBuf::from(&object.target);
+        let name = crate::files_ops::name_of(&path);
+
+        // Blocking and unbounded in time: a large file is a real read, and it
+        // has no business on an async worker.
+        let digest = tokio::task::spawn_blocking(move || crate::files_ops::sha256(&path))
+            .await
+            .map_err(|err| format!("could not read that file: {err}"))??;
+
+        copy_with_undo(ctx, &digest, &format!("Copied the SHA-256 of {name}"))
+    }
+}
+
+/// Puts a file or folder into a zip beside it.
+///
+/// Beside it rather than somewhere chosen, because choosing means a dialog and
+/// the overwhelmingly common answer is "here". The name is the file's own, and
+/// a number is added rather than overwriting anything.
+struct CompressFile;
+
+#[async_trait]
+impl Action for CompressFile {
+    fn id(&self) -> &'static str {
+        "sill.file.compress"
+    }
+
+    fn title(&self) -> &'static str {
+        "Compress"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        matches!(kind, ObjectKind::File | ObjectKind::Folder)
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::FileRead, Capability::FileWrite]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let path = std::path::PathBuf::from(&object.target);
+        let name = crate::files_ops::name_of(&path);
+
+        let made = tokio::task::spawn_blocking(move || crate::files_ops::compress(&path))
+            .await
+            .map_err(|err| format!("could not compress that: {err}"))??;
+
+        let into = crate::files_ops::name_of(&made);
+
+        // Undoable, because this made a file that was not there before and
+        // nothing else was touched. Deleting it puts things back exactly.
+        Ok(Outcome::undoable(
+            format!("Compressed {name} into {into}"),
+            Undo::DeleteFile {
+                path: made.to_string_lossy().into_owned(),
+                name: into,
+            },
+        ))
+    }
+}
+
+/// Renames a file, using the launcher's field to ask for the new name.
+///
+/// The asking is the feature, so this action never runs from the panel with a
+/// name it guessed: the window takes over the field first, exactly as it does
+/// for a quicklink with a hole in it.
+struct RenameFile;
+
+#[async_trait]
+impl Action for RenameFile {
+    fn id(&self) -> &'static str {
+        "sill.file.rename"
+    }
+
+    fn title(&self) -> &'static str {
+        "Rename"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        matches!(kind, ObjectKind::File | ObjectKind::Folder)
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::FileWrite]
+    }
+
+    /// The window collects the new name and calls `rename_path`, so reaching
+    /// here means something dispatched it without asking.
+    async fn run(&self, _ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
+        Err("renaming needs a new name, which the launcher asks for".to_string())
     }
 }

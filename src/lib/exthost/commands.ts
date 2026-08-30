@@ -507,3 +507,14 @@ export function asTarget(command: RankedCommand): ActionTarget {
 export function undoAction(undo: UndoToken): Promise<string> {
   return invoke<string>("undo_action", { undo });
 }
+
+/**
+ * Renames a file or folder, keeping it where it is.
+ *
+ * Its own command rather than an action, because the action is handed an
+ * object and acts: there is nowhere in that for a question, and renaming is
+ * mostly the question.
+ */
+export function renamePath(path: string, to: string): Promise<string> {
+  return invoke<string>("rename_path", { path, to });
+}

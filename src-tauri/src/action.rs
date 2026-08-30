@@ -69,6 +69,13 @@ pub enum Capability {
 pub enum Undo {
     /// Put back what was on the clipboard before.
     RestoreClipboard { text: String },
+    /// Remove a file this action made, and nothing else.
+    ///
+    /// Only ever a file that did not exist a moment ago: compressing writes a
+    /// new archive and touches nothing else, so deleting it puts things back
+    /// exactly. Never used to undo anything that removed or replaced a file,
+    /// because that is not something a descriptor can reverse.
+    DeleteFile { path: String, name: String },
     /// Put a window back where it was, and back how it was.
     ///
     /// The state matters as much as the rectangle: a window that was maximized
@@ -267,6 +274,21 @@ pub fn undo(ctx: &ActionCtx, undo: &Undo) -> Result<String, String> {
                 .write_text(text.clone())
                 .map_err(|err| format!("could not restore the clipboard: {err}"))?;
             Ok("Clipboard restored".to_string())
+        }
+
+        Undo::DeleteFile { path, name } => {
+            let path = std::path::Path::new(path);
+
+            // Already gone is not a failure. Somebody may have deleted it
+            // themselves, and the end state is the one that was asked for.
+            if !path.exists() {
+                return Ok(format!("{name} was already gone"));
+            }
+
+            std::fs::remove_file(path)
+                .map_err(|err| format!("could not remove {name}: {err}"))?;
+
+            Ok(format!("{name} removed"))
         }
 
         Undo::RestoreWindow {

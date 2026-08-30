@@ -52,7 +52,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.6 | Process and resource view | Not started |
 | P2.7 | Terminal execution, capability gated | Not started |
 | P2.8 | Scripting | Not started |
-| P2.9 | File actions | **Partly.** Copy path, copy name, reveal, open a terminal, move to the recycle bin. Rename, move, compress and hash are not |
+| P2.9 | File actions | **Done, except moving.** Copy path, copy name, reveal, open a terminal, recycle bin, SHA-256, compress, rename. Moving needs a destination picker, which is its own question |
 | P2.10 | Hyperkey and double-tap modifiers | Not started in Sill. **Double-tap is written already in AuraKey**, see below |
 | P2.11 | Browser history and bookmarks | **Done.** Chromium and Firefox families, read on demand and never indexed. Off by default |
 | P2.12 | Workspace profiles | Not started |
