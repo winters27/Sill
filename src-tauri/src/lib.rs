@@ -59,12 +59,14 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
     let cached = registry::load_cache(&cache_path);
 
     let state = handle.state::<RegistryState>().inner().clone();
-    let sources = handle
-        .state::<PrefsState>()
-        .inner
-        .blocking_lock()
-        .sources
-        .clone();
+    let (sources, aliases) = {
+        let prefs = handle.state::<PrefsState>();
+        let prefs = prefs.inner.blocking_lock();
+        (
+            prefs.sources.clone(),
+            registry::Aliases::new(&prefs.aliases),
+        )
+    };
     let index_paths = index_paths(&handle);
 
     tauri::async_runtime::spawn(async move {
@@ -77,6 +79,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
             registry.commands = cached;
             registry.frecency = frecency;
             registry.frecency_path = frecency_path.clone();
+            registry.aliases = aliases.clone();
             drop(registry);
             let _ = handle.emit("sill://registry-updated", 0);
         }
@@ -97,6 +100,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
 
         // Set even when the cache was empty, which the block above skipped.
         registry.frecency_path = frecency_path;
+        registry.aliases = aliases;
 
         if let Err(err) = registry::save_cache(&cache_path, &registry.commands) {
             // A missing cache only costs a slower next start.
@@ -687,6 +691,7 @@ pub fn run() {
                 quicklinks: Vec::new(),
                 frecency: Frecency::default(),
                 frecency_path: PathBuf::new(),
+                aliases: registry::Aliases::default(),
             })),
         })
         .setup(|app| {
@@ -860,6 +865,7 @@ pub fn run() {
             commands::search::search_files,
             commands::search::search_windows,
             commands::settings::hotkey_conflicts,
+            commands::settings::set_alias,
             commands::search::list_monitors,
             commands::search::open_path,
             commands::launch::launch_command,

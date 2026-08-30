@@ -11,6 +11,7 @@
   import ClipboardView from "$lib/components/ClipboardView.svelte";
   import { collectActions, isRunnable } from "$lib/exthost/actions";
   import { clipboardMerge } from "$lib/clipboard";
+  import { setAlias } from "$lib/settings";
   import {
     activateHandler,
     dismiss,
@@ -50,7 +51,13 @@
 
   /** Root browses installed commands; command shows one that is running. */
   let mode = $state<
-    "root" | "command" | "clipboard" | "argument" | "switcher" | "collection"
+    | "root"
+    | "command"
+    | "clipboard"
+    | "argument"
+    | "switcher"
+    | "collection"
+    | "alias"
   >("root");
   /**
    * The quicklink waiting for something to be typed into it.
@@ -136,7 +143,7 @@
   const count = $derived.by(() => {
     if (mode === "root" || mode === "switcher") return commands.length;
     // The field is a name, not a filter, so there is nothing to arrow through.
-    if (mode === "collection") return 0;
+    if (mode === "collection" || mode === "alias") return 0;
     if (mode === "clipboard") return clipboardCount;
     return items.length;
   });
@@ -285,7 +292,37 @@
     // two entries written here by hand, which meant the panel and the Enter
     // key were two separate opinions about what a result supports.
     if (mode === "root") {
-      return rootActions.map((action, index) => ({
+      const chosen = commands[selected];
+
+      // Naming a result is offered on the result, not buried in settings.
+      // An alias nobody can reach is one nobody sets, and the launcher is
+      // where you are when you notice you want one.
+      const naming =
+        chosen && chosen.mode !== "answer" && chosen.mode !== "window"
+          ? [
+              {
+                id: -40,
+                title: chosen.alias ? `Rename "${chosen.alias}"` : "Give It a Name",
+                tag: "Sill.SetAlias",
+                props: {},
+                shortcut: undefined,
+              },
+              ...(chosen.alias
+                ? [
+                    {
+                      id: -41,
+                      title: `Forget the Name "${chosen.alias}"`,
+                      tag: "Sill.ClearAlias",
+                      props: {},
+                      shortcut: undefined,
+                    },
+                  ]
+                : []),
+            ]
+          : [];
+
+      return [
+        ...rootActions.map((action, index) => ({
         id: -1 - index,
         title: action.title,
         tag: `Sill.Action:${action.id}`,
@@ -293,7 +330,9 @@
         shortcut: action.primary
           ? { modifiers: [], key: "enter" }
           : undefined,
-      })) as typeof extensionActions;
+        })),
+        ...naming,
+      ] as typeof extensionActions;
     }
 
     const node = tree.top();
@@ -457,6 +496,27 @@
       return;
     }
 
+    if (mode === "alias") {
+      const target = naming;
+      if (!target) return;
+
+      try {
+        prefs = await setAlias(target.id, query);
+        status = query.trim()
+          ? `${target.title} answers to "${query.trim().toLowerCase()}"`
+          : `Forgot the name for ${target.title}`;
+      } catch (err) {
+        status = `${err}`;
+      }
+
+      naming = null;
+      mode = "root";
+      query = "";
+      selected = 0;
+      await refreshRoot();
+      return;
+    }
+
     if (mode === "collection") {
       const name = query.trim();
       if (!name) return;
@@ -617,6 +677,9 @@
    */
   let openCollection = $state<{ id: number; name: string } | null>(null);
 
+  /** The result being given a name, while the field holds the name. */
+  let naming = $state<{ id: string; title: string } | null>(null);
+
   /** The separator a plain merge uses: one entry per line. */
   const NEWLINE = String.fromCharCode(10);
 
@@ -704,6 +767,27 @@
         case "Sill.ClipboardForgetCollection":
           await clipboardView?.forgetCollection();
           break;
+        case "Sill.SetAlias": {
+          const chosen = commands[selected];
+          if (!chosen) return;
+          naming = { id: chosen.id, title: chosen.title };
+          mode = "alias";
+          query = chosen.alias ?? "";
+          panelOpen = false;
+          return;
+        }
+        case "Sill.ClearAlias": {
+          const chosen = commands[selected];
+          if (!chosen) return;
+          try {
+            prefs = await setAlias(chosen.id, "");
+            status = `Forgot the name for ${chosen.title}`;
+            await refreshRoot();
+          } catch (err) {
+            status = `${err}`;
+          }
+          break;
+        }
         case "Sill.ClipboardPin":
           await clipboardView?.togglePin();
           break;
@@ -831,6 +915,17 @@
       mode = "root";
       selected = 0;
       query = "";
+      await refreshRoot();
+      return;
+    }
+
+    // Changing your mind about a name leaves the result where it was, rather
+    // than dropping out of the launcher entirely.
+    if (mode === "alias") {
+      naming = null;
+      mode = "root";
+      query = "";
+      selected = 0;
       await refreshRoot();
       return;
     }
@@ -983,6 +1078,7 @@
   // Typing at the root re-ranks; inside a command the query is the extension's.
   $effect(() => {
     query;
+    // Not while the field holds a name rather than a query.
     if (mode === "root" || mode === "switcher") void refreshRoot();
   });
 
@@ -1112,6 +1208,8 @@
       <span class="crumb">Open Windows</span>
     {:else if mode === "collection"}
       <span class="crumb">Collection</span>
+    {:else if mode === "alias" && naming}
+      <span class="crumb">{naming.title}</span>
     {:else if running}
       <span class="crumb">{running.extensionTitle}</span>
     {/if}
@@ -1120,8 +1218,10 @@
       bind:value={query}
       placeholder={mode === "argument"
         ? "Type what to search for, then Enter…"
-        : mode === "collection"
-          ? "Name the collection, then Enter…"
+        : mode === "alias"
+          ? "Type a short name, then Enter. Empty forgets it…"
+          : mode === "collection"
+            ? "Name the collection, then Enter…"
           : mode === "clipboard"
             ? "Filter what you have copied…"
           : mode === "switcher"
@@ -1162,7 +1262,9 @@
       onrich={(rich) => (richEntry = rich)}
       oncollection={(open) => (openCollection = open)}
     />
-  {:else if mode === "root" || mode === "switcher"}
+  {:else if mode === "root" || mode === "switcher" || mode === "alias"}
+    <!-- Kept on screen while a name is typed, so what is being named stays
+         visible. -->
     <RootList
       {commands}
       {selected}

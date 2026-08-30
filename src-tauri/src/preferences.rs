@@ -391,6 +391,13 @@ pub struct Preferences {
     /// Global shortcuts that run an action without showing the launcher.
     #[serde(default)]
     pub bindings: Vec<crate::bindings::Binding>,
+    /// Names the user has chosen for things in the index.
+    ///
+    /// The one piece of ranking information that is not a guess, which is why
+    /// an exact alias match outranks every other kind of match. A list rather
+    /// than a map so the order shown in settings is the order they were made.
+    #[serde(default)]
+    pub aliases: Vec<crate::registry::Alias>,
 }
 
 impl Appearance {

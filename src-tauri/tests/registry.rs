@@ -3,7 +3,7 @@
 //! This is the part of a launcher users judge hardest, so the tests are about
 //! ordering outcomes rather than the arithmetic that produces them.
 
-use sill_lib::registry::{search, CommandRecord, Frecency};
+use sill_lib::registry::{self, search, Alias, Aliases, CommandRecord, Frecency};
 
 const NOW: i64 = 1_756_000_000;
 const HOUR: i64 = 3600;
@@ -706,11 +706,20 @@ fn an_exclusion_term_hides_matching_entries() {
     let commands = corpus();
     let frecency = Frecency::default();
 
-    let before = sill_lib::registry::search_excluding(&commands, "", &frecency, NOW, 50, &[]);
+    let before = sill_lib::registry::search_excluding(
+        &commands,
+        "",
+        &frecency,
+        &Aliases::default(),
+        NOW,
+        50,
+        &[],
+    );
     let after = sill_lib::registry::search_excluding(
         &commands,
         "",
         &frecency,
+        &Aliases::default(),
         NOW,
         50,
         &["history".to_string()],
@@ -742,6 +751,7 @@ fn an_exclusion_term_is_case_insensitive_and_ignores_blanks() {
         &commands,
         "",
         &frecency,
+        &Aliases::default(),
         NOW,
         50,
         // A blank term matches every string. Left in, it would empty the list
@@ -775,6 +785,7 @@ fn searching_borrows_its_corpus_from_more_than_one_source() {
         index.iter().chain(extra.iter()),
         "sig",
         &Frecency::default(),
+        &Aliases::default(),
         NOW,
         20,
         &[],
@@ -802,6 +813,7 @@ fn a_snippet_is_findable_by_what_is_inside_it() {
         extra.iter(),
         "regards",
         &Frecency::default(),
+        &Aliases::default(),
         NOW,
         20,
         &[],
@@ -1136,4 +1148,248 @@ fn a_guess_is_the_last_thing_offered() {
     // what keeps a near-miss below every real match including a keyword hit.
     assert!(MatchClass::Elsewhere < MatchClass::TitleTypo);
     assert!(MatchClass::TitleSubsequence < MatchClass::TitleTypo);
+}
+
+// ---------------------------------------------------------------- aliases
+
+/// The alias target, chosen so its own title cannot match the alias.
+///
+/// "music" appears in no title in the corpus, and Spotify contains no `m` at
+/// all, so nothing on the way to typing it can reach Spotify by accident
+/// either. Both properties matter: without the second, the partial-typing
+/// test would pass for the wrong reason.
+const TARGET: &str = "Spotify";
+const ALIAS: &str = "music";
+
+fn aliased() -> (Vec<CommandRecord>, Aliases) {
+    let commands = realistic();
+    let target = commands
+        .iter()
+        .find(|c| c.title == TARGET)
+        .unwrap_or_else(|| panic!("the corpus has {TARGET}"));
+
+    let aliases = Aliases::new(&[Alias {
+        alias: ALIAS.into(),
+        command: target.id.clone(),
+    }]);
+
+    (commands, aliases)
+}
+
+#[test]
+fn an_alias_finds_something_its_name_does_not_contain() {
+    // The point of an alias. "notes" appears nowhere in "Obsidian", so
+    // without one there is no query that reaches it by that word at all.
+    let (commands, aliases) = aliased();
+
+    let found = registry::search_excluding(
+        commands.iter(),
+        ALIAS,
+        &Frecency::default(),
+        &aliases,
+        NOW,
+        50,
+        &[],
+    );
+
+    assert_eq!(
+        found.first().map(|r| r.command.title.as_str()),
+        Some(TARGET),
+        "an alias has to reach a title that does not contain it"
+    );
+}
+
+#[test]
+fn an_alias_outranks_an_exact_title_match() {
+    // The hard case, and the reason Alias is above ExactTitle rather than
+    // beside it. An alias is the one ranking input that is not a guess:
+    // somebody typed it in and said what those letters mean. A model that can
+    // overrule it has turned an instruction into a suggestion.
+    let mut commands = realistic();
+
+    // Something whose title IS the alias, which would otherwise win outright.
+    commands.push(command("decoy:music", "Music", "Decoy"));
+
+    let target = commands
+        .iter()
+        .find(|c| c.title == TARGET)
+        .expect("in the corpus")
+        .id
+        .clone();
+
+    let aliases = Aliases::new(&[Alias {
+        alias: ALIAS.into(),
+        command: target,
+    }]);
+
+    let found = registry::search_excluding(
+        commands.iter(),
+        ALIAS,
+        &Frecency::default(),
+        &aliases,
+        NOW,
+        50,
+        &[],
+    );
+
+    assert_eq!(
+        found.first().map(|r| r.command.title.as_str()),
+        Some(TARGET),
+        "the alias lost to a title that happened to match"
+    );
+
+    // And the decoy is still findable, immediately below.
+    assert!(
+        found.iter().any(|r| r.command.title == "Music"),
+        "the alias must not hide anything"
+    );
+}
+
+#[test]
+fn an_alias_only_applies_when_it_is_typed_in_full() {
+    // Partway through typing, ordinary matching applies. An alias that pulled
+    // its target to the top from the first letter would make every result
+    // list unpredictable while typing anything that starts the same way.
+    let (commands, aliases) = aliased();
+
+    for partial in ["m", "mu", "mus", "musi"] {
+        let found = registry::search_excluding(
+            commands.iter(),
+            partial,
+            &Frecency::default(),
+            &aliases,
+            NOW,
+            50,
+            &[],
+        );
+
+        assert_ne!(
+            found.first().map(|r| r.command.title.as_str()),
+            Some(TARGET),
+            "{partial:?} pulled the alias target up before it was finished"
+        );
+    }
+}
+
+#[test]
+fn an_alias_is_matched_regardless_of_case() {
+    let (commands, _) = aliased();
+    let target = commands
+        .iter()
+        .find(|c| c.title == TARGET)
+        .expect("in the corpus")
+        .id
+        .clone();
+
+    // Stored with capitals and padding, which the store cleans on the way in.
+    let aliases = Aliases::new(&[Alias {
+        alias: "  MUSIC  ".into(),
+        command: target,
+    }]);
+
+    for typed in ["music", "MUSIC", "Music"] {
+        let found = registry::search_excluding(
+            commands.iter(),
+            typed,
+            &Frecency::default(),
+            &aliases,
+            NOW,
+            50,
+            &[],
+        );
+
+        assert_eq!(
+            found.first().map(|r| r.command.title.as_str()),
+            Some(TARGET),
+            "{typed:?} did not match the alias"
+        );
+    }
+}
+
+#[test]
+fn an_alias_pointing_at_something_that_is_gone_changes_nothing() {
+    // An application is uninstalled and the alias outlives it. The alias
+    // simply never matches; it must not make the search fail or hide results.
+    let commands = realistic();
+    let aliases = Aliases::new(&[Alias {
+        alias: ALIAS.into(),
+        command: "app:C:/gone/forever.exe".into(),
+    }]);
+
+    let with = registry::search_excluding(
+        commands.iter(),
+        "disc",
+        &Frecency::default(),
+        &aliases,
+        NOW,
+        50,
+        &[],
+    );
+    let without = registry::search_excluding(
+        commands.iter(),
+        "disc",
+        &Frecency::default(),
+        &Aliases::default(),
+        NOW,
+        50,
+        &[],
+    );
+
+    let titles = |r: &[registry::RankedCommand]| {
+        r.iter()
+            .map(|c| c.command.title.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(titles(&with), titles(&without));
+}
+
+#[test]
+fn a_blank_alias_is_not_an_alias_that_matches_everything() {
+    // An empty string is a prefix of every query. Storing one and comparing
+    // it naively would make one command win every search ever typed.
+    let commands = realistic();
+    let aliases = Aliases::new(&[
+        Alias {
+            alias: "   ".into(),
+            command: commands[0].id.clone(),
+        },
+        Alias {
+            alias: "".into(),
+            command: commands[1].id.clone(),
+        },
+    ]);
+
+    assert!(aliases.is_empty(), "blank aliases were kept");
+
+    // And the ordering is exactly what it would be with no aliases at all,
+    // rather than merely "not obviously wrong".
+    let with = registry::search_excluding(
+        commands.iter(),
+        "docker",
+        &Frecency::default(),
+        &aliases,
+        NOW,
+        50,
+        &[],
+    );
+    let without = registry::search_excluding(
+        commands.iter(),
+        "docker",
+        &Frecency::default(),
+        &Aliases::default(),
+        NOW,
+        50,
+        &[],
+    );
+
+    let titles = |r: &[registry::RankedCommand]| {
+        r.iter()
+            .map(|c| c.command.title.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(titles(&with), titles(&without));
+    assert!(
+        !titles(&with).is_empty(),
+        "the query matched nothing at all"
+    );
 }

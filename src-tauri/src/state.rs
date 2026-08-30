@@ -65,6 +65,12 @@ pub(crate) struct Registry {
     pub(crate) quicklinks: Vec<CommandRecord>,
     pub(crate) frecency: Frecency,
     pub(crate) frecency_path: PathBuf,
+    /// The names the user has chosen for things.
+    ///
+    /// Here beside frecency because it plays the same role: user state that
+    /// ranking consults on every keystroke. Rebuilt when the preference
+    /// changes rather than read from disk per query.
+    pub(crate) aliases: crate::registry::Aliases,
 }
 
 pub(crate) fn now_seconds() -> i64 {

@@ -351,6 +351,12 @@
             {#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}
           {/each}
         </span>
+        {#if command.alias}
+          <!-- Beside the name rather than at the end of the row, because it
+               is another name for the same thing and reads as one there. A
+               name kept out of sight is a name nobody remembers setting. -->
+          <span class="alias">{command.alias}</span>
+        {/if}
         {#if sourceOf(command)}
           <span class="extension">{sourceOf(command)}</span>
         {/if}
@@ -394,6 +400,19 @@
     background: none;
     color: var(--core-accent);
     font-weight: 600;
+  }
+
+  /* The user's own name for this. Quiet: it is a reminder, not a label
+     competing with the title it sits beside. */
+  .alias {
+    flex: none;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--accent-bright);
+    background: rgba(var(--accent-rgb), 0.13);
+    border-radius: 4px;
+    white-space: nowrap;
   }
 
   .extension {

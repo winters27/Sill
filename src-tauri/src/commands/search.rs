@@ -25,6 +25,7 @@ pub(crate) async fn search_commands(
             .chain(registry.own_settings.iter()),
         &query,
         &registry.frecency,
+        &registry.aliases,
         now_seconds(),
         registry::SEARCH_LIMIT,
         &excluded,
@@ -40,7 +41,20 @@ pub(crate) async fn search_commands(
     // Narrowed to what the window actually reads on the way out. The ranked
     // form carries the fields matching needs, which is most of the bytes and
     // none of the use once ranking is over.
-    Ok(results.into_iter().map(Into::into).collect())
+    Ok(results
+        .into_iter()
+        .map(|ranked| {
+            // Looked up here rather than carried through ranking: only the
+            // rows that survive are drawn, and only drawn rows show a name.
+            let alias = registry
+                .aliases
+                .for_command(&ranked.command.id)
+                .map(str::to_string);
+            let mut result: registry::SearchResult = ranked.into();
+            result.alias = alias;
+            result
+        })
+        .collect())
 }
 
 /// The open windows matching a query.
@@ -89,6 +103,9 @@ pub(crate) async fn search_windows(
         records.iter(),
         &query,
         &registry.frecency,
+        // A window is not in the index, so nothing can have been given a name
+        // for one. An alias points at a command id that survives a restart.
+        &registry::Aliases::default(),
         now_seconds(),
         registry::SEARCH_LIMIT,
         &[],

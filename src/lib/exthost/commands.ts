@@ -50,6 +50,8 @@ export interface RankedCommand {
   panel?: string | null;
   /** Indices into `title` that matched the query, for highlighting. */
   matched: number[];
+  /** The name the user gave this, when they gave it one. */
+  alias?: string;
 }
 
 export interface LaunchedCommand {

@@ -17,6 +17,12 @@ export interface General {
   showInTray: boolean;
 }
 
+/** A name the user chose for one thing in the index. */
+export interface Alias {
+  alias: string;
+  command: string;
+}
+
 export interface Hotkey {
   summon: string;
   /** Opens straight onto the window list. Empty means off. */
@@ -97,6 +103,7 @@ export interface Preferences {
   sources: Sources;
   files: FileSearch;
   bindings: Binding[];
+  aliases: Alias[];
 }
 
 /**
@@ -233,4 +240,14 @@ export function acceleratorFrom(event: KeyboardEvent): string | null {
  */
 export function hotkeyConflicts(): Promise<string[]> {
   return invoke<string[]>("hotkey_conflicts").catch(() => []);
+}
+
+/**
+ * Gives a command a name of the user's own, or takes one away.
+ *
+ * An empty alias removes it. Returns the whole preferences object, because
+ * setting one is a write and every other window has to see the result.
+ */
+export function setAlias(command: string, alias: string): Promise<Preferences> {
+  return invoke<Preferences>("set_alias", { command, alias });
 }

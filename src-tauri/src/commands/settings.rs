@@ -79,6 +79,16 @@ pub(crate) async fn set_preferences(
         apply_dictation(&app, &prefs.dictation);
     }
 
+    if previous.aliases != prefs.aliases {
+        // Rebuilt rather than reloaded per query. Ranking asks about aliases
+        // once per candidate on every keystroke.
+        app.state::<crate::state::RegistryState>()
+            .inner
+            .lock()
+            .await
+            .aliases = crate::registry::Aliases::new(&prefs.aliases);
+    }
+
     if previous.bindings != prefs.bindings {
         crate::bindings::apply(&app, &previous.bindings, &prefs.bindings);
     }
@@ -178,4 +188,39 @@ pub(crate) async fn hotkey_conflicts(app: AppHandle) -> Vec<String> {
     app.try_state::<crate::HotkeyConflicts>()
         .map(|conflicts| conflicts.all())
         .unwrap_or_default()
+}
+
+/// Gives a command a name of the user's own, or takes one away.
+///
+/// An empty alias removes it. One command has at most one name and one name
+/// points at one command, so setting either half replaces whatever held it:
+/// two commands answering to the same word would make that word useless, and
+/// silently keeping the older claim would look like the new one was ignored.
+#[tauri::command]
+pub(crate) async fn set_alias(
+    app: AppHandle,
+    prefs: State<'_, crate::state::PrefsState>,
+    command: String,
+    alias: String,
+) -> Result<crate::preferences::Preferences, String> {
+    let wanted = alias.trim().to_lowercase();
+
+    let next = {
+        let mut current = prefs.inner.lock().await;
+        current
+            .aliases
+            .retain(|a| a.command != command && (wanted.is_empty() || a.alias != wanted));
+
+        if !wanted.is_empty() {
+            current.aliases.push(crate::registry::Alias {
+                alias: wanted,
+                command,
+            });
+        }
+
+        current.clone()
+    };
+
+    set_preferences(app, prefs, next.clone()).await?;
+    Ok(next)
 }

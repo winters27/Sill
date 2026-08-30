@@ -93,6 +93,12 @@ pub struct SearchResult {
     pub panel: Option<String>,
     /// Indices into `title` that matched, so the UI can highlight them.
     pub matched: Vec<usize>,
+    /// The name the user gave this, when they gave it one.
+    ///
+    /// Shown on the row, which is the only way an alias is discoverable: a
+    /// name nobody can see is one nobody remembers they set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
 }
 
 impl From<RankedCommand> for SearchResult {
@@ -122,6 +128,8 @@ impl From<RankedCommand> for SearchResult {
             icon,
             panel: command.panel,
             matched,
+            // Filled by the caller, which is the only place that knows them.
+            alias: None,
         }
     }
 }
@@ -147,6 +155,7 @@ impl SearchResult {
             panel: command.panel,
             // Nothing was typed, so nothing matched.
             matched: Vec::new(),
+            alias: None,
         }
     }
 }
@@ -597,6 +606,48 @@ impl Frecency {
     }
 }
 
+// ------------------------------------------------------------- aliases
+
+/// One name the user chose for one thing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Alias {
+    /// What they type. Stored lowercased, because that is how it is compared.
+    pub alias: String,
+    /// The command id it stands for.
+    pub command: String,
+}
+
+/// The names the user has chosen, ready to be asked about.
+///
+/// Two lookups because both directions are needed and both are hot: ranking
+/// asks "does this command have an alias" once per candidate, and the window
+/// asks "what is the alias for this row" once per drawn row.
+#[derive(Debug, Clone, Default)]
+pub struct Aliases {
+    by_command: std::collections::HashMap<String, String>,
+}
+
+impl Aliases {
+    pub fn new(aliases: &[Alias]) -> Self {
+        Self {
+            by_command: aliases
+                .iter()
+                .filter(|a| !a.alias.trim().is_empty() && !a.command.is_empty())
+                .map(|a| (a.command.clone(), a.alias.trim().to_lowercase()))
+                .collect(),
+        }
+    }
+
+    pub fn for_command(&self, id: &str) -> Option<&str> {
+        self.by_command.get(id).map(String::as_str)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_command.is_empty()
+    }
+}
+
 // ------------------------------------------------------- match classes
 
 /// How well a query matched, as a handful of discrete kinds.
@@ -612,6 +663,13 @@ impl Frecency {
 /// the sort relies on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MatchClass {
+    /// The user said this is what those letters mean.
+    ///
+    /// Above everything, and it has to be: an alias is the one piece of
+    /// ranking information that is not a guess. Somebody typed it in and said
+    /// "when I type this, I mean that". A model that can overrule it has
+    /// turned an instruction into a suggestion.
+    Alias,
     /// The title is exactly what was typed.
     ExactTitle,
     /// The title starts with what was typed.
@@ -648,7 +706,23 @@ fn find_run(hay: &[char], needle: &[char]) -> Option<usize> {
 ///
 /// `None` when it did not match at all, which is the answer for almost every
 /// entry on almost every query.
-fn classify(needle: &[char], command: &CommandRecord) -> Option<(MatchClass, Vec<usize>)> {
+fn classify(
+    needle: &[char],
+    command: &CommandRecord,
+    alias: Option<&str>,
+) -> Option<(MatchClass, Vec<usize>)> {
+    // Checked before the title, because it outranks it. The alias is already
+    // lowercased when it is stored, and the needle is lowercased by the
+    // caller, so this is a comparison rather than a normalisation.
+    if let Some(alias) = alias {
+        if alias.chars().eq(needle.iter().copied()) {
+            // No matched indices: the letters that matched are not in the
+            // title, so highlighting positions in it would underline the
+            // wrong characters.
+            return Some((MatchClass::Alias, Vec::new()));
+        }
+    }
+
     let hay: Vec<char> = command.title.chars().collect();
     let hay_lower: Vec<char> = command.title.to_lowercase().chars().collect();
 
@@ -802,7 +876,17 @@ fn looks_like_a_typo_of(needle: &[char], title: &str, budget: usize) -> bool {
 /// it is the obvious next use.
 pub fn match_class(query: &str, command: &CommandRecord) -> Option<MatchClass> {
     let needle: Vec<char> = query.trim().to_lowercase().chars().collect();
-    classify(&needle, command).map(|(class, _)| class)
+    classify(&needle, command, None).map(|(class, _)| class)
+}
+
+/// The same, for a command the user has given a name of their own.
+pub fn match_class_with_alias(
+    query: &str,
+    command: &CommandRecord,
+    alias: &str,
+) -> Option<MatchClass> {
+    let needle: Vec<char> = query.trim().to_lowercase().chars().collect();
+    classify(&needle, command, Some(alias)).map(|(class, _)| class)
 }
 
 // ----------------------------------------------------------------- search
@@ -834,7 +918,15 @@ pub fn search(
     now: i64,
     limit: usize,
 ) -> Vec<RankedCommand> {
-    search_excluding(commands, query, frecency, now, limit, &[])
+    search_excluding(
+        commands,
+        query,
+        frecency,
+        &Aliases::default(),
+        now,
+        limit,
+        &[],
+    )
 }
 
 /// The corpus is borrowed, never collected.
@@ -853,6 +945,7 @@ pub fn search_excluding<'a>(
     commands: impl IntoIterator<Item = &'a CommandRecord>,
     query: &str,
     frecency: &Frecency,
+    aliases: &Aliases,
     now: i64,
     limit: usize,
     excluded: &[String],
@@ -893,7 +986,7 @@ pub fn search_excluding<'a>(
         let (class, matched) = if query.is_empty() {
             (MatchClass::ExactTitle, Vec::new())
         } else {
-            match classify(&needle, command) {
+            match classify(&needle, command, aliases.for_command(&command.id)) {
                 Some(found) => found,
                 None => continue,
             }
