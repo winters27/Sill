@@ -491,6 +491,21 @@
       if (id === searchId) status = `window search failed: ${err}`;
     }
 
+    // Emoji, in their own group. A separate corpus rather than part of the
+    // index: two thousand entries would swamp fifteen hundred real ones, and
+    // ranking them together would mean every keystroke weighed both.
+    //
+    // Only strong matches come back, which Rust decides. Their names are
+    // ordinary words, so loose matching would put a smiley in the middle of
+    // every search anybody ever typed.
+    try {
+      const faces = await searchEmoji(current, true);
+      if (id !== searchId) return;
+      if (faces.length) commands = merged(commands, faces);
+    } catch (err) {
+      if (id === searchId) status = `emoji search failed: ${err}`;
+    }
+
     // Files are appended after the commands, so a slower file query can never
     // reorder or delay what is already shown.
     fileTimer = setTimeout(async () => {
@@ -566,35 +581,7 @@
       const emoji = commands[selected];
       if (!emoji) return;
 
-      // What was typed to reach it, remembered against the emoji itself.
-      // Search "party", choose the popper, and next time "party" finds it
-      // first. Raycast does this with a model; Sill already learns query to
-      // result for everything else, so here it is the same mechanism.
-      //
-      // Not into the history Up walks back through: that is what was typed at
-      // the root, and this taught nothing about the root list.
-      void recordUse(emoji.id, query, false);
-
-      const paste = (prefs?.emoji.primary ?? "paste") === "paste";
-
-      try {
-        if (paste) {
-          // Dismissed first: pasting means putting it back where the user was
-          // typing, and Sill has to stop being the foreground window for that
-          // to mean anything.
-          await dismiss();
-          await runObjectAction("sill.emoji.paste", asTarget(emoji));
-        } else {
-          await runObjectAction("sill.clipboard.copy", asTarget(emoji));
-          await dismiss();
-        }
-      } catch (err) {
-        status = `${err}`;
-      }
-
-      mode = "root";
-      selected = 0;
-      query = "";
+      await useEmoji(emoji);
       return;
     }
 
@@ -614,6 +601,13 @@
     if (mode === "root") {
       const command = commands[selected];
       if (!command) return;
+
+      // Found in an ordinary search rather than through the picker, and it
+      // behaves identically once it is on screen.
+      if (command.mode === "emoji") {
+        await useEmoji(command);
+        return;
+      }
 
       // Its own view rather than a window: the history is browsed the same
       // way the root list is, with the same field and the same keys.
@@ -842,6 +836,62 @@
     } catch (err) {
       status = `${err}`;
     }
+  }
+
+  /**
+   * Puts a second search's results into the first, by how well each matched.
+   *
+   * Appending was wrong and measuring showed how wrong: typing "tada" matched
+   * eighty-four things in the index, every one of them a coincidence of
+   * spelling, and the party popper somebody had plainly named landed
+   * eighty-fifth. Groups are ordered by their best member, so where the first
+   * one lands decides where the whole group reads.
+   *
+   * So: above everything the index only half-recognised, below everything it
+   * knew by name. Neither list is reordered within itself.
+   */
+  function merged(into: RankedCommand[], extra: RankedCommand[]): RankedCommand[] {
+    let at = 0;
+    while (at < into.length && into[at].strong) at += 1;
+
+    return [...into.slice(0, at), ...extra, ...into.slice(at)];
+  }
+
+  /**
+   * Pastes or copies one emoji, and remembers what was typed to reach it.
+   *
+   * One implementation because there are two ways to reach one: the picker,
+   * and finding it in an ordinary search. Two copies would drift the first
+   * time the primary action or the learning changed.
+   */
+  async function useEmoji(emoji: RankedCommand) {
+    // What was typed, remembered against the emoji itself. Search "party",
+    // choose the popper, and next time "party" finds it first. Raycast does
+    // this with a model; Sill already learns query to result for everything
+    // else, so here it is the same mechanism.
+    //
+    // A query typed at the root DOES go into the history, unlike one typed in
+    // the picker: Up recalling it will find the same emoji again.
+    void recordUse(emoji.id, query, mode === "root");
+
+    try {
+      if ((prefs?.emoji.primary ?? "paste") === "paste") {
+        // Dismissed first: pasting means putting it back where the user was
+        // typing, and Sill has to stop being the foreground window for that
+        // to mean anything.
+        await dismiss();
+        await runObjectAction("sill.emoji.paste", asTarget(emoji));
+      } else {
+        await runObjectAction("sill.clipboard.copy", asTarget(emoji));
+        await dismiss();
+      }
+    } catch (err) {
+      status = `${err}`;
+    }
+
+    mode = "root";
+    selected = 0;
+    query = "";
   }
 
   /** Runs an action chosen from the panel. -1 means dismiss without running. */

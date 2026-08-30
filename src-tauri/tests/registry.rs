@@ -933,7 +933,7 @@ fn a_better_kind_of_match_is_what_promotes_a_result() {
     // match for Visual Studio Code, so Calculator overtakes it.
     assert_eq!(
         class_of("ca", &corpus, "app:calc"),
-        Some(MatchClass::TitlePrefix)
+        Some(MatchClass::TitleWord)
     );
 
     let after = ids(&search(&corpus, "ca", &frecency, NOW, 50));
@@ -975,8 +975,8 @@ fn initials_beat_a_run_of_the_same_letters() {
 fn the_kinds_of_match_are_ordered_best_first() {
     // The sort relies on the derived Ord, so the declaration order in the
     // enum is load-bearing rather than cosmetic.
-    assert!(MatchClass::ExactTitle < MatchClass::TitlePrefix);
-    assert!(MatchClass::TitlePrefix < MatchClass::TitleWordStarts);
+    assert!(MatchClass::ExactTitle < MatchClass::TitleWord);
+    assert!(MatchClass::TitleWord < MatchClass::TitleWordStarts);
     assert!(MatchClass::TitleWordStarts < MatchClass::TitleSubstring);
     assert!(MatchClass::TitleSubstring < MatchClass::TitleSubsequence);
     assert!(MatchClass::TitleSubsequence < MatchClass::Elsewhere);
@@ -1886,5 +1886,283 @@ fn a_keyword_written_with_capitals_still_matches() {
     assert_eq!(
         match_class("screenshot", &thing),
         Some(MatchClass::KeywordExact)
+    );
+}
+
+// ------------------------------------------------- volunteering results
+
+#[test]
+fn only_a_named_match_is_strong_enough_to_volunteer() {
+    // Emoji append themselves to an ordinary search, so they have to earn the
+    // room. Their names are ordinary words and there are nearly two thousand
+    // of them, so anything looser than "the user named this" would put a
+    // smiley in the middle of every search anybody ever typed.
+    use registry::MatchClass;
+
+    for strong in [
+        MatchClass::Alias,
+        MatchClass::Learned,
+        MatchClass::ExactTitle,
+        MatchClass::TitleWord,
+        MatchClass::TitleWordStarts,
+        MatchClass::KeywordExact,
+    ] {
+        assert!(registry::is_strong(strong), "{strong:?} should volunteer");
+    }
+
+    for weak in [
+        MatchClass::TitleSubstring,
+        MatchClass::TitleSubsequence,
+        MatchClass::Elsewhere,
+        MatchClass::TitleTypo,
+    ] {
+        assert!(!registry::is_strong(weak), "{weak:?} should not volunteer");
+    }
+}
+
+#[test]
+fn a_scattered_match_on_an_emoji_name_does_not_volunteer() {
+    // The case this exists for. "code" finds "chart decreasing" as a
+    // subsequence: c, o... no, but "cloud" does, and so do dozens of others
+    // for almost any query. Checked through the real classifier rather than
+    // by listing classes.
+    let mut emoji = command("emoji:x", "chart increasing", "Symbols");
+    emoji.keywords = vec!["chart_increasing".to_string()];
+
+    let class = match_class("cri", &emoji).expect("it does match somehow");
+
+    assert_eq!(class, MatchClass::TitleSubsequence);
+    assert!(
+        !registry::is_strong(class),
+        "a scattered match volunteered itself"
+    );
+}
+
+#[test]
+fn typing_the_name_of_an_emoji_does_volunteer_it() {
+    let mut emoji = command("emoji:rocket", "rocket", "Travel and Places");
+    emoji.keywords = vec!["rocket".to_string()];
+
+    for typed in ["rocket", "rock", "ROCKET"] {
+        let class = match_class(typed, &emoji).expect("matches");
+        assert!(
+            registry::is_strong(class),
+            "{typed:?} gave {class:?}, which will not be offered"
+        );
+    }
+}
+
+/// What a query actually pulls out of the real emoji set.
+///
+/// The whole set, not a fixture: the question is whether nearly two thousand
+/// ordinary English words quietly match everything, and only the real names
+/// answer that.
+fn volunteered(query: &str) -> Vec<String> {
+    let frecency = Frecency::default();
+    let aliases = Aliases::default();
+    let records = sill_lib::emoji::records(sill_lib::emoji::Tone::Default);
+
+    registry::search_excluding(
+        records.iter(),
+        query,
+        &frecency,
+        &aliases,
+        NOW,
+        registry::SEARCH_LIMIT,
+        Excluded::none(),
+    )
+    .into_iter()
+    .filter(|ranked| match_class(query, &ranked.command).is_some_and(registry::is_strong))
+    .map(|ranked| ranked.command.title.clone())
+    .collect()
+}
+
+#[test]
+fn launching_something_does_not_drag_in_emoji() {
+    // The measurement this rule exists for. These are what a person types to
+    // launch a program, and not one of them is asking for a picture. Measured
+    // against the real set of nearly two thousand: every one comes back empty.
+    for typed in [
+        "code", "chrome", "term", "settings", "explorer", "obs", "python",
+        "git", "docker", "slack", "word", "excel", "calc", "edge", "zoom",
+        "teams", "photo", "spot",
+    ] {
+        let found = volunteered(typed);
+        assert!(found.is_empty(), "{typed:?} dragged in {found:?}");
+    }
+}
+
+#[test]
+fn a_word_that_names_an_emoji_offers_a_few_and_not_a_screenful() {
+    // Some words genuinely are the name of an emoji as well as of a program.
+    // Those do offer some, which is the point, and the number is what decides
+    // whether it reads as a helpful aside or as the list being taken over.
+    //
+    // "heart" is here as the worst case in the whole set: thirty-five emoji
+    // are named with that word, and the caller shows four of them.
+    for (typed, most) in [("file", 4), ("mail", 5), ("note", 5), ("steam", 6)] {
+        let found = volunteered(typed);
+        assert!(
+            !found.is_empty() && found.len() <= most,
+            "{typed:?} offered {}: {found:?}",
+            found.len()
+        );
+    }
+}
+
+#[test]
+fn asking_for_an_emoji_by_name_still_finds_it() {
+    // The other half. Tightening the rule until nothing gets through would
+    // pass the test above and make the feature useless.
+    for (typed, wanted) in [
+        ("rocket", "rocket"),
+        // The shortcode rather than the name, which is what people type.
+        ("tada", "party popper"),
+        ("thumbs", "thumbs up"),
+        ("fire", "fire"),
+        ("cat", "cat"),
+        ("check", "check mark button"),
+        ("party", "party popper"),
+        ("100", "hundred points"),
+        // Named by a word that is not the first one. This is the case the
+        // whole-word class was added for: before it, "red heart" was in the
+        // same bucket as an accident of spelling and was never offered.
+        ("heart", "red heart"),
+        ("moon", "full moon"),
+        ("hand", "raised hand"),
+    ] {
+        let found = volunteered(typed);
+        assert!(
+            found.iter().any(|title| title == wanted),
+            "{typed:?} did not offer {wanted:?}, only {:?}",
+            found.iter().take(6).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn a_result_says_whether_the_query_named_it() {
+    // The window merges two searches into one list and needs this to place
+    // them. Measured through the real conversion rather than the classifier,
+    // because it is the serialised value that decides what the window sees.
+    let corpus = vec![
+        command("app:chrome", "Google Chrome", "Application"),
+        command("app:logcat", "Logcat Viewer", "Application"),
+    ];
+
+    let found = search(&corpus, "chrome", &Frecency::default(), NOW, 50);
+    let named: Vec<registry::SearchResult> = found.into_iter().map(Into::into).collect();
+    assert!(named[0].strong, "typing the name did not count as naming it");
+
+    // Two letters that happen to sit next to each other in a longer word.
+    let found = search(&corpus, "gc", &Frecency::default(), NOW, 50);
+    let loose: Vec<registry::SearchResult> = found.into_iter().map(Into::into).collect();
+    let logcat = loose
+        .iter()
+        .find(|r| r.id == "app:logcat")
+        .expect("still a result");
+    assert!(!logcat.strong, "a run of letters counted as naming it");
+}
+
+#[test]
+fn the_flag_is_left_out_of_the_payload_when_it_is_false() {
+    // Serialised on every keystroke, and most results in a long list are not
+    // strong. Sending "strong":false sixty times a keystroke is the kind of
+    // thing that made the payload half a megabyte in the first place.
+    let corpus = vec![command("app:logcat", "Logcat Viewer", "Application")];
+    let found = search(&corpus, "gc", &Frecency::default(), NOW, 50);
+    let result: registry::SearchResult = found.into_iter().next().expect("a result").into();
+
+    let wire = serde_json::to_string(&result).expect("serialises");
+    assert!(!wire.contains("strong"), "{wire}");
+
+    let corpus = vec![command("app:logcat", "Logcat Viewer", "Application")];
+    let found = search(&corpus, "logcat", &Frecency::default(), NOW, 50);
+    let result: registry::SearchResult = found.into_iter().next().expect("a result").into();
+    let wire = serde_json::to_string(&result).expect("serialises");
+    assert!(wire.contains("\"strong\":true"), "{wire}");
+}
+
+#[test]
+fn a_query_the_index_only_half_recognises_has_no_strong_results() {
+    // The case that made the merge necessary. "tada" is not the name of
+    // anything a person installs, so nothing in an index should claim it, and
+    // the emoji somebody plainly meant has to be able to get above the noise.
+    let corpus = vec![
+        command("sill:dictation", "Dictation and transcripts", "Sill Settings"),
+        command("app:notepad", "Notepad", "Application"),
+        command("app:task", "Task Manager", "Application"),
+    ];
+
+    let found = search(&corpus, "tada", &Frecency::default(), NOW, 50);
+    let results: Vec<registry::SearchResult> = found.into_iter().map(Into::into).collect();
+
+    assert!(
+        results.iter().all(|r| !r.strong),
+        "something claimed to be named tada: {:?}",
+        results.iter().map(|r| &r.title).collect::<Vec<_>>()
+    );
+}
+
+
+// ------------------------------------------- where a scattered match may start
+
+#[test]
+fn a_scattered_match_has_to_start_where_a_word_starts() {
+    // The letters of "tada" really do appear in that order inside
+    // "MTWSAndroidAppHelper", and matching them there is how a query nobody
+    // meant as a search for anything installed still returned fifty-seven
+    // results. The first typed character landing mid-word is the tell.
+    let corpus = vec![
+        command("app:mtws", "MTWSAndroidAppHelper", "Application"),
+        command("setting:team", "Team Device Management", "Settings"),
+    ];
+
+    let found = ids(&search(&corpus, "tada", &Frecency::default(), NOW, 50));
+
+    assert_eq!(
+        found,
+        vec!["setting:team"],
+        "the one starting at a word should be the only one left"
+    );
+}
+
+#[test]
+fn a_scattered_match_that_starts_a_word_is_still_offered() {
+    // The other half, and the reason this is a rule about the first character
+    // rather than about gaps. "steam" reaches StreamNook by skipping one
+    // letter, which is the single scattered match on a real machine that
+    // anybody actually wants.
+    let corpus = vec![
+        command("app:streamnook", "StreamNook", "Application"),
+        command("exe:dscdt", "DataStoreCacheDumpTool", "Developer"),
+    ];
+
+    let found = ids(&search(&corpus, "steam", &Frecency::default(), NOW, 50));
+
+    assert!(
+        found.contains(&"app:streamnook".to_string()),
+        "lost the one match worth keeping: {found:?}"
+    );
+}
+
+#[test]
+fn typing_a_whole_word_finds_it_wherever_it_sits_in_the_title() {
+    // Prefix and whole-word-elsewhere are the same act: somebody typed a word
+    // this thing is called. Ranking the first above the second put a heart
+    // suit above the red heart and a moon cake above the full moon, because
+    // position was standing in for quality. The shorter title decides instead.
+    let corpus = vec![
+        command("emoji:suit", "heart suit", "Symbols"),
+        command("emoji:red", "red heart", "Smileys and Emotion"),
+        command("emoji:decor", "heart decoration", "Smileys and Emotion"),
+    ];
+
+    let found = ids(&search(&corpus, "heart", &Frecency::default(), NOW, 50));
+
+    assert_eq!(
+        found.first().map(String::as_str),
+        Some("emoji:red"),
+        "got {found:?}"
     );
 }

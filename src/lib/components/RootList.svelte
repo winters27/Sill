@@ -310,8 +310,6 @@
         return "Open Windows";
       case "emoji":
         return "Emoji";
-      case "window":
-        return "Open Windows";
       case "exe":
         return "Developer";
       default:

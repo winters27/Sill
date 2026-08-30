@@ -61,6 +61,12 @@ pub struct RankedCommand {
     pub score: i64,
     /// Indices into `title` that matched, so the UI can highlight them.
     pub matched: Vec<usize>,
+    /// How this result was reached.
+    ///
+    /// Kept past the sort because two searches are merged in the window and
+    /// the merge has to know which of them found something the user actually
+    /// named. Never sent: only the answer to [`is_strong`] crosses the wire.
+    pub class: MatchClass,
 }
 
 /// One result, as the window receives it.
@@ -99,6 +105,22 @@ pub struct SearchResult {
     /// name nobody can see is one nobody remembers they set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
+    /// Whether the query named this rather than merely fitting it.
+    ///
+    /// The window runs more than one search and shows the answers in one list,
+    /// so it needs to know which results were found by name. Without it, a
+    /// query that nothing in the index really matches still buries an emoji
+    /// somebody typed the name of under eighty near-misses.
+    ///
+    /// Absent rather than false on the wire. Most results in a long list are
+    /// not strong, and this is serialised on every keystroke.
+    #[serde(skip_serializing_if = "is_not_strong")]
+    pub strong: bool,
+}
+
+/// Whether to leave `strong` out of the payload.
+fn is_not_strong(strong: &bool) -> bool {
+    !*strong
 }
 
 impl From<RankedCommand> for SearchResult {
@@ -106,6 +128,7 @@ impl From<RankedCommand> for SearchResult {
         let RankedCommand {
             command,
             matched,
+            class,
             // Ranking is finished by the time this conversion happens, and the
             // order results arrive in is the only thing the UI needs to know
             // about it.
@@ -130,6 +153,7 @@ impl From<RankedCommand> for SearchResult {
             matched,
             // Filled by the caller, which is the only place that knows them.
             alias: None,
+            strong: is_strong(class),
         }
     }
 }
@@ -156,6 +180,8 @@ impl SearchResult {
             // Nothing was typed, so nothing matched.
             matched: Vec::new(),
             alias: None,
+            // Nothing was typed, so nothing was named.
+            strong: false,
         }
     }
 }
@@ -277,11 +303,17 @@ pub fn builtins() -> Vec<CommandRecord> {
         ),
         builtin(
             "emoji",
-            "emoji",
+            "snippets",
             "Emoji",
             "Search every emoji by name and paste one",
             &[
-                "emoji", "symbol", "smiley", "face", "icon", "unicode", "reaction",
+                "emoji",
+                "symbol",
+                "smiley",
+                "face",
+                "icon",
+                "unicode",
+                "reaction",
             ],
         ),
         builtin(
@@ -415,6 +447,9 @@ pub fn snippet_record(id: &str, name: &str, keyword: &str, preview: &str) -> Com
 /// a sum the answer is the only thing being asked for.
 pub fn answer_record(text: &str, input: &str) -> RankedCommand {
     RankedCommand {
+        // An answer is only ever produced because the query was a sum, so it
+        // is always exactly what was asked for.
+        class: MatchClass::ExactTitle,
         command: CommandRecord {
             id: "sill:answer".to_string(),
             extension: "sill".to_string(),
@@ -833,11 +868,23 @@ pub enum MatchClass {
     Learned,
     /// The title is exactly what was typed.
     ExactTitle,
-    /// The title starts with what was typed.
-    TitlePrefix,
+    /// What was typed is a word of the title, or the start of one.
+    ///
+    /// **Where that word sits does not matter**, and that is the whole point
+    /// of the class. "heart" in "heart suit" and "heart" in "red heart" are
+    /// the same act: somebody typed a word this thing is called. Ranking the
+    /// first above the second because it happens to come first in the string
+    /// put ♥️ above ❤️, moon cake above the full moon, and a handbag above a
+    /// raised hand. Ordering these by **title length** instead puts the plain
+    /// thing first and the specific variants after it, which is what people
+    /// mean.
+    ///
+    /// Contrast the substring below: "art" inside "heart" is a coincidence of
+    /// spelling, not a name, and it stays down there.
+    TitleWord,
     /// Every character landed on the start of a word: `vh` in View History.
     TitleWordStarts,
-    /// The title contains what was typed, unbroken.
+    /// The title contains what was typed, unbroken and mid-word.
     TitleSubstring,
     /// A keyword is exactly what was typed.
     ///
@@ -940,8 +987,17 @@ fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass
         if hay_lower == needle {
             return Some((MatchClass::ExactTitle, (0..needle.len()).collect()));
         }
-        if hay_lower.starts_with(needle) {
-            return Some((MatchClass::TitlePrefix, (0..needle.len()).collect()));
+        // Whether the run starts the title is not asked. Only whether it
+        // starts a *word*, which is what makes it a name rather than an
+        // accident of spelling. `find_run` below answers both cases at once,
+        // since position zero always begins a word.
+        if let Some(at) = find_run(&hay_lower, needle) {
+            if begins_a_word(&hay, at) {
+                return Some((
+                    MatchClass::TitleWord,
+                    (at..at + needle.len()).collect(),
+                ));
+            }
         }
     }
 
@@ -965,8 +1021,23 @@ fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass
         }
     }
 
+    // The first typed character has to land where a word begins.
+    //
+    // fzf doubles the bonus on the first character for exactly this reason:
+    // "the first character in the typed pattern usually has more significance
+    // than the rest, so it's important that it appears at special positions
+    // where bonus points are given". Here it is a requirement rather than a
+    // bonus, because this class is already last and a bonus inside it would
+    // only reorder noise.
+    //
+    // What it costs and what it buys, measured against a real index of 1,444
+    // entries: `tada` drops from fifty-seven results to a handful, `term`
+    // stops offering Character Map, and `steam` still finds StreamNook, which
+    // is the one scattered match on that machine anybody would have wanted.
     if let Some((_, matched)) = scattered {
-        return Some((MatchClass::TitleSubsequence, matched));
+        if matched.first().is_some_and(|&at| begins_a_word(&hay, at)) {
+            return Some((MatchClass::TitleSubsequence, matched));
+        }
     }
 
     // Nothing in the title. The other sources are searched but never
@@ -1093,6 +1164,29 @@ fn looks_like_a_typo_of(needle: &[char], title: &str, budget: usize) -> bool {
 pub fn match_class(query: &str, command: &CommandRecord) -> Option<MatchClass> {
     let needle: Vec<char> = query.trim().to_lowercase().chars().collect();
     classify(&needle, command, None, None).map(|(class, _)| class)
+}
+
+/// Whether a match is good enough to volunteer beside things that were asked
+/// for.
+///
+/// A separate corpus appended to the root list has to earn its place. Emoji
+/// matched loosely would put a smiley in the middle of every search: there are
+/// nearly two thousand of them and their names are ordinary words, so a
+/// scattered subsequence finds a dozen for almost anything typed.
+///
+/// So only the classes that mean the user named the thing: the whole title,
+/// the start of it, a keyword exactly, or something they set or taught
+/// themselves. Not a substring, not a subsequence, not a near miss.
+pub fn is_strong(class: MatchClass) -> bool {
+    matches!(
+        class,
+        MatchClass::Alias
+            | MatchClass::Learned
+            | MatchClass::ExactTitle
+            | MatchClass::TitleWord
+            | MatchClass::TitleWordStarts
+            | MatchClass::KeywordExact
+    )
 }
 
 /// The same, for a command the user has given a name of their own.
@@ -1256,7 +1350,8 @@ pub fn search_excluding<'a>(
 
     scored
         .into_iter()
-        .map(|(_, weight, command, matched)| RankedCommand {
+        .map(|(class, weight, command, matched)| RankedCommand {
+            class,
             command: command.clone(),
             score: weight,
             matched,

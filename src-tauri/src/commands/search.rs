@@ -131,6 +131,15 @@ pub(crate) async fn search_emoji(
     state: State<'_, RegistryState>,
     prefs: State<'_, PrefsState>,
     query: String,
+    // Whether these are being offered beside results that were asked for.
+    //
+    // Emoji volunteer themselves into the root list, so they have to earn the
+    // room: a handful, and only where the user plainly named the thing. Loose
+    // matching would put a smiley in the middle of every search, because there
+    // are nearly two thousand of them and their names are ordinary words.
+    //
+    // The picker itself passes nothing, because there the emoji ARE the list.
+    inline: Option<bool>,
 ) -> Result<Vec<registry::SearchResult>, String> {
     let tone = prefs.inner.lock().await.emoji.tone;
 
@@ -160,8 +169,30 @@ pub(crate) async fn search_emoji(
         registry::Excluded::none(),
     );
 
-    Ok(results.into_iter().map(Into::into).collect())
+    if !inline.unwrap_or(false) {
+        return Ok(results.into_iter().map(Into::into).collect());
+    }
+
+    Ok(results
+        .into_iter()
+        .filter(|ranked| {
+            registry::match_class_with_alias(
+                &query,
+                &ranked.command,
+                registry.aliases.for_command(&ranked.command.id).unwrap_or(""),
+            )
+            .is_some_and(registry::is_strong)
+        })
+        .take(INLINE_EMOJI)
+        .map(Into::into)
+        .collect())
 }
+
+/// How many emoji may appear beside an ordinary search.
+///
+/// Few. They are volunteering rather than being asked for, and a row of them
+/// pushing applications off the screen is worse than not offering any.
+const INLINE_EMOJI: usize = 4;
 
 /// Every display, for laying windows out.
 #[tauri::command]

@@ -52,6 +52,14 @@ export interface RankedCommand {
   panel?: string | null;
   /** Indices into `title` that matched the query, for highlighting. */
   matched: number[];
+  /**
+   * Whether the query named this rather than merely fitting it.
+   *
+   * Absent on most rows. The root list merges more than one search, and this
+   * is how it tells a result somebody typed the name of from one that only
+   * happens to contain the same letters in the same order.
+   */
+  strong?: boolean;
   /** The name the user gave this, when they gave it one. */
   alias?: string;
 }
@@ -187,8 +195,8 @@ export function searchFiles(query: string): Promise<FileHit[]> {
  * entries would nearly quadruple an index that is ranked on every keystroke,
  * so that typing "smile" could find an emoji as well as an application.
  */
-export function searchEmoji(query: string): Promise<RankedCommand[]> {
-  return invoke<RankedCommand[]>("search_emoji", { query }).catch(() => []);
+export function searchEmoji(query: string, inline = false): Promise<RankedCommand[]> {
+  return invoke<RankedCommand[]>("search_emoji", { query, inline }).catch(() => []);
 }
 
 export function searchWindows(query: string): Promise<RankedCommand[]> {
