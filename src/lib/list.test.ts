@@ -120,10 +120,17 @@ describe("which slice is drawn", () => {
   const HEIGHT = 400;
   const OVERSCAN = 8;
 
-  function windowFor(count: number, scrollTop: number) {
+  /** `padding` is what the container adds below the rows, as the chin does. */
+  function windowFor(count: number, scrollTop: number, padding = 0) {
     const lines = linesOf(flat(count));
     const offsets = offsetsOf(lines, ROW, HEADER);
-    return { lines, ...windowOf(offsets, lines.length, scrollTop, HEIGHT, OVERSCAN) };
+    const total = offsets[lines.length] ?? 0;
+    const reach = Math.max(0, total + padding - HEIGHT);
+
+    return {
+      lines,
+      ...windowOf(offsets, lines.length, scrollTop, HEIGHT, OVERSCAN, reach),
+    };
   }
 
   test("the top of a long list draws from the first line", () => {
@@ -192,10 +199,37 @@ describe("which slice is drawn", () => {
 
   test("an empty list draws nothing without failing", () => {
     const offsets = offsetsOf([], ROW, HEADER);
-    const { first, last } = windowOf(offsets, 0, 0, HEIGHT, OVERSCAN);
+    const { first, last } = windowOf(offsets, 0, 0, HEIGHT, OVERSCAN, 0);
 
     expect(first).toBe(0);
     expect(last).toBe(0);
+  });
+
+  /*
+   * The other end of the same bug, and the one that shipped.
+   *
+   * The rows are not all there is inside the scrolling box: the container has
+   * 48 pixels of padding below them to clear the chin, and that padding
+   * scrolls too. Clamping to "the rows minus the viewport" stopped the drawn
+   * slice short of the end, so scrolling to the bottom showed blank space.
+   */
+  test("a container with padding below the rows still draws its last row", () => {
+    const CHIN = 48;
+    const lines = linesOf(flat(200));
+    const offsets = offsetsOf(lines, ROW, HEADER);
+    const total = offsets[lines.length];
+    const bottom = total + CHIN - HEIGHT;
+
+    const { at, last } = windowFor(200, bottom, CHIN);
+
+    expect(at).toBe(bottom);
+    expect(last).toBe(lines.length);
+  });
+
+  test("padding never lets the window run past the end of the list", () => {
+    const { last, lines } = windowFor(30, 100_000, 48);
+
+    expect(last).toBe(lines.length);
   });
 });
 

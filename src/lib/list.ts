@@ -120,6 +120,13 @@ export function lineAt(offsets: number[], count: number, y: number): number {
  * sliced the list from a position past its end, and **every row rendered below
  * the viewport**: a screen of blank space that only came right if you scrolled
  * and provoked an event.
+ *
+ * `reach` is how far the container can actually scroll, and it is asked for
+ * rather than worked out from the rows. Deriving it as "the rows minus the
+ * viewport" assumes the rows are all there is inside the scrolling box, and
+ * the first time that stopped being true, a 48 pixel bottom padding put the
+ * end of the list past where this would clamp: **scrolling to the bottom drew
+ * nothing**, which is the same blank screen from the other end.
  */
 export function windowOf(
   offsets: number[],
@@ -127,9 +134,9 @@ export function windowOf(
   scrollTop: number,
   height: number,
   overscan: number,
+  reach: number,
 ): { at: number; first: number; last: number } {
-  const total = offsets[count] ?? 0;
-  const at = Math.max(0, Math.min(scrollTop, total - height));
+  const at = Math.max(0, Math.min(scrollTop, Math.max(0, reach)));
 
   return {
     at,
