@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { RankedCommand } from "$lib/exthost/commands";
+  import { LISTBOX, optionId } from "$lib/results";
   import LaunchIcon from "./LaunchIcon.svelte";
   import SettingsIcon, { type IconName } from "./SettingsIcon.svelte";
 
@@ -23,6 +24,8 @@
   }
 
   let { commands, selected, onselect, onrun, asking = "" }: Props = $props();
+
+
 
   /**
    * Row and header heights, measured rather than assumed.
@@ -383,11 +386,18 @@
   }
 </script>
 
+<!--
+  The list is named by the field rather than by itself.
+
+  A screen reader announces the field, and the field points here for what is
+  currently highlighted. Two names would be read out twice.
+-->
 <div
+  id={LISTBOX}
   class="sill-list"
   role="listbox"
   tabindex="-1"
-  aria-label="Commands"
+  aria-label="Results"
   bind:this={viewport}
   onscroll={onScroll}
 >
@@ -400,6 +410,7 @@
       {@const command = line.command}
       {@const index = line.index}
       <div
+        id={optionId(index)}
         class="sill-row"
         class:answer={command.mode === "answer"}
         class:selected={index === selected}

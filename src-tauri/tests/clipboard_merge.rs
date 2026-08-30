@@ -92,3 +92,96 @@ fn merging_nothing_that_still_exists_is_not_an_empty_string() {
     assert_eq!(store.merge(&[only], "|").expect("merges"), None);
     assert_eq!(store.merge(&[], "|").expect("merges"), None);
 }
+
+// ------------------------------------------------------ the log beside it
+
+#[test]
+fn the_log_does_not_outgrow_the_history_it_describes() {
+    // Measured on a real machine before this was bounded: a 557 KB history
+    // with a 3.46 MB log beside it. SQLite waits for a thousand pages, about
+    // four megabytes, and a clipboard writes a few kilobytes at a time, so
+    // nothing ever wrote enough at once to reach the threshold.
+    let dir = std::env::temp_dir().join("sill-wal-growth");
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("clipboard.db");
+
+    {
+        let store = sill_lib::clipboard::store::Store::open(&path).unwrap();
+
+        // Enough copies to have blown past the default threshold.
+        for n in 0..1_500 {
+            store
+                .record(Recording {
+                    hash: &format!("hash-{n}"),
+                    kind: Kind::Text,
+                    text: &format!("entry number {n}, with enough text to matter"),
+                    html: None,
+                    app: Some("Test"),
+                    app_path: None,
+                    bytes: 48,
+                    now: 1_756_000_000 + n,
+                })
+                .unwrap();
+        }
+
+        let log = std::fs::metadata(dir.join("clipboard.db-wal"))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let history = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+
+        // Twice the setting, not once. A checkpoint runs when the log has
+        // already passed the threshold rather than as it reaches it, and one
+        // more write lands while that is happening. The number that matters is
+        // that this is a ceiling at all: without the setting the log grows
+        // with the number of entries and never comes back.
+        assert!(
+            log <= 2 * 1_048_576,
+            "log grew to {log} bytes against a {history} byte history"
+        );
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn opening_hands_back_a_log_that_already_grew() {
+    // The setting bounds what happens next. Nothing else would ever shrink a
+    // log that grew before it existed, and on a real machine that was three
+    // and a half megabytes sitting there.
+    let dir = std::env::temp_dir().join("sill-wal-reclaim");
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("clipboard.db");
+
+    {
+        let store = sill_lib::clipboard::store::Store::open(&path).unwrap();
+        for n in 0..300 {
+            store
+                .record(Recording {
+                    hash: &format!("hash-{n}"),
+                    kind: Kind::Text,
+                    text: &format!("entry {n}"),
+                    html: None,
+                    app: Some("Test"),
+                    app_path: None,
+                    bytes: 8,
+                    now: 1_756_000_000 + n,
+                })
+                .unwrap();
+        }
+    }
+
+    // Reopening runs the checkpoint.
+    {
+        let _store = sill_lib::clipboard::store::Store::open(&path).unwrap();
+    }
+
+    let log = std::fs::metadata(dir.join("clipboard.db-wal"))
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    assert!(log < 65_536, "log kept {log} bytes after a checkpoint");
+
+    std::fs::remove_dir_all(&dir).ok();
+}

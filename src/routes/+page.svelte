@@ -6,6 +6,7 @@
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
   import RootList from "$lib/components/RootList.svelte";
+  import { LISTBOX, optionId } from "$lib/results";
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import ClipboardView from "$lib/components/ClipboardView.svelte";
@@ -160,6 +161,20 @@
     const onSubmit = action?.props.onSubmit ?? action?.props.onAction;
     return isHandlerRef(onSubmit) ? onSubmit.$handler : undefined;
   });
+
+  /**
+   * Whether the field is filtering a list that is on screen and walkable.
+   *
+   * Only then is it a combobox. The same field is a plain one everywhere else:
+   * in the modes that show something other than the root list there is no
+   * listbox to point at, and naming a row that is not rendered leaves a screen
+   * reader announcing nothing at all. Naming a collection or an alias is
+   * typing a name rather than filtering, so there is nothing to arrow through
+   * either.
+   */
+  const browsing = $derived(
+    (mode === "root" || mode === "switcher" || mode === "emoji") && commands.length > 0,
+  );
 
   const count = $derived.by(() => {
     if (mode === "root" || mode === "switcher" || mode === "emoji") {
@@ -1553,7 +1568,23 @@
     {:else if running}
       <span class="crumb">{running.extensionTitle}</span>
     {/if}
+    <!--
+      A combobox, which is what this is: a field whose typing filters a list
+      below it, where the list is walked with the arrow keys while the field
+      keeps focus.
+
+      Without this a screen reader announces the field and then says nothing
+      as somebody arrows through the results, because focus never moves and
+      nothing tells it what is highlighted. The listbox half of the pattern
+      was already there; this is the half that makes it audible.
+    -->
     <input
+      role={browsing ? "combobox" : undefined}
+      aria-expanded={browsing ? true : undefined}
+      aria-controls={browsing ? LISTBOX : undefined}
+      aria-activedescendant={browsing ? optionId(selected) : undefined}
+      aria-autocomplete={browsing ? "list" : undefined}
+      aria-label="Search"
       bind:this={searchInput}
       bind:value={query}
       placeholder={mode === "argument"
@@ -1611,7 +1642,7 @@
       bind:this={rootList}
       {commands}
       {selected}
-      asking={mode + " " + query}
+      asking={`${mode}:${query}`}
       onselect={(i) => (selected = i)}
       onrun={(i) => {
         selected = i;

@@ -97,9 +97,43 @@ impl Store {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
 
+        // How much of the log may pile up before it is folded back in.
+        //
+        // SQLite waits for a thousand pages, which is about four megabytes,
+        // and a clipboard writes a few kilobytes at a time. Measured on a real
+        // machine before this: **a 557 KB history with a 3.46 MB log beside
+        // it**, six times the size of the thing it describes, because nothing
+        // ever wrote enough at once to reach the threshold.
+        //
+        // A quarter of that, so the log stays roughly the size of the history
+        // rather than several times it. Folding in more often costs a little
+        // more work per copy, which is an operation that happens when a person
+        // presses two keys and has milliseconds to spare.
+        connection.pragma_update(None, "wal_autocheckpoint", 256)?;
+
         let store = Self { connection };
         store.migrate()?;
+
+        // Whatever piled up before now, handed back to the filesystem. The
+        // setting above bounds what happens next; this is what shrinks a log
+        // that already grew, which nothing else would ever do.
+        store.compact();
+
         Ok(store)
+    }
+
+    /// Folds the log back into the history and hands the space back.
+    ///
+    /// `TRUNCATE` rather than `PASSIVE`, because passive leaves the file at
+    /// whatever size it reached and the point here is to give it back.
+    ///
+    /// Failure is ignored on purpose. A checkpoint cannot run while another
+    /// connection is reading, and the answer to that is to try again next
+    /// time, not to refuse to open the clipboard history.
+    pub fn compact(&self) {
+        let _ = self
+            .connection
+            .pragma_update(None, "wal_checkpoint", "TRUNCATE");
     }
 
     fn migrate(&self) -> rusqlite::Result<()> {
