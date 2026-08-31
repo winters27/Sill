@@ -11,27 +11,32 @@ find them. They exist only as a catalog, and this is Microsoft's own.
 
 --------------------------------------------------------------------------
 
-Satoshi (src/lib/theme/fonts/Satoshi-Variable.woff2)
+Satoshi (fetched to src/lib/theme/fonts/Satoshi-Variable.woff2)
 
 Satoshi, by Indian Type Foundry. Distributed through Fontshare
 (https://www.fontshare.com/fonts/satoshi) under the ITF Free Font License,
 which is not an open source licence and is not this project's MIT licence.
 
-**The font file is not part of this repository.** `npm run fonts` fetches it
-from Fontshare on each machine, and `.gitignore` and `npm run verify:source`
-together keep it from being committed.
+The font file is not in this repository or in its history. `npm run fonts`
+fetches it from Fontshare per machine, `.gitignore` keeps it untracked, and
+`npm run verify:source` fails if any font is committed again. A build then
+insists on it: `npm run build` stops rather than produce a bundle without it,
+because a downloaded copy of Sill can only carry the face that was on disk
+when it was built.
 
-That is not tidiness. Section 02 of the ITF Free Font License forbids making
-the Font Software available through "another font website, font library,
-marketplace, repository, download service, application or platform [...]
-publicly accessible servers", and a public git repository is exactly that:
-anyone cloning it could take the file out and use it on its own. What the
-licence does permit, in section 01, is embedding the font in a desktop
-application, which is what a built copy of Sill does. So the built application
-carries it and the source does not.
+Section 01 of that licence permits embedding the font in a desktop
+application, which is what a built copy of Sill does. Section 02 forbids
+making the Font Software available through "another font website, font
+library, marketplace, repository, download service, application or platform
+[...] publicly accessible servers". A git repository is a channel of exactly
+that kind: anyone who can clone it can take the file back out and use it on
+its own, which is not what section 01 granted.
 
-If you fork this, `npm install` fetches your own copy direct from Fontshare and
-you are bound by that licence yourself, which is the arrangement it describes.
+This repository is private, so keeping the file out of it is a precaution and
+not a remedy for anything. It is arranged this way so the answer does not have
+to change on the day it stops being private, and so that a fork fetches its own
+copy direct from Fontshare and is bound by the licence in its own right, which
+is the arrangement the licence describes.
 
 --------------------------------------------------------------------------
 
@@ -59,8 +64,11 @@ Copyright 2016 The Inter Project Authors.
 Licensed under the SIL Open Font License, Version 1.1
 (https://scripts.sil.org/OFL).
 
-No woff2 is committed for it: the package is a dependency, and Vite emits the
-subsets into the build, so the face ships inside the application exactly as
-Satoshi does and nothing is requested from a font host at runtime. That it
-arrives through node_modules rather than through this repository does not
-shorten the licence, so the notice lives here with the others.
+No woff2 is committed for this one either, for a different reason than
+Satoshi's: the OFL permits redistribution, and the package is an ordinary
+dependency, so `npm install` puts the subsets in place and Vite emits the ones
+actually used. Both faces end up inside the built application and neither is
+requested from a font host at runtime, but they arrive by different routes, one
+named in `package.json` and one fetched by a script. Arriving through
+node_modules rather than through this repository does not shorten the licence,
+so the notice lives here with the others.
