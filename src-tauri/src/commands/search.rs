@@ -37,6 +37,26 @@ pub(crate) async fn search_commands(
         },
     );
 
+    /*
+     * A switch says which way it is set.
+     *
+     * Read here rather than carried by the index, because what a switch is set
+     * to is a fact about the moment somebody looks at it. Read at all only if
+     * one actually matched, so a search that finds no switch costs nothing,
+     * and behind a one second cache, because typing "bluetooth" is eight
+     * keystrokes and enumerating the radios eight times is eight times too
+     * many.
+     */
+    if results.iter().any(|hit| hit.command.mode == "system") {
+        let live = crate::system::live();
+
+        for hit in results.iter_mut() {
+            if hit.command.mode == "system" {
+                hit.command.toggle = crate::system::toggle_state(&hit.command.entrypoint, &live);
+            }
+        }
+    }
+
     // Above everything, because when a query IS a sum the answer is the only
     // thing wanted. `evaluate` returns nothing for the ninety-nine queries in
     // a hundred that are searches, so this costs those nothing.
@@ -61,6 +81,35 @@ pub(crate) async fn search_commands(
             result
         })
         .collect())
+}
+
+/// Where a set of switches are set, right now.
+///
+/// The row that was pressed is not the only one that can have changed. The
+/// audio outputs are one switch each but one choice between them, so turning
+/// on Speakers turns off everything else, and nothing about the Speakers row
+/// says so. Asked for the switches on screen, which is a handful, and answered
+/// out of the same reading the search took, so it is arithmetic rather than a
+/// second trip to the sound system.
+///
+/// Ids that are not switches answer `null`, which is the same answer they give
+/// everywhere else: this is not a thing that is on or off.
+#[tauri::command]
+pub(crate) async fn system_states(
+    state: State<'_, RegistryState>,
+    ids: Vec<String>,
+) -> Result<Vec<Option<bool>>, String> {
+    let registry = state.inner.lock().await;
+    let live = crate::system::live();
+
+    Ok(crate::system::states_for(
+        registry
+            .commands
+            .iter()
+            .map(|row| (row.id.as_str(), row.entrypoint.as_str())),
+        &ids,
+        &live,
+    ))
 }
 
 /// The open windows matching a query.

@@ -309,6 +309,40 @@ fn write_theme(name: &str, value: u32) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// The window asks about a row by its id, not by what the row runs.
+    ///
+    /// These are different strings and only one of them is a key. Asking with
+    /// the other returns "not a switch", which is what an ordinary row also
+    /// returns, so a whole list of switches quietly kept the state it had
+    /// before it was pressed: no error, no log, nothing to notice.
+    #[test]
+    fn a_switch_is_found_by_the_id_the_window_knows_it_by() {
+        let live = Live {
+            muted: true,
+            dark: false,
+            ..Live::default()
+        };
+
+        let rows = [
+            ("sill:system.mute", "system.mute"),
+            ("sill:system.theme", "system.theme"),
+            ("app:notepad", "C:/Windows/notepad.exe"),
+        ];
+
+        let asked = [
+            "sill:system.mute".to_string(),
+            "sill:system.theme".to_string(),
+            // Not a switch, and not in the list either.
+            "app:notepad".to_string(),
+            "sill:nothing.like.this".to_string(),
+        ];
+
+        assert_eq!(
+            states_for(rows.into_iter(), &asked, &live),
+            vec![Some(true), Some(false), None, None],
+        );
+    }
+
     #[test]
     fn a_step_is_a_tenth() {
         // Five presses is half, which is what somebody typing "volume down"
@@ -438,4 +472,123 @@ mod tests {
         assert_eq!(dark(), Some(before));
     }
 
+}
+
+/// What the switches are set to right now.
+///
+/// Read together rather than one at a time, because a row that shows its state
+/// needs all of them and the reads share the cost of opening COM once.
+#[derive(Debug, Clone, Default)]
+pub struct Live {
+    pub muted: bool,
+    pub dark: bool,
+    pub wifi: Option<bool>,
+    pub bluetooth: Option<bool>,
+    /// The endpoint id sound is going to.
+    pub output: String,
+}
+
+/// How long a reading is trusted before another is taken.
+///
+/// A keystroke is not a reason to enumerate the radios: that is a WinRT call
+/// and typing "bluetooth" is eight of them. Nothing here changes faster than a
+/// person can notice, and pressing a switch refreshes it regardless, so a
+/// second is generous.
+const FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(1);
+
+static LAST: std::sync::Mutex<Option<(std::time::Instant, Live)>> = std::sync::Mutex::new(None);
+
+/// The current state of every switch, read at most once a second.
+///
+/// Lazily: nothing calls this unless a system row is actually about to be
+/// shown, so a search that matches no switch costs nothing at all.
+pub fn live() -> Live {
+    let mut held = LAST.lock().expect("system state poisoned");
+
+    if let Some((taken, state)) = held.as_ref() {
+        if taken.elapsed() < FRESH_FOR {
+            return state.clone();
+        }
+    }
+
+    let radios = crate::radios::radios();
+    let state = Live {
+        muted: muted().unwrap_or(false),
+        dark: dark().unwrap_or(false),
+        wifi: radios.iter().find(|r| r.kind == "wifi").map(|r| r.on),
+        bluetooth: radios.iter().find(|r| r.kind == "bluetooth").map(|r| r.on),
+        output: crate::audio::outputs()
+            .into_iter()
+            .find(|o| o.current)
+            .map(|o| o.id)
+            .unwrap_or_default(),
+    };
+
+    *held = Some((std::time::Instant::now(), state.clone()));
+    state
+}
+
+/// Which way a switch is set, given its id.
+///
+/// `None` for a system row that is not a switch. Volume up is a nudge and lock
+/// is a door: neither has an on and an off, and drawing one as a control that
+/// is currently "off" would be a lie about what pressing it does.
+pub fn toggle_state(id: &str, live: &Live) -> Option<bool> {
+    match id {
+        "system.mute" => Some(live.muted),
+        "system.theme" => Some(live.dark),
+        _ => {
+            if let Some(kind) = id.strip_prefix(crate::actions::RADIO) {
+                return match kind {
+                    "wifi" => live.wifi,
+                    "bluetooth" => live.bluetooth,
+                    _ => None,
+                };
+            }
+
+            // An output is one of a set rather than an on and an off, so it is
+            // drawn as chosen or not: exactly one of them is true at a time.
+            if let Some(device) = id.strip_prefix(crate::actions::AUDIO_OUTPUT) {
+                return Some(device == live.output);
+            }
+
+            None
+        }
+    }
+}
+
+/// Where each of a set of switches is set, asked for by row id.
+///
+/// The window knows a row by its id, `sill:system.mute`. A switch is keyed by
+/// its entrypoint, `system.mute`, and they are different strings. Asking
+/// [`toggle_state`] with an id answers "not a switch", which is the same
+/// answer an ordinary row gives, so nothing fails and no error is logged: the
+/// row simply keeps showing the state it had before it was pressed. That is
+/// the bug this function exists to make impossible, so the translation happens
+/// once, here, rather than at each caller.
+pub fn states_for<'a>(
+    rows: impl Iterator<Item = (&'a str, &'a str)>,
+    ids: &[String],
+    live: &Live,
+) -> Vec<Option<bool>> {
+    let by_id: std::collections::HashMap<&str, &str> = rows.collect();
+
+    ids.iter()
+        .map(|id| {
+            by_id
+                .get(id.as_str())
+                .and_then(|entrypoint| toggle_state(entrypoint, live))
+        })
+        .collect()
+}
+
+/// Throws the reading away, so the next one is taken fresh.
+///
+/// Called after a switch is pressed. Without it the row would show what it was
+/// a moment ago for up to a second, which is exactly the moment somebody is
+/// looking at it.
+pub fn forget_live() {
+    if let Ok(mut held) = LAST.lock() {
+        *held = None;
+    }
 }

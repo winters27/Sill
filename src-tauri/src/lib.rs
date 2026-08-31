@@ -1076,6 +1076,7 @@ pub fn run() {
             commands::system::finish_markup,
             commands::system::cancel_markup,
             commands::search::search_windows,
+            commands::search::system_states,
             commands::search::search_emoji,
             commands::search::file_search_missing,
             commands::search::list_drives,

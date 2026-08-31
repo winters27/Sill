@@ -365,8 +365,22 @@ impl Action for ToggleSystem {
         // not, and it stays true if something else changed it in between.
         let said = run_system(&object.target)?;
 
-        // Nobody flips a switch and then wants to look at the launcher.
-        crate::dismiss_main(&ctx.app);
+        // The reading is a second stale otherwise, and a second is exactly how
+        // long somebody looks at a switch they just pressed.
+        crate::system::forget_live();
+
+        /*
+         * A switch stays on screen. A one-shot gets out of the way.
+         *
+         * Flipping something and watching the row change is the point of
+         * drawing it as a control: mute, dark mode, a radio and an output are
+         * all things somebody may want to press twice, or press and then look
+         * at. Locking the screen is not, and neither is nudging the volume
+         * away from the launcher.
+         */
+        if crate::system::toggle_state(&object.target, &crate::system::live()).is_none() {
+            crate::dismiss_main(&ctx.app);
+        }
 
         Ok(Outcome::done(said))
     }

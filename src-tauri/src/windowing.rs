@@ -853,6 +853,7 @@ pub fn records() -> Vec<crate::registry::CommandRecord> {
                 } else {
                     Some(window.app_path.clone())
                 },
+                toggle: None,
                 panel: None,
                 preferences: serde_json::Value::Null,
             }

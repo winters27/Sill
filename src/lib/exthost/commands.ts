@@ -79,6 +79,14 @@ export interface RankedCommand {
    * choice, and a copy of the mapping here would drift.
    */
   panel?: string | null;
+  /**
+   * Whether this row is a switch, and which way it is set.
+   *
+   * Absent for everything that is not one, which is nearly everything. A row
+   * that carries it draws as a control: pressing it flips the thing and leaves
+   * the launcher where it is, so the state can be watched changing.
+   */
+  toggle?: boolean;
   /** Indices into `title` that matched the query, for highlighting. */
   matched: number[];
   /**
@@ -145,10 +153,30 @@ export interface LaunchedCommand {
      * other.
      */
     | "system";
+  /** What the action said it did, in one line. */
+  message: string;
+  /**
+   * Where a switch ended up, when the thing run was one.
+   *
+   * A row carrying this stays on screen showing its new state instead of the
+   * launcher closing, so the thing being switched can be watched changing.
+   */
+  toggle?: boolean;
 }
 
 export function searchCommands(query: string): Promise<RankedCommand[]> {
   return invoke<RankedCommand[]>("search_commands", { query });
+}
+
+/**
+ * Where the given switches are set, right now.
+ *
+ * Asked after one has been pressed, because pressing one can move another:
+ * the audio outputs are a single choice spread across several rows. Answers in
+ * the order it was asked, with `null` for anything that is not a switch.
+ */
+export function systemStates(ids: string[]): Promise<(boolean | null)[]> {
+  return invoke<(boolean | null)[]>("system_states", { ids });
 }
 
 /**

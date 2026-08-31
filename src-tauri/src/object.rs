@@ -339,6 +339,7 @@ mod tests {
             icon: None,
             panel: None,
             preferences: serde_json::Value::Null,
+            toggle: None,
         };
 
         let object = Object::from_record(&record).expect("a known mode");

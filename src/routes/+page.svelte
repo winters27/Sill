@@ -23,6 +23,7 @@
     activateHandler,
     dismiss,
     launchCommand,
+    systemStates,
     searchCommands,
     unloadExtension,
     performBuiltin,
@@ -517,6 +518,37 @@
    */
   const FILE_SEARCH_DEBOUNCE_MS = 120;
 
+  /*
+   * Re-reads the switches on screen after one of them has been pressed.
+   *
+   * Every one of them, not just the one pressed, because one switch can move
+   * another: the audio outputs are a single choice spread over several rows,
+   * so turning Speakers on turns the monitors off and nothing about the
+   * Speakers row says so.
+   *
+   * A re-search would answer this too, and would also re-rank: the launch has
+   * just been recorded, so the row would climb out from under the cursor of
+   * somebody who wanted to press it twice. This asks about the rows already
+   * drawn and leaves the order alone.
+   */
+  async function refreshSwitches() {
+    const rows = commands.filter((row) => row.toggle !== undefined);
+    if (rows.length === 0) return;
+
+    try {
+      const now = await systemStates(rows.map((row) => row.id));
+      const by = new Map(rows.map((row, at) => [row.id, now[at]]));
+
+      commands = commands.map((row) => {
+        const state = by.get(row.id);
+        return state === undefined || state === null ? row : { ...row, toggle: state };
+      });
+    } catch (err) {
+      // The switch itself worked, and saying so would be the wrong story.
+      status = `${status}, but the row may be out of date: ${err}`;
+    }
+  }
+
   async function refreshRoot() {
     const current = query;
     const id = ++searchId;
@@ -939,14 +971,34 @@
           launched.mode === "app" ||
           launched.mode === "exe" ||
           launched.mode === "setting" ||
-          launched.mode === "builtin" ||
-          // A Windows switch is done the moment it runs. Left out of this
-          // list it fell through to the command view below, so the launcher
-          // came back the next time showing an extension screen with no
-          // extension in it, titled after the switch.
-          launched.mode === "system"
+          launched.mode === "builtin"
         ) {
           await dismiss();
+          return;
+        }
+
+        /*
+         * A switch flips under the cursor instead of the launcher closing.
+         *
+         * Turning Wi-Fi off and having the window vanish gives no answer to
+         * the only question worth asking, which is whether it went off. The
+         * row shows the new state, so the switch is watched happening and can
+         * be pressed straight back.
+         *
+         * The state is written onto the row rather than searched for again:
+         * one row changed, and re-ranking the whole index would also move it.
+         * Whether to close is Rust's decision and it has already made it, so
+         * there is nothing to do here for a one-shot like Lock Screen.
+         */
+        if (launched.mode === "system") {
+          status = launched.message;
+
+          // Absent means Rust is closing the window: a volume nudge has no
+          // state for a row to show, so there is nothing left to draw and
+          // drawing it would be work on a window nobody is looking at.
+          if (launched.toggle === undefined) return;
+
+          await refreshSwitches();
           return;
         }
 
@@ -1317,6 +1369,12 @@
         const outcome = await runObjectAction(chosen, asTarget(command));
         status = outcome.message;
         lastUndo = outcome.undo ?? null;
+
+        // The panel reaches the same switches Enter does, so pressing one
+        // here has to leave the rows saying the same thing. Only when the row
+        // acted on was a switch: a one-shot has no state and is closing the
+        // window anyway, and copying a file path moves nothing.
+        if (command.toggle !== undefined) await refreshSwitches();
       } catch (err) {
         status = `${err}`;
       }

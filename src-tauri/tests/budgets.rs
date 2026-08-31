@@ -28,6 +28,7 @@ fn command(id: &str, title: &str) -> CommandRecord {
         icon: None,
         panel: None,
         preferences: serde_json::Value::Null,
+        toggle: None,
     }
 }
 

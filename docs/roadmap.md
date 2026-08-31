@@ -48,7 +48,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.2 | Screenshot | **Done.** Drag an area or take every screen, with a markup editor: box, arrow, ellipse, pen, highlight, hide, text |
 | P2.3 | OCR on demand | **Done.** WinRT recognition, ported from AuraKey. Reads a picture on the clipboard, never automatically. Measured: 35 ms on a 640x160 capture |
 | P2.4 | Read aloud | Not started |
-| P2.5 | System control | **Done, except per-app volume.** Volume, mute, dark mode, lock, audio output switching, Wi-Fi and Bluetooth. Do not disturb and night light have no public way to set them, see below |
+| P2.5 | System control | **Done, except per-app volume.** Volume, mute, dark mode, lock, audio output switching, Wi-Fi and Bluetooth, all of them switches you press in the list without leaving it. Do not disturb and night light have no public way to set them, see below |
 | P2.6 | Process and resource view | Not started |
 | P2.7 | Terminal execution, capability gated | Not started |
 | P2.8 | Scripting | Not started |
@@ -71,6 +71,36 @@ A line is done when something checks it. Where that is a test, it is named.
 - **A device suite.** Nine checks that only a running Sill can answer.
 - **A source check.** Damage that compiles: stray NUL bytes, replacement
   characters, conflict markers.
+
+## Built since the audit, and not on it: switches you press in the list
+
+A Windows switch is drawn as a switch, showing which way it is set, and
+pressing it flips the thing without the launcher closing. Turning Wi-Fi off and
+having the window vanish answers the only question worth asking, which is
+whether it went off, by not answering it.
+
+**The state is read when the row is drawn, never carried by the index.** The
+index is built once at startup and searched on every keystroke, and neither is
+a place to ask the sound system anything. The reading is taken only if a switch
+actually matched the query, and it is cached for a second, so typing
+`bluetooth` enumerates the radios once rather than eight times.
+
+**Pressing one re-reads all of them, not just the one pressed.** The audio
+outputs are a single choice spread over several rows: turning Speakers on turns
+the monitors off, and nothing about the Speakers row says so. A re-search would
+answer this too, and would also re-rank, so the row would climb out from under
+the cursor of somebody who wanted to press it twice.
+
+**A switch with no state still closes the launcher.** Volume up is a nudge and
+lock is a door. Neither has an on and an off, so neither draws as a control,
+and Rust decides which is which rather than the window guessing.
+
+The trap, and it cost a working feature for an hour: **the window knows a row
+by its id, `sill:system.mute`, and a switch is keyed by what it runs,
+`system.mute`.** Asking with the wrong one answers "not a switch", which is
+exactly what an ordinary row answers, so every switch quietly kept the state it
+had before it was pressed with no error and nothing logged. The translation now
+happens in one place with a test on it.
 
 ## Built since the audit, and not on it: web search
 

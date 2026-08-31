@@ -90,6 +90,7 @@ fn ranking_cost() {
                 icon: None,
                 panel: None,
                 preferences: serde_json::Value::Null,
+                toggle: None,
             }
         })
         .collect();

@@ -33,6 +33,18 @@ pub struct CommandRecord {
     /// real executable behind it, and a packaged app has neither.
     #[serde(default)]
     pub icon: Option<String>,
+    /// Whether this row is a switch, and which way it is set.
+    ///
+    /// `None` for everything that is not one, which is nearly everything. A
+    /// row that carries this draws as a control rather than as a command:
+    /// pressing it flips the thing and leaves the launcher where it is, so the
+    /// state can be seen changing and changed again.
+    ///
+    /// Filled at search time rather than when the index is built. What a
+    /// switch is set to is a fact about the moment it is looked at, and a
+    /// value written into the index would be whatever it was at the last scan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toggle: Option<bool>,
     /// The settings panel this belongs to, for anything Sill owns.
     ///
     /// Carries the panel's drawn icon out to the launcher, so "Dictate" and
@@ -97,6 +109,13 @@ pub struct SearchResult {
     /// and paths are the longest strings a result carries.
     pub icon: Option<String>,
     pub panel: Option<String>,
+    /// Whether this row is a switch, and which way it is set.
+    ///
+    /// Filled in when the results are built rather than carried by the index:
+    /// what a switch is set to is a fact about the moment somebody looks at
+    /// it, and a value from the last scan would be a guess.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toggle: Option<bool>,
     /// Indices into `title` that matched, so the UI can highlight them.
     pub matched: Vec<usize>,
     /// The name the user gave this, when they gave it one.
@@ -149,6 +168,10 @@ impl From<RankedCommand> for SearchResult {
             mode: command.mode,
             entrypoint: command.entrypoint,
             icon,
+            // Set for a Windows switch and nothing else, and set by whoever
+            // is about to draw the row rather than by the index, because how
+            // a switch is set is a fact about right now.
+            toggle: command.toggle,
             panel: command.panel,
             matched,
             // Filled by the caller, which is the only place that knows them.
@@ -176,6 +199,10 @@ impl SearchResult {
             mode: command.mode,
             entrypoint: command.entrypoint,
             icon,
+            // Set for a Windows switch and nothing else, and set by whoever
+            // is about to draw the row rather than by the index, because how
+            // a switch is set is a fact about right now.
+            toggle: command.toggle,
             panel: command.panel,
             // Nothing was typed, so nothing matched.
             matched: Vec::new(),
@@ -236,6 +263,7 @@ fn app_entry(
         keywords: Vec::new(),
         icon,
         // A Windows application, not one of Sill's panels.
+        toggle: None,
         panel: None,
         // Only extension commands carry any.
         preferences: serde_json::Value::Null,
@@ -650,6 +678,7 @@ fn system_switch(
         icon: Some(icon.to_string()),
         // No panel. These do not appear in settings, and naming one would be
         // borrowing an icon that says the wrong thing anyway.
+        toggle: None,
         panel: None,
         preferences: serde_json::Value::Null,
     }
@@ -668,6 +697,7 @@ fn builtin(id: &str, panel: &str, title: &str, subtitle: &str, keywords: &[&str]
         entrypoint: id.to_string(),
         keywords: keywords.iter().map(|k| k.to_string()).collect(),
         icon: None,
+        toggle: None,
         panel: Some(panel.to_string()),
         // Only extension commands carry any.
         preferences: serde_json::Value::Null,
@@ -709,6 +739,7 @@ pub fn quicklink_record(
             vec![keyword.to_string()]
         },
         icon: None,
+        toggle: None,
         panel: Some("quicklinks".to_string()),
         // Only extension commands carry any.
         preferences: serde_json::Value::Null,
@@ -736,6 +767,7 @@ pub fn snippet_record(id: &str, name: &str, keyword: &str, preview: &str) -> Com
         // Searchable by what is in it, not only by what it is called.
         keywords: vec![keyword.to_string(), preview.to_string()],
         icon: None,
+        toggle: None,
         panel: None,
         // Only extension commands carry any.
         preferences: serde_json::Value::Null,
@@ -764,6 +796,7 @@ pub fn answer_record(text: &str, input: &str) -> RankedCommand {
             entrypoint: text.to_string(),
             keywords: Vec::new(),
             icon: None,
+            toggle: None,
             panel: None,
             // Only extension commands carry any.
             preferences: serde_json::Value::Null,

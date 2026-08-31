@@ -604,6 +604,7 @@ pub fn records() -> Vec<CommandRecord> {
                 .map(str::to_string)
                 .collect(),
             icon: None,
+            toggle: None,
             panel: Some(setting.panel.to_string()),
             // Only extension commands carry any.
             preferences: serde_json::Value::Null,

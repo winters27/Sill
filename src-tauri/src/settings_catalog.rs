@@ -459,6 +459,7 @@ pub fn load() -> Vec<CommandRecord> {
                 keywords,
                 icon,
                 // A Windows settings page, which draws the shell's own icon.
+                toggle: None,
                 panel: None,
                 // Only extension commands carry any.
                 preferences: serde_json::Value::Null,

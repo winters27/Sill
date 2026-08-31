@@ -25,6 +25,7 @@ fn command(id: &str, title: &str, extension_title: &str) -> CommandRecord {
         panel: None,
         // Ranking never looks at these, so a fixture does not need any.
         preferences: serde_json::Value::Null,
+        toggle: None,
     }
 }
 
@@ -2309,6 +2310,37 @@ fn a_system_switch_says_what_it_does_rather_than_what_the_machine_is_doing() {
             switch.title
         );
     }
+}
+
+/// A row that is a switch has to reach the window still knowing it is one.
+///
+/// The state is read at search time and written onto the record, and the
+/// record is then narrowed into the smaller shape the window is sent. That
+/// conversion listed every field by hand and set this one to `None`, so the
+/// reading was taken, thrown away, and every switch drew as an ordinary row.
+/// Nothing failed and nothing was logged.
+#[test]
+fn the_way_a_switch_is_set_survives_being_narrowed_for_the_window() {
+    let mut record = command("sill:system.mute", "Mute", "System Controls");
+    record.mode = "system".to_string();
+    record.toggle = Some(true);
+
+    let ranked = registry::RankedCommand {
+        command: record.clone(),
+        matched: Vec::new(),
+        class: registry::MatchClass::ExactTitle,
+        score: 1,
+    };
+
+    let narrowed: registry::SearchResult = ranked.into();
+    assert_eq!(
+        narrowed.toggle,
+        Some(true),
+        "the switch reached the window not knowing it was one",
+    );
+
+    // And the path the switcher takes, which does not rank.
+    assert_eq!(registry::SearchResult::from_record(record).toggle, Some(true));
 }
 
 /// The index has to hold each id once, whichever way it arrived.

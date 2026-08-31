@@ -163,6 +163,7 @@ pub fn records(tone: Tone) -> Vec<CommandRecord> {
                     .map(str::to_string)
                     .collect(),
                 icon: None,
+                toggle: None,
                 panel: None,
                 preferences: serde_json::Value::Null,
             }

@@ -69,6 +69,21 @@ pub(crate) async fn launch_command(
 
     let outcome = action.run(&ActionCtx { app: app.clone() }, &object).await?;
 
+    /*
+     * Where a switch ended up, so the row it was pressed on can show it.
+     *
+     * Read here rather than returned by the action because it is the
+     * launcher's question, not the action's: the action's job was to flip the
+     * thing. `ToggleSystem` has already dropped the cached reading, so this
+     * sees the state after the change, and the reading it takes is the same
+     * one the action's own dismiss decision used a moment earlier.
+     */
+    let toggle = if record.mode == "system" {
+        crate::system::toggle_state(&record.entrypoint, &crate::system::live())
+    } else {
+        None
+    };
+
     Ok(LaunchedCommand {
         // Empty rather than absent: the window has always read this as a
         // string and an extension command is the only thing that fills it.
@@ -76,6 +91,8 @@ pub(crate) async fn launch_command(
         title: record.title,
         extension_title: record.extension_title,
         mode: record.mode,
+        message: outcome.message,
+        toggle,
     })
 }
 
@@ -88,6 +105,11 @@ pub(crate) struct LaunchedCommand {
     pub extension_title: String,
     /// "view" or "no-view"; the UI stays at the root list for no-view.
     pub mode: String,
+    /// What the action said it did, in one line.
+    pub message: String,
+    /// Where a switch is now, for a row that stays on screen showing it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toggle: Option<bool>,
 }
 
 /// Performs an action Raycast implements itself rather than handing to the

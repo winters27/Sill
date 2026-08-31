@@ -447,7 +447,21 @@
         </span>
 
         <span class="spacer"></span>
-        <span class="kind">{kindOf(command)}</span>
+        {#if command.toggle !== undefined}
+          <!--
+            A switch draws as a switch, in place of the category. The category
+            on one of these says "System" every time, which the heading above
+            the group already says.
+          -->
+          <span
+            class="switch"
+            class:on={command.toggle}
+            role="img"
+            aria-label={command.toggle ? "On" : "Off"}
+          ></span>
+        {:else}
+          <span class="kind">{kindOf(command)}</span>
+        {/if}
         {#if numeric && index < 9}
           <!--
             Hidden from the reader on purpose. The combobox announces each
@@ -478,6 +492,48 @@
    * refuses to shrink below its content and a long path pushes the category
    * clean off the row instead of truncating.
    */
+  /*
+   * The switch on a row that is one.
+   *
+   * Colour is the only thing that moves besides the knob. A row like this is
+   * looked at for half a second, and anything more elaborate is motion for its
+   * own sake.
+   */
+  .switch {
+    flex: none;
+    width: 26px;
+    height: 15px;
+    position: relative;
+    border-radius: 999px;
+    background: var(--fill-2);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    transition: background-color 0.16s var(--ease);
+  }
+
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--text-2);
+    transition:
+      transform 0.16s var(--ease),
+      background-color 0.16s var(--ease);
+  }
+
+  .switch.on {
+    background: var(--accent);
+    box-shadow: none;
+  }
+
+  .switch.on::after {
+    transform: translateX(11px);
+    background: var(--core-background);
+  }
+
   .text {
     display: flex;
     flex-direction: column;
