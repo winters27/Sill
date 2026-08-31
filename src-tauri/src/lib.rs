@@ -1,5 +1,6 @@
 pub mod action;
 pub mod actions;
+pub mod ai;
 pub mod app_volume;
 pub mod apps;
 pub mod audio;
