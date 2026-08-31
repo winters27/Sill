@@ -113,8 +113,13 @@ pub fn count_words(text: &str) -> usize {
     text.split_whitespace().count()
 }
 
-/// Appends one entry, trimming the file when it has grown well past the cap.
+/// Appends one entry, trimming the file when it has grown well past the cap
+/// or when the retention policy has something to drop.
 pub fn record(app: &AppHandle, entry: &Entry) -> Result<()> {
+    let retain_days = app
+        .try_state::<crate::dictation::service::DictationService>()
+        .map(|service| service.settings().retain_days)
+        .unwrap_or(0);
     let file = path(app)?;
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent)?;
@@ -131,7 +136,7 @@ pub fn record(app: &AppHandle, entry: &Entry) -> Result<()> {
     handle.write_all(line.as_bytes())?;
     drop(handle);
 
-    trim_if_needed(&file);
+    trim_if_needed(&file, retain_days);
     Ok(())
 }
 
@@ -240,18 +245,63 @@ fn write_all(file: &Path, entries: &[Entry]) -> Result<()> {
     Ok(())
 }
 
-fn trim_if_needed(file: &Path) {
+fn trim_if_needed(file: &Path, retain_days: u32) {
     let entries = read(file);
-    if entries.len() <= KEEP + SLACK {
+    let by_count = entries.len() > KEEP + SLACK;
+    let expired = retain_days > 0 && entries.iter().any(|entry| older_than(entry, retain_days, now()));
+
+    // Rewriting the file is the cost here, so it is only paid when something
+    // would actually come out of it. Without the second question a machine
+    // with a retention policy and nothing old enough to drop would rewrite its
+    // whole history on every dictation forever.
+    if !by_count && !expired {
         return;
     }
 
-    // `read` returns newest first, so the newest KEEP are the front.
-    let mut keep: Vec<Entry> = entries.into_iter().take(KEEP).collect();
+    let mut keep = keep_within(entries, retain_days, now());
     keep.reverse();
     if let Err(err) = write_all(file, &keep) {
         crate::say!("could not trim the dictation history: {err}");
     }
+}
+
+/// Now, in unix seconds.
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Whether one entry has outlived the policy.
+fn older_than(entry: &Entry, retain_days: u32, now: i64) -> bool {
+    entry.at < now - (retain_days as i64) * 86_400
+}
+
+/// What survives both limits, newest first.
+///
+/// Two rules, different in kind. The count stops the file growing without end
+/// and is not a policy anybody chose; the age is. Both are applied, and **the
+/// order between them does not matter**: the list arrives newest first and an
+/// entry's age rises with its position, so filtering by age and then taking
+/// the newest few gives what taking the newest few and then filtering does.
+/// Worth writing down because it reads as though it should matter, and a test
+/// asserting the order would pass whichever way round it was written.
+///
+/// `retain_days` of zero means no age limit at all, which is the same spelling
+/// the clipboard uses for the same idea.
+pub fn keep_within(entries: Vec<Entry>, retain_days: u32, now: i64) -> Vec<Entry> {
+    let by_age: Vec<Entry> = if retain_days == 0 {
+        entries
+    } else {
+        entries
+            .into_iter()
+            .filter(|entry| !older_than(entry, retain_days, now))
+            .collect()
+    };
+
+    // `read` returns newest first, so the newest are already the front.
+    by_age.into_iter().take(KEEP).collect()
 }
 
 #[cfg(test)]
@@ -260,6 +310,82 @@ mod tests {
 
     const NOW: i64 = 1_700_000_000;
     const HOUR: i64 = 3_600;
+
+
+    /// Zero is the spelling for "no age limit", the same as the clipboard's.
+    #[test]
+    fn keeping_everything_is_what_zero_days_means() {
+        let entries = vec![entry(NOW - 400 * 24 * HOUR, 3, 900), entry(NOW, 3, 900)];
+
+        let kept = keep_within(entries, 0, NOW);
+
+        assert_eq!(kept.len(), 2, "a year old entry survives no policy at all");
+    }
+
+    #[test]
+    fn a_transcript_older_than_the_policy_goes_and_the_rest_stay() {
+        let entries = vec![
+            entry(NOW - 1 * HOUR, 3, 900),
+            entry(NOW - 29 * 24 * HOUR, 3, 900),
+            entry(NOW - 31 * 24 * HOUR, 3, 900),
+        ];
+
+        let kept = keep_within(entries, 30, NOW);
+
+        assert_eq!(kept.len(), 2, "only the one past thirty days should go");
+        assert!(
+            kept.iter().all(|e| e.at > NOW - 30 * 24 * HOUR),
+            "something older than the policy survived"
+        );
+    }
+
+    /// The boundary, stated rather than left to a comparison nobody checked.
+    #[test]
+    fn an_entry_exactly_at_the_limit_is_kept() {
+        let at_the_edge = vec![entry(NOW - 30 * 24 * HOUR, 3, 900)];
+
+        assert_eq!(
+            keep_within(at_the_edge, 30, NOW).len(),
+            1,
+            "the limit is how long something is kept, not when it is already gone"
+        );
+    }
+
+    /// The age limit drops entries the count would have been happy to keep.
+    ///
+    /// Deliberately a handful of entries rather than thousands: well under
+    /// `KEEP`, the count limit does nothing at all, so the only thing that can
+    /// remove anything here is the policy. A version of this with more than
+    /// `KEEP` entries passes whether or not the age filter runs, because the
+    /// count alone would have cut it to the same answer.
+    #[test]
+    fn age_removes_what_the_count_alone_would_have_kept() {
+        let mut entries = vec![entry(NOW, 3, 900)];
+        for day in 0..5 {
+            entries.push(entry(NOW - (60 + day) * 24 * HOUR, 3, 900));
+        }
+
+        assert_eq!(
+            keep_within(entries.clone(), 0, NOW).len(),
+            6,
+            "with no policy the count keeps all six"
+        );
+        assert_eq!(
+            keep_within(entries, 30, NOW).len(),
+            1,
+            "only today's entry is inside the policy"
+        );
+    }
+
+    /// With no age policy the count still bounds the file.
+    #[test]
+    fn the_count_still_bounds_a_history_with_no_age_policy() {
+        let entries: Vec<Entry> = (0..KEEP + 50)
+            .map(|i| entry(NOW - i as i64 * 60, 3, 900))
+            .collect();
+
+        assert_eq!(keep_within(entries, 0, NOW).len(), KEEP);
+    }
 
     fn entry(at: i64, words: usize, spoken_ms: u64) -> Entry {
         Entry {
@@ -370,7 +496,7 @@ mod tests {
             .collect();
         write_all(&file, &oldest_first).unwrap();
 
-        trim_if_needed(&file);
+        trim_if_needed(&file, 0);
         assert_eq!(
             read(&file).len(),
             KEEP + SLACK,
@@ -379,7 +505,7 @@ mod tests {
 
         oldest_first.push(entry(NOW, 1, 100));
         write_all(&file, &oldest_first).unwrap();
-        trim_if_needed(&file);
+        trim_if_needed(&file, 0);
 
         let kept = read(&file);
         assert_eq!(kept.len(), KEEP);

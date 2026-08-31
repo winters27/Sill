@@ -109,6 +109,18 @@ pub struct DictationSettings {
     pub app_context: bool,
     /// Keep finished transcripts.
     pub keep_history: bool,
+    /// Days a transcript is kept. Zero keeps everything.
+    ///
+    /// The same shape the clipboard uses, and **a different default on
+    /// purpose**. A clipboard fills itself with one-time codes and whatever
+    /// was typed near a password field, so it ends at thirty days whether or
+    /// not anybody asks. Nothing reaches this history that was not deliberately
+    /// spoken into it, and the statistics it draws are a record of somebody's
+    /// own use that gets less useful the more of it is thrown away. So the
+    /// policy exists and is off until it is wanted, rather than deleting a
+    /// year of history on the update that introduces it.
+    #[serde(default)]
+    pub retain_days: u32,
     /// Play the bundled cues when a dictation starts and stops.
     pub sound_enabled: bool,
     /// Words and names the model should get right: proper nouns, jargon,
@@ -160,6 +172,8 @@ impl Default for DictationSettings {
             custom_instructions: String::new(),
             app_context: true,
             keep_history: true,
+            // Off until asked for. See the field.
+            retain_days: 0,
             sound_enabled: true,
             vocabulary: String::new(),
         }
