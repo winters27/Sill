@@ -73,13 +73,55 @@ fn sections_do_not_all_look_the_same() {
     );
 }
 
+/// No switch is drawn with an error sign.
+///
+/// `bthprops.cpl` with no index means index 0, and index 0 of that file is a
+/// yellow warning triangle, so the Bluetooth switch shipped wearing one. It
+/// was chosen by a rule that said a small icon is a blank icon, and the
+/// triangle is the smallest of the three in there.
+///
+/// This asks the only question that catches it: is the picture Sill draws the
+/// same picture as the triangle. Not ignored, because it needs no hardware and
+/// this is exactly the kind of thing nobody looks at twice.
+#[test]
+fn the_bluetooth_switch_is_not_wearing_a_warning_triangle() {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    let triangle = sill_lib::icons::icon_data_uri(&format!(r"{root}\System32\bthprops.cpl,0"));
+
+    // Not `else { return }`. The first version of this test built the path
+    // wrong, so this came back `None`, so the test returned before comparing
+    // anything and passed while the triangle was still shipping. A test that
+    // can quietly check nothing is worse than no test.
+    let triangle = triangle.expect("the warning triangle to compare against");
+
+    for row in sill_lib::registry::builtins() {
+        let Some(icon) = row.icon.as_deref() else { continue };
+        let Some(drawn) = sill_lib::icons::icon_data_uri(icon) else { continue };
+
+        assert_ne!(
+            drawn, triangle,
+            "{} is drawn with a warning triangle, from {icon}",
+            row.title,
+        );
+    }
+}
+
 /// Which system files are worth taking an icon from.
 ///
-/// The tool for choosing one. Size is the signal: a source that comes back
-/// under about two thousand bytes is drawing an empty picture rather than a
-/// small one, and `bthprops.cpl` at 870 is what a blank looks like next to
-/// `hdwwiz.cpl` at five thousand. Edit the list and run it before mapping a
-/// section to anything.
+/// The tool for choosing one. Size is a hint: a source under about two
+/// thousand bytes is often drawing an empty picture rather than a small one,
+/// next to `hdwwiz.cpl` at five thousand.
+///
+/// **A hint and not a test, and this file used to say otherwise.** It named
+/// `bthprops.cpl` as what a blank looks like. It is not blank. Its three icons
+/// come back at 386, 2887 and 426 bytes: the smallest is a yellow warning
+/// triangle, and the 426-byte one is a perfectly good Bluetooth glyph that
+/// compresses small because it is a flat two-colour shape. Sill shipped the
+/// warning triangle on the Bluetooth switch on the strength of that rule.
+///
+/// So: use the size to order the candidates, then **look at them**. Run
+/// `probe_icons`'s contact sheet and open the file. Edit the list and run this
+/// before mapping a section to anything.
 #[test]
 #[ignore = "reads this machine's System32"]
 fn compare_candidates() {

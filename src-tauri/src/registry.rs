@@ -531,7 +531,19 @@ fn system_commands() -> Vec<CommandRecord> {
     let theme = format!(r"{root}\System32\themecpl.dll");
     let padlock = format!(r"{root}\System32\imageres.dll,54");
     let network = format!(r"{root}\System32\ncpa.cpl");
-    let bluetooth = format!(r"{root}\System32\bthprops.cpl");
+    /*
+     * Index 2, and the index is the whole point.
+     *
+     * `bthprops.cpl` with no index means index 0, and index 0 of that file is
+     * a **yellow warning triangle**. So the Bluetooth switch sat in the list
+     * wearing an error sign on a machine where nothing was wrong.
+     *
+     * Index 2 is the Bluetooth glyph. It was found by extracting all three and
+     * looking at them, which is the only way that works: the file's icons come
+     * back at 386, 2887 and 426 bytes, so the smallest is the triangle and the
+     * second smallest is the right one. Size does not say which is which.
+     */
+    let bluetooth = format!(r"{root}\System32\bthprops.cpl,2");
 
     let mut rows = vec![
         system_switch(
