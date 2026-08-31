@@ -277,9 +277,11 @@ else if (Number(css[1]) !== Number(rust[1])) {
  *
  * Satoshi is under the ITF Free Font License, which permits embedding it in a
  * desktop application but forbids making the file available through a
- * "repository" or "publicly accessible servers". It was committed anyway, from
- * the initial commit until this check existed, to a public repository, which
- * is the breach that licence names most directly.
+ * "repository" or "publicly accessible servers". It was tracked from the
+ * initial commit until this check existed, but the remote it reached is
+ * private and has never been forked, so the file was not distributed to
+ * anybody. Keeping it out from here is a precaution against the day that
+ * changes, not a remedy for something already done.
  *
  * `scripts/fetch-fonts.mjs` puts it on disk per machine and `.gitignore` keeps
  * it out. Neither stops `git add -f`, and neither stops a second font being

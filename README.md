@@ -90,12 +90,14 @@ For a release build:
 npm run tauri build
 ```
 
-`npm install` also fetches the interface font. Satoshi is not open source and
-its licence does not allow the file to sit in a public repository, so it is
-pulled from [Fontshare](https://www.fontshare.com/fonts/satoshi) per machine
-instead. Building offline is fine: the interface falls back to Segoe UI
-Variable, and `npm run fonts` picks it up later. See
-[resources/NOTICE](resources/NOTICE).
+`npm install` also fetches the interface font. Satoshi is not open source, and
+its licence does not allow the file to be redistributed through a repository,
+so it is pulled from [Fontshare](https://www.fontshare.com/fonts/satoshi) per
+machine instead. Installing offline is fine: the fetch is not fatal and the
+interface falls back to Segoe UI Variable until `npm run fonts` picks it up.
+Building offline is not, because a packaged copy can only carry the face that
+was on disk when it was built, so `npm run build` stops rather than ship
+without it. See [resources/NOTICE](resources/NOTICE).
 
 Optional at runtime: [Everything](https://www.voidtools.com/) for file search.
 Without it the launcher offers to install it, and everything else still works.
