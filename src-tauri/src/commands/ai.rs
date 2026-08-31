@@ -217,6 +217,10 @@ pub(crate) async fn ai_models(provider: Provider) -> Result<Vec<Model>, String> 
             .collect());
     }
 
+    if let Some(waiting_on) = nothing_to_ask_with(&provider) {
+        return Err(waiting_on);
+    }
+
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .build()
@@ -231,6 +235,42 @@ pub(crate) async fn ai_models(provider: Provider) -> Result<Vec<Model>, String> 
             id,
         })
         .collect())
+}
+
+/// What is still missing before a provider can be asked for its models.
+///
+/// A remote service with no key yet is not a failure to report. It is the
+/// ordinary first second of setting one up: the address arrives from the table
+/// and the key arrives when somebody pastes it. Asking anyway earns a 401 and
+/// puts the provider's own refusal on screen, which reads as something being
+/// broken rather than as one field being empty.
+///
+/// Decided in Rust because "local" is defined in Rust. A model on this machine
+/// needs no key, and its list is there to be had from the first moment.
+fn nothing_to_ask_with(provider: &Provider) -> Option<String> {
+    if provider.base_url.trim().is_empty() {
+        return Some("Give it an address and the models will list themselves.".to_string());
+    }
+
+    if provider.api_key.trim().is_empty() && !provider::is_on_this_network(&provider.base_url) {
+        return Some("Paste a key and the models will list themselves.".to_string());
+    }
+
+    None
+}
+
+/// What each of these models is called, in order.
+///
+/// One call for a whole list rather than one per row. The alternative is the
+/// window working the names out for itself, and then the rule for what a model
+/// is called lives in two places: the launcher's chip would shorten one way
+/// and the settings window another, and nothing would make them agree.
+#[tauri::command]
+pub(crate) fn ai_named(providers: Vec<Provider>) -> Vec<String> {
+    providers
+        .iter()
+        .map(|one| provider::short_model(one.wire, &one.model))
+        .collect()
 }
 
 /// The services Sill knows how to reach, for the settings window.
@@ -315,6 +355,51 @@ mod tests {
             base_url: base.into(),
             model: model.into(),
             ..Provider::default()
+        }
+    }
+
+    mod before_it_is_worth_asking {
+        use super::*;
+
+        /// The moment after adding one from the table: an address, no key.
+        /// Asking earns a 401, and the provider's own refusal on screen reads
+        /// as something being broken.
+        #[test]
+        fn a_remote_one_with_no_key_says_what_it_is_waiting_for() {
+            let waiting = nothing_to_ask_with(&provider("xai", "https://api.x.ai/v1", "grok-4"));
+            assert!(waiting.unwrap_or_default().contains("Paste a key"));
+        }
+
+        /// A model on this machine needs no key, and its list is there from
+        /// the first moment. Demanding one would put a text box in front of
+        /// the one provider that can always answer.
+        #[test]
+        fn a_local_one_needs_no_key() {
+            assert_eq!(
+                nothing_to_ask_with(&provider("ollama", "http://localhost:11434/v1", "")),
+                None,
+            );
+        }
+
+        #[test]
+        fn one_on_this_network_needs_no_key_either() {
+            assert_eq!(
+                nothing_to_ask_with(&provider("lan", "http://192.168.1.9:1234/v1", "")),
+                None,
+            );
+        }
+
+        #[test]
+        fn no_address_says_so_rather_than_asking_nowhere() {
+            let waiting = nothing_to_ask_with(&provider("blank", "", ""));
+            assert!(waiting.unwrap_or_default().contains("address"));
+        }
+
+        #[test]
+        fn a_remote_one_with_a_key_is_worth_asking() {
+            let mut one = provider("xai", "https://api.x.ai/v1", "grok-4");
+            one.api_key = "xai-something".into();
+            assert_eq!(nothing_to_ask_with(&one), None);
         }
     }
 

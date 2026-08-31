@@ -8,6 +8,7 @@
   import {
     aiKnown,
     aiModels,
+    aiNamed,
     type AiModel,
     type AiProvider,
   } from "$lib/ai";
@@ -90,7 +91,6 @@
     save();
 
     editing = one.id;
-    void loadModels({ ...provider });
   }
 
   function change(id: string, patch: Partial<AiProvider>) {
@@ -116,32 +116,100 @@
    * with a message about a model nobody meant to ask for. When the list cannot
    * be had, the field below stays a text box, which still works.
    */
+  /**
+   * Which ask is the current one.
+   *
+   * Typing a key sends several, and they do not come back in order: a fast
+   * refusal of half a key can land after the slow success of the whole one and
+   * replace a good list with an error. Only the newest is allowed to write.
+   */
+  let asked = 0;
+
   async function loadModels(one: AiProvider) {
+    const mine = ++asked;
+
     models = [];
     modelTrouble = "";
     loadingModels = true;
 
     try {
-      models = await aiModels(one);
+      const found = await aiModels(one);
+      if (mine !== asked) return;
 
-      if (models.length === 0) {
-        modelTrouble = "That one did not say what it has.";
+      models = found;
+
+      if (found.length === 0) {
+        modelTrouble = "That one did not say what it has, so type the name.";
       } else if (!one.model) {
         // Nothing shipped a name for this one, because what it offers differs
         // per machine and per account. Taking the first is the whole setup
         // finished rather than a picker left blank for somebody to notice.
-        change(one.id, { model: models[0].id });
+        change(one.id, { model: found[0].id });
       }
     } catch (err) {
+      if (mine !== asked) return;
       modelTrouble = `${err}`;
     } finally {
-      loadingModels = false;
+      if (mine === asked) loadingModels = false;
     }
   }
 
+  /**
+   * How long to let an address or a key settle before asking again.
+   *
+   * A pasted key arrives in one event and a typed one arrives in forty, and
+   * asking per character is forty failed authentications against somebody's
+   * account. This is long enough to cover typing and short enough that a paste
+   * feels immediate.
+   */
+  const SETTLE = 600;
+
+  /** The provider and credentials the last ask was made with. */
+  let askedAbout = "";
+  /** Which provider was open last, so opening a different one is not delayed. */
+  let lastOpen = "";
+  let settling: ReturnType<typeof setTimeout> | undefined;
+
+  /*
+   * Asks again whenever the answer could have changed.
+   *
+   * This is the difference between a picker and a text box. A service with a
+   * key is added before the key exists, so the first ask is always refused;
+   * without this, pasting the key changed nothing and the only way to a model
+   * was to go and look up its id, which is exactly the work the picker exists
+   * to remove.
+   *
+   * Only the address and the key are watched. The model is not: choosing one
+   * writes the provider back, and re-asking on that would throw away the list
+   * the choice was just made from.
+   */
+  $effect(() => {
+    const one = open;
+
+    if (!one) {
+      askedAbout = "";
+      lastOpen = "";
+      return;
+    }
+
+    const signature = [one.id, one.wire, one.baseUrl, one.apiKey].join("\u0000");
+    if (signature === askedAbout) return;
+    askedAbout = signature;
+
+    // Opening a different provider is not something to wait out. Only a change
+    // to one already open is, because that is somebody still typing.
+    const wait = one.id === lastOpen ? SETTLE : 0;
+    lastOpen = one.id;
+
+    const snapshot = { ...one };
+    clearTimeout(settling);
+    settling = setTimeout(() => void loadModels(snapshot), wait);
+
+    return () => clearTimeout(settling);
+  });
+
   function edit(one: AiProvider) {
     editing = editing === one.id ? "" : one.id;
-    if (editing) void loadModels(one);
   }
 
   /**
@@ -157,12 +225,35 @@
    * so a card reading its label showed the wrong thing as soon as a second
    * provider was opened.
    */
-  function status(one: AiProvider): string {
-    if (one.wire === "claudeCode") {
-      return one.model ? `Your subscription, ${one.model}` : "Your subscription";
+  /**
+   * What each card's model is called, keyed by provider id.
+   *
+   * Asked for rather than worked out here, so a card and the launcher's chip
+   * call the same model the same thing. Until the answer arrives a card shows
+   * the stored id, which is right, just longer.
+   */
+  let named = $state<Record<string, string>>({});
+
+  $effect(() => {
+    const asking = providers.map((one) => ({ ...one }));
+    if (asking.length === 0) {
+      named = {};
+      return;
     }
 
-    return one.model || "Needs a model";
+    void aiNamed(asking).then((labels) => {
+      named = Object.fromEntries(asking.map((one, at) => [one.id, labels[at] ?? one.model]));
+    });
+  });
+
+  function status(one: AiProvider): string {
+    const model = named[one.id] ?? one.model;
+
+    if (one.wire === "claudeCode") {
+      return model ? `Your subscription, ${model}` : "Your subscription";
+    }
+
+    return model || "Needs a model";
   }
 
   /**
@@ -342,7 +433,12 @@
                   {#if loadingModels}
                     <span class="note">Asking what it has…</span>
                   {:else if modelTrouble}
-                    <span class="note warn">{modelTrouble} Type the name instead.</span>
+                    <!-- Whole sentences, because they are not all the same
+                         kind of trouble. "Paste a key" is a thing to do next;
+                         "type the name instead" is the way round a service
+                         that will not list, and reading both at once told
+                         somebody to type a model id and paste a key. -->
+                    <span class="note warn">{modelTrouble}</span>
                   {:else if strayModel}
                     <span class="note warn">
                       {open.model} was not in the list it gave. Keep it if you

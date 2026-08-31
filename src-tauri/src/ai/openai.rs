@@ -265,6 +265,43 @@ pub fn model_ids(body: &serde_json::Value) -> Vec<String> {
 /// and "model not found" tells them exactly what to fix. Trimmed, because a
 /// gateway will return a page of HTML and a status line is not the place.
 fn complaint(status: u16, body: &str) -> String {
+    /*
+     * The three refusals that mean something specific, said in Sill's words.
+     *
+     * A provider's own JSON is written for whoever is calling the API, and it
+     * is the wrong register for a settings window: somebody who pasted the
+     * wrong key needs to be told that, not handed a nested error object to
+     * read. Everything else falls through to the body, because a message
+     * nobody anticipated is more use verbatim than summarised wrongly.
+     */
+    /*
+     * The two refusals worth saying in Sill's words.
+     *
+     * Rejected credentials are said here rather than passed through, because
+     * some services quote the key back in the message and a settings window is
+     * not the place for that. Everything else keeps the provider's own words,
+     * including a 404: it looks like a wrong address and often is not, since a
+     * model that does not exist is a 404 on several services, and telling
+     * somebody to check an address that is correct sends them the wrong way.
+     */
+    match status {
+        401 | 403 => return "That key was not accepted.".to_string(),
+        429 => return "That provider is rate limiting the request. Try again shortly.".to_string(),
+        _ => {}
+    }
+
+    // The provider's own sentence, dug out of the object it arrived in.
+    //
+    // Every service speaking this shape answers a refusal with an error field,
+    // and what is in it is usually the most useful thing available: xAI's says
+    // where to get a key, and a wrong model name is quoted back exactly as it
+    // was sent. What is not useful is the JSON around it.
+    if let Some(said) = said_by(body) {
+        // The number as an aside rather than the subject. It says nothing on
+        // its own, but it is the searchable half when somebody reports one.
+        return format!("{said} ({status})");
+    }
+
     let said = body.trim();
 
     if said.is_empty() {
@@ -273,6 +310,29 @@ fn complaint(status: u16, body: &str) -> String {
 
     let short: String = said.chars().take(300).collect();
     format!("that provider refused the request ({status}): {short}")
+}
+
+/// The sentence a provider put in its error body, if it put one there.
+///
+/// Two shapes, because the services disagree: `{"error": "..."}` and
+/// `{"error": {"message": "..."}}`. Anything else answers nothing and the
+/// caller falls back to the body as it arrived, which is the right default for
+/// a message nobody anticipated.
+fn said_by(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+
+    let said = value
+        .pointer("/error/message")
+        .or_else(|| value.pointer("/error"))
+        .or_else(|| value.pointer("/message"))
+        .and_then(|found| found.as_str())?
+        .trim();
+
+    if said.is_empty() {
+        return None;
+    }
+
+    Some(said.chars().take(300).collect())
 }
 
 #[cfg(test)]
@@ -285,6 +345,103 @@ mod tests {
             api_key: key.into(),
             model: model.into(),
             ..Provider::default()
+        }
+    }
+
+    mod what_a_refusal_says {
+        use super::*;
+
+        /// The one that happens most, and the one whose real body is least
+        /// use: a nested JSON error object about invalid authentication is
+        /// not what somebody who pasted the wrong key needs to read.
+        #[test]
+        fn a_rejected_key_says_that_and_nothing_else() {
+            let said = complaint(401, r#"{"error":{"message":"Incorrect API key provided: sk-abc..."}}"#);
+            assert_eq!(said, "That key was not accepted.");
+            assert!(!said.contains("sk-abc"), "it repeated the key back");
+        }
+
+        #[test]
+        fn a_forbidden_request_reads_the_same_way() {
+            assert_eq!(complaint(403, "{}"), "That key was not accepted.");
+        }
+
+        /// A 404 is not proof the address is wrong. Several services answer
+        /// one for a model that does not exist, and sending somebody to check
+        /// an address that is correct sends them the wrong way.
+        #[test]
+        fn a_404_is_not_read_as_a_wrong_address() {
+            let said = complaint(404, r#"{"error":{"message":"model \"qwen9\" not found"}}"#);
+            assert!(said.contains("qwen9"), "it said {said:?}");
+            assert!(!said.to_lowercase().contains("address"), "it guessed: {said:?}");
+        }
+
+        #[test]
+        fn being_rate_limited_says_to_come_back() {
+            assert!(complaint(429, "slow down").contains("rate limiting"));
+        }
+
+        /// What xAI actually answers a bad key with, taken from a real
+        /// request. The status is 400, not 401, which is why mapping by status
+        /// alone was not enough: the services disagree about which number a
+        /// rejected key is, and only the body says what happened.
+        #[test]
+        fn a_provider_that_calls_a_bad_key_a_bad_request_still_reads_plainly() {
+            let said = complaint(
+                400,
+                r#"{"code":"invalid-argument","error":"Incorrect API key provided. You can obtain an API key from https://console.x.ai."}"#,
+            );
+
+            assert_eq!(
+                said,
+                "Incorrect API key provided. You can obtain an API key from \
+                 https://console.x.ai. (400)",
+            );
+        }
+
+        /// The other shape, which is what OpenAI and most of the rest send.
+        #[test]
+        fn a_nested_message_is_dug_out_of_its_object() {
+            let said = complaint(400, r#"{"error":{"message":"model `grok-9` does not exist","type":"invalid_request_error"}}"#);
+            assert_eq!(said, "model `grok-9` does not exist (400)");
+            assert!(!said.contains("invalid_request_error"), "the object came too");
+        }
+
+        /// A body that is not JSON at all is still the most useful thing there
+        /// is, so it survives.
+        #[test]
+        fn something_that_is_not_json_is_passed_through() {
+            let said = complaint(502, "upstream connect error");
+            assert!(said.contains("upstream connect error"));
+        }
+
+        /// An error field that is an empty string is not a message.
+        #[test]
+        fn an_empty_message_falls_back_rather_than_saying_nothing() {
+            let said = complaint(400, r#"{"error":{"message":"  "}}"#);
+            assert!(said.contains("400"), "it said {said:?}");
+        }
+
+        /// Anything unanticipated is passed through rather than summarised
+        /// wrongly. A wrong model name and an unpaid account are both 400,
+        /// and only the provider knows which.
+        #[test]
+        fn anything_else_keeps_the_providers_own_words() {
+            let said = complaint(400, r#"{"error":"model `grok-9` does not exist"}"#);
+            assert!(said.contains("grok-9"), "the useful half was thrown away");
+        }
+
+        #[test]
+        fn an_empty_body_still_names_the_status() {
+            assert!(complaint(500, "   ").contains("500"));
+        }
+
+        /// A provider that answers an error with a page of HTML must not put
+        /// a page of HTML in a settings window.
+        #[test]
+        fn an_enormous_body_is_cut_down() {
+            let said = complaint(400, &"x".repeat(5000));
+            assert!(said.chars().count() < 400, "it was {} long", said.chars().count());
         }
     }
 

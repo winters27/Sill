@@ -46,3 +46,15 @@ export function aiKnown(): Promise<AiProvider[]> {
 export function aiModels(provider: AiProvider): Promise<AiModel[]> {
   return invoke<AiModel[]>("ai_models", { provider });
 }
+
+/**
+ * What each of these models is called, in order.
+ *
+ * One call for the whole list. Working it out in the window instead would put
+ * the rule for what a model is called in two places, and the chip in the
+ * launcher and the cards in here would drift apart the first time either
+ * changed.
+ */
+export function aiNamed(providers: AiProvider[]): Promise<string[]> {
+  return invoke<string[]>("ai_named", { providers });
+}
