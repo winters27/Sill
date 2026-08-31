@@ -37,6 +37,15 @@ use tauri::{Emitter, Manager};
 use super::openai::Message;
 use super::provider::{Provider, Wire};
 
+/// One tool being used, as the window draws it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Step {
+    pub tool: String,
+    /// What it is being used on. Empty when the tool takes no arguments.
+    pub subject: String,
+}
+
 /// One exchange, as the window draws it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -426,6 +435,8 @@ fn shorten(question: &str) -> String {
 
 /// What the window is told while an answer is being written.
 const SAID: &str = "sill://ai-said";
+/// One tool being reached for, so the window can say what is happening.
+const USING: &str = "sill://ai-using";
 const DONE: &str = "sill://ai-done";
 const FAILED: &str = "sill://ai-failed";
 
@@ -473,7 +484,21 @@ pub async fn ask(
     }
 }
 
+/// How many times one question may go round before the answer is written.
+///
+/// Each round is a request paid for in full, so this is a ceiling on a
+/// mistake rather than a target: a model that keeps calling tools without ever
+/// answering is the failure this bounds, and six is more steps than any
+/// question a launcher is asked has needed.
+const MOST_STEPS: usize = 6;
+
 /// Over HTTP, to anything speaking the common shape.
+///
+/// A loop rather than one request, because a tool call is the model asking to
+/// be told something before it answers. Each round: ask, run whatever was
+/// asked for, put the results in and ask again. It ends the first time a round
+/// comes back with words and no calls, which is the ordinary case on the very
+/// first round when nothing needed looking up.
 async fn over_http(
     app: &tauri::AppHandle,
     provider: &Provider,
@@ -484,15 +509,81 @@ async fn over_http(
         .build()
         .map_err(|err| format!("could not prepare the request: {err}"))?;
 
+    let tools = super::tools::as_request();
+    let mut conversation = messages.to_vec();
     let mut whole = String::new();
 
-    super::openai::ask(&client, provider, messages, |piece| {
+    for step in 0..MOST_STEPS {
+        let said = super::openai::ask(&client, provider, &conversation, Some(&tools), |piece| {
+            whole.push_str(&piece);
+            let _ = app.emit(SAID, &piece);
+        })
+        .await?;
+
+        if said.calls.is_empty() {
+            return Ok(whole);
+        }
+
+        // The turn back in full: what it said, then the calls it asked for.
+        // Sending only the results earns a complaint about a tool message with
+        // no call before it.
+        conversation.push(Message::calling(said.text.clone(), said.calls.clone()));
+
+        for call in &said.calls {
+            let name = call.function.name.clone();
+
+            // Said before the tool runs rather than after. Reading the screen
+            // takes a moment, and a window showing nothing during it looks
+            // like a window that has stopped.
+            let _ = app.emit(USING, &Step { tool: name.clone(), subject: subject_of(call) });
+
+            let arguments: serde_json::Value =
+                serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
+
+            let found = super::tools::run(app, &name, &arguments).await;
+            conversation.push(Message::answered(&call.id, found.to_string()));
+        }
+
+        // Every round after the first is one the person is waiting through, so
+        // the last is spent answering rather than looking something else up.
+        if step + 1 == MOST_STEPS {
+            conversation.push(Message::system(
+                "You have used every step available. Answer now with what you have, \
+                 and say plainly what you could not find out.",
+            ));
+        }
+    }
+
+    // One more, with no tools, so a model that kept calling them still ends
+    // with words rather than with nothing.
+    let said = super::openai::ask(&client, provider, &conversation, None, |piece| {
         whole.push_str(&piece);
         let _ = app.emit(SAID, &piece);
     })
     .await?;
 
-    Ok(whole)
+    Ok(if whole.is_empty() { said.text } else { whole })
+}
+
+/// What a tool is about to be used on, for the line that says so.
+///
+/// The argument a person would recognise, which is nearly always the first
+/// string in it. Nothing at all for the tools that take no arguments, where
+/// the name already says everything.
+fn subject_of(call: &super::openai::ToolCall) -> String {
+    let Ok(arguments) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) else {
+        return String::new();
+    };
+
+    for key in ["query", "path"] {
+        if let Some(found) = arguments.get(key).and_then(|value| value.as_str()) {
+            if !found.trim().is_empty() {
+                return found.trim().to_string();
+            }
+        }
+    }
+
+    String::new()
 }
 
 /// Through the Claude Code binary, on the subscription.

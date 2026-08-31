@@ -12,36 +12,102 @@ use serde::{Deserialize, Serialize};
 
 use super::provider::Provider;
 
-/// Who said what.
+/// One call the model wants made.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+pub struct ToolCall {
+    /// What the result must be labelled with when it is sent back.
+    pub id: String,
+    /// Always `function`. Sent because the services require the field.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub function: Called,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Called {
+    pub name: String,
+    /// JSON, as a string. That is how the services send it, and it arrives a
+    /// few characters at a time.
+    pub arguments: String,
+}
+
+/// Who said what.
+///
+/// Four roles rather than three now. `assistant` carries the calls it wants
+/// made, and `tool` carries one result labelled with the call it answers. Both
+/// extra fields are skipped when empty, because a service given
+/// `"tool_calls": null` on every ordinary message rejects the request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
-    /// `system`, `user` or `assistant`.
+    /// `system`, `user`, `assistant` or `tool`.
     pub role: String,
     pub content: String,
+    #[serde(rename = "tool_calls", default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    /// Which call this answers. Only ever set on a `tool` message.
+    #[serde(rename = "tool_call_id", default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl Message {
-    pub fn user(content: impl Into<String>) -> Self {
+    fn plain(role: &str, content: impl Into<String>) -> Self {
         Self {
-            role: "user".into(),
+            role: role.into(),
             content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
         }
+    }
+
+    pub fn user(content: impl Into<String>) -> Self {
+        Self::plain("user", content)
     }
 
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self {
-            role: "assistant".into(),
-            content: content.into(),
-        }
+        Self::plain("assistant", content)
     }
 
     pub fn system(content: impl Into<String>) -> Self {
+        Self::plain("system", content)
+    }
+
+    /// What the model said it wants to do, kept so the next request has it.
+    ///
+    /// The services require the whole turn back: the calls it asked for and
+    /// then the results, in that order. Sending only the results earns a
+    /// complaint about a tool message with no call before it.
+    pub fn calling(content: impl Into<String>, calls: Vec<ToolCall>) -> Self {
         Self {
-            role: "system".into(),
+            role: "assistant".into(),
             content: content.into(),
+            tool_calls: calls,
+            tool_call_id: None,
         }
     }
+
+    /// One result, labelled with the call it answers.
+    pub fn answered(id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: "tool".into(),
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(id.into()),
+        }
+    }
+}
+
+/// A piece of one call, as it arrives.
+///
+/// Fragmented on purpose by the services: the name comes whole in the first
+/// piece and the arguments arrive a few characters at a time after it, all
+/// keyed by a position in the list rather than by the id, because the id is in
+/// the first piece too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallPiece {
+    pub at: usize,
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub arguments: String,
 }
 
 /// What one line of the response said.
@@ -49,6 +115,8 @@ impl Message {
 pub enum Event {
     /// More of the answer.
     Text(String),
+    /// More of a call the model wants made.
+    Calling(CallPiece),
     /// The answer is finished.
     Done,
     /// Nothing this needs to act on.
@@ -68,14 +136,24 @@ pub fn endpoint(base_url: &str) -> String {
 }
 
 /// What gets posted.
-pub fn body(provider: &Provider, messages: &[Message]) -> serde_json::Value {
-    serde_json::json!({
+///
+/// The tool list rides along when there is one. Sending an empty array is not
+/// the same as sending none: several services take it as "tools are in play,
+/// here are zero" and answer differently, so the field is left out entirely.
+pub fn body(provider: &Provider, messages: &[Message], tools: Option<&serde_json::Value>) -> serde_json::Value {
+    let mut body = serde_json::json!({
         "model": provider.model,
         "messages": messages,
         // Tokens as they are produced. A launcher that shows nothing for four
         // seconds and then a paragraph feels broken even when it is not.
         "stream": true,
-    })
+    });
+
+    if let Some(tools) = tools.filter(|list| !list.as_array().is_some_and(Vec::is_empty)) {
+        body["tools"] = tools.clone();
+    }
+
+    body
 }
 
 /// Reads one line of the event stream.
@@ -101,10 +179,96 @@ pub fn parse_line(line: &str) -> Event {
         return Event::Ignored;
     };
 
+    // A call being asked for, which is read before the text: the same delta
+    // can carry an empty content alongside a piece of a call, and reading
+    // content first would drop it.
+    if let Some(piece) = value
+        .pointer("/choices/0/delta/tool_calls/0")
+        .and_then(read_piece)
+    {
+        return Event::Calling(piece);
+    }
+
     // The delta of the first choice, which is the only one asked for.
     match value.pointer("/choices/0/delta/content").and_then(|c| c.as_str()) {
         Some(text) if !text.is_empty() => Event::Text(text.to_string()),
         _ => Event::Ignored,
+    }
+}
+
+/// One fragment of a call, out of the delta that carried it.
+fn read_piece(value: &serde_json::Value) -> Option<CallPiece> {
+    Some(CallPiece {
+        // Missing means the first and only one. Several services leave the
+        // index off when a turn asks for exactly one call.
+        at: value.get("index").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize,
+        id: value
+            .get("id")
+            .and_then(|id| id.as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_string),
+        name: value
+            .pointer("/function/name")
+            .and_then(|name| name.as_str())
+            .filter(|name| !name.is_empty())
+            .map(str::to_string),
+        arguments: value
+            .pointer("/function/arguments")
+            .and_then(|args| args.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    })
+}
+
+/// Every call a turn asked for, assembled from the pieces it arrived in.
+///
+/// Its own type because the assembling is the part that goes wrong: pieces
+/// are keyed by position, a name arrives once and arguments arrive many
+/// times, and appending to the wrong slot produces a call whose arguments are
+/// two calls spliced together.
+#[derive(Debug, Default)]
+pub struct Calls {
+    building: Vec<ToolCall>,
+}
+
+impl Calls {
+    pub fn take(&mut self, piece: CallPiece) {
+        while self.building.len() <= piece.at {
+            self.building.push(ToolCall {
+                id: String::new(),
+                kind: "function".to_string(),
+                function: Called {
+                    name: String::new(),
+                    arguments: String::new(),
+                },
+            });
+        }
+
+        let call = &mut self.building[piece.at];
+
+        if let Some(id) = piece.id {
+            call.id = id;
+        }
+        if let Some(name) = piece.name {
+            call.function.name = name;
+        }
+        call.function.arguments.push_str(&piece.arguments);
+    }
+
+    /// What was asked for, dropping anything that never got a name.
+    ///
+    /// A slot with no name is a gap left by a service numbering its calls from
+    /// one, or a stream that stopped part way. Either way there is nothing to
+    /// run and nothing to answer with.
+    pub fn finish(self) -> Vec<ToolCall> {
+        self.building
+            .into_iter()
+            .filter(|call| !call.function.name.is_empty())
+            .collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.building.iter().all(|call| call.function.name.is_empty())
     }
 }
 
@@ -136,15 +300,16 @@ pub async fn ask(
     client: &reqwest::Client,
     provider: &Provider,
     messages: &[Message],
+    tools: Option<&serde_json::Value>,
     mut on_text: impl FnMut(String),
-) -> Result<(), String> {
+) -> Result<Said, String> {
     use futures_util::StreamExt;
 
     super::provider::check(&provider.base_url).map_err(|why| why.message().to_string())?;
 
     let mut request = client
         .post(endpoint(&provider.base_url))
-        .json(&body(provider, messages));
+        .json(&body(provider, messages, tools));
 
     for (name, value) in headers(provider) {
         request = request.header(name, value);
@@ -165,6 +330,11 @@ pub async fn ask(
 
     let mut stream = response.bytes_stream();
     let mut pending = String::new();
+    // Kept as well as handed out, because a turn that asks for a tool has to
+    // send its own words back with the calls, and the caller only sees the
+    // pieces as they go past.
+    let mut said = String::new();
+    let mut calls = Calls::default();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|err| format!("the answer stopped part way: {err}"))?;
@@ -176,8 +346,17 @@ pub async fn ask(
             let line: String = pending.drain(..=at).collect();
 
             match parse_line(&line) {
-                Event::Text(text) => on_text(text),
-                Event::Done => return Ok(()),
+                Event::Text(text) => {
+                    said.push_str(&text);
+                    on_text(text);
+                }
+                Event::Calling(piece) => calls.take(piece),
+                Event::Done => {
+                    return Ok(Said {
+                        text: said,
+                        calls: calls.finish(),
+                    })
+                }
                 Event::Ignored => {}
             }
         }
@@ -185,7 +364,20 @@ pub async fn ask(
 
     // The stream ended without a `[DONE]`, which several services do. The
     // answer still arrived.
-    Ok(())
+    Ok(Said {
+        text: said,
+        calls: calls.finish(),
+    })
+}
+
+/// What one exchange produced.
+///
+/// Either words, or calls to make and then ask again, or both: a model
+/// explaining what it is about to do and then doing it is one turn, not two.
+#[derive(Debug, Default)]
+pub struct Said {
+    pub text: String,
+    pub calls: Vec<ToolCall>,
 }
 
 /// Which models this service has.
@@ -479,6 +671,7 @@ mod tests {
             let sent = body(
                 &provider("http://x/v1", "", "qwen3:1.7b"),
                 &[Message::system("be brief"), Message::user("hello")],
+                None,
             );
 
             assert_eq!(sent["model"], "qwen3:1.7b");
@@ -490,7 +683,7 @@ mod tests {
         /// feels broken even when it is not.
         #[test]
         fn it_always_asks_for_a_stream() {
-            let sent = body(&provider("http://x/v1", "", "m"), &[]);
+            let sent = body(&provider("http://x/v1", "", "m"), &[], None);
             assert_eq!(sent["stream"], true);
         }
 
@@ -586,6 +779,156 @@ mod tests {
         fn a_wall_of_text_is_cut_rather_than_shown_whole() {
             let said = complaint(502, &"x".repeat(5000));
             assert!(said.len() < 400, "{} characters", said.len());
+        }
+    }
+
+    mod asking_for_a_tool {
+        use super::*;
+
+        /// Real frames, in the order and the pieces a service sends them.
+        /// The name arrives once with the id, and the arguments arrive a few
+        /// characters at a time after it.
+        fn pieces(lines: &[&str]) -> Vec<ToolCall> {
+            let mut calls = Calls::default();
+
+            for line in lines {
+                match parse_line(line) {
+                    Event::Calling(piece) => calls.take(piece),
+                    _ => {}
+                }
+            }
+
+            calls.finish()
+        }
+
+        #[test]
+        fn one_call_is_assembled_from_its_fragments() {
+            let calls = pieces(&[
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"find_files","arguments":""}}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"qu"}}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ery\":\"inv"}}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"oice\"}"}}]}}]}"#,
+            ]);
+
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].id, "call_a");
+            assert_eq!(calls[0].function.name, "find_files");
+            assert_eq!(calls[0].function.arguments, r#"{"query":"invoice"}"#);
+        }
+
+        /// Two calls in one turn, interleaved. Appending to the wrong slot
+        /// produces one call whose arguments are two calls spliced together,
+        /// which parses as nothing and fails with a message about JSON.
+        #[test]
+        fn two_calls_do_not_run_into_each_other() {
+            let calls = pieces(&[
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"find_files","arguments":"{\"query\":"}}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"list_windows","arguments":"{"}}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a\"}"}}]}}]}"#,
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"}"}}]}}]}"#,
+            ]);
+
+            assert_eq!(calls.len(), 2);
+            assert_eq!(calls[0].function.name, "find_files");
+            assert_eq!(calls[0].function.arguments, r#"{"query":"a"}"#);
+            assert_eq!(calls[1].function.name, "list_windows");
+            assert_eq!(calls[1].function.arguments, "{}");
+        }
+
+        /// Several services leave the index off when a turn asks for exactly
+        /// one call. Treating a missing index as anything but the first slot
+        /// loses the call entirely.
+        #[test]
+        fn a_missing_index_is_the_first_one() {
+            let calls = pieces(&[
+                r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"a","function":{"name":"system_state","arguments":"{}"}}]}}]}"#,
+            ]);
+
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].function.name, "system_state");
+        }
+
+        /// A stream that stopped part way leaves a slot with no name in it.
+        /// There is nothing to run and nothing to answer with, so it goes.
+        #[test]
+        fn a_slot_that_never_got_a_name_is_dropped() {
+            let mut calls = Calls::default();
+            calls.take(CallPiece { at: 1, id: None, name: None, arguments: "{}".into() });
+            assert!(calls.is_empty());
+            assert!(calls.finish().is_empty());
+        }
+
+        /// The same delta can carry an empty content beside a piece of a call.
+        /// Reading content first drops the call.
+        #[test]
+        fn a_call_beside_an_empty_content_is_still_read() {
+            let line = r#"data: {"choices":[{"delta":{"content":"","tool_calls":[{"index":0,"id":"a","function":{"name":"system_state","arguments":"{}"}}]}}]}"#;
+            assert!(matches!(parse_line(line), Event::Calling(_)));
+        }
+
+        #[test]
+        fn ordinary_text_is_still_text() {
+            let line = r#"data: {"choices":[{"delta":{"content":"Hello"}}]}"#;
+            assert_eq!(parse_line(line), Event::Text("Hello".into()));
+        }
+    }
+
+    mod what_a_turn_sends_back {
+        use super::*;
+
+        /// The services want the whole turn: what the model said, then the
+        /// calls it asked for, then one result per call. Sending only the
+        /// results earns a complaint about a tool message with no call before
+        /// it.
+        #[test]
+        fn a_turn_that_asked_for_something_carries_the_calls() {
+            let call = ToolCall {
+                id: "call_a".into(),
+                kind: "function".into(),
+                function: Called { name: "system_state".into(), arguments: "{}".into() },
+            };
+
+            let sent = serde_json::to_value(Message::calling("Let me look.", vec![call])).unwrap();
+
+            assert_eq!(sent["role"], "assistant");
+            assert_eq!(sent["tool_calls"][0]["id"], "call_a");
+            assert_eq!(sent["tool_calls"][0]["type"], "function");
+            assert_eq!(sent["tool_calls"][0]["function"]["name"], "system_state");
+        }
+
+        #[test]
+        fn a_result_names_the_call_it_answers() {
+            let sent = serde_json::to_value(Message::answered("call_a", "{}")).unwrap();
+            assert_eq!(sent["role"], "tool");
+            assert_eq!(sent["tool_call_id"], "call_a");
+        }
+
+        /// A service given `"tool_calls": null` on every ordinary message
+        /// rejects the request, so the field is absent rather than empty.
+        #[test]
+        fn an_ordinary_message_carries_neither_field() {
+            let sent = serde_json::to_value(Message::user("hello")).unwrap();
+            assert!(sent.get("tool_calls").is_none(), "{sent}");
+            assert!(sent.get("tool_call_id").is_none(), "{sent}");
+        }
+
+        /// "Tools are in play, here are zero" is a different request from
+        /// "no tools", and several services answer it differently.
+        #[test]
+        fn no_tools_means_the_field_is_absent() {
+            let sent = body(&provider("http://x/v1", "", "m"), &[], None);
+            assert!(sent.get("tools").is_none());
+
+            let empty = serde_json::json!([]);
+            let sent = body(&provider("http://x/v1", "", "m"), &[], Some(&empty));
+            assert!(sent.get("tools").is_none(), "an empty list was sent as one");
+        }
+
+        #[test]
+        fn the_tool_list_rides_along_when_there_is_one() {
+            let tools = crate::ai::tools::as_request();
+            let sent = body(&provider("http://x/v1", "", "m"), &[], Some(&tools));
+            assert!(sent["tools"].as_array().is_some_and(|list| !list.is_empty()));
         }
     }
 

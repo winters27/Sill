@@ -329,6 +329,13 @@ export function aiResume(id: string): Promise<AiTurn[]> {
   return invoke<AiTurn[]>("ai_resume", { id });
 }
 
+/** One tool the model reached for, as the window draws it. */
+export interface AiStep {
+  tool: string;
+  /** What it was used on. Empty for the tools that take no arguments. */
+  subject: string;
+}
+
 /** One conversation, as the list of them draws it. */
 export interface AiConversation {
   id: string;

@@ -13,3 +13,4 @@ pub mod chat;
 pub mod claude_code;
 pub mod openai;
 pub mod provider;
+pub mod tools;

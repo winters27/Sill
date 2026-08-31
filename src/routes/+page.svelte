@@ -67,6 +67,7 @@
     undoAction,
     type ActionInfo,
     type AiConversation,
+    type AiStep,
     type AiReady,
     type AiTurn,
     type RankedCommand,
@@ -1758,7 +1759,7 @@
    * reloaded whenever the page does, and a conversation that lived here would
    * be lost every time somebody pressed Escape. This is a copy for drawing.
    */
-  let conversation = $state<AiTurn[]>([]);
+  let conversation = $state<Shown[]>([]);
 
   /** The answer being written right now, before it becomes a turn. */
   let answering = $state("");
@@ -1832,6 +1833,50 @@
       ? `${answersWith.name} answers, on this machine`
       : `${answersWith.name} answers when you press Tab`;
   });
+
+  /**
+   * One turn as the window draws it: what was said, and what was looked at to
+   * say it.
+   *
+   * The steps belong to the turn rather than to the conversation, because
+   * that is what they are about. Held here only: they are provenance for the
+   * moment, and a conversation reopened tomorrow is the answer rather than
+   * the working.
+   */
+  interface Shown {
+    role: string;
+    text: string;
+    steps: AiStep[];
+  }
+
+  /** What the model has looked at during the turn in flight. */
+  let steps = $state<AiStep[]>([]);
+
+  /**
+   * What one step did, in words.
+   *
+   * A table rather than the tool's own name, because the names are written for
+   * a model and read like an API. Anything unknown falls back to the name
+   * rather than to nothing: a tool added later should read oddly rather than
+   * vanish, which is the mistake this codebase has made four times with
+   * lists of modes.
+   */
+  const DID: Record<string, string> = {
+    search_sill: "Searched what is on this machine for",
+    find_files: "Looked for files called",
+    read_file: "Read",
+    list_directory: "Looked inside",
+    read_clipboard: "Read what you have copied",
+    list_windows: "Looked at what is open",
+    system_state: "Checked how this machine is set",
+    read_selection: "Read what was selected",
+    read_screen: "Read what is on screen",
+  };
+
+  function didWhat(step: AiStep): string {
+    const said = DID[step.tool] ?? step.tool;
+    return step.subject ? `${said} ${step.subject}` : said;
+  }
 
   /** Every conversation, while the list of them is open. */
   let pastConversations = $state<AiConversation[]>([]);
@@ -1972,11 +2017,12 @@
     selected = 0;
     aiWhoNot = "";
     answering = "";
+    steps = [];
     asking = true;
 
     // Shown immediately, so the question is on screen before the answer
     // starts rather than after.
-    conversation = [...conversation, { role: "user", text: question }];
+    conversation = [...conversation, { role: "user", text: question, steps: [] }];
     query = "";
 
     try {
@@ -1995,7 +2041,9 @@
    */
   async function resumeConversation(id: string, title: string) {
     try {
-      conversation = await aiResume(id);
+      // A conversation reopened is the answers, not the working: the steps
+      // were provenance for the moment they happened in.
+      conversation = (await aiResume(id)).map((turn) => ({ ...turn, steps: [] }));
     } catch (err) {
       status = `${err}`;
       return;
@@ -2428,6 +2476,7 @@
     let changed: UnlistenFn | undefined;
     let ran: UnlistenFn | undefined;
     let said: UnlistenFn | undefined;
+    let using: UnlistenFn | undefined;
     let finished: UnlistenFn | undefined;
     let wentWrong: UnlistenFn | undefined;
     let disposed = false;
@@ -2540,9 +2589,21 @@
         answering += payload;
       });
 
+      /*
+       * What the model reached for, said before it runs rather than after.
+       *
+       * Reading the screen takes a moment, and a window showing nothing during
+       * it looks like a window that has stopped. This is also the only place
+       * anybody can see that a question about their machine was answered by
+       * looking at their machine.
+       */
+      using = await listen<AiStep>("sill://ai-using", ({ payload }) => {
+        steps = [...steps, payload];
+      });
+
       finished = await listen("sill://ai-done", () => {
         if (answering) {
-          conversation = [...conversation, { role: "assistant", text: answering }];
+          conversation = [...conversation, { role: "assistant", text: answering, steps }];
         }
         answering = "";
         asking = false;
@@ -2552,7 +2613,7 @@
         // Whatever arrived before it failed is kept: half an answer is often
         // enough to see what went wrong.
         if (answering) {
-          conversation = [...conversation, { role: "assistant", text: answering }];
+          conversation = [...conversation, { role: "assistant", text: answering, steps }];
         }
         answering = "";
         asking = false;
@@ -2608,6 +2669,7 @@
       changed?.();
       ran?.();
       said?.();
+      using?.();
       finished?.();
       wentWrong?.();
     };
@@ -2779,9 +2841,39 @@
         {#if turn.role === "user"}
           <article class="turn asked"><p>{turn.text}</p></article>
         {:else}
+          <!--
+            What was looked at, above the answer it produced.
+
+            One line per tool with what it was used on, because ten lookups
+            that all read "Searched" read as a stutter and say nothing about
+            what was searched for. It stays after the answer arrives: knowing
+            that a question about your machine was answered by reading your
+            clipboard is part of the answer.
+          -->
+          {#if turn.steps.length}
+            <div class="steps">
+              {#each turn.steps as step, n (n)}
+                <p class="step">
+                  <span class="pip" aria-hidden="true"></span>
+                  {didWhat(step)}
+                </p>
+              {/each}
+            </div>
+          {/if}
           <article class="turn said md"><Markdown text={turn.text} /></article>
         {/if}
       {/each}
+
+      {#if asking && steps.length}
+        <div class="steps">
+          {#each steps as step, at (at)}
+            <p class="step">
+              <span class="pip" aria-hidden="true"></span>
+              {didWhat(step)}
+            </p>
+          {/each}
+        </div>
+      {/if}
 
       {#if answering}
         <article class="turn said md"><Markdown text={answering} /></article>
@@ -3090,6 +3182,39 @@
    */
   .asked p {
     color: var(--text-2);
+  }
+
+  /*
+   * What was looked at, kept quiet.
+   *
+   * Below the question and above the answer, in the smallest step on the
+   * scale. It is provenance rather than content: worth being able to read,
+   * never worth reading first.
+   */
+  .steps {
+    align-self: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .step {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--text-meta);
+    line-height: 1.5;
+  }
+
+  .pip {
+    width: 4px;
+    height: 4px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0.7;
   }
 
   /*
