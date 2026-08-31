@@ -40,3 +40,20 @@ Vendored as path data rather than taken as a dependency: a handful of paths is
 a few kilobytes, and a package would pull a build step and a tree-shaking
 question for drawings that change about never. Vendoring does not shorten the
 licence, so the notice lives here.
+
+--------------------------------------------------------------------------
+
+Inter, via the @fontsource-variable/inter package
+
+Inter, by Rasmus Andersson and the Inter Project Authors
+(https://github.com/rsms/inter).
+
+Copyright 2016 The Inter Project Authors.
+Licensed under the SIL Open Font License, Version 1.1
+(https://scripts.sil.org/OFL).
+
+No woff2 is committed for it: the package is a dependency, and Vite emits the
+subsets into the build, so the face ships inside the application exactly as
+Satoshi does and nothing is requested from a font host at runtime. That it
+arrives through node_modules rather than through this repository does not
+shorten the licence, so the notice lives here with the others.
