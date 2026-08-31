@@ -503,7 +503,7 @@ fn system_commands() -> Vec<CommandRecord> {
     let theme = format!(r"{root}\System32\themecpl.dll");
     let padlock = format!(r"{root}\System32\imageres.dll,54");
 
-    vec![
+    let mut rows = vec![
         system_switch(
             "system.volume.up",
             &audio,
@@ -553,7 +553,36 @@ fn system_commands() -> Vec<CommandRecord> {
             "Locks Windows straight away",
             &["lock", "away", "screen", "afk", "system"],
         ),
-    ]
+    ];
+
+    /*
+     * One row per thing sound can come out of.
+     *
+     * Built here, when the index is, so they cost nothing per keystroke. The
+     * price is that plugging in headphones does not add a row until the next
+     * scan, which is the trade the whole index makes.
+     *
+     * The one in use is still listed. Choosing it is a no-op that says which
+     * it is, and hiding it would mean the list never answers "what am I on".
+     */
+    for output in crate::audio::outputs() {
+        let name = crate::audio::short_name(&output.name);
+        let id = format!("{}{}", crate::actions::AUDIO_OUTPUT, output.id);
+
+        rows.push(system_switch(
+            &id,
+            &audio,
+            &name,
+            if output.current {
+                "Sound is going here"
+            } else {
+                "Send sound here"
+            },
+            &["audio", "sound", "output", "speakers", "headphones", "device", "system"],
+        ));
+    }
+
+    rows
 }
 
 /// One of Windows' switches, shaped as a row.

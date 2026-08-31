@@ -48,7 +48,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.2 | Screenshot | **Done.** Drag an area or take every screen, with a markup editor: box, arrow, ellipse, pen, highlight, hide, text |
 | P2.3 | OCR on demand | **Done.** WinRT recognition, ported from AuraKey. Reads a picture on the clipboard, never automatically. Measured: 35 ms on a 640x160 capture |
 | P2.4 | Read aloud | Not started |
-| P2.5 | System control | **Partly.** Volume, mute, dark mode and lock are done. Per-app volume, audio device, do not disturb, night light, wifi and bluetooth are not |
+| P2.5 | System control | **Partly.** Volume, mute, dark mode, lock and **switching audio output** are done. Wifi and bluetooth are next. Per-app volume is possible; do not disturb and night light have no public way to set them, see below |
 | P2.6 | Process and resource view | Not started |
 | P2.7 | Terminal execution, capability gated | Not started |
 | P2.8 | Scripting | Not started |
@@ -233,6 +233,29 @@ password it has to actually hide it.
 Verified by driving it: dragged an area, got exactly the rectangle asked for,
 opened it for markup, drew a box, and the same size came back with the box in
 it.
+
+## What Windows will not let a program do
+
+Two things on P2.5 are listed as not started and should be listed as not
+possible, at least not honestly.
+
+**Do not disturb** has no public way to set it. It moved from Focus Assist to
+Do Not Disturb and neither has ever had an API; what exists is an undocumented
+notification-state call that has changed between releases. A switch that
+silently stops working after an update is worse than no switch.
+
+**Night light** is stored as an opaque blob in the registry, with a timestamp
+and a checksum inside it that have to be rebuilt by hand. It has been reverse
+engineered and it breaks: the format is not a contract and Windows rewrites it.
+
+Both are one row away as "open the settings page for it", which the settings
+catalog already offers. That is the honest version and it is already there.
+
+**Switching the audio output is different**, and worth the exception. It is
+also undocumented, through `IPolicyConfig`, but that interface has been in the
+same place since Vista and is what every audio switcher on the platform uses.
+It is declared by hand in `src-tauri/src/audio.rs`, and the methods before the
+one that is wanted are placeholders that put it at the right vtable offset.
 
 ## Decisions waiting
 

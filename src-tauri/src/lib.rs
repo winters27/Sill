@@ -1,6 +1,7 @@
 pub mod action;
 pub mod actions;
 pub mod apps;
+pub mod audio;
 pub mod bindings;
 pub mod browsers;
 pub mod calculator;

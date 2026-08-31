@@ -377,6 +377,9 @@ impl Action for ToggleSystem {
 /// A toggle reads the current state and inverts it rather than being told,
 /// because the row was drawn a moment ago and the answer could have changed
 /// since. Being told would let a stale row turn the sound off twice.
+/// What an audio output row's id starts with, before the device's own.
+pub(crate) const AUDIO_OUTPUT: &str = "system.audio.output:";
+
 fn run_system(id: &str) -> Result<String, String> {
     use crate::system;
 
@@ -398,6 +401,26 @@ fn run_system(id: &str) -> Result<String, String> {
             let set = system::set_dark(!now)?;
 
             Ok(if set { "Dark mode".into() } else { "Light mode".into() })
+        }
+
+        /*
+         * An output row carries the device's own id after the prefix.
+         *
+         * Matched by prefix rather than listed, because which outputs exist is
+         * a fact about the machine at the moment somebody plugged something
+         * in, not something that can be written down here.
+         */
+        other if other.starts_with(AUDIO_OUTPUT) => {
+            let device = &other[AUDIO_OUTPUT.len()..];
+
+            let name = crate::audio::outputs()
+                .into_iter()
+                .find(|output| output.id == device)
+                .map(|output| crate::audio::short_name(&output.name))
+                .unwrap_or_else(|| "that output".to_string());
+
+            crate::audio::set_output(device)?;
+            Ok(format!("Sound goes to {name}"))
         }
 
         "system.lock" => {
