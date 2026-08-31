@@ -50,9 +50,23 @@ export const BUILTIN_ACTIONS = new Set([
   "Action.Open",
 ]);
 
-/** Whether an action can be run at all, by callback or by us. */
+/**
+ * Whether an action can be run at all, by callback or by us.
+ *
+ * `no action` beside a row means an extension declared something with nothing
+ * behind it, which is worth saying because clicking it would do nothing.
+ *
+ * **Sill's own actions are never that.** Everything the launcher puts in this
+ * panel is dispatched by tag, and until this looked for that, every one of
+ * them was labelled as doing nothing: eleven rows on a file, all of them
+ * working, all of them saying otherwise.
+ */
 export function isRunnable(action: ActionEntry): boolean {
-  return action.handler !== undefined || BUILTIN_ACTIONS.has(action.tag);
+  return (
+    action.handler !== undefined ||
+    BUILTIN_ACTIONS.has(action.tag) ||
+    action.tag.startsWith("Sill.")
+  );
 }
 
 const CONTAINERS = new Set(["ActionPanel", "ActionPanel.Section", "ActionPanel.Submenu"]);

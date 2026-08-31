@@ -252,6 +252,71 @@ fn add_dir(
     Ok(())
 }
 
+/// Which checksum a piece of text looks like, if any.
+///
+/// Length is the whole of it: these are hex strings and nothing else
+/// distinguishes them. Knowing which kind matters because comparing a SHA-256
+/// against a SHA-1 is not a mismatch, it is the wrong question, and reporting
+/// it as "does not match" would send somebody off to re-download a file that
+/// was fine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Checksum {
+    Md5,
+    Sha1,
+    Sha256,
+    Sha512,
+}
+
+impl Checksum {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Md5 => "MD5",
+            Self::Sha1 => "SHA-1",
+            Self::Sha256 => "SHA-256",
+            Self::Sha512 => "SHA-512",
+        }
+    }
+}
+
+/// The checksum a piece of text is, if it is one at all.
+///
+/// Whitespace either side is expected: a hash copied off a page usually brings
+/// some with it, and some tools print it in spaced groups, which is why the
+/// spaces inside are taken out rather than being treated as a refusal.
+pub fn looks_like_checksum(text: &str) -> Option<Checksum> {
+    let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+
+    if cleaned.is_empty() || !cleaned.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    match cleaned.len() {
+        32 => Some(Checksum::Md5),
+        40 => Some(Checksum::Sha1),
+        64 => Some(Checksum::Sha256),
+        128 => Some(Checksum::Sha512),
+        _ => None,
+    }
+}
+
+/// Whether two checksums are the same, ignoring how they were written.
+///
+/// Case and spacing differ between the tools that print them, and neither is
+/// part of the value. A comparison that says no because one side is upper case
+/// is worse than no comparison.
+pub fn same_checksum(a: &str, b: &str) -> bool {
+    let tidy = |text: &str| -> String {
+        text.chars()
+            .filter(|c| !c.is_whitespace())
+            .flat_map(|c| c.to_lowercase())
+            .collect()
+    };
+
+    let (a, b) = (tidy(a), tidy(b));
+
+    !a.is_empty() && a == b
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,5 +623,74 @@ mod tests {
             // nothing can read.
             assert!(!dir.join("nothing.zip").exists());
         }
+    }
+}
+
+#[cfg(test)]
+mod checksums {
+    use super::*;
+
+    const SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    #[test]
+    fn each_length_is_the_checksum_it_belongs_to() {
+        assert_eq!(looks_like_checksum(&"a".repeat(32)), Some(Checksum::Md5));
+        assert_eq!(looks_like_checksum(&"a".repeat(40)), Some(Checksum::Sha1));
+        assert_eq!(looks_like_checksum(SHA256), Some(Checksum::Sha256));
+        assert_eq!(looks_like_checksum(&"f".repeat(128)), Some(Checksum::Sha512));
+    }
+
+    /// A hash copied off a page brings whitespace with it, and some tools
+    /// print it in spaced groups.
+    #[test]
+    fn whitespace_around_it_and_inside_it_is_ignored() {
+        assert_eq!(looks_like_checksum(&format!("  {SHA256}\n")), Some(Checksum::Sha256));
+        assert_eq!(
+            looks_like_checksum("ba7816bf 8f01cfea 414140de 5dae2223 b00361a3 96177a9c b410ff61 f20015ad"),
+            Some(Checksum::Sha256),
+        );
+    }
+
+    #[test]
+    fn ordinary_text_is_not_a_checksum() {
+        assert_eq!(looks_like_checksum("hello"), None);
+        assert_eq!(looks_like_checksum(""), None);
+        assert_eq!(looks_like_checksum("   "), None);
+        // Right length, but not hex.
+        assert_eq!(looks_like_checksum(&"z".repeat(64)), None);
+        // Hex, but no checksum is this long.
+        assert_eq!(looks_like_checksum(&"a".repeat(50)), None);
+    }
+
+    /// A path can be all hex characters and is still not a checksum, because
+    /// the slashes are not.
+    #[test]
+    fn something_with_punctuation_in_it_is_not_a_checksum() {
+        assert_eq!(looks_like_checksum("abc/def"), None);
+        assert_eq!(looks_like_checksum(&format!("sha256:{SHA256}")), None);
+    }
+
+    /// Case is not part of the value, and a comparison that says no because
+    /// one side is upper case is worse than no comparison.
+    #[test]
+    fn case_and_spacing_do_not_make_two_checksums_different() {
+        assert!(same_checksum(SHA256, &SHA256.to_uppercase()));
+        assert!(same_checksum(SHA256, &format!("  {SHA256}  ")));
+        assert!(same_checksum(
+            SHA256,
+            "BA7816BF 8F01CFEA 414140DE 5DAE2223 B00361A3 96177A9C B410FF61 F20015AD",
+        ));
+    }
+
+    #[test]
+    fn two_different_checksums_are_different() {
+        assert!(!same_checksum(SHA256, &"a".repeat(64)));
+    }
+
+    /// Nothing matches nothing, or an empty clipboard would verify anything.
+    #[test]
+    fn nothing_never_matches() {
+        assert!(!same_checksum("", ""));
+        assert!(!same_checksum("   ", ""));
     }
 }

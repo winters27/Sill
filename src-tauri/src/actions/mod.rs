@@ -45,6 +45,8 @@ pub fn builtins() -> ActionRegistry {
         Box::new(TerminalHere),
         Box::new(ToggleSystem),
         Box::new(RecycleFile),
+        Box::new(VerifyFile),
+        Box::new(LookUpFile),
         Box::new(HashFile),
         Box::new(CompressFile),
         Box::new(RenameFile),
@@ -1580,5 +1582,121 @@ impl Action for RenameFile {
     /// here means something dispatched it without asking.
     async fn run(&self, _ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
         Err("renaming needs a new name, which the launcher asks for".to_string())
+    }
+}
+
+/// Checks a file against the checksum on the clipboard.
+///
+/// This is what somebody actually wants when a download page prints a
+/// checksum: a yes or a no. Copying the file's own hash leaves them comparing
+/// sixty-four hex characters by eye, which is the step people skip and the
+/// reason checksums go unchecked.
+///
+/// The expected value is taken from the clipboard because that is where it
+/// already is, a moment after being copied off the page that published it.
+struct VerifyFile;
+
+#[async_trait]
+impl Action for VerifyFile {
+    fn id(&self) -> &'static str {
+        "sill.file.verify"
+    }
+
+    fn title(&self) -> &'static str {
+        "Check Against Copied Checksum"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::File
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::FileRead, Capability::ClipboardRead]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        use tauri_plugin_clipboard_manager::ClipboardExt;
+
+        let expected = ctx.app.clipboard().read_text().unwrap_or_default();
+
+        let Some(kind) = crate::files_ops::looks_like_checksum(&expected) else {
+            return Err(
+                "copy the checksum you want to check against first, then run this".to_string(),
+            );
+        };
+
+        // Saying which kind beats saying "does not match". Comparing a SHA-256
+        // against a SHA-1 is the wrong question rather than a failure, and
+        // reporting it as a mismatch sends somebody off to re-download a file
+        // that was fine.
+        if kind != crate::files_ops::Checksum::Sha256 {
+            return Err(format!(
+                "that is a {} and Sill checks SHA-256",
+                kind.name()
+            ));
+        }
+
+        let path = std::path::PathBuf::from(&object.target);
+        let name = crate::files_ops::name_of(&path);
+
+        let actual = tokio::task::spawn_blocking(move || crate::files_ops::sha256(&path))
+            .await
+            .map_err(|err| format!("could not read that file: {err}"))??;
+
+        if crate::files_ops::same_checksum(&actual, &expected) {
+            Ok(Outcome::done(format!("{name} matches the copied checksum")))
+        } else {
+            // An error rather than a message, so it is not read as a success
+            // at a glance. This is the answer somebody most needs to notice.
+            Err(format!("{name} does NOT match the copied checksum"))
+        }
+    }
+}
+
+/// Looks a file up by its checksum, without sending the file anywhere.
+///
+/// The address carries the hash, so the service is asked whether it has seen
+/// this file before rather than being given a copy of it. That distinction is
+/// the point: it works on something confidential, and uploading would not.
+///
+/// A file nobody has ever submitted simply has no page, which is itself an
+/// answer worth having.
+struct LookUpFile;
+
+#[async_trait]
+impl Action for LookUpFile {
+    fn id(&self) -> &'static str {
+        "sill.file.lookUp"
+    }
+
+    fn title(&self) -> &'static str {
+        "Look Up on VirusTotal"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::File
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::FileRead, Capability::Network, Capability::ProcessLaunch]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let path = std::path::PathBuf::from(&object.target);
+        let name = crate::files_ops::name_of(&path);
+
+        let digest = tokio::task::spawn_blocking(move || crate::files_ops::sha256(&path))
+            .await
+            .map_err(|err| format!("could not read that file: {err}"))??;
+
+        tauri_plugin_opener::open_url(
+            format!("https://www.virustotal.com/gui/file/{digest}"),
+            None::<&str>,
+        )
+        .map_err(|err| format!("could not open that: {err}"))?;
+
+        crate::dismiss_main(&ctx.app);
+
+        Ok(Outcome::done(format!("Looking up {name} by its checksum")))
     }
 }

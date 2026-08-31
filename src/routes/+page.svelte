@@ -121,6 +121,14 @@
   let searchInput = $state<HTMLInputElement | null>(null);
   let formView = $state<ReturnType<typeof FormView> | null>(null);
   let panelOpen = $state(false);
+  /**
+   * What the action panel is filtered to.
+   *
+   * A file offers eleven things now, and a list of eleven is a list somebody
+   * reads rather than one they use. Typing narrows it, the same way typing
+   * narrows everything else here.
+   */
+  let panelFilter = $state("");
   let panelSelected = $state(0);
   let prefs = $state<Preferences | null>(null);
   /**
@@ -430,6 +438,25 @@
    * shortcut and a workflow step. A second copy here would be a second
    * opinion about what a result supports.
    */
+  /**
+   * The actions on screen, which is what selection counts through.
+   *
+   * Matched on the title alone. An action id reads like `sill.file.verify` and
+   * nobody types that; the title is the thing they just looked at.
+   */
+  const shownActions = $derived.by(() => {
+    const needle = panelFilter.trim().toLowerCase();
+    if (!needle) return actions;
+
+    return actions.filter((action) => action.title.toLowerCase().includes(needle));
+  });
+
+  // A filter that narrows the list past the selection would leave it pointing
+  // at nothing, and Enter would do nothing with no sign of why.
+  $effect(() => {
+    if (panelSelected >= shownActions.length) panelSelected = 0;
+  });
+
   let rootActions = $state<ActionInfo[]>([]);
 
   /**
@@ -1132,7 +1159,10 @@
     panelOpen = false;
     if (index < 0) return;
 
-    const action = actions[index];
+    // The filtered list, because that is the one on screen and the one the
+    // index came from. Reading the unfiltered one here would run whichever
+    // action happened to sit at that position before the filter narrowed it.
+    const action = shownActions[index];
     if (!action) return;
 
     // The session guard belongs on the extension path below, not here: the
@@ -1439,6 +1469,8 @@
       event.preventDefault();
       if (actions.length) {
         panelOpen = !panelOpen;
+        // A fresh panel is an unfiltered one.
+        panelFilter = "";
         panelSelected = 0;
       } else {
         // Never silent: if there is nothing to show, say so, otherwise a
@@ -1450,20 +1482,33 @@
 
     // While the panel is open it owns the keyboard.
     if (panelOpen) {
+      // Nothing to move through, so the arrows would divide by zero.
+      const count = Math.max(1, shownActions.length);
+
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        panelSelected = (panelSelected + 1) % actions.length;
+        panelSelected = (panelSelected + 1) % count;
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
-        panelSelected = (panelSelected - 1 + actions.length) % actions.length;
+        panelSelected = (panelSelected - 1 + count) % count;
       } else if (event.key === "Enter") {
         event.preventDefault();
         void runAction(panelSelected);
       } else if (event.key === "Escape") {
-        // Closes the panel only; the launcher stays put.
         event.preventDefault();
-        panelOpen = false;
+        // The filter goes first. Escape with something typed means "show me
+        // all of them again", and closing instead loses the panel as well as
+        // the filter for one keystroke.
+        if (panelFilter) {
+          panelFilter = "";
+          panelSelected = 0;
+        } else {
+          // Closes the panel only; the launcher stays put.
+          panelOpen = false;
+        }
       }
+      // Everything else falls through to the panel's own field, which has
+      // focus while it is open.
       return;
     }
 
@@ -1874,8 +1919,13 @@
 
   {#if panelOpen}
     <ActionPanel
-      {actions}
+      actions={shownActions}
       selected={panelSelected}
+      filter={panelFilter}
+      onfilter={(text) => {
+        panelFilter = text;
+        panelSelected = 0;
+      }}
       onselect={(i) => (panelSelected = i)}
       onrun={(i) => void runAction(i)}
     />

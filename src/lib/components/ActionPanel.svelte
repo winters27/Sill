@@ -3,15 +3,43 @@
   import { popover } from "$lib/motion";
 
   interface Props {
+    /** Already filtered. Selection counts through exactly this list. */
     actions: ActionEntry[];
     selected: number;
+    /** What the list is narrowed to. Owned above, because selection is. */
+    filter: string;
+    onfilter: (text: string) => void;
     onselect: (index: number) => void;
     onrun: (index: number) => void;
   }
 
-  let { actions, selected, onselect, onrun }: Props = $props();
+  let { actions, selected, filter, onfilter, onselect, onrun }: Props = $props();
+
+  let field = $state<HTMLInputElement | null>(null);
+
+  /*
+   * The field takes focus the moment the panel opens.
+   *
+   * Without it nothing in the panel has focus, so a keystroke goes nowhere and
+   * the only way through a list of eleven is the arrow keys. With it, typing
+   * narrows, which is what typing does everywhere else here.
+   *
+   * The arrows and Enter are still handled above and prevent their default, so
+   * they move the selection rather than the caret.
+   */
+  $effect(() => {
+    field?.focus();
+  });
 
   const groups = $derived(groupActions(actions));
+
+  /**
+   * Whether narrowing is worth offering.
+   *
+   * Once something has been typed it stays, or clearing the last character
+   * would take the field away mid-edit along with the focus that was in it.
+   */
+  const showFilter = $derived(actions.length > 5 || filter.length > 0);
 
   /**
    * The panel renders grouped but selection is a flat index over `actions`,
@@ -32,7 +60,29 @@
   in:popover={{ origin: "bottom right" }}
   out:popover={{ origin: "bottom right", out: true }}
 >
+  <!--
+    Not shown until there is something to narrow. Two actions with a search box
+    over them is furniture, and the panel is small enough that it shows.
+  -->
+  {#if showFilter}
+    <div class="find">
+      <input
+        bind:this={field}
+        value={filter}
+        oninput={(e) => onfilter(e.currentTarget.value)}
+        placeholder="Filter actions"
+        aria-label="Filter actions"
+        spellcheck="false"
+        autocomplete="off"
+      />
+    </div>
+  {/if}
+
   <div class="scroll">
+    {#if actions.length === 0}
+      <div class="empty">Nothing matches {filter}</div>
+    {/if}
+
     {#each groups as group, g (g)}
       {#if group.section}
         <div class="section">{group.section}</div>
@@ -149,6 +199,27 @@
 
   .spacer {
     flex: 1;
+  }
+
+  .find {
+    padding: var(--space-2);
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .find input {
+    width: 100%;
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--fill-1);
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--text-meta);
+    outline: none;
+  }
+
+  .find input::placeholder {
+    color: var(--text-3);
   }
 
   .keys {

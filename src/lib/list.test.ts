@@ -8,6 +8,7 @@
 import { describe, expect, test } from "vitest";
 import type { RankedCommand } from "$lib/exthost/commands";
 import { groupOf, linesOf, scrollFor } from "$lib/list";
+import { isRunnable, type ActionEntry } from "$lib/exthost/actions";
 
 const ROW = 38;
 const HEADER = 26;
@@ -224,5 +225,35 @@ describe("the web search row", () => {
     const last = rows[rows.length - 1];
     expect(last.kind).toBe("row");
     expect(last.kind === "row" && last.command.mode).toBe("websearch");
+  });
+});
+
+describe("whether an action can be run", () => {
+  function entry(over: Partial<ActionEntry>): ActionEntry {
+    return { id: "a", title: "An action", tag: "Action.Unknown", props: {}, ...over } as ActionEntry;
+  }
+
+  /**
+   * "no action" beside a row is for an extension that declared something with
+   * nothing behind it. Sill's own actions are dispatched by tag, and every one
+   * of them was wearing that label: eleven rows on a file, all working, all
+   * saying otherwise.
+   */
+  test("Sill's own actions are runnable, whatever else is true of them", () => {
+    expect(isRunnable(entry({ tag: "Sill.Action:sill.file.verify" }))).toBe(true);
+    expect(isRunnable(entry({ tag: "Sill.ClipboardDelete" }))).toBe(true);
+  });
+
+  test("an extension action with a handler is runnable", () => {
+    expect(isRunnable(entry({ handler: "h1" }))).toBe(true);
+  });
+
+  test("a built-in an extension declared is runnable without one", () => {
+    expect(isRunnable(entry({ tag: "Action.CopyToClipboard" }))).toBe(true);
+  });
+
+  /** The case the label exists for, which still has to work. */
+  test("an extension action with neither is not", () => {
+    expect(isRunnable(entry({ tag: "Action.SomethingNobodyImplemented" }))).toBe(false);
   });
 });
