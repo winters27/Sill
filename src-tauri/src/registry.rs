@@ -601,7 +601,22 @@ fn system_commands() -> Vec<CommandRecord> {
             if radio.kind == "wifi" { &network } else { &bluetooth },
             &format!("Turn {} {}", radio.name, if radio.on { "Off" } else { "On" }),
             if radio.on { "It is on" } else { "It is off" },
-            &["wifi", "wireless", "bluetooth", "radio", "network", "toggle", "system"],
+            /*
+             * The words for this radio only.
+             *
+             * Both rows shared one list at first, which put the Bluetooth
+             * switch above the Wi-Fi one for the query "wifi": the word was an
+             * exact keyword on both, and an exact keyword outranks the
+             * subsequence match that "wifi" makes against "Turn Wi-Fi Off".
+             *
+             * The hyphen is why that title does not match on its own, and why
+             * the unhyphenated spelling has to be here.
+             */
+            &if radio.kind == "wifi" {
+                ["wifi", "wi-fi", "wireless", "wlan", "internet", "network", "radio", "system"]
+            } else {
+                ["bluetooth", "bt", "wireless", "pair", "headphones", "radio", "toggle", "system"]
+            },
         ));
     }
 

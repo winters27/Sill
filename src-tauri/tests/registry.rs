@@ -2452,3 +2452,39 @@ mod sills_own_settings_are_findable {
         }
     }
 }
+
+/// Each system switch answers to its own name and not its neighbour's.
+///
+/// Both radio rows shared one keyword list at first, so "wifi" was an exact
+/// keyword on the Bluetooth row and put it above the Wi-Fi one. An exact
+/// keyword outranks the subsequence match "wifi" makes against "Turn Wi-Fi
+/// Off", so the wrong switch came first for its own name.
+mod a_switch_answers_to_its_own_name {
+    use super::*;
+
+    fn best(commands: &[CommandRecord], query: &str) -> Option<String> {
+        search(commands, query, &Frecency::default(), NOW, 20)
+            .into_iter()
+            .find(|hit| hit.command.mode == "system")
+            .map(|hit| hit.command.title.clone())
+    }
+
+    #[test]
+    fn the_radio_somebody_named_is_the_one_that_comes_first() {
+        let commands = registry::builtins();
+
+        // Only meaningful on a machine that has them, and the probe beside
+        // this covers the case where it does not.
+        let has_wifi = commands.iter().any(|c| c.title.contains("Wi-Fi"));
+        let has_bt = commands.iter().any(|c| c.title.contains("Bluetooth"));
+        if !has_wifi || !has_bt {
+            return;
+        }
+
+        let wifi = best(&commands, "wifi").unwrap_or_default();
+        assert!(wifi.contains("Wi-Fi"), "\"wifi\" gave {wifi:?}");
+
+        let bluetooth = best(&commands, "bluetooth").unwrap_or_default();
+        assert!(bluetooth.contains("Bluetooth"), "\"bluetooth\" gave {bluetooth:?}");
+    }
+}
