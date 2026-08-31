@@ -892,6 +892,12 @@ pub fn run() {
             // rather than dropped.
             app.manage(HotkeyConflicts::default());
 
+            // What was said before Sill was last closed, so the list of past
+            // conversations is not empty every morning. Nothing is opened:
+            // yesterday's conversation is somewhere to go back to rather than
+            // somewhere to be when the launcher appears.
+            app.state::<ai::chat::Chat>().load(&data_dir);
+
             // The host itself is not started here. Nothing has asked for an
             // extension yet, and starting Node on the chance that something
             // might is 38 MB resident for a session that usually never opens
@@ -1125,6 +1131,9 @@ pub fn run() {
             commands::ai::ai_ask,
             commands::ai::ai_follow_up,
             commands::ai::ai_new,
+            commands::ai::ai_conversations,
+            commands::ai::ai_forget,
+            commands::ai::ai_forget_all,
             commands::ai::ai_resume,
             commands::ai::ai_transcript,
             commands::ai::ai_clear,

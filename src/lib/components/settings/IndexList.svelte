@@ -317,6 +317,8 @@
   .rows {
     max-height: 420px;
     overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .row {

@@ -4,7 +4,7 @@ use tauri::{AppHandle, State};
 
 use tauri::Manager;
 
-use crate::ai::chat::{Chat, Turn};
+use crate::ai::chat::{Chat, Summary, Turn};
 use crate::ai::provider::{self, Provider};
 use crate::state::PrefsState;
 
@@ -109,8 +109,9 @@ pub(crate) fn ai_transcript(chat: State<'_, Chat>) -> Vec<Turn> {
 
 /// Forgets the conversation.
 #[tauri::command]
-pub(crate) fn ai_clear(chat: State<'_, Chat>) {
+pub(crate) fn ai_clear(app: AppHandle, chat: State<'_, Chat>) {
     chat.clear();
+    chat.save(&crate::state::data_dir(&app));
 }
 
 /// Asks the first question of a new conversation.
@@ -132,9 +133,13 @@ pub(crate) async fn ai_ask(
 
     // Before the request, not after: the conversation is named by its first
     // question whether or not the answer ever arrives.
-    app.state::<Chat>().begin(&question, crate::state::now_seconds());
+    let chat = app.state::<Chat>();
+    chat.begin(&question, crate::state::now_seconds());
+    chat.save(&crate::state::data_dir(&app));
 
-    crate::ai::chat::ask(&app, &chosen, &question).await
+    let answer = crate::ai::chat::ask(&app, &chosen, &question).await;
+    app.state::<Chat>().save(&crate::state::data_dir(&app));
+    answer
 }
 
 /// Asks the next question of the conversation already open.
@@ -145,7 +150,34 @@ pub(crate) async fn ai_follow_up(
     question: String,
 ) -> Result<String, String> {
     let chosen = who_answers(&prefs).await?;
-    crate::ai::chat::ask(&app, &chosen, &question).await
+
+    let answer = crate::ai::chat::ask(&app, &chosen, &question).await;
+    app.state::<Chat>().save(&crate::state::data_dir(&app));
+    answer
+}
+
+/// Every conversation, newest first.
+#[tauri::command]
+pub(crate) fn ai_conversations(chat: State<'_, Chat>) -> Vec<Summary> {
+    chat.summaries(crate::state::now_seconds())
+}
+
+/// Forgets one.
+///
+/// Answers with what is left, so the list that asked can redraw without a
+/// second call and without working out for itself what removing one did.
+#[tauri::command]
+pub(crate) fn ai_forget(app: AppHandle, chat: State<'_, Chat>, id: String) -> Vec<Summary> {
+    chat.forget(&id);
+    chat.save(&crate::state::data_dir(&app));
+    chat.summaries(crate::state::now_seconds())
+}
+
+/// Forgets all of them.
+#[tauri::command]
+pub(crate) fn ai_forget_all(app: AppHandle, chat: State<'_, Chat>) {
+    chat.clear();
+    chat.save(&crate::state::data_dir(&app));
 }
 
 /// Sets the open conversation aside so the next question begins its own.
@@ -153,8 +185,9 @@ pub(crate) async fn ai_follow_up(
 /// Not `ai_clear`, which forgets everything. The one set aside is still
 /// offered back from the root list until it goes stale.
 #[tauri::command]
-pub(crate) fn ai_new(chat: State<'_, Chat>) {
+pub(crate) fn ai_new(app: AppHandle, chat: State<'_, Chat>) {
     chat.set_aside();
+    chat.save(&crate::state::data_dir(&app));
 }
 
 /// Reopens a conversation, and answers with everything said in it.

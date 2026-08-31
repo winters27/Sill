@@ -382,6 +382,22 @@ pub fn builtins() -> Vec<CommandRecord> {
             &["paste", "copy", "history", "recent", "pasteboard"],
         ),
         builtin(
+            "conversations",
+            "ai",
+            "Past Conversations",
+            "Everything you have asked, to reopen or forget",
+            &[
+                "ask",
+                "ai",
+                "chat",
+                "history",
+                "conversation",
+                "asked",
+                "model",
+                "answer",
+            ],
+        ),
+        builtin(
             "capture-area",
             "clipboard",
             "Capture Area",

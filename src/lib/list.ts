@@ -27,6 +27,9 @@ export function groupOf(command: RankedCommand): string {
      */
     case "conversation":
       return "Continue";
+    /* Every conversation, in the list that lets you reopen or forget one. */
+    case "past-conversation":
+      return "Conversations";
     /*
      * The collection it is in, or "Snippets" when it is in none.
      *

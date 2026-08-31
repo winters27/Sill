@@ -738,6 +738,20 @@ body {
 }
 
 /*
+ * Anything that scrolls.
+ *
+ * These two lines were copied into six components and left out of the
+ * seventh, and the seventh is how a Windows scrollbar ends up painted down
+ * the middle of a dark window. A class rather than a rule on everything,
+ * because the surface that scrolls is a decision each component makes and
+ * naming it is what makes the decision visible.
+ */
+.sill-scrolls {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/*
  * Shared list primitives, used by the root list and by a command's List.
  *
  * The bottom padding is the chin's height. The chin is laid over this rather

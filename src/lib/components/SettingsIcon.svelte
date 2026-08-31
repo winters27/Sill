@@ -47,15 +47,29 @@
 
   let { name, size = 26 }: Props = $props();
 
-  /** Panels with drawn art. The rest use the line glyphs below. */
+  /**
+   * Panels with drawn art. The rest use the line glyphs below.
+   *
+   * Every panel but `history` now has a plaque, so the fallback is reached
+   * only by that one. It stays because a panel added before its art is drawn
+   * must show something rather than a broken image.
+   */
   const ART = new Set<IconName>([
     "general",
     "appearance",
-    "dictation",
+    "snippets",
+    "quicklinks",
     "clipboard",
+    "emoji",
+    "shortcuts",
+    "browsers",
+    "screenshot",
+    "websearch",
     "sources",
     "files",
     "extensions",
+    "ai",
+    "dictation",
     "advanced",
     "about",
   ]);

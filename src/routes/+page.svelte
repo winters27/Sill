@@ -8,6 +8,7 @@
   import FormView from "$lib/components/FormView.svelte";
   import RootList from "$lib/components/RootList.svelte";
   import AiMark from "$lib/components/settings/AiMark.svelte";
+  import Markdown from "$lib/components/Markdown.svelte";
   import { LISTBOX, isBrowsing, isListMode, merged, optionId } from "$lib/results";
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
@@ -29,6 +30,8 @@
     aiFollowUp,
     aiNew,
     aiResume,
+    aiConversations,
+    aiForget,
     aiClear,
     aiReady,
     aiTranscript,
@@ -63,6 +66,7 @@
     asTarget,
     undoAction,
     type ActionInfo,
+    type AiConversation,
     type AiReady,
     type AiTurn,
     type RankedCommand,
@@ -112,6 +116,7 @@
      * where the question was already being typed.
      */
     | "ai"
+    | "conversations"
     /**
      * Picking somewhere to move a file to.
      *
@@ -296,6 +301,15 @@
     // The field is a name, not a filter, so there is nothing to arrow through.
     if (mode === "collection" || mode === "alias") return 0;
     if (mode === "clipboard") return clipboardCount;
+    /*
+     * Its own count rather than a place in `LIST_MODES`.
+     *
+     * That list decides two things at once: what can be arrowed through, and
+     * what re-runs the index search when the query changes. This is the first
+     * and not the second, because the filter is a substring test over rows
+     * already in hand. The clipboard is here for the same reason.
+     */
+    if (mode === "conversations") return conversationRows.length;
     return items.length;
   });
 
@@ -795,6 +809,12 @@
   }
 
   async function openSelected() {
+    if (mode === "conversations") {
+      const row = conversationRows[selected];
+      if (row) await resumeConversation(row.entrypoint, row.title);
+      return;
+    }
+
     if (mode === "clipboard") {
       await clipboardView?.paste(true);
       return;
@@ -1060,6 +1080,12 @@
       if (command.mode === "conversation") {
         void recordUse(command.id, query);
         void resumeConversation(command.entrypoint, command.title);
+        return;
+      }
+
+      if (command.id === "sill:conversations") {
+        void recordUse(command.id, query);
+        await openConversations();
         return;
       }
 
@@ -1807,6 +1833,99 @@
       : `${answersWith.name} answers when you press Tab`;
   });
 
+  /** Every conversation, while the list of them is open. */
+  let pastConversations = $state<AiConversation[]>([]);
+
+  /**
+   * The list, as rows.
+   *
+   * Built here rather than in Rust because these never go through search:
+   * the list is short, it is already ordered by when each was last spoken to,
+   * and filtering it is a substring test on the question.
+   */
+  const conversationRows = $derived.by(() => {
+    const wanted = query.trim().toLowerCase();
+
+    return pastConversations
+      .filter((one) => !wanted || one.title.toLowerCase().includes(wanted))
+      .map((one) => ({
+        id: `chat-row:${one.id}`,
+        extension: "sill",
+        extensionTitle: "Conversations",
+        command: "conversation",
+        title: one.title,
+        subtitle: saidAbout(one),
+        mode: "past-conversation" as const,
+        entrypoint: one.id,
+        panel: "ai",
+        score: 0,
+        matched: [],
+      }));
+  });
+
+  /** What a conversation row says underneath the question. */
+  function saidAbout(one: AiConversation): string {
+    const when =
+      one.age < 60
+        ? "Just now"
+        : one.age < 3600
+          ? `${Math.floor(one.age / 60)} min ago`
+          : one.age < 86_400
+            ? `${Math.floor(one.age / 3600)} hr ago`
+            : `${Math.floor(one.age / 86_400)} d ago`;
+
+    const replies = `${one.replies} ${one.replies === 1 ? "reply" : "replies"}`;
+
+    // Saying which one is open stops the row offering to reopen something
+    // that is already open.
+    return one.open ? `${when} · ${replies} · open` : `${when} · ${replies}`;
+  }
+
+  async function openConversations() {
+    panelOpen = false;
+
+    try {
+      pastConversations = await aiConversations();
+    } catch (err) {
+      status = `${err}`;
+      return;
+    }
+
+    if (pastConversations.length === 0) {
+      status = "Nothing has been asked yet.";
+      return;
+    }
+
+    mode = "conversations";
+    selected = 0;
+    query = "";
+  }
+
+  /**
+   * Forgets the conversation under the cursor.
+   *
+   * The list comes back from Rust rather than being edited here, so what is
+   * drawn is what is held rather than what this thinks removing one did.
+   */
+  async function forgetConversation(id: string) {
+    try {
+      pastConversations = await aiForget(id);
+    } catch (err) {
+      status = `${err}`;
+      return;
+    }
+
+    // The row under the cursor is gone, so the cursor lands on what took its
+    // place rather than past the end of a shorter list.
+    selected = Math.min(selected, Math.max(0, conversationRows.length - 1));
+
+    if (pastConversations.length === 0) {
+      mode = "root";
+      status = "Nothing left to go back to.";
+      await refreshRoot();
+    }
+  }
+
   async function refreshWhoAnswers() {
     try {
       answersWith = await aiReady();
@@ -1967,6 +2086,14 @@
       return;
     }
 
+    if (mode === "conversations") {
+      mode = "root";
+      selected = 0;
+      query = "";
+      await refreshRoot();
+      return;
+    }
+
     if (mode === "clipboard") {
       // A step back rather than a way out. Escape with entries picked means
       // "not those", and closing the whole view would throw away the search
@@ -2085,6 +2212,20 @@
         if (mode === "root" && query.trim()) void askAi(query.trim());
       }
 
+      return;
+    }
+
+    /*
+     * Delete forgets the conversation under the cursor.
+     *
+     * The same key that removes a row from the clipboard, and the same reason
+     * it is not on the action panel alone: a list somebody opened to tidy up
+     * wants tidying with one key rather than two.
+     */
+    if (mode === "conversations" && event.key === "Delete") {
+      event.preventDefault();
+      const row = conversationRows[selected];
+      if (row) void forgetConversation(row.entrypoint);
       return;
     }
 
@@ -2488,6 +2629,8 @@
       <span class="crumb">Emoji</span>
     {:else if mode === "ai"}
       <span class="crumb">Ask</span>
+    {:else if mode === "conversations"}
+      <span class="crumb">Conversations</span>
     {:else if mode === "appVolume"}
       <span class="crumb">App Volume</span>
     {:else if mode === "destination" && moving}
@@ -2526,6 +2669,8 @@
           ? asking
             ? "Waiting for the answer…"
             : "Ask a follow-up…"
+        : mode === "conversations"
+          ? "Filter what you have asked…"
         : mode === "appVolume"
           ? "Filter by program name…"
         : mode === "destination"
@@ -2620,25 +2765,30 @@
     />
   {:else if mode === "ai"}
     <!--
-      A conversation reads as a column of paragraphs, not as a list of rows.
+      A conversation, with each side on its own.
+
+      A question sits right in a bubble of its own and an answer sits left with
+      none. That asymmetry is the point rather than an oversight: the question
+      is a few words and reads as a card, the answer is prose and reads as
+      prose, and boxing both makes a long answer into a wall inside a wall.
       The field below stays the composer, so a follow-up is typed where the
       question was.
     -->
-    <div class="chat" bind:this={chatScroll}>
+    <div class="chat sill-scrolls" bind:this={chatScroll}>
       {#each conversation as turn, at (at)}
-        <article class="turn" class:asked={turn.role === "user"}>
-          <p>{turn.text}</p>
-        </article>
+        {#if turn.role === "user"}
+          <article class="turn asked"><p>{turn.text}</p></article>
+        {:else}
+          <article class="turn said md"><Markdown text={turn.text} /></article>
+        {/if}
       {/each}
 
       {#if answering}
-        <article class="turn">
-          <p>{answering}</p>
-        </article>
+        <article class="turn said md"><Markdown text={answering} /></article>
       {:else if asking}
         <!-- Something between pressing Tab and the first token arriving,
              because a blank panel reads as nothing having happened. -->
-        <p class="thinking">Thinking…</p>
+        <p class="thinking">Thinking<span class="dots" aria-hidden="true"></span></p>
       {/if}
     </div>
 
@@ -2648,6 +2798,21 @@
     by exactly that mode and sharing one would be wrong in one direction or the
     other. Written out, and this comment is why.
   -->
+  {:else if mode === "conversations"}
+    <div class="listing">
+      <RootList
+        commands={conversationRows}
+        {selected}
+        numeric={false}
+        asking={`conversations:${query}`}
+        onselect={(i) => (selected = i)}
+        onrun={(i) => {
+          selected = i;
+          void openSelected();
+        }}
+      />
+    </div>
+
   {:else if mode === "root" || mode === "switcher" || mode === "alias" || mode === "emoji" || mode === "appVolume" || mode === "destination"}
     <!-- Kept on screen while a name is typed, so what is being named stays
          visible. -->
@@ -2868,22 +3033,52 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4) var(--space-4);
+    /* Wider between turns than inside one, so the conversation reads as
+       exchanges rather than as a single column of paragraphs. */
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-4) var(--space-5);
   }
 
   .turn {
-    max-width: 68ch;
+    font-size: var(--text-body);
   }
 
-  .turn p {
+  /*
+   * The question, to the right and in a ground of its own.
+   *
+   * Short by nature, so it can afford a bubble and gains from one: it is the
+   * only thing on screen that somebody wrote themselves, and finding it again
+   * in a long conversation is how you remember what you asked.
+   */
+  .asked {
+    align-self: flex-end;
+    max-width: 78%;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+    background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-line);
+  }
+
+  .asked p {
     margin: 0;
     color: var(--text-1);
-    font-size: var(--text-body);
-    line-height: 1.6;
-    /* An answer arrives as written, and models write in paragraphs. */
+    line-height: 1.55;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+
+  /*
+   * The answer, to the left and unboxed.
+   *
+   * No ground, because prose in a box is a wall inside a wall, and the width
+   * is capped where a line stops being comfortable to read rather than at the
+   * window edge.
+   */
+  .said {
+    align-self: flex-start;
+    max-width: 68ch;
+    width: 100%;
+    color: var(--text-1);
   }
 
   /*
@@ -2897,10 +3092,45 @@
     color: var(--text-2);
   }
 
+  /*
+   * The wait, said without a spinner.
+   *
+   * A launcher is meant to feel instant and a spinner advertises that it is
+   * not. Three dots that fill in say the same thing while making the wait a
+   * detail rather than the subject.
+   */
   .thinking {
+    align-self: flex-start;
     margin: 0;
     color: var(--text-2);
     font-size: var(--text-body);
+  }
+
+  .dots::after {
+    content: "";
+    animation: thinking 1.4s steps(4, end) infinite;
+  }
+
+  @keyframes thinking {
+    0% {
+      content: "";
+    }
+    25% {
+      content: ".";
+    }
+    50% {
+      content: "..";
+    }
+    75% {
+      content: "...";
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dots::after {
+      animation: none;
+      content: "…";
+    }
   }
 
   /*

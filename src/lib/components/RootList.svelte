@@ -354,6 +354,29 @@
    * modes and made them draw lettered tiles. A list of exceptions is honest
    * about what it is; a list of permissions pretends to be complete.
    */
+  /**
+   * Whether the subtitle is a path rather than prose.
+   *
+   * It decides which end of the subtitle is truncated, and which end is
+   * truncated decides whether it is readable at all. A path wants its tail,
+   * because the folder something is in is the useful half; a sentence wants
+   * its head.
+   *
+   * A list of the ones that are paths rather than of the ones that are not.
+   * The other way round is how the conversation rows arrived reading
+   * "min ago and 1 reply 3", with a leading digit dragged to the far end by
+   * the bidi algorithm: a mode added after the rule was written gets the
+   * wrong default, and the wrong default here is silent.
+   */
+  function isPath(command: RankedCommand): boolean {
+    return (
+      command.mode === "file" ||
+      command.mode === "file-setup" ||
+      command.mode === "destination" ||
+      command.mode === "exe"
+    );
+  }
+
   function sourceOf(command: RankedCommand): string {
     // An extension is worth naming, and it is not in the subtitle.
     if (command.mode === "view" || command.mode === "no-view") {
@@ -398,6 +421,7 @@
         data-row={index}
         class="sill-row"
         class:answer={command.mode === "answer"}
+        class:path={isPath(command)}
         class:selected={index === selected}
         role="option"
         aria-selected={index === selected}
@@ -617,16 +641,20 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    /* A full path is long, and `rtl` is what keeps the end of a path rather
-       than its start. */
-    direction: rtl;
-    text-align: left;
   }
 
-  /* A question is prose, not a path: it reads from the left like everything
-     else, and truncating its tail is the right end to lose. */
-  .answer .extension {
-    direction: ltr;
+  /*
+   * A path keeps its tail; everything else keeps its head.
+   *
+   * `rtl` is what makes a truncated path show the folder it is in rather than
+   * the drive it is on, and it is wrong for anything that is a sentence: the
+   * bidi algorithm moves a leading digit to the far end, so "3 min ago" is
+   * drawn as "min ago 3". This used to be the default with one exception, and
+   * the next mode that had a sentence in its subtitle got it wrong.
+   */
+  .path .extension {
+    direction: rtl;
+    text-align: left;
   }
 
   .equals {

@@ -56,16 +56,26 @@ const KEEP_OFFERING: i64 = 10 * 60;
 
 /// How many finished conversations are kept.
 ///
-/// In memory only, and deliberately so. They exist because a second question
-/// must not destroy the answer to the first, and the window that will browse
-/// them is not built yet: writing them to disk before anything reads them back
-/// would be storage with no reader.
-const KEEP_PAST: usize = 20;
+/// Written to disk now that there is a list somebody can open, resume from and
+/// delete out of. Bounded because the file is read whole at startup and because
+/// nobody scrolls past fifty of anything.
+const KEEP_PAST: usize = 50;
+
+/// Where they are kept.
+///
+/// Plain JSON beside the rest of Sill's own files, which is what the clipboard
+/// and the dictation transcripts already are. Anything said to a model on this
+/// machine is readable by anything running as this user, and the honest place
+/// to say so is the settings window rather than an encryption scheme that only
+/// looks like it helps.
+const FILE: &str = "conversations.json";
 
 /// The longest a question may be before it is shortened into a name.
 const TITLE: usize = 80;
 
 /// One conversation, from its first question until another is begun.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Conversation {
     /// Unique for as long as Sill runs, which is as long as these live.
     pub id: String,
@@ -75,6 +85,12 @@ pub struct Conversation {
     pub last: i64,
     messages: Vec<Message>,
     /// Claude Code's own session, when that is who is answering.
+    ///
+    /// Not written out. A session id belongs to a running CLI and means
+    /// nothing after a restart; keeping one would make the first follow-up
+    /// after reopening Sill fail with somebody else's error about a session
+    /// that is not there.
+    #[serde(skip)]
     session: Option<String>,
 }
 
@@ -86,6 +102,19 @@ impl Conversation {
             .filter(|message| message.role == "assistant")
             .count()
     }
+}
+
+/// One conversation, as the list of them needs to draw it.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+    pub id: String,
+    pub title: String,
+    pub replies: usize,
+    /// Seconds since it was last spoken to.
+    pub age: i64,
+    /// Whether this is the one currently open.
+    pub open: bool,
 }
 
 /// A conversation offered back, as the root list needs to draw it.
@@ -241,12 +270,97 @@ impl Chat {
             .collect()
     }
 
+    /// Every conversation, newest first.
+    ///
+    /// The open one included, marked as open. A list that hid it would be
+    /// missing the one somebody is most likely to be looking for, and the mark
+    /// is what stops the row offering to resume something already resumed.
+    pub fn summaries(&self, now: i64) -> Vec<Summary> {
+        let Ok(held) = self.held.lock() else {
+            return Vec::new();
+        };
+
+        let mut all: Vec<Summary> = held
+            .open
+            .iter()
+            .map(|one| (one, true))
+            .chain(held.past.iter().map(|one| (one, false)))
+            .map(|(one, open)| Summary {
+                id: one.id.clone(),
+                title: one.title.clone(),
+                replies: one.replies(),
+                age: now.saturating_sub(one.last).max(0),
+                open,
+            })
+            .collect();
+
+        all.sort_by(|a, b| a.age.cmp(&b.age));
+        all
+    }
+
+    /// Forgets one, wherever it is.
+    pub fn forget(&self, id: &str) -> bool {
+        let Ok(mut held) = self.held.lock() else {
+            return false;
+        };
+
+        if held.open.as_ref().is_some_and(|open| open.id == id) {
+            held.open = None;
+            return true;
+        }
+
+        let before = held.past.len();
+        held.past.retain(|past| past.id != id);
+        held.past.len() != before
+    }
+
     /// Forgets all of them.
     pub fn clear(&self) {
         if let Ok(mut held) = self.held.lock() {
             held.open = None;
             held.past.clear();
         }
+    }
+
+    /// Reads what was said before Sill was last closed.
+    ///
+    /// Nothing is opened: a conversation from yesterday is somewhere to go
+    /// back to, not somewhere to be when the launcher appears.
+    pub fn load(&self, dir: &std::path::Path) {
+        let Ok(text) = std::fs::read_to_string(dir.join(FILE)) else {
+            return;
+        };
+
+        let Ok(saved) = serde_json::from_str::<Vec<Conversation>>(&text) else {
+            return;
+        };
+
+        if let Ok(mut held) = self.held.lock() {
+            held.past = saved.into_iter().take(KEEP_PAST).collect();
+            // Past whatever the file held, so a restart cannot mint an id that
+            // a saved conversation already has.
+            held.begun = held.past.len() as u64;
+        }
+    }
+
+    /// Writes them out.
+    ///
+    /// Called after anything that changes them rather than on a timer. There
+    /// are at most fifty and the whole file is a few kilobytes, so this costs
+    /// less than deciding when to do it would.
+    pub fn save(&self, dir: &std::path::Path) {
+        let Ok(held) = self.held.lock() else {
+            return;
+        };
+
+        let all: Vec<&Conversation> = held.open.iter().chain(held.past.iter()).collect();
+
+        let Ok(text) = serde_json::to_string(&all) else {
+            return;
+        };
+
+        let _ = std::fs::create_dir_all(dir);
+        let _ = std::fs::write(dir.join(FILE), text);
     }
 
     /// Remembers something said, and marks the conversation as spoken to.
@@ -701,6 +815,226 @@ mod tests {
 
             let held = chat.held.lock().expect("the lock");
             assert_eq!(held.past.len(), KEEP_PAST);
+        }
+    }
+
+    mod the_list_of_them {
+        use super::*;
+
+        #[test]
+        fn the_open_one_is_listed_and_marked() {
+            let chat = Chat::new();
+            chat.begin("what is open", 0);
+            said(&chat, "what is open", "an answer", 0);
+
+            let all = chat.summaries(30);
+            assert_eq!(all.len(), 1);
+            assert_eq!(all[0].title, "what is open");
+            assert_eq!(all[0].age, 30);
+            assert!(all[0].open, "the one being had is the one to say so about");
+        }
+
+        /// Newest first, which is not the order they were begun in: reopening
+        /// an old one makes it the recent one again.
+        #[test]
+        fn they_are_ordered_by_when_each_was_last_spoken_to() {
+            let chat = Chat::new();
+
+            chat.begin("oldest", 0);
+            said(&chat, "oldest", "a", 0);
+            chat.begin("middle", 10);
+            said(&chat, "middle", "a", 10);
+            chat.begin("newest", 20);
+            said(&chat, "newest", "a", 20);
+
+            let titles: Vec<String> = chat.summaries(30).into_iter().map(|s| s.title).collect();
+            assert_eq!(titles, vec!["newest", "middle", "oldest"]);
+        }
+
+        /// Unlike the row offering one back, this list holds everything. A
+        /// question that failed is still something somebody asked, and hiding
+        /// it from the only place it can be deleted would strand it.
+        #[test]
+        fn one_with_no_answer_is_still_listed() {
+            let chat = Chat::new();
+            chat.begin("this failed", 0);
+            chat.said(Message::user("this failed"), 0);
+
+            assert_eq!(chat.summaries(1).len(), 1);
+            assert_eq!(chat.offer(1), None, "but it is not offered back");
+        }
+    }
+
+    mod forgetting {
+        use super::*;
+
+        #[test]
+        fn one_that_was_filed_goes() {
+            let chat = Chat::new();
+            chat.begin("keep me", 0);
+            said(&chat, "keep me", "a", 0);
+            chat.begin("delete me", 10);
+            said(&chat, "delete me", "a", 10);
+
+            let doomed = chat.summaries(11)[0].id.clone();
+            assert!(chat.forget(&doomed));
+
+            let titles: Vec<String> = chat.summaries(11).into_iter().map(|s| s.title).collect();
+            assert_eq!(titles, vec!["keep me"]);
+        }
+
+        /// Deleting the one being had closes it rather than leaving a
+        /// conversation on screen that nothing holds any more.
+        #[test]
+        fn the_open_one_goes_and_leaves_nothing_open() {
+            let chat = Chat::new();
+            chat.begin("the open one", 0);
+            said(&chat, "the open one", "a", 0);
+
+            let open = chat.summaries(1)[0].id.clone();
+            assert!(chat.forget(&open));
+
+            assert!(chat.summaries(1).is_empty());
+            assert!(chat.transcript().is_empty());
+        }
+
+        #[test]
+        fn forgetting_one_that_is_not_here_says_so() {
+            assert!(!Chat::new().forget("chat:404"));
+        }
+    }
+
+    mod across_a_restart {
+        use super::*;
+
+        fn a_directory(name: &str) -> std::path::PathBuf {
+            let dir = std::env::temp_dir().join(format!("sill-chat-{name}"));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("a directory");
+            dir
+        }
+
+        #[test]
+        fn what_was_said_survives() {
+            let dir = a_directory("survives");
+
+            let before = Chat::new();
+            before.begin("asked yesterday", 100);
+            said(&before, "asked yesterday", "answered yesterday", 100);
+            before.save(&dir);
+
+            let after = Chat::new();
+            after.load(&dir);
+
+            let all = after.summaries(200);
+            assert_eq!(all.len(), 1);
+            assert_eq!(all[0].title, "asked yesterday");
+            assert_eq!(all[0].replies, 1);
+        }
+
+        /// Yesterday's conversation is somewhere to go back to, not somewhere
+        /// to be when the launcher next appears.
+        #[test]
+        fn nothing_is_open_after_a_restart() {
+            let dir = a_directory("nothing-open");
+
+            let before = Chat::new();
+            before.begin("asked yesterday", 100);
+            said(&before, "asked yesterday", "an answer", 100);
+            before.save(&dir);
+
+            let after = Chat::new();
+            after.load(&dir);
+
+            assert!(after.transcript().is_empty());
+            assert!(!after.summaries(200)[0].open);
+        }
+
+        /// The whole point of saving them: reopening one from a previous run
+        /// has to give back what was said, not an empty conversation.
+        #[test]
+        fn one_from_before_can_be_reopened_whole() {
+            let dir = a_directory("reopened");
+
+            let before = Chat::new();
+            before.begin("the question", 100);
+            said(&before, "the question", "the answer", 100);
+            before.save(&dir);
+
+            let after = Chat::new();
+            after.load(&dir);
+
+            let id = after.summaries(200)[0].id.clone();
+            assert!(after.resume(&id, 200));
+
+            let turns = after.transcript();
+            assert_eq!(turns.len(), 2);
+            assert_eq!(turns[1].text, "the answer");
+        }
+
+        /// A session id belongs to a running CLI. Kept across a restart it
+        /// would make the first follow-up fail with somebody else's error
+        /// about a session that is not there.
+        #[test]
+        fn a_cli_session_is_not_carried_across() {
+            let dir = a_directory("no-session");
+
+            let before = Chat::new();
+            before.begin("asked", 0);
+            said(&before, "asked", "an answer", 0);
+            before.set_session("session-abc".to_string());
+            before.save(&dir);
+
+            let after = Chat::new();
+            after.load(&dir);
+            let id = after.summaries(1)[0].id.clone();
+            after.resume(&id, 1);
+
+            assert_eq!(after.session(), None);
+        }
+
+        /// A restart must not mint an id that a saved conversation already
+        /// has, or resuming picks whichever the search finds first.
+        #[test]
+        fn a_new_conversation_after_a_restart_does_not_reuse_an_id() {
+            let dir = a_directory("ids");
+
+            let before = Chat::new();
+            for n in 0..3 {
+                before.begin(&format!("question {n}"), n);
+                said(&before, "q", "a", n);
+            }
+            before.save(&dir);
+
+            let after = Chat::new();
+            after.load(&dir);
+            after.begin("brand new", 100);
+            said(&after, "brand new", "a", 100);
+
+            let ids: Vec<String> = after.summaries(100).into_iter().map(|s| s.id).collect();
+            let mut unique = ids.clone();
+            unique.sort();
+            unique.dedup();
+            assert_eq!(ids.len(), unique.len(), "an id came back twice: {ids:?}");
+        }
+
+        #[test]
+        fn a_missing_file_is_not_a_problem() {
+            let chat = Chat::new();
+            chat.load(&std::env::temp_dir().join("sill-chat-nothing-here"));
+            assert!(chat.summaries(0).is_empty());
+        }
+
+        /// A file somebody edited, or one written by a version that shaped
+        /// them differently. Starting empty beats refusing to start.
+        #[test]
+        fn a_file_full_of_nonsense_is_not_a_problem() {
+            let dir = a_directory("nonsense");
+            std::fs::write(dir.join(FILE), "{not json at all").expect("written");
+
+            let chat = Chat::new();
+            chat.load(&dir);
+            assert!(chat.summaries(0).is_empty());
         }
     }
 

@@ -145,6 +145,30 @@ for (const file of sources(".")) {
     }
 
     /*
+     * A surface that scrolls without saying how its scrollbar looks.
+     *
+     * Windows paints one itself, in its own colours, and it is the only thing
+     * in the window that does not follow the theme. Six components carry the
+     * two lines that fix it and the seventh forgot, which is what a rule
+     * copied by hand always eventually does.
+     *
+     * File level rather than rule level, because a component that scrolls
+     * anything needs the answer somewhere in it, and where is its business.
+     */
+    if (/overflow(-[xy])?:\s*(auto|scroll)/.test(text)) {
+      const answered =
+        text.includes("scrollbar-color") || text.includes("sill-scrolls");
+
+      if (!answered) {
+        fail(
+          file,
+          lineOf(text, text.search(/overflow(-[xy])?:\s*(auto|scroll)/)),
+          "this scrolls but never says how; add the sill-scrolls class",
+        );
+      }
+    }
+
+    /*
      * A hand-rolled picker in the settings window.
      *
      * Windows draws an open `<select>` list itself, in a window of its own,

@@ -78,7 +78,15 @@ export interface RankedCommand {
      * window. It exists only while the conversation is recent, and there is
      * never more than one.
      */
-    | "conversation";
+    | "conversation"
+    /**
+     * One row in the list of everything that has been asked.
+     *
+     * Its own kind rather than reusing `conversation`, which is the single row
+     * offering back the one you left. These are the whole history, they carry
+     * a delete, and they never appear in the root list.
+     */
+    | "past-conversation";
   entrypoint: string;
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;
@@ -319,6 +327,39 @@ export function aiNew(): Promise<void> {
 /** Reopens a conversation, and answers with everything said in it. */
 export function aiResume(id: string): Promise<AiTurn[]> {
   return invoke<AiTurn[]>("ai_resume", { id });
+}
+
+/** One conversation, as the list of them draws it. */
+export interface AiConversation {
+  id: string;
+  /** The question it opened with. */
+  title: string;
+  replies: number;
+  /** Seconds since it was last spoken to. */
+  age: number;
+  /** Whether this is the one currently open. */
+  open: boolean;
+}
+
+/** Every conversation, newest first. */
+export function aiConversations(): Promise<AiConversation[]> {
+  return invoke<AiConversation[]>("ai_conversations");
+}
+
+/**
+ * Forgets one, and answers with what is left.
+ *
+ * The list comes back rather than the caller working out what removing one
+ * did, which is the difference between a list that is right and a list that
+ * agrees with itself.
+ */
+export function aiForget(id: string): Promise<AiConversation[]> {
+  return invoke<AiConversation[]>("ai_forget", { id });
+}
+
+/** Forgets all of them. */
+export function aiForgetAll(): Promise<void> {
+  return invoke<void>("ai_forget_all");
 }
 
 /** Everything said so far, for a window that has just opened. */
