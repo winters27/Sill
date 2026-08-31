@@ -37,6 +37,7 @@ pub mod snippets;
 pub mod state;
 pub mod system;
 pub mod summon;
+pub mod timing;
 pub mod synthetic;
 pub mod text;
 pub mod websearch;
@@ -839,6 +840,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(actions::builtins())
+        .manage(timing::Timings::new())
         .manage(commands::system::Marking::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
@@ -1040,6 +1042,24 @@ pub fn run() {
             reload_snippets(&handle);
             reload_quicklinks(&handle);
 
+            /*
+             * Cold start, measured at the last thing setup does.
+             *
+             * The number somebody cares about is "how long until the hotkey
+             * works", and the hotkey is registered above. Everything after
+             * this point is the index still being scanned on a background
+             * task, which the launcher opens perfectly well without.
+             *
+             * Asked of Windows rather than measured from the first line of our
+             * own code, because the loader and the runtime are part of what
+             * was waited for.
+             */
+            if let Some(since_start) = timing::since_process_start() {
+                if let Some(timings) = handle.try_state::<timing::Timings>() {
+                    timings.ready(since_start);
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1073,6 +1093,8 @@ pub fn run() {
             commands::system::cancel_markup,
             commands::search::search_windows,
             commands::search::system_states,
+            commands::search::summon_painted,
+            commands::search::timings,
             commands::search::search_app_volume,
             commands::launch::move_path,
             commands::launch::search_destinations,

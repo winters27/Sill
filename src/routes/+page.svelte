@@ -26,6 +26,7 @@
     movePath,
     searchAppVolume,
     searchDestinations,
+    summonPainted,
     systemStates,
     searchCommands,
     unloadExtension,
@@ -1984,6 +1985,20 @@
           // Selected rather than cleared, so typing replaces the old query
           // but it is still there if the summon was accidental.
           if (prefs?.hotkey.selectQueryOnSummon ?? true) searchInput?.select();
+
+          /*
+           * The summon is over, and only here is that true.
+           *
+           * Rust can see when it told the window to show itself. It cannot see
+           * when this frame ran, and this frame is the one somebody was
+           * waiting for: a window that is up and blank is not a launcher you
+           * can type into. So the number is finished from here.
+           *
+           * Inside the same frame that takes focus rather than a frame later,
+           * because taking focus is the last thing that has to happen before
+           * a keystroke lands somewhere useful.
+           */
+          void summonPainted();
         });
       });
 

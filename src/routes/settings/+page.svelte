@@ -27,6 +27,7 @@
     clearUsageHistory,
     browserProfiles,
     getDiagnostics,
+    getTimings,
     type AfterCapture,
     type KnownBrowser,
     searchEngines,
@@ -43,6 +44,7 @@
     type InterfaceFont,
     type Theme,
     type Diagnostics,
+    type Timings,
     type Preferences,
   } from "$lib/settings";
   import { swap } from "$lib/motion";
@@ -219,6 +221,15 @@
 
   let prefs = $state<Preferences | null>(null);
   let info = $state<Diagnostics | null>(null);
+
+  /**
+   * What reaching the launcher has cost this session.
+   *
+   * Read once when this window opens rather than watched: these are facts
+   * about summons that have already happened, and none can happen while this
+   * window is the one in front.
+   */
+  let timings = $state<Timings | null>(null);
   /** The engines Sill knows, named by Rust so the list is stated once. */
   let engines = $state<SearchEngine[]>([]);
   /** Which browsers are installed, so the pane can show them. */
@@ -430,6 +441,7 @@
         applyAppearance(prefs);
         index = await listOwnSettings();
         info = await getDiagnostics();
+        timings = await getTimings();
         browsers = await browserProfiles();
         engines = await searchEngines();
       } catch (err) {
@@ -1283,6 +1295,40 @@
             </Row>
           </Section>
 
+          <!--
+            Measured rather than claimed, which is the whole point of it being
+            here. A launcher's pitch is that it is quick, and that is a
+            statement about numbers: these are this machine's, this session.
+          -->
+          <Section
+            label="Reaching the launcher"
+            description="Timed by Sill itself, from the key being pressed to the moment you can type. The middle of the recent ones, because an occasional slow summon is a display waking rather than the launcher."
+          >
+            <Row
+              title="Summon"
+              description={timings?.summons.length
+                ? `The middle of the last ${timings.summons.length}.`
+                : "Nothing measured yet this session."}
+            >
+              {#snippet control()}
+                <span class="reading">
+                  {timings?.medianMs != null ? `${timings.medianMs} ms` : "not yet"}
+                </span>
+              {/snippet}
+            </Row>
+
+            <Row
+              title="Starting up"
+              description="From the process starting to the hotkey working."
+            >
+              {#snippet control()}
+                <span class="reading">
+                  {timings?.coldStartMs != null ? `${timings.coldStartMs} ms` : "not yet"}
+                </span>
+              {/snippet}
+            </Row>
+          </Section>
+
           <Section
             label="Ranking"
             description="Sill ranks by how often and how recently you launch something, which is why the root list is usually right before you type."
@@ -1748,6 +1794,19 @@
     margin: var(--space-1) 0 0;
     font-size: var(--text-meta);
     color: var(--text-2);
+  }
+
+  /*
+   * A measured number, in the column the buttons are in.
+   *
+   * Tabular figures, so two readings under each other line up on the decimal
+   * rather than wandering by the width of a 1.
+   */
+  .reading {
+    color: var(--text-2);
+    font-size: var(--text-meta);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   .status {

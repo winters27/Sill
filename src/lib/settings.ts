@@ -239,6 +239,33 @@ export function getDiagnostics(): Promise<Diagnostics> {
   return invoke<Diagnostics>("diagnostics");
 }
 
+/** One summon, from the hotkey to being able to type. */
+export interface SummonTiming {
+  /** Hotkey to the window being shown. */
+  shownMs: number;
+  /** Shown to the page having painted. Absent if it never reported. */
+  paintedMs?: number | null;
+}
+
+/** What reaching the launcher has cost lately. */
+export interface Timings {
+  /** Process start to the hotkey being live. */
+  coldStartMs?: number | null;
+  summons: SummonTiming[];
+  /**
+   * The middle complete summon, which is what to quote.
+   *
+   * The median rather than the mean: the slow ones are slow for reasons that
+   * have nothing to do with Sill, such as a display coming out of sleep, and
+   * one of those drags an average somewhere no summon ever was.
+   */
+  medianMs?: number | null;
+}
+
+export function getTimings(): Promise<Timings> {
+  return invoke<Timings>("timings");
+}
+
 /** A search engine Sill knows. */
 export interface SearchEngine {
   id: string;

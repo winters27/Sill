@@ -211,6 +211,16 @@ export function searchAppVolume(query: string): Promise<RankedCommand[]> {
   return invoke<RankedCommand[]>("search_app_volume", { query });
 }
 
+/**
+ * Tells Rust the window has painted, which is when a summon is actually over.
+ *
+ * Rust can see when it told the window to show itself and not when this page
+ * finished drawing, and the drawing is the half somebody waited for.
+ */
+export function summonPainted(): Promise<void> {
+  return invoke<void>("summon_painted");
+}
+
 export function systemStates(ids: string[]): Promise<(boolean | null)[]> {
   return invoke<(boolean | null)[]>("system_states", { ids });
 }

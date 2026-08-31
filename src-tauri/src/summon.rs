@@ -228,6 +228,13 @@ pub(crate) fn force_foreground(hwnd: HWND) {
 
 /// Shows the launcher and takes the keyboard.
 pub fn show(window: &WebviewWindow) {
+    // Before anything, so what is measured is what somebody waited for rather
+    // than what was left after the parts that were easy to instrument.
+    let timings = window.app_handle().try_state::<crate::timing::Timings>();
+    if let Some(timings) = timings.as_deref() {
+        timings.summon_began();
+    }
+
     remember_foreground();
 
     let _ = window.show();
@@ -251,6 +258,12 @@ pub fn show(window: &WebviewWindow) {
      * is still hidden.
      */
     let _ = window.emit("sill://shown", ());
+
+    // The window is up and the page has been told. The other half of the
+    // number comes back from the page, because only it knows when it painted.
+    if let Some(timings) = timings.as_deref() {
+        timings.summon_shown();
+    }
 }
 
 /// Shows the launcher already in the window switcher.

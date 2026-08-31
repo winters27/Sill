@@ -107,6 +107,31 @@ pub(crate) async fn system_states(
     ))
 }
 
+/// The window has painted, which is when a summon is actually over.
+///
+/// Rust can see when the window was told to show itself and not when the page
+/// finished drawing, and the page is the half somebody is waiting for: a
+/// window that is up and blank is not a launcher you can type into. So the
+/// window reports this, once, from inside the frame that follows the summon.
+///
+/// Deliberately does nothing if no summon is in flight. A page that reloads,
+/// or a window shown some other way, would otherwise be recorded as a summon
+/// that took as long as the launcher had been sitting open.
+#[tauri::command]
+pub(crate) fn summon_painted(timings: State<'_, crate::timing::Timings>) {
+    timings.summon_painted();
+}
+
+/// What reaching the launcher has cost lately.
+///
+/// Read by the settings window and by the probe that holds the budget. The
+/// numbers are the ones the audit refused to let anybody claim without
+/// measuring.
+#[tauri::command]
+pub(crate) fn timings(timings: State<'_, crate::timing::Timings>) -> crate::timing::Report {
+    timings.report()
+}
+
 /// The programs playing sound, matching a query.
 ///
 /// Its own command for the reason the window switcher has one: a different

@@ -12,7 +12,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | --- | --- | --- |
 | P0.1 | Version control, MIT headers, CI running verify | **Repo exists** with full history. CI has no remote to run on yet |
 | P0.2 | Idle pass: cap results, debounce, bound the icon cache, drop PATH executables, checkpoint the log | **Done.** Result cap is 120, icon cache evicts, PATH executables default off, the clipboard log is bounded and checkpointed |
-| P0.3 | Instrument before promising | **Partly.** Ranking, idle memory and idle processor are measured and enforced. Summon latency and cold start are not |
+| P0.3 | Instrument before promising | **Done.** Ranking, idle memory, idle processor, summon latency and cold start are all measured and held to a budget. Release build: **25 ms to summon, 846 ms to start** |
 | P0.4 | Extension correctness | **Done.** Every method the host can call is answered, storage persists, crashes reach the window |
 | P0.5 | Release-mode host bundling | **Done.** Three candidates, in order, and only one that exists is returned |
 | P0.6 | Credentials at rest | **Done.** Keys go to DPAPI rather than into a settings file |
@@ -212,6 +212,39 @@ transforms use. That fixed something as well as reusing something: written by
 hand, the write and the restore were two changes the history recorded, so
 pasting a long snippet used to leave the snippet and then the user's own older
 entry sitting at the top of the history as though they had just copied both.
+
+### How long it takes to reach the launcher
+
+The two numbers the audit refused to let anybody claim without measuring.
+Measured on the release build, on this machine:
+
+| | |
+| --- | --- |
+| Summon, median of eight | **25 ms** (22 showing, 5 painting) |
+| Summon, worst of eight | 40 ms |
+| Cold start, to the hotkey working | **846 ms** |
+
+**A summon is two halves and only Sill can see both.** Rust knows when the
+window was told to show itself; the page knows when it painted, and a window
+that is up and blank is not a launcher you can type into. So the page reports
+the second half back, from inside the same frame that takes focus, because
+taking focus is the last thing that has to happen before a keystroke lands
+somewhere useful.
+
+A summon that never reports is kept as half a measurement rather than thrown
+away. "Shown in 9 ms and never painted" is the most interesting thing this
+could record, and dropping it would hide exactly the failure worth knowing
+about.
+
+Cold start is asked of Windows rather than measured from the first line of our
+own code, because the loader and the runtime are part of what somebody waited
+for. Measuring from `main` would report a number that flatters us by exactly
+the part we cannot see.
+
+`scripts/measure-summon.ps1` starts a fresh copy, presses the key, and fails if
+the median summon or the cold start is over budget. The numbers are also in
+Settings under Advanced, because a launcher's pitch is that it is quick and
+that is a claim about numbers.
 
 ## Built since the audit, and not on it: web search
 

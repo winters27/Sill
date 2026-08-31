@@ -1,0 +1,144 @@
+<#
+.SYNOPSIS
+  Measures how long it takes to reach the launcher.
+
+.DESCRIPTION
+  Two numbers, and they are the two the audit refused to let anybody claim
+  without measuring: how long from starting the process to the hotkey working,
+  and how long from pressing the hotkey to being able to type.
+
+  Both are recorded by the app itself, because only it can see both ends. Rust
+  knows when the window was told to show; the page knows when it painted, and
+  a window that is up and blank is not a launcher you can type into. This
+  script presses the key, waits, and reads what the app wrote to its log.
+
+  It starts a fresh copy rather than measuring one already running, because
+  cold start can only be measured once per process and a launcher that has
+  been open all day is not what a cold start feels like.
+
+.PARAMETER Exe
+  Which binary to run. Defaults to the release build.
+
+.PARAMETER Times
+  How many summons to measure. The median is what gets quoted, so an even
+  handful is enough and each one costs a couple of seconds.
+
+.PARAMETER BudgetMs
+  What the median summon is allowed to cost. Exceeding it fails, which is what
+  makes this a budget rather than a report.
+
+.PARAMETER ColdBudgetMs
+  What starting up is allowed to cost before the hotkey works.
+
+.EXAMPLE
+  pwsh -File scripts/measure-summon.ps1
+  pwsh -File scripts/measure-summon.ps1 -Exe src-tauri/target/debug/sill.exe
+#>
+param(
+    [string]$Exe = 'src-tauri/target/release/sill.exe',
+    [int]$Times = 8,
+    # Measured at around 30 ms on a warm machine, then given room. Generous on
+    # purpose: a budget tight enough to fail on a busy machine is a budget
+    # somebody switches off, and a switched-off budget catches nothing. This
+    # is here to catch a change in kind, not a change of five milliseconds.
+    [int]$BudgetMs = 250,
+    [int]$ColdBudgetMs = 4000
+)
+
+$ErrorActionPreference = 'Stop'
+
+Add-Type @"
+using System; using System.Text; using System.Runtime.InteropServices;
+public class Key {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+  public static string Text(IntPtr h){ var b=new StringBuilder(256); GetWindowText(h,b,256); return b.ToString(); }
+  public static void AltSpace(){
+    keybd_event(0x12,0,0,UIntPtr.Zero); keybd_event(0x20,0,0,UIntPtr.Zero);
+    keybd_event(0x20,0,2,UIntPtr.Zero); keybd_event(0x12,0,2,UIntPtr.Zero);
+  }
+}
+"@
+
+function Front { [Key]::Text([Key]::GetForegroundWindow()) }
+
+$log = Join-Path $env:APPDATA 'app.winters.sill\sill.log'
+$exe = (Resolve-Path $Exe).Path
+
+if (-not (Test-Path $exe)) { throw "no binary at $Exe" }
+
+# A fresh copy. Cold start can only be measured once per process, and one that
+# has been open all day is not what starting up feels like.
+Get-Process sill -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Milliseconds 800
+
+# Everything already in the log is somebody else's run.
+$before = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
+
+Write-Host "starting $exe"
+Start-Process $exe -WindowStyle Hidden
+Start-Sleep -Seconds 10
+
+for ($i = 1; $i -le $Times; $i++) {
+    [Key]::AltSpace()
+    Start-Sleep -Milliseconds 1200
+    if ((Front) -ne 'Sill') { Write-Host "  press $i did not reach the launcher (front '$(Front)')" }
+    # Away again, so the next press is a summon rather than a dismissal.
+    [Key]::AltSpace()
+    Start-Sleep -Milliseconds 900
+}
+
+Start-Sleep -Milliseconds 800
+
+if (-not (Test-Path $log)) { throw "the app wrote no log at $log" }
+
+$stream = [System.IO.File]::Open($log, 'Open', 'Read', 'ReadWrite')
+$stream.Seek($before, 'Begin') | Out-Null
+$reader = New-Object System.IO.StreamReader($stream)
+$fresh = $reader.ReadToEnd()
+$reader.Close(); $stream.Close()
+
+$cold = [regex]::Match($fresh, 'ready in (\d+) ms')
+$summons = [regex]::Matches($fresh, 'summon (\d+) ms \((\d+) to show, (\d+) to paint\)')
+
+Write-Host ''
+Write-Host '--- reaching the launcher ---'
+
+if (-not $cold.Success) { throw 'the app never said it was ready' }
+$coldMs = [int]$cold.Groups[1].Value
+'{0,-22} {1,6} ms' -f 'cold start', $coldMs
+
+if ($summons.Count -eq 0) { throw 'no summon was measured' }
+
+$totals = @($summons | ForEach-Object { [int]$_.Groups[1].Value })
+$shows  = @($summons | ForEach-Object { [int]$_.Groups[2].Value })
+$paints = @($summons | ForEach-Object { [int]$_.Groups[3].Value })
+
+$sorted = $totals | Sort-Object
+$median = $sorted[[int][math]::Floor($sorted.Count / 2)]
+
+'{0,-22} {1,6} ms   (of {2})' -f 'summon, median', $median, $summons.Count
+'{0,-22} {1,6} ms' -f 'summon, best', $sorted[0]
+'{0,-22} {1,6} ms' -f 'summon, worst', $sorted[-1]
+'{0,-22} {1,6} ms' -f '  of which showing', (($shows | Measure-Object -Average).Average -as [int])
+'{0,-22} {1,6} ms' -f '  of which painting', (($paints | Measure-Object -Average).Average -as [int])
+
+Get-Process sill -ErrorAction SilentlyContinue | Stop-Process -Force
+
+Write-Host ''
+$failed = $false
+
+if ($median -gt $BudgetMs) {
+    Write-Host ("OVER BUDGET  median summon {0} ms, allowed {1}" -f $median, $BudgetMs) -ForegroundColor Red
+    $failed = $true
+}
+if ($coldMs -gt $ColdBudgetMs) {
+    Write-Host ("OVER BUDGET  cold start {0} ms, allowed {1}" -f $coldMs, $ColdBudgetMs) -ForegroundColor Red
+    $failed = $true
+}
+
+if ($failed) { exit 1 }
+
+Write-Host ("within budget: summon {0} ms of {1}, cold start {2} ms of {3}" -f
+    $median, $BudgetMs, $coldMs, $ColdBudgetMs) -ForegroundColor Green
