@@ -28,7 +28,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P1.2 | Context captured at summon | **Done.** `ActionCtx` |
 | P1.3 | Window enumeration and control | **Done.** `windowing.rs` |
 | P1.4 | Window management commands | **Done.** Halves, thirds, quarters, monitors |
-| P1.5 | Window switcher | **Done.** Previews are still P2 |
+| P1.5 | Window switcher | **Done.** Fuzzy search, recent-window order, and a picture of the window under the cursor |
 | P1.6 | Selection actions | **Done.** Case, tidy, title |
 | P1.7 | Clipboard: merge, HTML, secrets, collections | **Done** |
 | P1.8 | Navigation bindings | **Done.** Vim and Emacs presets |
@@ -271,6 +271,45 @@ collection, a program list and formatting, and the export wrote six fields by
 hand, so all three were dropped on the way out and the way back in. Nothing
 failed; the snippets simply came back plainer than they went. There is a test
 that exports and reads back now.
+
+### A picture of the window you are switching to
+
+A list of titles tells you which application and often not which window: four
+browser windows are four rows reading almost the same. A picture answers in one
+glance what a title cannot answer at all.
+
+**One window is photographed, never the list.** Opening the switcher on twenty
+windows must not photograph twenty windows, so the picture is taken for the
+selected row only, after the selection has settled for ninety milliseconds.
+Holding an arrow key walks past windows without photographing any of them.
+
+Measured on the release build, per preview:
+
+| | |
+| --- | --- |
+| Photographing the window | 9 to 25 ms |
+| Making it small | 3 to 7 ms |
+| Encoding it | 2 to 5 ms |
+
+Made small **before** it is encoded, because encoding is the expensive half and
+a full-size window is four million pixels nobody is going to look at. Averaged
+rather than sampled: taking every eighth pixel of a window full of one-pixel
+text turns it into noise, which reads as a broken preview rather than a small
+one.
+
+Worth knowing before anybody optimises something that is not slow: **on a debug
+build the same work takes twenty times as long** (125 to 414 ms to shrink),
+because none of it is optimised. The numbers above are the ones that ship.
+
+A handful are kept while the switcher is open, so arrowing down and back does
+not re-photograph anything, and **the whole lot is dropped when it closes**. A
+preview is a picture of a moment, and keeping them would mean showing a window
+as it was the last time somebody looked.
+
+A minimized window has nothing on screen to photograph, so it shows no picture
+rather than a grey box. The strip keeps its width either way: a list that
+shuffles sideways as you arrow past one is worse than an empty strip, because
+the row being read moves.
 
 ## Built since the audit, and not on it: web search
 

@@ -67,6 +67,83 @@ impl Shot {
     }
 }
 
+/// A smaller copy, no larger than `most` on its longer side.
+///
+/// A preview of a window is looked at in a strip a few hundred pixels wide,
+/// and the window itself can be four million pixels. Sending the original
+/// would be a multi-megabyte picture per press of an arrow key, so it is made
+/// small **before** it is encoded rather than after: the encoding is the
+/// expensive half and there is no reason to spend it on pixels nobody sees.
+///
+/// Averaged rather than sampled. Taking every eighth pixel of a window full of
+/// one-pixel text turns it into noise, which reads as a broken preview rather
+/// than a small one; averaging the block each output pixel covers gives
+/// something that still looks like the window.
+///
+/// Returns the shot untouched when it is already small enough, so nothing is
+/// paid to shrink something that does not need it.
+pub fn thumbnail(shot: &Shot, most: i32) -> Shot {
+    let longest = shot.width.max(shot.height);
+
+    if most <= 0 || longest <= most || shot.width <= 0 || shot.height <= 0 {
+        return Shot {
+            pixels: shot.pixels.clone(),
+            width: shot.width,
+            height: shot.height,
+        };
+    }
+
+    // At least one pixel each way. A window one pixel tall is silly but it is
+    // not a reason to produce a picture with no rows in it.
+    let width = ((shot.width * most) / longest).max(1);
+    let height = ((shot.height * most) / longest).max(1);
+
+    let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
+
+    for y in 0..height {
+        // The block of source rows this output row covers.
+        let from_y = (y * shot.height) / height;
+        let to_y = (((y + 1) * shot.height) / height).max(from_y + 1).min(shot.height);
+
+        for x in 0..width {
+            let from_x = (x * shot.width) / width;
+            let to_x = (((x + 1) * shot.width) / width).max(from_x + 1).min(shot.width);
+
+            let mut totals = [0u32; 4];
+            let mut counted = 0u32;
+
+            for sy in from_y..to_y {
+                for sx in from_x..to_x {
+                    let at = ((sy as usize) * (shot.width as usize) + sx as usize) * 4;
+                    if at + 3 >= shot.pixels.len() {
+                        continue;
+                    }
+
+                    for channel in 0..4 {
+                        totals[channel] += u32::from(shot.pixels[at + channel]);
+                    }
+                    counted += 1;
+                }
+            }
+
+            if counted == 0 {
+                continue;
+            }
+
+            let out = ((y as usize) * (width as usize) + x as usize) * 4;
+            for channel in 0..4 {
+                pixels[out + channel] = (totals[channel] / counted) as u8;
+            }
+        }
+    }
+
+    Shot {
+        pixels,
+        width,
+        height,
+    }
+}
+
 /// Everything the screens cover, as one rectangle.
 ///
 /// With more than one display this is bigger than any of them, and its origin
@@ -204,6 +281,107 @@ pub fn region(_left: i32, _top: i32, _width: i32, _height: i32) -> Result<Shot, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A picture of one flat colour, for the tests that only care about size.
+    fn flat(width: i32, height: i32, colour: [u8; 4]) -> Shot {
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for _ in 0..(width * height) {
+            pixels.extend_from_slice(&colour);
+        }
+
+        Shot {
+            pixels,
+            width,
+            height,
+        }
+    }
+
+    mod making_it_small {
+        use super::*;
+
+        #[test]
+        fn the_longer_side_becomes_the_limit() {
+            let small = thumbnail(&flat(1600, 900, [1, 2, 3, 255]), 400);
+
+            assert_eq!(small.width, 400);
+            assert_eq!(small.height, 225);
+            assert_eq!(small.pixels.len(), 400 * 225 * 4);
+        }
+
+        /// A tall window is limited by its height, not by its width.
+        #[test]
+        fn a_tall_picture_is_limited_the_same_way() {
+            let small = thumbnail(&flat(600, 1200, [0, 0, 0, 255]), 300);
+
+            assert_eq!(small.height, 300);
+            assert_eq!(small.width, 150);
+        }
+
+        /// Nothing is paid to shrink something that does not need it.
+        #[test]
+        fn something_already_small_is_left_exactly_alone() {
+            let already = flat(120, 80, [9, 9, 9, 255]);
+            let same = thumbnail(&already, 400);
+
+            assert_eq!(same.width, 120);
+            assert_eq!(same.height, 80);
+            assert_eq!(same.pixels, already.pixels);
+        }
+
+        /// Averaged rather than sampled: half black and half white makes grey,
+        /// where taking every other pixel would make one or the other.
+        #[test]
+        fn the_block_is_averaged_and_not_sampled() {
+            // Two pixels wide, one tall: black then white.
+            let pair = shot_from(2, 1, &[[0, 0, 0, 255], [255, 255, 255, 255]]);
+            let one = thumbnail(&pair, 1);
+
+            assert_eq!(one.width, 1);
+            assert_eq!(one.height, 1);
+            assert_eq!(&one.pixels[..3], &[127, 127, 127]);
+        }
+
+        /// Taking every eighth pixel of a window full of one-pixel text turns
+        /// it into noise, which reads as a broken preview rather than a small
+        /// one. This is that case: a single bright pixel in a dark field must
+        /// still lighten the block it lands in.
+        #[test]
+        fn one_bright_pixel_still_shows_in_its_block() {
+            let mut field = flat(4, 1, [0, 0, 0, 255]);
+            field.pixels[8] = 255;
+            field.pixels[9] = 255;
+            field.pixels[10] = 255;
+
+            let one = thumbnail(&field, 1);
+            assert_eq!(one.pixels[0], 63, "the bright pixel was sampled away");
+        }
+
+        /// A window one pixel tall is silly, and not a reason to produce a
+        /// picture with no rows in it.
+        #[test]
+        fn nothing_ever_comes_back_with_no_pixels() {
+            let sliver = thumbnail(&flat(2000, 1, [5, 5, 5, 255]), 100);
+
+            assert_eq!(sliver.width, 100);
+            assert_eq!(sliver.height, 1);
+            assert!(!sliver.pixels.is_empty());
+        }
+
+        #[test]
+        fn a_limit_of_nothing_changes_nothing() {
+            let original = flat(40, 40, [1, 1, 1, 255]);
+            assert_eq!(thumbnail(&original, 0).width, 40);
+        }
+    }
+
+    /// A picture built pixel by pixel, for the tests that care about colour.
+    fn shot_from(width: i32, height: i32, pixels: &[[u8; 4]]) -> Shot {
+        Shot {
+            pixels: pixels.iter().flatten().copied().collect(),
+            width,
+            height,
+        }
+    }
 
     fn shot(width: i32, height: i32, pixels: Vec<u8>) -> Shot {
         Shot {

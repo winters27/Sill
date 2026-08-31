@@ -26,6 +26,7 @@ pub mod navigation;
 pub mod ocr;
 pub mod object;
 pub mod preferences;
+pub mod previews;
 pub mod quicklinks;
 pub mod radios;
 pub mod registry;
@@ -841,6 +842,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(actions::builtins())
         .manage(timing::Timings::new())
+        .manage(previews::Previews::new())
         .manage(commands::system::Marking::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
@@ -1096,6 +1098,8 @@ pub fn run() {
             commands::search::search_windows,
             commands::search::system_states,
             commands::search::summon_painted,
+            commands::search::window_preview,
+            commands::search::forget_previews,
             commands::search::timings,
             commands::search::search_app_volume,
             commands::launch::move_path,

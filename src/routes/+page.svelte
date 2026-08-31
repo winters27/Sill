@@ -24,9 +24,11 @@
     dismiss,
     launchCommand,
     movePath,
+    forgetPreviews,
     searchAppVolume,
     searchDestinations,
     summonPainted,
+    windowPreview,
     systemStates,
     searchCommands,
     unloadExtension,
@@ -1609,8 +1611,80 @@
    * extension: the key was pressed to get to another window, and arriving in
    * a half-finished command instead is not that.
    */
+  /**
+   * A picture of the window under the cursor, in the switcher.
+   *
+   * Fetched for the selected row only, never for the list: opening the
+   * switcher on twenty windows must not photograph twenty windows.
+   *
+   * Debounced, because holding Down walks the list faster than a window can
+   * be photographed, and every one passed through on the way would be a
+   * capture nobody looked at.
+   */
+  let preview = $state<string | null>(null);
+  let previewTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Which row the picture on screen belongs to, so a stale one is dropped. */
+  let previewOf = "";
+
+  const PREVIEW_SETTLE_MS = 90;
+
+  /**
+   * Drops the pictures when the switcher is left.
+   *
+   * A preview is a picture of a moment, and keeping them would mean showing a
+   * window as it was the last time somebody looked rather than as it is. A
+   * plain variable rather than state, so this only acts on the change.
+   */
+  let wasSwitching = false;
+
+  $effect(() => {
+    const switching = mode === "switcher";
+
+    if (wasSwitching && !switching) {
+      preview = null;
+      previewOf = "";
+      void forgetPreviews();
+    }
+
+    wasSwitching = switching;
+  });
+
+  $effect(() => {
+    // Read so this runs again when either changes.
+    const wanted = mode === "switcher" ? commands[selected]?.entrypoint : undefined;
+
+    clearTimeout(previewTimer);
+
+    if (!wanted) {
+      preview = null;
+      previewOf = "";
+      return;
+    }
+
+    if (wanted === previewOf) return;
+
+    previewTimer = setTimeout(() => {
+      previewOf = wanted;
+
+      void windowPreview(wanted)
+        .then((picture) => {
+          // The selection moved on while this was being taken.
+          if (previewOf === wanted) preview = picture;
+        })
+        // A window that closed or refuses to be photographed is not an error
+        // worth a message. The strip is simply empty.
+        .catch(() => {
+          if (previewOf === wanted) preview = null;
+        });
+    }, PREVIEW_SETTLE_MS);
+  });
+
   async function openSwitcher() {
     panelOpen = false;
+    // Whatever was on screen was a picture of a moment that has passed.
+    preview = null;
+    previewOf = "";
     mode = "switcher";
     selected = 0;
     query = "";
@@ -1681,6 +1755,12 @@
     // It was opened by its own key to do one thing, and dropping into a
     // general search on the way out is not what "never mind" means.
     if (mode === "switcher") {
+      // The mode does not change on the way out, so the pictures are dropped
+      // here rather than by the effect that watches for it.
+      preview = null;
+      previewOf = "";
+      void forgetPreviews();
+
       await dismiss();
       return;
     }
@@ -2158,18 +2238,36 @@
   {:else if mode === "root" || mode === "switcher" || mode === "alias" || mode === "emoji" || mode === "appVolume" || mode === "destination"}
     <!-- Kept on screen while a name is typed, so what is being named stays
          visible. -->
-    <RootList
-      bind:this={rootList}
-      {commands}
-      {selected}
-      numeric={prefs?.navigation.numeric ?? false}
-      asking={`${mode}:${query}`}
-      onselect={(i) => (selected = i)}
-      onrun={(i) => {
-        selected = i;
-        void openSelected();
-      }}
-    />
+    <div class="listing">
+      <RootList
+        bind:this={rootList}
+        {commands}
+        {selected}
+        numeric={prefs?.navigation.numeric ?? false}
+        asking={`${mode}:${query}`}
+        onselect={(i) => (selected = i)}
+        onrun={(i) => {
+          selected = i;
+          void openSelected();
+        }}
+      />
+
+      <!--
+        A picture of the window under the cursor.
+        
+        Four browser windows are four rows reading almost the same, and a
+        title cannot tell them apart. The strip keeps its width whether or not
+        there is a picture in it, so arrowing past a window that refuses to be
+        photographed does not shuffle the list sideways.
+      -->
+      {#if mode === "switcher"}
+        <aside class="preview" aria-hidden="true">
+          {#if preview}
+            <img src={preview} alt="" />
+          {/if}
+        </aside>
+      {/if}
+    </div>
   {:else if view?.tag === "List"}
     <ListView
       {tree}
@@ -2287,6 +2385,54 @@
 </main>
 
 <style>
+  /*
+   * The list, with room beside it for a picture in the switcher.
+   *
+   * The list keeps its own scrolling, so this is a row of two children rather
+   * than anything that reshapes it. Only the switcher gets the second child,
+   * and only the switcher pays for the column: `.listing` on its own is one
+   * child filling the width, which is every other mode unchanged.
+   */
+  .listing {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+  }
+
+  .listing > :global(*:first-child) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /*
+   * The strip the picture is drawn in.
+   *
+   * A fixed width whether or not there is a picture, so arrowing past a window
+   * that refuses to be photographed does not shuffle the list sideways. That
+   * shuffle is worse than an empty strip: the row under the cursor moves while
+   * somebody is reading it.
+   */
+  .preview {
+    flex: none;
+    width: 280px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-3);
+    overflow: hidden;
+  }
+
+  .preview img {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: var(--radius-sm);
+    /* The picture is of somebody's window, which may be any colour and may
+       end in a flat edge against the launcher's own. A hairline separates the
+       two without drawing a frame around it. */
+    box-shadow: 0 0 0 1px var(--hairline);
+    object-fit: contain;
+  }
+
   main {
     display: flex;
     flex-direction: column;

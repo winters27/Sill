@@ -1,6 +1,6 @@
 //! Searching, and opening what was found.
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::state::{now_seconds, CatalogState, PrefsState, RegistryState};
 use crate::{browsers, calculator, files, registry, windowing};
@@ -105,6 +105,43 @@ pub(crate) async fn system_states(
         &ids,
         &live,
     ))
+}
+
+/// A picture of one open window, for the switcher.
+///
+/// Asked for the selected row only, never for the list: opening the switcher
+/// on twenty windows must not photograph twenty windows. `None` when the
+/// window has closed, is minimized, or refuses to be photographed, which is
+/// not an error worth a message: a switcher with no picture is a switcher.
+#[tauri::command]
+pub(crate) async fn window_preview(app: AppHandle, id: String) -> Result<Option<String>, String> {
+    let Ok(handle) = id.parse::<isize>() else {
+        return Ok(None);
+    };
+
+    /*
+     * On a blocking task, because this photographs a window and encodes a
+     * picture: tens of milliseconds of GDI and PNG, which has no business on
+     * an async worker.
+     *
+     * The state is fetched inside rather than borrowed from a `State`
+     * parameter, because a borrow cannot cross onto another thread and a
+     * handle can.
+     */
+    tokio::task::spawn_blocking(move || {
+        app.state::<crate::previews::Previews>().of(handle)
+    })
+    .await
+    .map_err(|err| format!("could not photograph that window: {err}"))
+}
+
+/// Drops every window picture.
+///
+/// Called when the switcher closes. A preview is a picture of a moment, and
+/// keeping them would mean showing a window as it was rather than as it is.
+#[tauri::command]
+pub(crate) fn forget_previews(previews: State<'_, crate::previews::Previews>) {
+    previews.forget();
 }
 
 /// The window has painted, which is when a summon is actually over.

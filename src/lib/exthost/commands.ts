@@ -217,6 +217,22 @@ export function searchAppVolume(query: string): Promise<RankedCommand[]> {
  * Rust can see when it told the window to show itself and not when this page
  * finished drawing, and the drawing is the half somebody waited for.
  */
+/**
+ * A picture of one open window, for the switcher.
+ *
+ * Asked for the selected row only, never for the list. `null` when the window
+ * has closed, is minimized, or refuses to be photographed, which is not an
+ * error: a switcher with no picture is still a switcher.
+ */
+export function windowPreview(id: string): Promise<string | null> {
+  return invoke<string | null>("window_preview", { id });
+}
+
+/** Drops every window picture. Called when the switcher closes. */
+export function forgetPreviews(): Promise<void> {
+  return invoke<void>("forget_previews");
+}
+
 export function summonPainted(): Promise<void> {
   return invoke<void>("summon_painted");
 }
