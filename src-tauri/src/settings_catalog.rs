@@ -593,8 +593,18 @@ mod tests {
     /// own program, so the section simply looks like it was never given an
     /// icon. That is exactly what `access.cpl` did: it is the obvious answer
     /// for Ease of Access and Windows 11 removed it.
+    ///
+    /// The question is about a Windows client, and only a Windows client can
+    /// answer it. A server ships a different set of applets, `wscui.cpl` among
+    /// the missing, so running this there reports a catalog fault that does not
+    /// exist on any machine Sill is for.
     #[test]
     fn every_section_with_a_mark_can_still_find_it() {
+        if !crate::system::is_windows_client() {
+            eprintln!("skipped: a Windows Server has a different set of applets");
+            return;
+        }
+
         for area in MAPPED_AREAS {
             assert!(
                 area_icon(area).is_some(),

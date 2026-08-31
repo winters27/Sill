@@ -234,6 +234,55 @@ fn with_endpoint<T>(
     }
 }
 
+/// Whether this is a Windows client rather than a Windows Server.
+///
+/// The two ship different sets of control panel applets, so a check that a
+/// system file is present answers a different question on each. `wscui.cpl`,
+/// the Security and Maintenance applet, is the one that matters here: it is on
+/// every client and on no server, so a catalog that names it is correct on the
+/// machines Sill runs on and looks broken on a build agent.
+///
+/// `InstallationType` is the value Windows itself uses to say which it is. It
+/// reads `Client` on 10 and 11 and `Server` on the server editions.
+#[cfg(windows)]
+pub(crate) fn is_windows_client() -> bool {
+    use windows::core::{h, HSTRING};
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+
+    // Room for "Client" or "Server" and the terminator, in UTF-16 bytes.
+    let mut buffer = [0u8; 64];
+    let mut size = buffer.len() as u32;
+
+    // SAFETY: the buffer is owned here, its size is passed alongside it, and
+    // both key names are literals that outlive the call.
+    let code = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            h!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"),
+            h!("InstallationType"),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buffer.as_mut_ptr().cast()),
+            Some(&mut size),
+        )
+    };
+
+    if code.is_err() {
+        // A machine that will not say is treated as the ordinary case, because
+        // refusing to check on an unreadable registry would turn one unknown
+        // into a skipped test everywhere.
+        return true;
+    }
+
+    let wide: Vec<u16> = buffer[..size as usize]
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .take_while(|unit| *unit != 0)
+        .collect();
+
+    HSTRING::from_wide(&wide).to_string().eq_ignore_ascii_case("client")
+}
+
 #[cfg(windows)]
 fn read_theme(name: &str) -> Option<u32> {
     use windows::core::{w, PCWSTR};
