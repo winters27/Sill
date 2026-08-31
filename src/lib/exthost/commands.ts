@@ -131,7 +131,20 @@ export interface LaunchedCommand {
      */
     | "websearch"
     /** One emoji. Its own corpus, reached through its own command. */
-    | "emoji";
+    | "emoji"
+    /**
+     * A switch belonging to Windows.
+     *
+     * Missing here for as long as these have existed, which made a Windows
+     * switch a thing that could be shown and, as far as the types knew, never
+     * launched. The window read that as "there is more to show" and put up an
+     * extension screen with no extension in it, named after the switch.
+     *
+     * This union is a second copy of the one above it and they drifted. It is
+     * still two lists, and the next thing added to one has to be added to the
+     * other.
+     */
+    | "system";
 }
 
 export function searchCommands(query: string): Promise<RankedCommand[]> {

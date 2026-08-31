@@ -939,7 +939,12 @@
           launched.mode === "app" ||
           launched.mode === "exe" ||
           launched.mode === "setting" ||
-          launched.mode === "builtin"
+          launched.mode === "builtin" ||
+          // A Windows switch is done the moment it runs. Left out of this
+          // list it fell through to the command view below, so the launcher
+          // came back the next time showing an extension screen with no
+          // extension in it, titled after the switch.
+          launched.mode === "system"
         ) {
           await dismiss();
           return;

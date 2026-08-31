@@ -257,3 +257,23 @@ describe("whether an action can be run", () => {
     expect(isRunnable(entry({ tag: "Action.SomethingNobodyImplemented" }))).toBe(false);
   });
 });
+
+describe("what leaves the launcher on screen", () => {
+  /**
+   * The modes that finish the moment they run, and so should dismiss.
+   *
+   * A Windows switch was missing from this list and fell through to the
+   * extension command view, so the next summon came back showing an extension
+   * screen with no extension in it, titled after the switch.
+   */
+  const DONE_ON_RUN = ["app", "exe", "setting", "builtin", "system"];
+
+  test("a Windows switch is done the moment it runs, like an application", () => {
+    expect(DONE_ON_RUN).toContain("system");
+  });
+
+  /** An extension command is the one that genuinely has more to show. */
+  test("an extension command is not", () => {
+    expect(DONE_ON_RUN).not.toContain("view");
+  });
+});
