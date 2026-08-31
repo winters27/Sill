@@ -172,3 +172,36 @@ fn no_capability_names_a_window_that_does_not_exist() {
         "these capabilities name windows that are never created: {stray:?}"
     );
 }
+
+/// The windows an approval card can appear in are windows that exist.
+///
+/// `ai::approval::raise` opens the chat window when none of these is visible.
+/// A label naming no window is never found visible, which is silent in exactly
+/// the way this file is about: no error, nothing logged, and instead a second
+/// window arriving in front of whatever somebody was doing every single time
+/// the model asks to change something, while the card they already had was
+/// perfectly readable. `get_webview_window` on a name that does not exist
+/// simply answers `None`.
+#[test]
+fn every_window_an_approval_card_can_appear_in_exists() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    let conf = std::fs::read_to_string(root.join("tauri.conf.json")).expect("readable");
+    let conf: serde_json::Value = serde_json::from_str(&conf).expect("valid JSON");
+
+    let mut real = declared_windows(&conf);
+    real.extend(built_at_runtime(&root.join("src")));
+
+    let surfaces = sill_lib::ai::approval::SURFACES;
+    assert!(!surfaces.is_empty(), "a card would have nowhere to appear at all");
+
+    let missing: Vec<&&str> = surfaces
+        .iter()
+        .filter(|label| !real.contains(**label))
+        .collect();
+
+    assert!(
+        missing.is_empty(),
+        "an approval card is looking for windows that are never created: {missing:?}"
+    );
+}

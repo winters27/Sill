@@ -150,7 +150,7 @@ impl Pending {
 /// The chat window draws one whenever there is one. The launcher draws one
 /// only while it is showing a conversation, which is always true when the
 /// launcher itself asked the question and is why it counts here.
-const SURFACES: &[&str] = &["ask", "main"];
+pub const SURFACES: &[&str] = &["ask", "main"];
 
 /// Puts a card in front of somebody, and makes sure there is a front.
 ///
