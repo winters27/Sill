@@ -1,0 +1,247 @@
+//! Stopping to ask before something is changed.
+//!
+//! The turn genuinely pauses. The alternative was to run everything and offer
+//! an undo afterwards, and it is worse for the reason undo is always worse
+//! than not doing it: half the things worth asking about are things whose undo
+//! is a lie. A file moved across a volume was copied and deleted, a window
+//! closed took whatever was unsaved with it, and a program launched has
+//! already done whatever it does on startup.
+//!
+//! ## Why a channel rather than a flag
+//!
+//! The tool loop is an ordinary async function, and what it wants is to wait.
+//! A flag polled on a timer is the same wait written worse: it burns wakeups
+//! while nothing is happening, which is the thing this codebase measures, and
+//! it still has to decide how often to look.
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use serde::Serialize;
+use tokio::sync::oneshot;
+
+/// How long a card waits before it counts as refused.
+///
+/// Long enough to read a sentence and think, short enough that a conversation
+/// somebody walked away from does not hold a turn open until Sill closes.
+/// Refusing rather than allowing on a timeout is the only safe direction: the
+/// question was "may I change this", and silence is not a yes.
+const PATIENCE: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// What the window is told, when something needs deciding.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asking {
+    /// What the answer must name, so two cards cannot be confused.
+    pub id: String,
+    /// The action, as the panel would title it.
+    pub title: String,
+    /// What it is about to act on.
+    pub subject: String,
+    /// What it touches, in words somebody deciding would use.
+    pub touches: String,
+}
+
+/// How it was answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    Allowed,
+    Refused,
+    /// Nobody was there. Counted as refused, said differently.
+    Unanswered,
+}
+
+/// Every card waiting on somebody.
+#[derive(Default)]
+pub struct Pending {
+    waiting: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    /// Numbers the cards, so two in one turn are told apart.
+    asked: Mutex<u64>,
+}
+
+impl Pending {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A name for the next card.
+    pub fn next_id(&self) -> String {
+        let mut asked = match self.asked.lock() {
+            Ok(asked) => asked,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        *asked += 1;
+        format!("ask:{asked}")
+    }
+
+    /// Waits for one to be answered.
+    ///
+    /// The sender is dropped when the window answers, and dropping it without
+    /// sending is also an answer: a launcher that was dismissed mid-question
+    /// has refused, and waiting the full ninety seconds for a window nobody is
+    /// looking at helps nothing.
+    pub async fn wait(&self, id: &str) -> Answer {
+        self.wait_for(id, PATIENCE).await
+    }
+
+    /// The same wait, with the patience given rather than assumed.
+    ///
+    /// So that the one property worth proving can be proved in milliseconds:
+    /// nobody answering is not permission. A test that had to sit out the real
+    /// ninety seconds is a test nobody runs.
+    pub async fn wait_for(&self, id: &str, patience: std::time::Duration) -> Answer {
+        let (tx, rx) = oneshot::channel();
+
+        if let Ok(mut waiting) = self.waiting.lock() {
+            waiting.insert(id.to_string(), tx);
+        }
+
+        let answered = tokio::time::timeout(patience, rx).await;
+
+        // Whatever happened, it is not waiting any more. Left in the map it
+        // would be a sender nobody sends on and an id nobody answers.
+        if let Ok(mut waiting) = self.waiting.lock() {
+            waiting.remove(id);
+        }
+
+        match answered {
+            Ok(Ok(true)) => Answer::Allowed,
+            Ok(Ok(false)) => Answer::Refused,
+            // The sender went without a decision, which is the window closing.
+            Ok(Err(_)) => Answer::Refused,
+            Err(_) => Answer::Unanswered,
+        }
+    }
+
+    /// Answers one.
+    ///
+    /// An id nobody is waiting on is not a failure worth reporting: a card
+    /// answered twice, or answered after it timed out, is somebody pressing a
+    /// key at the moment it stopped mattering.
+    pub fn decide(&self, id: &str, allowed: bool) {
+        let Ok(mut waiting) = self.waiting.lock() else {
+            return;
+        };
+
+        if let Some(sender) = waiting.remove(id) {
+            let _ = sender.send(allowed);
+        }
+    }
+
+    /// Refuses everything outstanding.
+    ///
+    /// What leaving a conversation means. Without it a card answered by
+    /// nobody holds its turn open for a minute and a half, and the answer
+    /// arrives long after somebody moved on.
+    pub fn refuse_everything(&self) {
+        let Ok(mut waiting) = self.waiting.lock() else {
+            return;
+        };
+
+        for (_, sender) in waiting.drain() {
+            let _ = sender.send(false);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_card_that_is_allowed_says_so() {
+        let pending = std::sync::Arc::new(Pending::new());
+        let id = pending.next_id();
+
+        let answering = {
+            let pending = pending.clone();
+            let id = id.clone();
+            tokio::spawn(async move {
+                // Long enough that the waiter is registered before the answer.
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                pending.decide(&id, true);
+            })
+        };
+
+        assert_eq!(pending.wait(&id).await, Answer::Allowed);
+        answering.await.expect("the answer");
+    }
+
+    #[tokio::test]
+    async fn a_card_that_is_refused_says_so() {
+        let pending = std::sync::Arc::new(Pending::new());
+        let id = pending.next_id();
+
+        {
+            let pending = pending.clone();
+            let id = id.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                pending.decide(&id, false);
+            });
+        }
+
+        assert_eq!(pending.wait(&id).await, Answer::Refused);
+    }
+
+    /// Leaving a conversation answers everything it was waiting on, rather
+    /// than holding a turn open for a minute and a half.
+    #[tokio::test]
+    async fn leaving_refuses_what_was_outstanding() {
+        let pending = std::sync::Arc::new(Pending::new());
+        let id = pending.next_id();
+
+        {
+            let pending = pending.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                pending.refuse_everything();
+            });
+        }
+
+        assert_eq!(pending.wait(&id).await, Answer::Refused);
+    }
+
+    /// Two cards in one turn must not be confused, and the second must not be
+    /// answered by the first one's decision.
+    #[tokio::test]
+    async fn two_cards_are_told_apart() {
+        let pending = std::sync::Arc::new(Pending::new());
+        let first = pending.next_id();
+        let second = pending.next_id();
+        assert_ne!(first, second);
+
+        {
+            let pending = pending.clone();
+            let second = second.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                pending.decide(&second, true);
+            });
+        }
+
+        assert_eq!(pending.wait(&second).await, Answer::Allowed);
+    }
+
+    /// Somebody pressing a key at the moment a card stopped mattering.
+    #[test]
+    fn answering_one_nobody_is_waiting_on_is_not_a_problem() {
+        Pending::new().decide("ask:404", true);
+    }
+
+    /// Silence is not a yes. The direction of this default is the whole
+    /// safety property, which is why it is proved rather than assumed.
+    #[tokio::test]
+    async fn nobody_answering_is_not_permission() {
+        let pending = Pending::new();
+        let id = pending.next_id();
+
+        let answer = pending
+            .wait_for(&id, std::time::Duration::from_millis(20))
+            .await;
+
+        assert_eq!(answer, Answer::Unanswered);
+        assert_ne!(answer, Answer::Allowed);
+    }
+}

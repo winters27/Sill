@@ -32,6 +32,8 @@
     aiResume,
     aiConversations,
     aiForget,
+    aiDecide,
+    aiRefusePending,
     aiClear,
     aiReady,
     aiTranscript,
@@ -67,6 +69,7 @@
     undoAction,
     type ActionInfo,
     type AiConversation,
+    type AiAsking,
     type AiStep,
     type AiReady,
     type AiTurn,
@@ -905,6 +908,13 @@
      * in flight would interleave their answers into one paragraph.
      */
     if (mode === "ai") {
+      // A card is the only thing on screen worth answering, so Enter answers
+      // it rather than sending a question into a turn that is not listening.
+      if (asked) {
+        decide(true);
+        return;
+      }
+
       const next = query.trim();
       if (!next || asking) return;
 
@@ -1853,6 +1863,20 @@
   let steps = $state<AiStep[]>([]);
 
   /**
+   * What it wants to do, while nobody has said yes or no.
+   *
+   * At most one at a time, because the turn that raised it is paused: nothing
+   * else can be asked until this is answered.
+   */
+  let asked = $state<AiAsking | null>(null);
+
+  function decide(allowed: boolean) {
+    if (!asked) return;
+    void aiDecide(asked.id, allowed);
+    asked = null;
+  }
+
+  /**
    * What to ask, offered to an empty conversation.
    *
    * Not decoration. Nothing anywhere else says the model can read this
@@ -1898,6 +1922,8 @@
     system_state: "Checked how this machine is set",
     read_selection: "Read what was selected",
     read_screen: "Read what is on screen",
+    what_can_be_done: "Worked out what can be done to",
+    run_action: "Acted on",
   };
 
   function didWhat(step: AiStep): string {
@@ -2045,6 +2071,7 @@
     aiWhoNot = "";
     answering = "";
     steps = [];
+    asked = null;
     asking = true;
 
     // Shown immediately, so the question is on screen before the answer
@@ -2142,6 +2169,16 @@
      * stops drawing it.
      */
     if (mode === "ai") {
+      // Escape answers the card before it leaves. A question nobody replied to
+      // holds its turn open for a minute and a half, and the action would land
+      // long after somebody moved on.
+      if (asked) {
+        decide(false);
+        return;
+      }
+
+      void aiRefusePending();
+
       mode = "root";
       selected = 0;
       // The search this was opened from, so leaving lands where it started
@@ -2504,6 +2541,7 @@
     let ran: UnlistenFn | undefined;
     let said: UnlistenFn | undefined;
     let using: UnlistenFn | undefined;
+    let wants: UnlistenFn | undefined;
     let finished: UnlistenFn | undefined;
     let wentWrong: UnlistenFn | undefined;
     let disposed = false;
@@ -2628,6 +2666,16 @@
         steps = [...steps, payload];
       });
 
+      /*
+       * Something the model wants to do, waiting on a decision.
+       *
+       * The turn is genuinely paused behind this: it asked, the loop stopped,
+       * and nothing else happens until Enter or Escape answers it.
+       */
+      wants = await listen<AiAsking>("sill://ai-asking", ({ payload }) => {
+        asked = payload;
+      });
+
       finished = await listen("sill://ai-done", () => {
         if (answering) {
           conversation = [...conversation, { role: "assistant", text: answering, steps }];
@@ -2697,6 +2745,7 @@
       ran?.();
       said?.();
       using?.();
+      wants?.();
       finished?.();
       wentWrong?.();
     };
@@ -2959,9 +3008,34 @@
         </div>
       {/if}
 
+      {#if asked}
+        <!--
+          What it wants to do, and the two keys that answer.
+
+          Enter and Escape rather than buttons, because the field already has
+          focus and reaching for a mouse to answer a question about your own
+          files is the wrong shape. The keys are drawn anyway: a control that
+          exists only as a keystroke nobody was told about is a control nobody
+          uses.
+        -->
+        <div class="permission">
+          <p class="wants">{asked.title}</p>
+          <p class="subject">{asked.subject}</p>
+          <p class="touches">This {asked.touches}.</p>
+          <div class="answers">
+            <button class="allow" onclick={() => decide(true)}>
+              <span class="sill-key">Enter</span> Do it
+            </button>
+            <button class="refuse" onclick={() => decide(false)}>
+              <span class="sill-key">Esc</span> Not now
+            </button>
+          </div>
+        </div>
+      {/if}
+
       {#if answering}
         <article class="turn said md"><Markdown text={answering} /></article>
-      {:else if asking}
+      {:else if asking && !asked}
         <!-- Something between pressing Tab and the first token arriving,
              because a blank panel reads as nothing having happened. -->
         <p class="thinking">Thinking<span class="dots" aria-hidden="true"></span></p>
@@ -3334,6 +3408,91 @@
   }
 
   .opener:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  /*
+   * The card that asks before something changes.
+   *
+   * The one thing in a conversation that is not a message, so it is the one
+   * thing with a ground and an outline. It sits where the next answer would,
+   * because that is where somebody is already looking.
+   */
+  .permission {
+    align-self: flex-start;
+    max-width: 62ch;
+    width: 100%;
+    padding: var(--space-3);
+    border-radius: var(--radius-lg);
+    background: var(--fill-1);
+    box-shadow: inset 0 0 0 1px var(--accent-line);
+  }
+
+  .wants {
+    margin: 0;
+    color: var(--accent);
+    font-size: var(--text-meta);
+    font-weight: var(--weight-strong);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  /* What it acts on, which is the line somebody actually decides on. */
+  .subject {
+    margin: var(--space-1) 0 0;
+    color: var(--text-1);
+    font-size: var(--text-body);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .touches {
+    margin: var(--space-1) 0 var(--space-3);
+    color: var(--text-2);
+    font-size: var(--text-meta);
+  }
+
+  .answers {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .answers button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--fill-2);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-meta);
+    cursor: pointer;
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+  }
+
+  .answers button:hover {
+    color: var(--text-1);
+  }
+
+  /*
+   * The affirmative takes the accent, and only the affirmative.
+   *
+   * Two coloured buttons is two things shouting; a refusal that looks like a
+   * warning also reads as the dangerous one, which is backwards.
+   */
+  .allow {
+    background: var(--accent-fill);
+    color: var(--accent);
+  }
+
+  .allow:hover {
+    background: var(--accent-fill-strong);
+  }
+
+  .answers button:focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 1px var(--accent);
   }

@@ -575,7 +575,9 @@ fn subject_of(call: &super::openai::ToolCall) -> String {
         return String::new();
     };
 
-    for key in ["query", "path"] {
+    // In the order a person would read them. `target` is what an action acts
+    // on, and it is the only one of these that is worth saying twice.
+    for key in ["query", "path", "target"] {
         if let Some(found) = arguments.get(key).and_then(|value| value.as_str()) {
             if !found.trim().is_empty() {
                 return found.trim().to_string();

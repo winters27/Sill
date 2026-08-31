@@ -156,6 +156,26 @@ pub(crate) async fn ai_follow_up(
     answer
 }
 
+/// Answers a card that asked before changing something.
+///
+/// Its own command rather than a field on the next question, because the turn
+/// it answers is sitting waiting for it: the model asked, the loop paused, and
+/// nothing else will happen until this arrives or the wait runs out.
+#[tauri::command]
+pub(crate) fn ai_decide(pending: State<'_, crate::ai::approval::Pending>, id: String, allowed: bool) {
+    pending.decide(&id, allowed);
+}
+
+/// Refuses everything still waiting.
+///
+/// What leaving a conversation means. Without it a card nobody answered holds
+/// its turn open for a minute and a half, and the action lands long after
+/// somebody moved on to something else.
+#[tauri::command]
+pub(crate) fn ai_refuse_pending(pending: State<'_, crate::ai::approval::Pending>) {
+    pending.refuse_everything();
+}
+
 /// Every conversation, newest first.
 #[tauri::command]
 pub(crate) fn ai_conversations(chat: State<'_, Chat>) -> Vec<Summary> {

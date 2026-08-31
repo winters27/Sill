@@ -1,12 +1,15 @@
-//! What the model can look at.
+//! What the model can look at, and what it can do.
 //!
-//! Every tool here reads. Nothing in this file changes a file, launches a
-//! program, types into a window or touches the machine, and that is a property
-//! of the set rather than of each one: a read that goes wrong wastes a turn,
-//! and a write that goes wrong is somebody's afternoon. Doing things comes
-//! through the action registry, which already declares a capability per action
-//! and already knows how to undo one, and it arrives with the card that asks
-//! first.
+//! Nine of these read. The last one acts, and it acts by reaching the same
+//! action registry the action panel reaches, so an action written for a person
+//! is available unchanged, gated by the capability it already declares and
+//! undone by the descriptor it already returns. There is no second
+//! implementation and therefore no second set of rules.
+//!
+//! Anything that writes a file, launches a program, types into a window,
+//! changes the machine or reaches the network stops and asks first. That is
+//! decided by the capability rather than by a list kept beside it, so it holds
+//! for every action written after this one without anybody remembering.
 //!
 //! ## Why these and not thirty
 //!
@@ -152,6 +155,60 @@ pub const CATALOGUE: &[Tool] = &[
                       keeps its text to itself.",
         schema: || json!({ "type": "object", "properties": {} }),
     },
+    Tool {
+        name: "what_can_be_done",
+        description: "What actions are available for a thing, given its path or what \
+                      kind of thing it is. Ask this before run_action when you are not \
+                      sure an action applies. Answers with action ids and whether each \
+                      one stops to ask permission first.",
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "A full path, or the thing itself for text."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Only when the target is not a path on disk. One \
+                                        of: text, systemControl, window, url.",
+                        "enum": ["text", "systemControl", "window", "url", "file", "folder"]
+                    }
+                },
+                "required": ["target"]
+            })
+        },
+    },
+    Tool {
+        name: "run_action",
+        description: "Do something to a file, a folder, a piece of text, a window or one \
+                      of this machine's switches. Anything that changes something stops \
+                      and asks the person first, and answers with what they decided, so \
+                      call it and report what happened rather than asking them yourself. \
+                      Use what_can_be_done first if you are unsure which action applies.",
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "The action id, from what_can_be_done."
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "A full path, or the thing itself for text."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Only when the target is not a path on disk.",
+                        "enum": ["text", "systemControl", "window", "url", "file", "folder"]
+                    }
+                },
+                "required": ["action", "target"]
+            })
+        },
+    },
 ];
 
 /// The tool list, in the shape a request carries it.
@@ -209,6 +266,10 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value) -> Value {
         "system_state" => system_state(),
         "read_selection" => read_selection(app),
         "read_screen" => read_screen(),
+        "what_can_be_done" => what_can_be_done(app, &text("target"), &text("kind")),
+        "run_action" => {
+            run_action(app, &text("action"), &text("target"), &text("kind")).await
+        }
         other => json!({ "error": format!("Sill has no tool called {other}.") }),
     }
 }
@@ -413,6 +474,128 @@ fn read_screen() -> Value {
         }
         Ok(text) => json!({ "text": text.chars().take(MOST_BYTES).collect::<String>() }),
         Err(why) => json!({ "error": format!("Could not read the screen: {why}") }),
+    }
+}
+
+/// What can be done to a thing, and which of it asks first.
+fn what_can_be_done(app: &AppHandle, target: &str, kind: &str) -> Value {
+    let object = match super::acting::object_for(target, Some(kind)) {
+        Ok(object) => object,
+        Err(why) => return json!({ "error": why }),
+    };
+
+    let registry = app.state::<crate::action::ActionRegistry>();
+
+    let actions: Vec<Value> = registry
+        .for_kind(object.kind)
+        .into_iter()
+        .map(|action| {
+            json!({
+                "action": action.id(),
+                "name": action.title(),
+                "asks_first": super::acting::needs_asking(action.capabilities()),
+                "touches": super::acting::what_it_touches(action.capabilities()),
+            })
+        })
+        .collect();
+
+    json!({ "kind": object.kind, "found": actions.len(), "actions": actions })
+}
+
+/// Runs one, stopping to ask when it changes something.
+///
+/// The answer says what happened either way, including when somebody said no.
+/// A refusal is information the turn should carry: the model can say what it
+/// did not do rather than claiming it did, and it can offer something else.
+async fn run_action(app: &AppHandle, action: &str, target: &str, kind: &str) -> Value {
+    if action.is_empty() {
+        return json!({ "error": "Name an action. what_can_be_done lists them." });
+    }
+
+    let object = match super::acting::object_for(target, Some(kind)) {
+        Ok(object) => object,
+        Err(why) => return json!({ "error": why }),
+    };
+
+    // Looked up and copied out before anything awaits. The registry is managed
+    // state borrowed from the app, and holding that borrow across an await is
+    // what stops this compiling.
+    let found = {
+        let registry = app.state::<crate::action::ActionRegistry>();
+        registry.get(action).map(|found| {
+            (
+                found.title(),
+                found.capabilities(),
+                found.accepts(object.kind),
+            )
+        })
+    };
+
+    let Some((title, capabilities, accepts)) = found else {
+        return json!({ "error": format!("Sill has no action called {action}.") });
+    };
+
+    if !accepts {
+        return json!({
+            "error": format!(
+                "{title} cannot be done to that. Ask what_can_be_done for what applies."
+            )
+        });
+    }
+
+    if super::acting::needs_asking(capabilities) {
+        let pending = app.state::<super::approval::Pending>();
+        let id = pending.next_id();
+
+        let _ = tauri::Emitter::emit(
+            app,
+            "sill://ai-asking",
+            super::approval::Asking {
+                id: id.clone(),
+                title: title.to_string(),
+                subject: object.title.clone(),
+                touches: super::acting::what_it_touches(capabilities).to_string(),
+            },
+        );
+
+        match pending.wait(&id).await {
+            super::approval::Answer::Allowed => {}
+            super::approval::Answer::Refused => {
+                return json!({
+                    "done": false,
+                    "refused": true,
+                    "note": format!("They said no to {title}. Do not try it again."),
+                })
+            }
+            super::approval::Answer::Unanswered => {
+                return json!({
+                    "done": false,
+                    "refused": true,
+                    "note": format!("Nobody answered about {title}, so nothing was done."),
+                })
+            }
+        }
+    }
+
+    let ctx = crate::action::ActionCtx { app: app.clone() };
+
+    // Borrowed again rather than held across the wait above, for the same
+    // reason it was copied out of in the first place.
+    let outcome = {
+        let registry = app.state::<crate::action::ActionRegistry>();
+        let Some(found) = registry.get(action) else {
+            return json!({ "error": format!("Sill has no action called {action}.") });
+        };
+        found.run(&ctx, &object).await
+    };
+
+    match outcome {
+        Ok(outcome) => json!({
+            "done": true,
+            "said": outcome.message,
+            "undoable": outcome.undo.is_some(),
+        }),
+        Err(why) => json!({ "done": false, "error": why }),
     }
 }
 

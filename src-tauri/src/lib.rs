@@ -861,6 +861,7 @@ pub fn run() {
         .manage(timing::Timings::new())
         .manage(previews::Previews::new())
         .manage(ai::chat::Chat::new())
+        .manage(ai::approval::Pending::new())
         .manage(commands::system::Marking::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
@@ -1131,6 +1132,8 @@ pub fn run() {
             commands::ai::ai_ask,
             commands::ai::ai_follow_up,
             commands::ai::ai_new,
+            commands::ai::ai_decide,
+            commands::ai::ai_refuse_pending,
             commands::ai::ai_conversations,
             commands::ai::ai_forget,
             commands::ai::ai_forget_all,

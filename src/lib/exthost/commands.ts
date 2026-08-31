@@ -329,6 +329,32 @@ export function aiResume(id: string): Promise<AiTurn[]> {
   return invoke<AiTurn[]>("ai_resume", { id });
 }
 
+/** Something the model wants to do, waiting on a decision. */
+export interface AiAsking {
+  id: string;
+  /** The action, as the panel would title it. */
+  title: string;
+  /** What it is about to act on. */
+  subject: string;
+  /** What it touches, in words somebody deciding would use. */
+  touches: string;
+}
+
+/**
+ * Answers a card.
+ *
+ * The turn is sitting waiting for this: the model asked, the loop paused, and
+ * nothing else happens until it arrives.
+ */
+export function aiDecide(id: string, allowed: boolean): Promise<void> {
+  return invoke<void>("ai_decide", { id, allowed });
+}
+
+/** Refuses everything still waiting, which is what leaving means. */
+export function aiRefusePending(): Promise<void> {
+  return invoke<void>("ai_refuse_pending");
+}
+
 /** One tool the model reached for, as the window draws it. */
 export interface AiStep {
   tool: string;
