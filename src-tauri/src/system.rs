@@ -528,12 +528,33 @@ pub fn live() -> Live {
     state
 }
 
+/// Whether this row is a switch at all, by what it is rather than by its state.
+///
+/// Two different questions live close together here and mixing them up costs
+/// an afternoon. **This one is about shape**: a volume nudge and the lock
+/// screen are not switches whatever the machine is doing. [`toggle_state`] is
+/// about the moment: it answers `None` for those, and also for a radio the
+/// machine does not have, because there is no state to report.
+///
+/// Anything that needs to know whether a row draws a control, without a live
+/// reading in hand, asks this.
+pub fn is_switch(id: &str) -> bool {
+    matches!(id, "system.mute" | "system.theme")
+        || id.starts_with(crate::actions::RADIO)
+        || id.starts_with(crate::actions::AUDIO_OUTPUT)
+}
+
 /// Which way a switch is set, given its id.
 ///
 /// `None` for a system row that is not a switch. Volume up is a nudge and lock
 /// is a door: neither has an on and an off, and drawing one as a control that
 /// is currently "off" would be a lie about what pressing it does.
 pub fn toggle_state(id: &str, live: &Live) -> Option<bool> {
+    // Asked first, so the two answers cannot drift about what a switch is.
+    if !is_switch(id) {
+        return None;
+    }
+
     match id {
         "system.mute" => Some(live.muted),
         "system.theme" => Some(live.dark),

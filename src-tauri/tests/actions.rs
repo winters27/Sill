@@ -525,3 +525,90 @@ fn nothing_else_is_offered_a_system_switch_action() {
         );
     }
 }
+
+/// A program's own volume is a kind of thing with a full set of actions.
+///
+/// Enter mutes and unmutes, which is what a mixer gets opened for, and the
+/// rest sit in the panel. A kind with one action and four things somebody
+/// wants to do would push the other four into the window, where they would be
+/// a second implementation of the same thing.
+mod a_program_has_more_than_one_volume_action {
+    use super::*;
+
+    #[test]
+    fn muting_is_what_enter_does() {
+        let registry = builtins();
+        let primary = registry
+            .primary(ObjectKind::AudioSession)
+            .expect("something on Enter");
+
+        assert_eq!(primary.id(), "sill.audio.session.mute");
+    }
+
+    #[test]
+    fn the_panel_offers_a_way_to_move_the_slider() {
+        let registry = builtins();
+        let offered: Vec<&str> = registry
+            .for_kind(ObjectKind::AudioSession)
+            .into_iter()
+            .map(|action| action.id())
+            .collect();
+
+        for wanted in [
+            "sill.audio.session.louder",
+            "sill.audio.session.quieter",
+            "sill.audio.session.half",
+            "sill.audio.session.full",
+        ] {
+            assert!(offered.contains(&wanted), "{wanted} is not offered: {offered:?}");
+        }
+    }
+
+    /// Changing how loud one program is changes the machine, not Sill.
+    ///
+    /// Only the volume actions. "Copy Name" is offered here too and should be:
+    /// it is offered on everything that has a name, and copying one touches
+    /// the clipboard rather than the machine.
+    #[test]
+    fn every_volume_action_says_it_touches_the_system() {
+        let registry = builtins();
+
+        let ours = registry
+            .for_kind(ObjectKind::AudioSession)
+            .into_iter()
+            .filter(|action| action.id().starts_with("sill.audio.session."));
+
+        let mut checked = 0;
+        for action in ours {
+            assert!(
+                action.capabilities().contains(&Capability::SystemControl),
+                "{} does not declare that it changes the machine",
+                action.id(),
+            );
+            checked += 1;
+        }
+
+        assert_eq!(checked, 5, "a volume action was added or lost");
+    }
+
+    /// A volume action on a file or a window would be nonsense.
+    #[test]
+    fn nothing_else_is_offered_one() {
+        let registry = builtins();
+
+        for kind in ObjectKind::ALL {
+            if *kind == ObjectKind::AudioSession {
+                continue;
+            }
+
+            for action in registry.for_kind(*kind) {
+                assert!(
+                    !action.id().starts_with("sill.audio.session."),
+                    "{:?} is offered {}",
+                    kind,
+                    action.id(),
+                );
+            }
+        }
+    }
+}

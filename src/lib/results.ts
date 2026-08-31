@@ -49,6 +49,21 @@ export function merged(into: RankedCommand[], extra: RankedCommand[]): RankedCom
  * Naming a collection or an alias is typing a name rather than filtering, so
  * there is nothing to arrow through either.
  */
+/**
+ * The modes that are a list of rows you arrow through and filter by typing.
+ *
+ * One list because this test was written out four times, and the fourth copy
+ * is where a new mode gets forgotten: the arrow keys stop working, or the
+ * search stops re-running, in one place and not the others. Two hand-kept
+ * copies of the mode union have already drifted in this codebase.
+ */
+export const LIST_MODES = ["root", "switcher", "emoji", "appVolume"] as const;
+
+/** Whether this mode draws a list of rows at all. */
+export function isListMode(mode: string): boolean {
+  return (LIST_MODES as readonly string[]).includes(mode);
+}
+
 export function isBrowsing(mode: string, results: number): boolean {
-  return (mode === "root" || mode === "switcher" || mode === "emoji") && results > 0;
+  return isListMode(mode) && results > 0;
 }

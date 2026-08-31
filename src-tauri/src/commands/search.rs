@@ -112,6 +112,61 @@ pub(crate) async fn system_states(
     ))
 }
 
+/// The programs playing sound, matching a query.
+///
+/// Its own command for the reason the window switcher has one: a different
+/// corpus with a different lifetime. The index is scanned once and cached; a
+/// program has a volume of its own only while it is playing something, so this
+/// is enumerated when it is asked for.
+///
+/// Not part of the root list, and that is a measurement rather than a taste.
+/// Enumerating costs about three milliseconds, and the root list runs on every
+/// keystroke whether or not anything about sound was typed. It sits behind its
+/// own row instead, so it costs nothing until somebody wants it.
+#[tauri::command]
+pub(crate) async fn search_app_volume(
+    state: State<'_, RegistryState>,
+    query: String,
+) -> Result<Vec<registry::SearchResult>, String> {
+    // Blocking: a COM apartment and an enumeration of the audio engine.
+    let sessions = tokio::task::spawn_blocking(crate::app_volume::sessions)
+        .await
+        .unwrap_or_default();
+
+    let records: Vec<registry::CommandRecord> = sessions
+        .into_iter()
+        .map(|session| registry::audio_session_record(&session))
+        .collect();
+
+    // An empty query is the whole list, in the order the audio engine gave
+    // them, which puts what started playing most recently first.
+    if query.trim().is_empty() {
+        return Ok(records
+            .into_iter()
+            .map(registry::SearchResult::from_record)
+            .collect());
+    }
+
+    let registry = state.inner.lock().await;
+
+    let results = registry::search_excluding(
+        records.iter(),
+        &query,
+        &registry.frecency,
+        // A session is not in the index, so nothing can have been given a name
+        // for one: an alias points at a command id that survives a restart.
+        &registry::Aliases::default(),
+        now_seconds(),
+        registry::SEARCH_LIMIT,
+        // A program that is playing is a fact rather than a preference.
+        // Hiding it would mean not being able to turn down the thing making
+        // the noise.
+        registry::Excluded::none(),
+    );
+
+    Ok(results.into_iter().map(Into::into).collect())
+}
+
 /// The open windows matching a query.
 ///
 /// Separate from `search_commands` for the reason file search is separate: it

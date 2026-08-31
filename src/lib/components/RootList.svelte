@@ -282,6 +282,8 @@
         return "Web Search";
       case "window":
         return "Open Window";
+      case "audio-session":
+        return "App Volume";
       case "emoji":
         // The group, which is the only useful thing to say about one.
         return command.extensionTitle;
@@ -337,30 +339,31 @@
   /**
    * The faint middle label.
    *
-   * An extension is worth naming. A settings page shows the section it lives
-   * under, which is what tells "Proxy" under Network apart from anything else
-   * with that word in it. Applications need neither, since the category
-   * already shows on the right.
+   * A row shows what it carries, and the few that do not are named here.
+   *
+   * **This was the other way round and it was wrong.** It listed the modes
+   * that may show a subtitle, so every mode added afterwards silently lost
+   * one: a Windows switch, an open window and a program's own volume all set
+   * a subtitle and none of them drew it. The same shape as `hasIcon` before
+   * it, which was a mode allowlist that threw away every icon outside four
+   * modes and made them draw lettered tiles. A list of exceptions is honest
+   * about what it is; a list of permissions pretends to be complete.
    */
   function sourceOf(command: RankedCommand): string {
-    // The question, beside the answer.
-    if (command.mode === "answer") return command.subtitle;
-    // The keyword, which is how it is used when the launcher is closed.
-    if (command.mode === "snippet") return command.subtitle;
-    // Which panel it lives in, so a result says where it came from.
-    if (command.mode === "sill-setting") return command.subtitle;
-    if (command.mode === "view" || command.mode === "no-view") return command.extensionTitle;
-    if (command.mode === "setting") return command.subtitle;
-    // A file's path is what tells two files with the same name apart, and a
-    // command-line tool's is the only thing that does: a machine with three
-    // Pythons on PATH shows three identical rows without it.
-    if (command.mode === "file") return command.subtitle;
-    if (command.mode === "exe") return command.subtitle;
-    if (command.mode === "builtin") return command.subtitle;
-    // Where the page actually goes, which is what tells two pages of the same
-    // name apart and what says whether it is the one you meant.
-    if (command.mode === "url") return command.subtitle;
-    return "";
+    // An extension is worth naming, and it is not in the subtitle.
+    if (command.mode === "view" || command.mode === "no-view") {
+      return command.extensionTitle;
+    }
+
+    // The subtitle is the character itself, drawn as the mark on the left.
+    // Writing it here as well would put the emoji on the row twice.
+    if (command.mode === "emoji") return "";
+
+    // The category on the right already says "Applications", and the path
+    // underneath every one of them is noise rather than information.
+    if (command.mode === "app") return "";
+
+    return command.subtitle;
   }
 </script>
 

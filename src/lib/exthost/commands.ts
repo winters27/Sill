@@ -66,7 +66,9 @@ export interface RankedCommand {
      */
     | "file-setup"
     /** One emoji. Its own corpus, reached through its own command. */
-    | "emoji";
+    | "emoji"
+    /** One program's own volume, while it is playing something. */
+    | "audio-session";
   entrypoint: string;
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;
@@ -140,6 +142,8 @@ export interface LaunchedCommand {
     | "websearch"
     /** One emoji. Its own corpus, reached through its own command. */
     | "emoji"
+    /** One program's own volume, while it is playing something. */
+    | "audio-session"
     /**
      * A switch belonging to Windows.
      *
@@ -175,6 +179,17 @@ export function searchCommands(query: string): Promise<RankedCommand[]> {
  * the audio outputs are a single choice spread across several rows. Answers in
  * the order it was asked, with `null` for anything that is not a switch.
  */
+/**
+ * Every program playing something right now, with its own volume.
+ *
+ * Its own call rather than part of the root search, because enumerating the
+ * audio sessions costs about three milliseconds and the root list runs on
+ * every keystroke whether or not anything about sound was typed.
+ */
+export function searchAppVolume(query: string): Promise<RankedCommand[]> {
+  return invoke<RankedCommand[]>("search_app_volume", { query });
+}
+
 export function systemStates(ids: string[]): Promise<(boolean | null)[]> {
   return invoke<(boolean | null)[]>("system_states", { ids });
 }

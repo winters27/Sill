@@ -70,14 +70,28 @@ pub enum ObjectKind {
     /// wrote and may carry a hole to fill in. This is an address that already
     /// exists somewhere else, such as a page a browser remembers.
     Url,
+    /// One program's own volume, as Windows keeps it.
+    ///
+    /// Like a [`ObjectKind::Window`] and for the same reason: it is not in the
+    /// index and never will be. A program has a session only while it is
+    /// playing something, so the list is enumerated at the moment it is asked
+    /// for and a row's identity stops meaning anything when the program goes
+    /// quiet.
+    AudioSession,
 }
 
 impl ObjectKind {
     /// Every kind there is.
     ///
-    /// Written out rather than derived, so adding a variant fails to compile
-    /// here until someone has thought about whether the tests that walk this
-    /// list still hold for it.
+    /// The invariant tests walk this, so a kind missing from it is a kind
+    /// nothing checks. **Three were missing**: a Windows switch, a web search
+    /// and a web address were in the enum and in none of the tests that ask
+    /// whether two actions claim Enter or whether every action declares what
+    /// it touches.
+    ///
+    /// The comment here used to claim that adding a variant fails to compile
+    /// until it is listed. It did not, because a list is not a match. The test
+    /// beside this one is what makes that true now.
     pub const ALL: &'static [Self] = &[
         Self::Application,
         Self::File,
@@ -86,6 +100,7 @@ impl ObjectKind {
         Self::SystemSetting,
         Self::Setting,
         Self::Builtin,
+        Self::SystemControl,
         Self::Snippet,
         Self::Quicklink,
         Self::Answer,
@@ -93,6 +108,9 @@ impl ObjectKind {
         Self::Text,
         Self::Emoji,
         Self::Window,
+        Self::Search,
+        Self::Url,
+        Self::AudioSession,
     ];
 
     /// The kind behind an index entry's `mode`.
@@ -130,6 +148,7 @@ impl ObjectKind {
             "text" => Self::Text,
             "emoji" => Self::Emoji,
             "window" => Self::Window,
+            "audio-session" => Self::AudioSession,
             _ => return None,
         })
     }
@@ -346,5 +365,48 @@ mod tests {
         assert_eq!(object.kind, ObjectKind::ExtensionCommand);
         assert_eq!(object.mode, "no-view");
         assert_eq!(object.target, "C:/build/cmd.js");
+    }
+
+    /// `ALL` is what the invariant tests walk, so it has to hold every kind.
+    ///
+    /// The match below is exhaustive, which is the whole mechanism: adding a
+    /// variant stops this compiling until somebody has decided where it goes.
+    /// The doc on `ALL` used to claim that happened already. It did not, a
+    /// list is not a match, and three kinds sat in the enum unchecked by any
+    /// invariant for as long as they had existed.
+    #[test]
+    fn every_kind_is_in_the_list_the_invariants_walk() {
+        fn place(kind: ObjectKind) -> usize {
+            match kind {
+                ObjectKind::Application => 0,
+                ObjectKind::File => 1,
+                ObjectKind::Folder => 2,
+                ObjectKind::ExtensionCommand => 3,
+                ObjectKind::SystemSetting => 4,
+                ObjectKind::Setting => 5,
+                ObjectKind::Builtin => 6,
+                ObjectKind::SystemControl => 7,
+                ObjectKind::Snippet => 8,
+                ObjectKind::Quicklink => 9,
+                ObjectKind::Answer => 10,
+                ObjectKind::ClipboardEntry => 11,
+                ObjectKind::Text => 12,
+                ObjectKind::Emoji => 13,
+                ObjectKind::Window => 14,
+                ObjectKind::Search => 15,
+                ObjectKind::Url => 16,
+                ObjectKind::AudioSession => 17,
+            }
+        }
+
+        assert_eq!(
+            ObjectKind::ALL.len(),
+            18,
+            "a kind was added or removed without `ALL` being told",
+        );
+
+        for (at, kind) in ObjectKind::ALL.iter().enumerate() {
+            assert_eq!(place(*kind), at, "{kind:?} is not where `ALL` puts it");
+        }
     }
 }

@@ -2480,7 +2480,27 @@ fn a_system_switch_says_what_it_does_rather_than_what_the_machine_is_doing() {
 
     for switch in switches {
         assert!(!switch.title.is_empty(), "{} has no title", switch.id);
-        assert!(!switch.subtitle.is_empty(), "{} says nothing", switch.id);
+
+        /*
+         * A row says something, unless the switch on it already does.
+         *
+         * This asked every switch for a subtitle, and it was written before
+         * the rows drew a control. A radio's said "It is on" and an output's
+         * said "Sound is going here", which is exactly what the switch beside
+         * them now says: the same fact twice, and the second copy goes stale
+         * on its own if anything ever reads one and not the other.
+         *
+         * Asked of `is_switch`, which is the one function that decides what
+         * counts as a switch, so this and the row cannot disagree. Not of
+         * `toggle_state`: that answers with the machine's current reading, and
+         * a fixture has no radios in it, so every radio came back "not a
+         * switch" and this asked them for a subtitle after all.
+         */
+        let drawn_as_a_switch = sill_lib::system::is_switch(&switch.entrypoint);
+
+        if !drawn_as_a_switch {
+            assert!(!switch.subtitle.is_empty(), "{} says nothing", switch.id);
+        }
         // "Unmute" and "Switch to Light Mode" both describe a state.
         assert!(
             !switch.title.starts_with("Unmute") && !switch.title.contains("Switch to"),
@@ -2697,5 +2717,79 @@ mod a_switch_answers_to_its_own_name {
 
         let bluetooth = best(&commands, "bluetooth").unwrap_or_default();
         assert!(bluetooth.contains("Bluetooth"), "\"bluetooth\" gave {bluetooth:?}");
+    }
+}
+
+/// A program's volume, shaped into a row.
+///
+/// The switch on one of these means **audible**, not muted, and that is a rule
+/// rather than an inconsistency: the switch answers whatever the row's title
+/// names. The system row is called "Toggle Mute", so its switch says whether
+/// mute is on. This row is called by the program's name, so its switch says
+/// whether the program is.
+mod a_program_volume_row {
+    use super::*;
+    use sill_lib::app_volume::Session;
+
+    fn session(name: &str, volume: f32, muted: bool) -> Session {
+        Session {
+            id: r"{0.0.0}.{abc}|C:\x\thing.exe%b|1%b900".to_string(),
+            name: name.to_string(),
+            volume,
+            muted,
+            path: r"C:\x\thing.exe".to_string(),
+        }
+    }
+
+    #[test]
+    fn the_switch_says_whether_you_can_hear_it() {
+        let audible = registry::audio_session_record(&session("Thing", 0.6, false));
+        assert_eq!(audible.toggle, Some(true));
+
+        let silent = registry::audio_session_record(&session("Thing", 0.6, true));
+        assert_eq!(silent.toggle, Some(false));
+    }
+
+    /// How loud, which is the one thing the switch cannot say.
+    #[test]
+    fn the_subtitle_carries_the_level() {
+        let row = registry::audio_session_record(&session("Thing", 0.6, false));
+        assert_eq!(row.subtitle, "60%");
+    }
+
+    /// Muting keeps the level, so unmuting puts it back where it was. The row
+    /// says so rather than reading as though it had been turned down to zero.
+    #[test]
+    fn a_muted_row_still_says_where_the_slider_is() {
+        let row = registry::audio_session_record(&session("Thing", 0.3, true));
+        assert_eq!(row.subtitle, "Muted, was at 30%");
+    }
+
+    /// The row wears the mark of the program behind it, like every other row.
+    #[test]
+    fn the_row_wears_the_programs_own_mark() {
+        let row = registry::audio_session_record(&session("Thing", 1.0, false));
+        assert_eq!(row.icon.as_deref(), Some(r"C:\x\thing.exe"));
+    }
+
+    /// System sounds have no program, so there is no mark to take.
+    #[test]
+    fn nothing_pretends_to_have_an_icon_it_does_not() {
+        let mut without = session("System Sounds", 1.0, false);
+        without.path = String::new();
+
+        assert_eq!(registry::audio_session_record(&without).icon, None);
+    }
+
+    /// The row has to be able to find the session again, and only Windows'
+    /// own identifier does: a name is shared and a process number is not the
+    /// same one tomorrow.
+    #[test]
+    fn the_row_carries_the_identifier_that_finds_it_again() {
+        let one = session("Thing", 1.0, false);
+        let row = registry::audio_session_record(&one);
+
+        assert_eq!(row.entrypoint, one.id);
+        assert!(row.id.starts_with("audio-session:"));
     }
 }

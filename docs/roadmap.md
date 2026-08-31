@@ -48,7 +48,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.2 | Screenshot | **Done.** Drag an area or take every screen, with a markup editor: box, arrow, ellipse, pen, highlight, hide, text |
 | P2.3 | OCR on demand | **Done.** WinRT recognition, ported from AuraKey. Reads a picture on the clipboard, never automatically. Measured: 35 ms on a 640x160 capture |
 | P2.4 | Read aloud | Not started |
-| P2.5 | System control | **Done, except per-app volume.** Volume, mute, dark mode, lock, audio output switching, Wi-Fi and Bluetooth, all of them switches you press in the list without leaving it. Do not disturb and night light have no public way to set them, see below |
+| P2.5 | System control | **Done.** Volume, mute, dark mode, lock, audio output switching, Wi-Fi and Bluetooth, all of them switches you press in the list without leaving it, plus a program's own volume behind its own row. Do not disturb and night light have no public way to set them, see below |
 | P2.6 | Process and resource view | Not started |
 | P2.7 | Terminal execution, capability gated | Not started |
 | P2.8 | Scripting | Not started |
@@ -125,6 +125,28 @@ curve, so a settings page opened once earlier today scores 77 and a bonus of a
 dozen points is invisible next to it. A page somebody opens repeatedly still
 wins, because that is a preference worth honouring. The empty query is exempt,
 or twelve switches would climb a list ordered by what you reach for.
+
+### One program's volume, on its own
+
+Windows has kept a separate volume per program since Vista and the only way to
+reach it is the volume mixer. Turning one noisy tab down without turning the
+music down is a thing people want and nobody has a shortcut for.
+
+**Its own row rather than rows in the root list, and that is a measurement.**
+Enumerating the audio sessions costs about three milliseconds, and the root
+list runs on every keystroke whether or not anything about sound was typed. It
+sits behind an "App Volume" row instead, so it costs nothing until somebody
+wants it, and the list it opens is filtered by typing like every other list.
+
+Enter mutes and unmutes, in place, the way a Windows switch does. The rest are
+in the action panel: louder, quieter, half, full. All five go through the
+action registry, so the panel and the Enter key are one implementation rather
+than two opinions.
+
+**The switch answers the row's title.** The system row is called "Toggle Mute",
+so its switch says whether mute is on. A program's row is called by the
+program's name, so its switch says whether the program is audible. The
+percentage underneath says the one thing the switch cannot.
 
 ## Built since the audit, and not on it: web search
 

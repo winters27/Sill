@@ -7,7 +7,7 @@
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
   import RootList from "$lib/components/RootList.svelte";
-  import { LISTBOX, isBrowsing, merged, optionId } from "$lib/results";
+  import { LISTBOX, isBrowsing, isListMode, merged, optionId } from "$lib/results";
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import ClipboardView from "$lib/components/ClipboardView.svelte";
@@ -23,6 +23,7 @@
     activateHandler,
     dismiss,
     launchCommand,
+    searchAppVolume,
     systemStates,
     searchCommands,
     unloadExtension,
@@ -79,6 +80,15 @@
     | "collection"
     | "alias"
     | "emoji"
+    /**
+     * Every program that is playing something, with its own volume.
+     *
+     * Its own mode rather than rows in the root list, and that is a
+     * measurement: enumerating the audio sessions costs about three
+     * milliseconds and the root list runs on every keystroke, whether or not
+     * anything about sound was typed.
+     */
+    | "appVolume"
   >("root");
   /**
    * The quicklink waiting for something to be typed into it.
@@ -221,7 +231,7 @@
   const browsing = $derived(isBrowsing(mode, commands.length));
 
   const count = $derived.by(() => {
-    if (mode === "root" || mode === "switcher" || mode === "emoji") {
+    if (isListMode(mode)) {
       return commands.length;
     }
     // The field is a name, not a filter, so there is nothing to arrow through.
@@ -373,14 +383,30 @@
     // Whatever Rust says can be done to the selected result. This used to be
     // two entries written here by hand, which meant the panel and the Enter
     // key were two separate opinions about what a result supports.
-    if (mode === "root") {
+    if (mode === "root" || mode === "appVolume") {
       const chosen = commands[selected];
 
       // Naming a result is offered on the result, not buried in settings.
       // An alias nobody can reach is one nobody sets, and the launcher is
       // where you are when you notice you want one.
+      /*
+       * Only where a name would still mean something tomorrow.
+       *
+       * An alias points at a command id, so it is only worth offering on a
+       * row whose id survives a restart. A calculator answer exists for as
+       * long as it is on screen, a window's id is a handle that stops being
+       * valid when it closes, and a program's audio session carries the
+       * process number in it, so naming one would be naming this morning's
+       * copy of that program.
+       */
+      const namable =
+        chosen &&
+        chosen.mode !== "answer" &&
+        chosen.mode !== "window" &&
+        chosen.mode !== "audio-session";
+
       const naming =
-        chosen && chosen.mode !== "answer" && chosen.mode !== "window"
+        namable
           ? [
               {
                 id: -40,
@@ -478,7 +504,8 @@
   let lastUndo = $state<UndoToken | null>(null);
 
   $effect(() => {
-    const command = mode === "root" ? commands[selected] : undefined;
+    const command =
+      mode === "root" || mode === "appVolume" ? commands[selected] : undefined;
     if (!command) {
       rootActions = [];
       return;
@@ -558,6 +585,19 @@
     if (!current) walked = -1;
 
     clearTimeout(fileTimer);
+
+    if (mode === "appVolume") {
+      try {
+        const found = await searchAppVolume(current);
+        if (id !== searchId) return;
+
+        commands = found;
+        if (selected >= commands.length) selected = 0;
+      } catch (err) {
+        if (id === searchId) status = `could not read the volumes: ${err}`;
+      }
+      return;
+    }
 
     if (mode === "emoji") {
       try {
@@ -761,6 +801,28 @@
       return;
     }
 
+    /*
+     * Muting a program leaves the list where it is.
+     *
+     * The same reasoning as a Windows switch: the question is whether it went
+     * quiet, and closing the window is not an answer to it. The row redraws,
+     * and the rest redraw with it because turning one program down is often
+     * the first of several.
+     */
+    if (mode === "appVolume") {
+      const session = commands[selected];
+      if (!session) return;
+
+      try {
+        const outcome = await runObjectAction("sill.audio.session.mute", asTarget(session));
+        status = outcome.message;
+        await refreshRoot();
+      } catch (err) {
+        status = `${err}`;
+      }
+      return;
+    }
+
     if (mode === "switcher") {
       const window = commands[selected];
       if (!window) return;
@@ -802,6 +864,14 @@
       // way the root list is, with the same field and the same keys.
       // Its own corpus behind its own command, the same shape the clipboard
       // history uses and for the same reason.
+      if (command.id === "sill:appVolume") {
+        void recordUse(command.id, query);
+        mode = "appVolume";
+        selected = 0;
+        query = "";
+        return;
+      }
+
       if (command.id === "sill:emoji") {
         void recordUse(command.id, query);
         mode = "emoji";
@@ -1327,7 +1397,12 @@
 
     // The root list's actions come from Rust's registry, so running one is a
     // matter of naming it. The window does not decide what any of them mean.
-    if (mode === "root") {
+    //
+    // The volume list is here too rather than in a branch of its own: its rows
+    // are ordinary results carrying an ordinary kind, and the registry already
+    // knows what can be done to one. A second copy of this would be a second
+    // opinion about what a row supports.
+    if (mode === "root" || mode === "appVolume") {
       const chosen = action.tag.startsWith("Sill.Action:")
         ? action.tag.slice("Sill.Action:".length)
         : "";
@@ -1370,11 +1445,22 @@
         status = outcome.message;
         lastUndo = outcome.undo ?? null;
 
-        // The panel reaches the same switches Enter does, so pressing one
-        // here has to leave the rows saying the same thing. Only when the row
-        // acted on was a switch: a one-shot has no state and is closing the
-        // window anyway, and copying a file path moves nothing.
-        if (command.toggle !== undefined) await refreshSwitches();
+        /*
+         * The panel reaches the same things Enter does, so pressing one here
+         * has to leave the rows saying the same thing.
+         *
+         * A whole re-read for the volume list, because these rows carry a
+         * percentage as well as a switch and `refreshSwitches` only puts the
+         * switch back: turning something down would have flipped nothing and
+         * left "100%" underneath. Elsewhere the switch is the whole state, and
+         * only when the row acted on was one, because copying a path moves
+         * nothing and a one-shot is closing the window anyway.
+         */
+        if (mode === "appVolume") {
+          await refreshRoot();
+        } else if (command.toggle !== undefined) {
+          await refreshSwitches();
+        }
       } catch (err) {
         status = `${err}`;
       }
@@ -1450,7 +1536,7 @@
       return;
     }
 
-    if (mode === "emoji") {
+    if (mode === "emoji" || mode === "appVolume") {
       mode = "root";
       selected = 0;
       query = "";
@@ -1712,7 +1798,7 @@
   $effect(() => {
     query;
     // Not while the field holds a name rather than a query.
-    if (mode === "root" || mode === "switcher" || mode === "emoji") {
+    if (isListMode(mode)) {
       void refreshRoot();
     }
   });
@@ -1870,6 +1956,8 @@
       <span class="crumb">Open Windows</span>
     {:else if mode === "emoji"}
       <span class="crumb">Emoji</span>
+    {:else if mode === "appVolume"}
+      <span class="crumb">App Volume</span>
     {:else if mode === "collection"}
       <span class="crumb">Collection</span>
     {:else if mode === "alias" && naming}
@@ -1900,6 +1988,8 @@
         ? "Type what to search for, then Enter…"
         : mode === "emoji"
           ? "Search emoji by name…"
+        : mode === "appVolume"
+          ? "Filter by program name…"
           : mode === "alias"
             ? "Type a short name, then Enter. Empty forgets it…"
           : mode === "collection"
@@ -1944,7 +2034,13 @@
       onrich={(rich) => (richEntry = rich)}
       oncollection={(open) => (openCollection = open)}
     />
-  {:else if mode === "root" || mode === "switcher" || mode === "alias" || mode === "emoji"}
+  <!--
+    Not `isListMode`. This set is not the same one: `alias` draws the list too,
+    with the field holding a name rather than a query, so the two lists differ
+    by exactly that mode and sharing one would be wrong in one direction or the
+    other. Written out, and this comment is why.
+  -->
+  {:else if mode === "root" || mode === "switcher" || mode === "alias" || mode === "emoji" || mode === "appVolume"}
     <!-- Kept on screen while a name is typed, so what is being named stays
          visible. -->
     <RootList

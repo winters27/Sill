@@ -59,6 +59,8 @@ export function groupOf(command: RankedCommand): string {
       return "Web Search";
     case "emoji":
       return "Emoji";
+    case "audio-session":
+      return "Playing Now";
     // What they are rather than who uses them: plenty of these ship with
     // Windows and have nothing to do with development.
     case "exe":

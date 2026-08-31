@@ -51,6 +51,11 @@ pub fn builtins() -> ActionRegistry {
         Box::new(CompressFile),
         Box::new(RenameFile),
         Box::new(CopyClipboardEntry),
+        Box::new(ToggleSessionMute),
+        Box::new(SessionLouder),
+        Box::new(SessionQuieter),
+        Box::new(SessionHalf),
+        Box::new(SessionFull),
     ];
 
     ActionRegistry::new(
@@ -383,6 +388,215 @@ impl Action for ToggleSystem {
         }
 
         Ok(Outcome::done(said))
+    }
+}
+
+/*
+ * A program's own volume.
+ *
+ * Five actions rather than one, because the useful things to do to a program's
+ * sound are not one thing. Enter mutes and unmutes, which is the reason people
+ * open a mixer; the rest sit in the panel where a second thought belongs.
+ *
+ * All five take the session's identifier as the target. Not the program name,
+ * which several programs share, and not its process id, which is a different
+ * number every time it starts.
+ */
+
+/// How far one press moves a program's volume.
+///
+/// A tenth, matching the system volume nudge, so the two feel like the same
+/// control rather than two controls that disagree about what a step is.
+const SESSION_STEP: f32 = 0.1;
+
+/// Runs a change against one program's volume and says where it ended up.
+///
+/// Shared by the four that move the slider, so they cannot drift on what a
+/// step is, on rounding, or on what to say afterwards.
+async fn nudge(
+    ctx: &ActionCtx,
+    object: &Object,
+    to: impl Fn(f32) -> f32 + Send + 'static,
+) -> Result<Outcome, String> {
+    let id = object.target.clone();
+
+    let level = tokio::task::spawn_blocking(move || {
+        let now = crate::app_volume::sessions()
+            .into_iter()
+            .find(|session| session.id == id)
+            .ok_or_else(|| "that program is not playing anything any more".to_string())?;
+
+        let level = to(now.volume).clamp(0.0, 1.0);
+        crate::app_volume::set_volume(&id, level)?;
+
+        // Unmuting as well, because a slider that moves under a mute is a
+        // control that appears to do nothing.
+        if level > 0.0 && now.muted {
+            crate::app_volume::set_muted(&id, false)?;
+        }
+
+        Ok::<f32, String>(level)
+    })
+    .await
+    .map_err(|err| format!("could not reach the sound system: {err}"))??;
+
+    crate::app_volume::forget_sessions();
+
+    Ok(Outcome::done(format!(
+        "{} at {}%",
+        object.title,
+        (level * 100.0).round() as i32,
+    )))
+}
+
+struct ToggleSessionMute;
+
+#[async_trait]
+impl Action for ToggleSessionMute {
+    fn id(&self) -> &'static str {
+        "sill.audio.session.mute"
+    }
+
+    fn title(&self) -> &'static str {
+        "Mute or Unmute"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::AudioSession
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::SystemControl]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let id = object.target.clone();
+
+        // Read and invert rather than being told which way to go. The row was
+        // drawn a moment ago and something else may have changed it since.
+        let muted = tokio::task::spawn_blocking(move || {
+            let now = crate::app_volume::sessions()
+                .into_iter()
+                .find(|session| session.id == id)
+                .ok_or_else(|| "that program is not playing anything any more".to_string())?;
+
+            crate::app_volume::set_muted(&id, !now.muted)?;
+            Ok::<bool, String>(!now.muted)
+        })
+        .await
+        .map_err(|err| format!("could not reach the sound system: {err}"))??;
+
+        crate::app_volume::forget_sessions();
+
+        Ok(Outcome::done(format!(
+            "{} is {}",
+            object.title,
+            if muted { "muted" } else { "audible" },
+        )))
+    }
+}
+
+struct SessionLouder;
+
+#[async_trait]
+impl Action for SessionLouder {
+    fn id(&self) -> &'static str {
+        "sill.audio.session.louder"
+    }
+
+    fn title(&self) -> &'static str {
+        "Louder"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::AudioSession
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::SystemControl]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        nudge(ctx, object, |level| level + SESSION_STEP).await
+    }
+}
+
+struct SessionQuieter;
+
+#[async_trait]
+impl Action for SessionQuieter {
+    fn id(&self) -> &'static str {
+        "sill.audio.session.quieter"
+    }
+
+    fn title(&self) -> &'static str {
+        "Quieter"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::AudioSession
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::SystemControl]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        nudge(ctx, object, |level| level - SESSION_STEP).await
+    }
+}
+
+struct SessionHalf;
+
+#[async_trait]
+impl Action for SessionHalf {
+    fn id(&self) -> &'static str {
+        "sill.audio.session.half"
+    }
+
+    fn title(&self) -> &'static str {
+        "Half Volume"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::AudioSession
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::SystemControl]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        nudge(ctx, object, |_| 0.5).await
+    }
+}
+
+struct SessionFull;
+
+#[async_trait]
+impl Action for SessionFull {
+    fn id(&self) -> &'static str {
+        "sill.audio.session.full"
+    }
+
+    fn title(&self) -> &'static str {
+        "Full Volume"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::AudioSession
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::SystemControl]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        nudge(ctx, object, |_| 1.0).await
     }
 }
 

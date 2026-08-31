@@ -442,6 +442,29 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "copy text",
             ],
         ),
+        // Wearing the volume mixer's own mark rather than a panel's.
+        //
+        // What it opens is a list of Windows' audio sessions, not one of
+        // Sill's settings pages, and a row wearing the settings gear would say
+        // it belongs to Sill. Same rule the switches follow.
+        builtin_wearing(
+            "appVolume",
+            &mixer_icon(),
+            "App Volume",
+            "Turn one program down without turning everything down",
+            &[
+                "volume",
+                "mixer",
+                "app",
+                "program",
+                "per app",
+                "mute",
+                "loud",
+                "quiet",
+                "sound",
+                "audio",
+            ],
+        ),
         builtin(
             "emoji",
             "snippets",
@@ -527,7 +550,7 @@ fn system_commands() -> Vec<CommandRecord> {
     // extracting the range and looking at it rather than by trusting a number
     // from somewhere.
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
-    let audio = format!(r"{root}\System32\SndVol.exe");
+    let audio = mixer_icon();
     let theme = format!(r"{root}\System32\themecpl.dll");
     let padlock = format!(r"{root}\System32\imageres.dll,54");
     let network = format!(r"{root}\System32\ncpa.cpl");
@@ -615,10 +638,16 @@ fn system_commands() -> Vec<CommandRecord> {
             &id,
             &audio,
             &name,
-            if output.current {
-                "Sound is going here"
+            // The name Windows gives it in full, which is the part the title
+            // drops. "Speakers" and "Speakers" are two rows that look the
+            // same until the card each one is on is written underneath.
+            //
+            // Not "sound is going here": the switch on the row says that, and
+            // saying it twice is not saying it better.
+            &if output.name.trim() == name {
+                String::new()
             } else {
-                "Send sound here"
+                output.name.trim().to_string()
             },
             &["audio", "sound", "output", "speakers", "headphones", "device", "system"],
         ));
@@ -640,7 +669,9 @@ fn system_commands() -> Vec<CommandRecord> {
             // other, which is what Windows draws them with.
             if radio.kind == "wifi" { &network } else { &bluetooth },
             &format!("Turn {} {}", radio.name, if radio.on { "Off" } else { "On" }),
-            if radio.on { "It is on" } else { "It is off" },
+            // Nothing. The switch on the row says whether it is on, and a
+            // radio has nothing else to tell you about itself.
+            "",
             /*
              * The words for this radio only.
              *
@@ -699,6 +730,34 @@ fn system_switch(
     }
 }
 
+/// Where the volume mixer keeps its icon.
+///
+/// Its own function because both this and the volume switches want it, and
+/// they are built in different places.
+fn mixer_icon() -> String {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    format!(r"{root}\System32\SndVol.exe")
+}
+
+/// One of Sill's own commands, wearing a mark of its own rather than a panel's.
+///
+/// A row either names a settings panel and wears that panel's mark, or brings
+/// its own. Anything that reaches outside Sill brings its own, because the
+/// settings gear would say the thing belongs to Sill when it does not.
+fn builtin_wearing(
+    id: &str,
+    icon: &str,
+    title: &str,
+    subtitle: &str,
+    keywords: &[&str],
+) -> CommandRecord {
+    CommandRecord {
+        panel: None,
+        icon: Some(icon.to_string()),
+        ..builtin(id, "general", title, subtitle, keywords)
+    }
+}
+
 fn builtin(id: &str, panel: &str, title: &str, subtitle: &str, keywords: &[&str]) -> CommandRecord {
     CommandRecord {
         id: format!("sill:{id}"),
@@ -715,6 +774,39 @@ fn builtin(id: &str, panel: &str, title: &str, subtitle: &str, keywords: &[&str]
         toggle: None,
         panel: Some(panel.to_string()),
         // Only extension commands carry any.
+        preferences: serde_json::Value::Null,
+    }
+}
+
+/// One program's volume, shaped as a row.
+///
+/// The switch shows whether you can hear it, not whether it is muted, because
+/// **the switch answers the row's title**. The system row is called "Toggle
+/// Mute" so its switch says whether mute is on; this row is called by the
+/// program's name, so its switch says whether the program is.
+pub fn audio_session_record(session: &crate::app_volume::Session) -> CommandRecord {
+    let percent = (session.volume * 100.0).round() as i32;
+
+    CommandRecord {
+        id: format!("audio-session:{}", session.id),
+        extension: "audio-session".to_string(),
+        extension_title: "App Volume".to_string(),
+        command: session.name.clone(),
+        title: session.name.clone(),
+        subtitle: if session.muted {
+            format!("Muted, was at {percent}%")
+        } else {
+            format!("{percent}%")
+        },
+        description: String::new(),
+        mode: "audio-session".to_string(),
+        // Windows' identifier for the session, which is what finds it again.
+        entrypoint: session.id.clone(),
+        keywords: vec!["volume".to_string(), "mute".to_string()],
+        // The program itself, so the row wears its mark rather than Sill's.
+        icon: (!session.path.is_empty()).then(|| session.path.clone()),
+        toggle: Some(!session.muted),
+        panel: None,
         preferences: serde_json::Value::Null,
     }
 }

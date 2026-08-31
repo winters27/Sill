@@ -1,5 +1,6 @@
 pub mod action;
 pub mod actions;
+pub mod app_volume;
 pub mod apps;
 pub mod audio;
 pub mod bindings;
@@ -1077,6 +1078,7 @@ pub fn run() {
             commands::system::cancel_markup,
             commands::search::search_windows,
             commands::search::system_states,
+            commands::search::search_app_volume,
             commands::search::search_emoji,
             commands::search::file_search_missing,
             commands::search::list_drives,
