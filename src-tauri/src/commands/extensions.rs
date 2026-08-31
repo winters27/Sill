@@ -55,3 +55,25 @@ pub(crate) async fn unload_extension(
 
     host.unload(&session).await.map_err(|e| e.to_string())
 }
+
+/// Installs an extension from a folder on this machine.
+///
+/// Everything about how is in [`crate::extension_install`]; this is the
+/// transport and nothing else. It is `async` because bundling is a subprocess
+/// per command and a large extension is long enough to be worth not holding
+/// the window still for.
+#[cfg(windows)]
+#[tauri::command]
+pub(crate) async fn install_extension(
+    app: tauri::AppHandle,
+    folder: String,
+) -> Result<crate::extension_install::Installed, String> {
+    let source = std::path::PathBuf::from(folder);
+
+    // Off the UI thread: esbuild is a subprocess and the index is a file.
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::extension_install::install(&app, &source)
+    })
+    .await
+    .map_err(|err| format!("the install did not finish: {err}"))?
+}

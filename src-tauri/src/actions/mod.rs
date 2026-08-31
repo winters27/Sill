@@ -317,6 +317,39 @@ impl Action for RunBuiltin {
             "snippets" => {
                 crate::commands::settings::open_settings(app.clone(), panel("snippets")).await?
             }
+            // The launcher is dismissed first: this opens a native folder
+            // picker, and a dialog behind a launcher that closes on blur is a
+            // dialog nobody can answer.
+            #[cfg(windows)]
+            "install-extension" => {
+                use tauri_plugin_dialog::DialogExt;
+
+                crate::dismiss_main(app);
+
+                let chosen = app
+                    .dialog()
+                    .file()
+                    .set_title("Choose an extension folder")
+                    .blocking_pick_folder();
+
+                // Nothing chosen is not a failure. Somebody opened the picker
+                // and changed their mind, which is an ordinary thing to do.
+                let Some(folder) = chosen else {
+                    return Ok(Outcome::done("Nothing installed"));
+                };
+
+                let source = folder
+                    .into_path()
+                    .map_err(|err| format!("that folder cannot be read: {err}"))?;
+
+                let installed = crate::extension_install::install(app, &source)?;
+
+                return Ok(Outcome::done(format!(
+                    "Installed {} ({})",
+                    installed.title,
+                    installed.commands.join(", ")
+                )));
+            }
             "quicklinks" => {
                 crate::commands::settings::open_settings(app.clone(), panel("quicklinks")).await?
             }

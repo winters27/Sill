@@ -368,6 +368,13 @@ pub fn builtins() -> Vec<CommandRecord> {
             &["snippet", "template", "expand", "abbreviation", "text"],
         ),
         builtin(
+            "install-extension",
+            "advanced",
+            "Install Extension",
+            "Build a Raycast extension from a folder and add its commands",
+            &["extension", "raycast", "add", "plugin", "import", "build"],
+        ),
+        builtin(
             "quicklinks",
             "quicklinks",
             "Quicklinks",

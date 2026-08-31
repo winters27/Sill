@@ -14,6 +14,7 @@ pub mod commands;
 pub mod dictation;
 pub mod emoji;
 pub mod everything_ipc;
+pub mod extension_install;
 pub mod exthost;
 pub mod files_ops;
 pub mod files;
@@ -1181,6 +1182,7 @@ pub fn run() {
             commands::extensions::load_extension,
             commands::extensions::activate_handler,
             commands::extensions::unload_extension,
+            commands::extensions::install_extension,
             commands::launch::perform_builtin,
             commands::system::app_icon,
             commands::diagnostics::diagnostics,

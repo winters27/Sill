@@ -244,7 +244,11 @@ fn with_endpoint<T>(
 ///
 /// `InstallationType` is the value Windows itself uses to say which it is. It
 /// reads `Client` on 10 and 11 and `Server` on the server editions.
-#[cfg(windows)]
+///
+/// Only a test asks so far, so it is built only for tests rather than left
+/// sitting as dead code in the shipped binary. Drop the `test` when something
+/// in the product wants it.
+#[cfg(all(windows, test))]
 pub(crate) fn is_windows_client() -> bool {
     use windows::core::{h, HSTRING};
     use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
