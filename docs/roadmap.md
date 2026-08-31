@@ -380,6 +380,43 @@ Keys are sealed with DPAPI before the preferences file is written. The sealer
 learned to walk arrays for this, since there is a key per provider and no fixed
 path names them all.
 
+**Choosing, in Settings.** An Ask panel lists what is set up, which one answers
+and what each of the rest would involve. Three of the services on offer have a
+subscription with the same name that does not pay for the thing being set up,
+and the row says so before anybody pastes a key.
+
+**Models are asked for, not typed.** A model id is a string, and one character
+wrong is a request that fails talking about a model nobody meant to name. The
+HTTP providers publish their list and Claude Code offers its own aliases, with
+"whatever Claude Code is set to" first: a choice made in Claude Code itself
+should not be overridden by a launcher. A service that will not say what it has
+leaves a text field, which still works.
+
+A model on somebody's own machine names no default. What is installed differs
+per machine, so any name shipped in the table is one most people do not have,
+and it arrived as a picker showing nothing beside a line saying there were five
+to choose from. It takes the first thing actually installed instead. A model
+that is set but no longer offered is still listed rather than blanking the
+control, because a picker showing nothing beside a stored value reads as the
+setting having been lost.
+
+Verified by driving it: a local model answers, keeps context across a follow-up,
+and switching the model persists. **The Claude Code path is not verified end to
+end**, because that CLI is not installed on this machine. Its refusal is, and
+reads correctly.
+
+Three things the panel work turned up that were broken elsewhere. Tab outside
+the root list fell through to the browser's own focus key, and since the only
+other focusable thing is outside the window, the field lost focus and the
+launcher dismissed itself on blur: a key that did nothing looked like a key that
+closed the launcher. Escape out of a conversation cleared the field, next to a
+comment promising the words would still be there. And Windows draws an open
+picker list in a window of its own and starts it white however the page is
+painted, so three panels remembered to colour the options, two did not, and Web
+Search had no rule at all and drew a white control on dark glass. One `Select`
+and one `TextField` decide it once now, and `verify:source` refuses a
+hand-rolled picker in settings.
+
 ## Built since the audit, and not on it: web search
 
 The row every launcher has and the audit never listed. Type anything and the
