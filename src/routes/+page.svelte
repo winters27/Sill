@@ -660,6 +660,14 @@
     }
   }
 
+  /**
+   * What a failed search says, and what a working one clears.
+   *
+   * Shared rather than written twice, because the clearing has to recognise
+   * exactly what the failing wrote.
+   */
+  const TROUBLE = "search failed: ";
+
   async function refreshRoot() {
     const current = query;
     const id = ++searchId;
@@ -734,8 +742,21 @@
 
       commands = ranked;
       if (selected >= commands.length) selected = 0;
+
+      /*
+       * A search that worked clears what a search that failed said.
+       *
+       * The page mounts and searches before `setup` has finished managing what
+       * the command needs, so the very first search of a run can fail. Nothing
+       * cleared the line it wrote, and it sat under a list of perfectly good
+       * results for the rest of the session, saying the search had failed.
+       *
+       * Only the search's own line: a message from an action that just ran is
+       * the more recent thing and is what somebody is reading.
+       */
+      if (status.startsWith(TROUBLE)) status = "";
     } catch (err) {
-      if (id === searchId) status = `search failed: ${err}`;
+      if (id === searchId) status = `${TROUBLE}${err}`;
       return;
     }
 
@@ -817,6 +838,118 @@
         commands = [...commands, webSearchRow(current.trim(), browser ?? undefined)];
       }
     }, FILE_SEARCH_DEBOUNCE_MS);
+  }
+
+  /**
+   * The commands this window opens itself, rather than launching.
+   *
+   * Each becomes a mode in the launcher or acts on something it already
+   * holds, so there is nothing for Rust's action registry to run: `RunBuiltin`
+   * has no arm for any of these eight and answers "unknown Sill command".
+   * They worked only because the root list intercepted them before
+   * `launchCommand` was ever reached.
+   *
+   * That interception living inside `openSelected` made it unreachable from
+   * anywhere else, and the tray menu reaches for exactly this: its "Clipboard
+   * History" row emits `sill://run`, which called `launchCommand` straight out
+   * and got the error rather than the history. One list, both callers.
+   *
+   * Returns whether it handled the id, so a caller can fall through.
+   */
+  async function openHere(id: string, typed = ""): Promise<boolean> {
+    // Its own view rather than a window: browsed the same way the root list
+    // is, with the same field and the same keys.
+    if (id === "sill:appVolume") {
+      void recordUse(id, typed);
+      mode = "appVolume";
+      selected = 0;
+      query = "";
+      return true;
+    }
+
+    if (id === "sill:emoji") {
+      void recordUse(id, typed);
+      mode = "emoji";
+      selected = 0;
+      query = "";
+      return true;
+    }
+
+    // Picking an area puts an overlay over every screen, so the launcher has
+    // nothing more to do than get out of the way, which Rust does.
+    if (id === "sill:capture-area") {
+      void recordUse(id, typed);
+      try {
+        await beginCapture();
+      } catch (err) {
+        status = `${err}`;
+      }
+      return true;
+    }
+
+    if (id === "sill:capture-screen") {
+      void recordUse(id, typed);
+      try {
+        status = await captureScreen();
+      } catch (err) {
+        status = `${err}`;
+      }
+      return true;
+    }
+
+    // Marking up opens a window of its own on the last picture copied. It goes
+    // through the action registry, so the row and the clipboard's own panel
+    // entry are one implementation.
+    if (id === "sill:mark-up") {
+      void recordUse(id, typed);
+      try {
+        const image = await lastImage();
+        if (image === null) {
+          status = "nothing has been copied as a picture yet";
+          return true;
+        }
+        await openMarkup(image);
+      } catch (err) {
+        status = `${err}`;
+      }
+      return true;
+    }
+
+    /*
+     * Reads the last picture copied, without opening anything.
+     *
+     * A row rather than only an action buried in the clipboard's panel,
+     * because a capability nobody can find is a capability nobody has. It is
+     * reached by typing "ocr", "read text" or "screenshot".
+     */
+    if (id === "sill:extract-text") {
+      void recordUse(id, typed);
+      try {
+        status = await extractTextFromLastImage();
+      } catch (err) {
+        status = `${err}`;
+      }
+      return true;
+    }
+
+    if (id === "sill:conversations") {
+      void recordUse(id, typed);
+      await openConversations();
+      return true;
+    }
+
+    // Opened here rather than launched, but it is still a use, and ranking has
+    // to see it or the history can never rise in the root list however often
+    // it is reached for.
+    if (id === "sill:clipboard") {
+      void recordUse(id, typed);
+      mode = "clipboard";
+      selected = 0;
+      query = "";
+      return true;
+    }
+
+    return false;
   }
 
   async function openSelected() {
@@ -1011,83 +1144,9 @@
         return;
       }
 
-      // Its own view rather than a window: the history is browsed the same
-      // way the root list is, with the same field and the same keys.
-      // Its own corpus behind its own command, the same shape the clipboard
-      // history uses and for the same reason.
-      if (command.id === "sill:appVolume") {
-        void recordUse(command.id, query);
-        mode = "appVolume";
-        selected = 0;
-        query = "";
-        return;
-      }
-
-      if (command.id === "sill:emoji") {
-        void recordUse(command.id, query);
-        mode = "emoji";
-        selected = 0;
-        query = "";
-        return;
-      }
-
-      /*
-       * Reads the last picture copied, without opening anything.
-       *
-       * A row rather than only an action buried in the clipboard's panel,
-       * because a capability nobody can find is a capability nobody has. This
-       * one is reached by typing "ocr", "read text" or "screenshot", and the
-       * key bound to it goes through the same action against the same picture.
-       */
-      // Picking an area puts an overlay over every screen, so the launcher
-      // has nothing more to do than get out of the way, which Rust does.
-      if (command.id === "sill:capture-area") {
-        void recordUse(command.id, query);
-        try {
-          await beginCapture();
-        } catch (err) {
-          status = `${err}`;
-        }
-        return;
-      }
-
-      if (command.id === "sill:capture-screen") {
-        void recordUse(command.id, query);
-        try {
-          status = await captureScreen();
-        } catch (err) {
-          status = `${err}`;
-        }
-        return;
-      }
-
-      // Marking up opens a window of its own on the last picture copied. It
-      // goes through the action registry, so the row and the clipboard's own
-      // panel entry are one implementation.
-      if (command.id === "sill:mark-up") {
-        void recordUse(command.id, query);
-        try {
-          const image = await lastImage();
-          if (image === null) {
-            status = "nothing has been copied as a picture yet";
-            return;
-          }
-          await openMarkup(image);
-        } catch (err) {
-          status = `${err}`;
-        }
-        return;
-      }
-
-      if (command.id === "sill:extract-text") {
-        void recordUse(command.id, query);
-        try {
-          status = await extractTextFromLastImage();
-        } catch (err) {
-          status = `${err}`;
-        }
-        return;
-      }
+      // Anything this window opens itself, which is also what the tray menu
+      // asks for. See `openHere`.
+      if (await openHere(command.id, query)) return;
 
       /*
        * The conversation you left, reopened rather than launched.
@@ -1101,22 +1160,6 @@
         return;
       }
 
-      if (command.id === "sill:conversations") {
-        void recordUse(command.id, query);
-        await openConversations();
-        return;
-      }
-
-      if (command.id === "sill:clipboard") {
-        // Opened here rather than launched, but it is still a use, and
-        // ranking has to see it or the history can never rise in the root
-        // list however often it is reached for.
-        void recordUse(command.id, query);
-        mode = "clipboard";
-        selected = 0;
-        query = "";
-        return;
-      }
 
       // A quicklink with a hole in it. Kept here rather than launched, so the
       // field can be handed over to filling the hole.
@@ -2702,8 +2745,19 @@
       // Something outside the launcher asked for a command, which today means
       // the notification-area menu. Rust has already put the window up; this
       // is only what to show now that it is there.
+      /*
+       * Asked to run something by the tray menu, so it goes the way a click
+       * goes: this window's own commands are opened here, and only what is
+       * left is launched. Calling `launchCommand` straight out skipped every
+       * one of the eight `openHere` handles, which is why the tray's
+       * "Clipboard History" answered "unknown Sill command: clipboard"
+       * instead of opening the history.
+       */
       ran = await listen<string>("sill://run", ({ payload }) => {
-        void launchCommand(payload).catch((err) => {
+        void (async () => {
+          if (await openHere(payload)) return;
+          await launchCommand(payload);
+        })().catch((err) => {
           status = `${err}`;
         });
       });
