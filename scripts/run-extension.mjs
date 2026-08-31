@@ -13,7 +13,7 @@
  * Usage: node scripts/run-extension.mjs <entrypoint.js> [extensionName] [--seed key=json]
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -41,8 +41,61 @@ for (let i = 0; i < args.length; i++) {
 const root = resolve(import.meta.dirname, "..");
 const hostJs = join(root, "host", "dist", "host.js");
 
+/*
+ * Scratch directories, and getting rid of them.
+ *
+ * Two bundles are written to temp on every run, once per extension, and the
+ * view gate runs this over every extension there is. Nothing removed them, so
+ * they accumulated: seven hundred and seventy-four of them on the machine this
+ * was found on, going back to the first day the gate existed.
+ *
+ * Registered rather than removed at the end, because the interesting exits are
+ * the ones that do not reach the end: a bundle that fails to build, a host
+ * that dies, somebody pressing Ctrl+C while watching the log go past.
+ */
+const scratch = [];
+
+function scratchDir(prefix) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  scratch.push(dir);
+  return dir;
+}
+
+let tidied = false;
+
+function tidy() {
+  if (tidied) return;
+  tidied = true;
+
+  for (const dir of scratch) {
+    // `force` because a directory that is already gone is not a problem worth
+    // failing an otherwise green gate over.
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Windows will refuse while the file is still mapped by the import
+      // above. One left behind is what this used to do every time.
+    }
+  }
+}
+
+process.on("exit", tidy);
+// `exit` does not fire for these, and these are how a gate run usually ends
+// when something is wrong.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    tidy();
+    process.exit(130);
+  });
+}
+process.on("uncaughtException", (err) => {
+  tidy();
+  console.error(err);
+  process.exit(1);
+});
+
 // ---- the UI's real tree module ----
-const out = join(mkdtempSync(join(tmpdir(), "sill-run-")), "tree.mjs");
+const out = join(scratchDir("sill-run-"), "tree.mjs");
 await new Promise((done, fail) => {
   const p = spawn(
     process.execPath,
@@ -61,7 +114,7 @@ await new Promise((done, fail) => {
 const { ViewTree } = await import(pathToFileURL(out).href);
 
 // The action reader, bundled the same way so the real implementation is used.
-const actionsOut = join(mkdtempSync(join(tmpdir(), "sill-actions-")), "actions.mjs");
+const actionsOut = join(scratchDir("sill-actions-"), "actions.mjs");
 await new Promise((done, fail) => {
   const p = spawn(
     process.execPath,

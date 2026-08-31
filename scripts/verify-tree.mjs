@@ -12,7 +12,7 @@
  * Run: node scripts/verify-tree.mjs
  */
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -28,7 +28,38 @@ const assert = (cond, msg) => {
 };
 
 // ---- bundle the UI's tree module so this script can use the real thing ----
-const out = join(mkdtempSync(join(tmpdir(), "sill-tree-")), "tree.mjs");
+/*
+ * Scratch, and what removes it.
+ *
+ * `mkdtemp` hands back a new directory every call and never takes it away.
+ * The sibling script leaked two per run for three days before anybody looked
+ * in temp; this one leaked one, for the same reason, and the tidy-up is
+ * registered rather than written at the end because the interesting exits are
+ * the ones that never reach the end.
+ */
+const scratch = mkdtempSync(join(tmpdir(), "sill-tree-"));
+const out = join(scratch, "tree.mjs");
+
+let tidied = false;
+
+function tidy() {
+  if (tidied) return;
+  tidied = true;
+  try {
+    rmSync(scratch, { recursive: true, force: true });
+  } catch {
+    // Windows refuses while a bundle is still mapped by the import below.
+    // One left behind is what this used to do every single time.
+  }
+}
+
+process.on("exit", tidy);
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    tidy();
+    process.exit(130);
+  });
+}
 await new Promise((done, fail) => {
   const p = spawn(
     process.execPath,

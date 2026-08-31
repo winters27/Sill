@@ -191,6 +191,32 @@ for (const file of sources(".")) {
 }
 
 /*
+ * A scratch directory nobody removes.
+ *
+ * `mkdtemp` hands back a new directory every call and never takes it away
+ * again. One script used two of them per run, the view gate runs that script
+ * once per extension, and nothing tidied up: fifteen hundred and ninety-nine
+ * folders had accumulated on the machine this was found on, going back to the
+ * first day the gate existed.
+ *
+ * A file that makes one has to say what removes it. `rmSync` is coarse as a
+ * test and that is deliberate: the point is that somebody writing the next
+ * one has to think about the end of its life, not that this can prove they
+ * got it right.
+ */
+for (const file of sources("scripts")) {
+  const text = readFileSync(file, "utf8");
+
+  if (text.includes("mkdtempSync") && !text.includes("rmSync")) {
+    fail(
+      file,
+      lineOf(text, text.indexOf("mkdtempSync")),
+      "makes a scratch directory and never removes one; say what tidies it up",
+    );
+  }
+}
+
+/*
  * The row height, which lives in two places because it has to.
  *
  * Rust sizes the launcher window and cannot read CSS, so `window_height`
