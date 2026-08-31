@@ -18,8 +18,17 @@ export function groupOf(command: RankedCommand): string {
   switch (command.mode) {
     case "answer":
       return "Answer";
+    /*
+     * The collection it is in, or "Snippets" when it is in none.
+     *
+     * Rust puts the collection here, in the same field an extension command
+     * puts the extension it belongs to, because both answer the same question:
+     * which heading does this row go under. A field of its own would be a
+     * second thing the window has to be taught to read, for a string that is
+     * only ever a heading.
+     */
     case "snippet":
-      return "Snippets";
+      return command.extensionTitle;
     case "sill-setting":
       return "Sill Settings";
     case "view":

@@ -18,6 +18,28 @@ export interface Snippet {
   created: number;
   /** Only fire when the keyword stands as a whole word. */
   wholeWord: boolean;
+  /**
+   * The group it is in. Empty means it is in none.
+   *
+   * A name and nothing else: there is no list of collections anywhere, they
+   * exist because snippets say they do, and renaming one means renaming it on
+   * the snippets that carry it.
+   */
+  collection: string;
+  /**
+   * The programs it may expand in. Empty means anywhere.
+   *
+   * Matched on the program's own name without its extension, so "code" covers
+   * that editor wherever it happens to be installed.
+   */
+  onlyIn: string[];
+  /**
+   * The same content with its formatting, when it has any.
+   *
+   * Empty for the great majority. Kept beside `content` rather than instead of
+   * it, so a plain field still receives sensible text.
+   */
+  html: string;
 }
 
 export interface Expansion {
@@ -98,5 +120,16 @@ export function expandSnippet(id: string): Promise<Expansion> {
 
 /** A blank snippet, for the editor. */
 export function emptySnippet(): Snippet {
-  return { id: "", name: "", keyword: "", content: "", uses: 0, created: 0, wholeWord: true };
+  return {
+    id: "",
+    name: "",
+    keyword: "",
+    content: "",
+    uses: 0,
+    created: 0,
+    wholeWord: true,
+    collection: "",
+    onlyIn: [],
+    html: "",
+  };
 }

@@ -36,7 +36,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P1.10 | Application and command hotkeys | **Done** |
 | P1.11 | Extension install path | **Not started.** Blocked on a decision, see below |
 | P1.12 | Emoji and symbols | **Done.** In the picker and in ordinary searches |
-| P1.13 | Snippets: collections, rich text, app-specific, forms | **Partly.** Placeholders and import/export are done. Collections, rich text and app-specific are not |
+| P1.13 | Snippets: collections, rich text, app-specific, forms | **Done, except forms.** Placeholders, import and export, collections, formatting, and limiting one to the programs it belongs in. Multi-field forms need a surface that does not exist yet |
 | P1.14 | Native dictation panel | **Not started, and the reason for it was wrong.** See below |
 | P1.15 | Disabled means stopped | **Done** |
 
@@ -173,6 +173,45 @@ nothing saying which is real. Verified against two real drives.
 
 Ctrl+Z puts it back. The token is two paths, so undoing a move of a ten
 gigabyte folder costs what undoing a move of a text file costs.
+
+### Snippets: a group, a program, and formatting
+
+**A collection is a name and nothing else.** There is no list of them
+anywhere: they exist because snippets say they do, and renaming one means
+renaming it on the snippets that carry it. A separate table would be a second
+place for them to disagree. The name travels in the same field an extension
+command uses for the extension it belongs to, because both answer the same
+question: which heading does this row go under.
+
+**A snippet can be limited to the programs it belongs in.** A signature belongs
+in mail and a code fragment belongs in an editor, and a keyword short enough to
+be worth typing is short enough to fire somewhere it should not. Matched on the
+program's own name without its extension, so one name covers it wherever it is
+installed.
+
+The cost of that is the interesting part. Matching runs inside a keyboard hook,
+on every character typed anywhere on the machine, and reading which program is
+in front is a window handle, a process handle and a path. So it is **asked for
+only when it turns out to matter**: match on the text first, and consult the
+foreground only when the snippet that won is limited. Nearly always it is never
+called at all, and there is a test that fails if it ever is.
+
+A limited snippet does not expand when the program cannot be read. The safe
+direction is not firing: a signature appearing in the wrong window is worse
+than one that has to be typed.
+
+**Formatting only travels through the clipboard.** There is no way to type
+bold, so a snippet that has any is pasted however short it is, both formats
+written in one go so a plain field still receives sensible text. Placeholders
+are expanded twice, and the formatted one is escaped: a value going into markup
+is somebody's clipboard or a file name, text that had no idea it was going
+anywhere near a tag.
+
+The clipboard is borrowed and put back through the same guard the text
+transforms use. That fixed something as well as reusing something: written by
+hand, the write and the restore were two changes the history recorded, so
+pasting a long snippet used to leave the snippet and then the user's own older
+entry sitting at the top of the history as though they had just copied both.
 
 ## Built since the audit, and not on it: web search
 

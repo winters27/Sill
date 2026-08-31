@@ -138,6 +138,11 @@ pub fn parse(text: &str) -> Result<Vec<Snippet>, String> {
                 uses: 0,
                 created: 0,
                 whole_word: row.whole_word.unwrap_or(true),
+                // Nothing another tool's file carries. A collection, a program
+                // list and formatting are Sill's own, so an imported snippet
+                // arrives plain and ungrouped rather than with something
+                // invented for it.
+                ..Snippet::default()
             })
         })
         .collect())
@@ -247,6 +252,7 @@ mod tests {
             uses: 0,
             created: 1_700_000_000,
             whole_word: true,
+            ..Snippet::default()
         }
     }
 

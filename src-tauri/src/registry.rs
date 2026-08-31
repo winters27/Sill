@@ -886,13 +886,25 @@ pub fn quicklink_record(
 }
 
 /// A snippet, shaped as a command so the ranker treats it like anything else.
-pub fn snippet_record(id: &str, name: &str, keyword: &str, preview: &str) -> CommandRecord {
+pub fn snippet_record(snippet: &crate::snippets::store::Snippet) -> CommandRecord {
+    let id = &snippet.id;
+    let keyword = snippet.keyword.trim();
+    let preview = &snippet.content;
+    let collection = snippet.collection.trim();
+
     CommandRecord {
         id: format!("snippet:{id}"),
         extension: "snippets".to_string(),
-        extension_title: "Snippets".to_string(),
+        // The group it is drawn under. A collection is a heading and nothing
+        // else, so it goes where a heading goes rather than into a field of
+        // its own that the window would have to be taught to read.
+        extension_title: if collection.is_empty() {
+            "Snippets".to_string()
+        } else {
+            collection.to_string()
+        },
         command: id.to_string(),
-        title: name.to_string(),
+        title: snippet.name.to_string(),
         // The keyword is worth showing: it is how the snippet is used when
         // the launcher is not open, and there is nowhere else to learn it.
         subtitle: if keyword.is_empty() {
@@ -903,8 +915,13 @@ pub fn snippet_record(id: &str, name: &str, keyword: &str, preview: &str) -> Com
         description: String::new(),
         mode: "snippet".to_string(),
         entrypoint: id.to_string(),
-        // Searchable by what is in it, not only by what it is called.
-        keywords: vec![keyword.to_string(), preview.to_string()],
+        // Searchable by what is in it and by the group it is in, not only by
+        // what it is called.
+        keywords: vec![
+            keyword.to_string(),
+            preview.to_string(),
+            collection.to_string(),
+        ],
         icon: None,
         toggle: None,
         panel: None,

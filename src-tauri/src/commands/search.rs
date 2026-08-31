@@ -20,12 +20,7 @@ pub(crate) async fn search_commands(
 
     // Chained, not collected: both sides are borrowed and nothing is copied.
     let mut results = registry::search_excluding(
-        registry
-            .commands
-            .iter()
-            .chain(registry.snippets.iter())
-            .chain(registry.quicklinks.iter())
-            .chain(registry.own_settings.iter()),
+        registry.everything(),
         &query,
         &registry.frecency,
         &registry.aliases,

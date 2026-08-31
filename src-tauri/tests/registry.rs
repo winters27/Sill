@@ -9,6 +9,16 @@ const NOW: i64 = 1_756_000_000;
 const HOUR: i64 = 3600;
 const DAY: i64 = 86_400;
 
+fn snippet(name: &str, keyword: &str, content: &str) -> sill_lib::snippets::store::Snippet {
+    sill_lib::snippets::store::Snippet {
+        id: "s1".to_string(),
+        name: name.to_string(),
+        keyword: keyword.to_string(),
+        content: content.to_string(),
+        ..Default::default()
+    }
+}
+
 fn command(id: &str, title: &str, extension_title: &str) -> CommandRecord {
     CommandRecord {
         id: id.to_string(),
@@ -788,12 +798,11 @@ fn searching_borrows_its_corpus_from_more_than_one_source() {
     // and a signature taking a slice is what forced that. Anything narrowing
     // it back to `&[CommandRecord]` fails to compile here.
     let index = corpus();
-    let extra = vec![sill_lib::registry::snippet_record(
-        "s1",
+    let extra = vec![sill_lib::registry::snippet_record(&snippet(
         "Signature",
         ";sig",
         "Best,\nBrandon",
-    )];
+    ))];
 
     let results = sill_lib::registry::search_excluding(
         index.iter().chain(extra.iter()),
@@ -816,12 +825,11 @@ fn searching_borrows_its_corpus_from_more_than_one_source() {
 fn a_snippet_is_findable_by_what_is_inside_it() {
     // Half the point of searching snippets: you remember the text, not the
     // name you gave it.
-    let extra = vec![sill_lib::registry::snippet_record(
-        "s1",
+    let extra = vec![sill_lib::registry::snippet_record(&snippet(
         "Signature",
         ";sig",
         "Kind regards, Brandon Winters",
-    )];
+    ))];
 
     let results = sill_lib::registry::search_excluding(
         extra.iter(),

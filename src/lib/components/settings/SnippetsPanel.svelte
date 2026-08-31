@@ -81,6 +81,80 @@
   let error = $state("");
   let confirmingDelete = $state("");
 
+  /**
+   * The programs field, as typed.
+   *
+   * Kept beside the list rather than derived from it, so a half-typed name is
+   * not rewritten under the cursor: "co" would otherwise become "co" the
+   * moment it parsed, and a trailing comma would vanish as it was typed.
+   */
+  let onlyInText = $state("");
+
+  /** The formatted body, when there is one. */
+  let richBody = $state<HTMLDivElement | null>(null);
+
+  /**
+   * Which snippet's markup has been put into the box.
+   *
+   * A contenteditable is not bound to anything: it holds what the browser
+   * decides it holds, so the markup has to be written into it once when the
+   * box appears. Once, and this is what says once. Writing it on every
+   * keystroke would put the caret back at the start with each letter.
+   *
+   * Deliberately not `$state`. It is written inside the effect that reads it,
+   * and a reactive one would wake that effect up on its own change.
+   */
+  let seeded: string | null = null;
+
+  $effect(() => {
+    const box = richBody;
+    // Read so the effect wakes when the snippet changes, not only when the
+    // box appears. The guard below is what stops it running per keystroke.
+    const markup = editing?.html ?? "";
+    const which = editing ? editing.id || "new" : null;
+
+    if (!box || which === null || seeded === which) return;
+
+    seeded = which;
+    box.innerHTML = markup;
+  });
+
+  /** Whether the snippet being edited keeps its formatting. */
+  const formatted = $derived(Boolean(editing?.html));
+
+  /**
+   * Every collection any snippet is in.
+   *
+   * There is no list of them: a collection exists because a snippet says it
+   * does, so this is where the list comes from and it cannot go stale.
+   */
+  const collections = $derived(
+    [...new Set(snippets.map((one) => one.collection.trim()).filter(Boolean))].sort(),
+  );
+
+  /**
+   * The snippets, under the collection each is in.
+   *
+   * Ungrouped ones last rather than first: a heading over the ones that have
+   * no heading would be inventing a collection called "everything else".
+   */
+  const grouped = $derived.by(() => {
+    const groups = new Map<string, Snippet[]>();
+
+    for (const snippet of snippets) {
+      const name = snippet.collection.trim();
+      const list = groups.get(name);
+      if (list) list.push(snippet);
+      else groups.set(name, [snippet]);
+    }
+
+    return [...groups.entries()].sort(([a], [b]) => {
+      if (!a) return 1;
+      if (!b) return -1;
+      return a.localeCompare(b);
+    });
+  });
+
   const isNew = $derived(editing !== null && editing.id === "");
 
   async function refresh() {
@@ -89,8 +163,66 @@
 
   function edit(snippet: Snippet) {
     // A copy, so cancelling leaves the list untouched.
-    editing = { ...snippet };
+    editing = { ...snippet, onlyIn: [...snippet.onlyIn] };
+    onlyInText = snippet.onlyIn.join(", ");
+    // A different snippet, so the box has to be filled again.
+    seeded = null;
     error = "";
+  }
+
+  /**
+   * The programs typed into the field, as a list.
+   *
+   * Separated by commas or spaces, because both are what somebody types, and
+   * emptied of blanks so a trailing comma does not become a program called
+   * nothing that nothing ever matches.
+   */
+  function parsePrograms(text: string): string[] {
+    return text
+      .split(/[,\s]+/)
+      .map((one) => one.trim())
+      .filter(Boolean);
+  }
+
+  /**
+   * Turns formatting on or off for the snippet being edited.
+   *
+   * Turning it on seeds the markup from the plain text, so nothing already
+   * written is lost. Turning it off drops the markup and keeps the words,
+   * which is the direction that can lose something, so it is the plain text
+   * that survives rather than the other way round.
+   */
+  function setFormatted(on: boolean) {
+    if (!editing) return;
+
+    if (!on) {
+      editing.html = "";
+      return;
+    }
+
+    // Turning it on is a fresh box whatever was in one before.
+    seeded = null;
+
+    if (!editing.html) {
+      editing.html = editing.content
+        .split("\n")
+        .map((line) => escapeMarkup(line))
+        .join("<br>");
+    }
+
+    // The box itself is filled by the effect above, which runs once the block
+    // has rendered. Doing it here would be writing to an element that does not
+    // exist yet.
+  }
+
+  /** The five characters that mean something in markup. */
+  function escapeMarkup(value: string): string {
+    return value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
   }
 
   async function save() {
@@ -181,7 +313,86 @@
 
       <label class="field">
         <span>Content</span>
-        <textarea rows="7" bind:value={editing.content} spellcheck="false"></textarea>
+        {#if formatted}
+          <!--
+            The browser does the formatting. In a contenteditable, Ctrl+B, I
+            and U are handled by the engine itself, so there is no toolbar to
+            build and no command layer to keep in step with what the keys do.
+
+            Both versions are kept on every keystroke: the markup is what a
+            formatted paste sends, and the plain text underneath it is what a
+            plain field receives and what the launcher shows as a preview.
+          -->
+          <div
+            class="rich"
+            role="textbox"
+            tabindex="0"
+            aria-multiline="true"
+            aria-label="Content, with formatting"
+            contenteditable="true"
+            bind:this={richBody}
+            oninput={(event) => {
+              if (!editing) return;
+              const el = event.currentTarget;
+              editing.html = el.innerHTML;
+              editing.content = el.innerText;
+            }}
+          ></div>
+        {:else}
+          <textarea rows="7" bind:value={editing.content} spellcheck="false"></textarea>
+        {/if}
+      </label>
+
+      <div class="pair">
+        <label class="field">
+          <span>Collection</span>
+          <input
+            bind:value={editing.collection}
+            placeholder="Ungrouped"
+            list="sill-collections"
+            spellcheck="false"
+            autocomplete="off"
+          />
+        </label>
+
+        <label class="field">
+          <span>Only in these programs</span>
+          <input
+            bind:value={onlyInText}
+            oninput={() => {
+              if (editing) editing.onlyIn = parsePrograms(onlyInText);
+            }}
+            placeholder="Any program"
+            spellcheck="false"
+            autocomplete="off"
+          />
+        </label>
+      </div>
+
+      <!--
+        The collections that already exist, so a second snippet joins a group
+        by picking it rather than by spelling it the same way. There is no list
+        of collections anywhere else: they exist because snippets say they do.
+      -->
+      <datalist id="sill-collections">
+        {#each collections as name (name)}
+          <option value={name}></option>
+        {/each}
+      </datalist>
+
+      <label class="check">
+        <Toggle
+          checked={formatted}
+          onchange={(on) => setFormatted(on)}
+          label="Keep formatting"
+        />
+        <span>
+          Bold, italic and links, with <span class="sill-key">Ctrl</span>
+          <span class="sill-key">B</span>, <span class="sill-key">Ctrl</span>
+          <span class="sill-key">I</span> and <span class="sill-key">Ctrl</span>
+          <span class="sill-key">U</span>. A formatted snippet is pasted rather
+          than typed, so it borrows the clipboard for a moment and puts it back.
+        </span>
       </label>
 
       <div class="placeholders">
@@ -226,22 +437,43 @@
       </div>
     </div>
   {:else}
-    {#each snippets as snippet (snippet.id)}
-      <Row
-        title={snippet.name}
-        description={snippet.content.split("\n")[0].slice(0, 90)}
-      >
-        {#snippet control()}
-          <div class="row-actions">
-            {#if snippet.keyword}
-              <span class="keyword-tag">{snippet.keyword}</span>
-            {:else}
-              <span class="no-keyword">launcher only</span>
-            {/if}
-            <Button label="Edit" onclick={() => edit(snippet)} />
-          </div>
-        {/snippet}
-      </Row>
+    {#each grouped as [collection, members] (collection)}
+      <!--
+        Only when there is more than one group. A single heading over the
+        whole list is a label rather than a grouping, and somebody who has
+        never made a collection should not be shown the idea of one.
+      -->
+      {#if grouped.length > 1}
+        <p class="collection">{collection || "Ungrouped"}</p>
+      {/if}
+
+      {#each members as snippet (snippet.id)}
+        <Row
+          title={snippet.name}
+          description={snippet.content.split("\n")[0].slice(0, 90)}
+        >
+          {#snippet control()}
+            <div class="row-actions">
+              {#if snippet.onlyIn.length}
+                <span class="limited" title={snippet.onlyIn.join(", ")}>
+                  {snippet.onlyIn.length === 1
+                    ? snippet.onlyIn[0]
+                    : `${snippet.onlyIn.length} programs`}
+                </span>
+              {/if}
+              {#if snippet.html}
+                <span class="limited">formatted</span>
+              {/if}
+              {#if snippet.keyword}
+                <span class="keyword-tag">{snippet.keyword}</span>
+              {:else}
+                <span class="no-keyword">launcher only</span>
+              {/if}
+              <Button label="Edit" onclick={() => edit(snippet)} />
+            </div>
+          {/snippet}
+        </Row>
+      {/each}
     {/each}
 
     {#if snippets.length === 0}
@@ -291,6 +523,54 @@
   .pair {
     display: flex;
     gap: var(--space-3);
+  }
+
+  /* The heading over a collection, in the settings list. */
+  .collection {
+    margin: var(--space-4) 0 var(--space-1);
+    color: var(--text-2);
+    font-size: var(--text-meta);
+  }
+
+  .collection:first-child {
+    margin-top: 0;
+  }
+
+  /*
+   * What is unusual about a snippet, said quietly beside it.
+   *
+   * The same weight as the keyword tag next to it rather than a colour of its
+   * own: these are facts about the row, not warnings, and three coloured tags
+   * on one line is a row that looks like it has gone wrong.
+   */
+  .limited {
+    color: var(--text-2);
+    font-size: var(--text-meta);
+    white-space: nowrap;
+  }
+
+  /*
+   * The body, when it keeps its formatting.
+   *
+   * Sized to match the plain field beside it so turning formatting on does not
+   * resize the editor under the cursor.
+   */
+  .rich {
+    min-height: 9.5rem;
+    max-height: 20rem;
+    overflow-y: auto;
+    padding: var(--space-2);
+    border-radius: var(--radius-md);
+    background: var(--fill-1);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    color: var(--text-1);
+    font-size: var(--text-body);
+    line-height: 1.5;
+  }
+
+  .rich:focus {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .field {

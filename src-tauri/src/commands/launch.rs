@@ -36,9 +36,11 @@ pub(crate) async fn launch_command(
 ) -> Result<LaunchedCommand, String> {
     let record = {
         let mut registry = state.inner.lock().await;
+        // Everything a search could have offered, not just the index. A
+        // snippet, a quicklink and Sill's own settings are all things the
+        // launcher shows and none of them are in `commands`.
         let record = registry
-            .commands
-            .iter()
+            .everything()
             .find(|c| c.id == id)
             .cloned()
             .ok_or_else(|| format!("no such command: {id}"))?;

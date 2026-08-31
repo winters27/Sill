@@ -361,7 +361,13 @@ mod windows_impl {
             };
             typed.push(c);
 
-            crate::snippets::store::match_keyword(&expander.snippets(), typed.as_str())
+            crate::snippets::store::match_keyword(
+                &expander.snippets(),
+                typed.as_str(),
+                // Called only if the snippet that matched is limited to
+                // certain programs, which is rare. See `match_keyword`.
+                || crate::dictation::context::foreground_app_full().map(|app| app.path),
+            )
                 .map(|snippet| (snippet.id.clone(), snippet.keyword.trim().chars().count()))
         };
 
@@ -409,22 +415,12 @@ mod windows_impl {
         }
     }
 
-    /// Past this many characters, typing is abandoned for a paste.
-    ///
-    /// `SendInput` costs two records per character, so a 600-character
-    /// snippet is 1,200 events. That is visibly slow to watch appear, and
-    /// several classes of application (Electron, terminals, remote desktop)
-    /// drop synthetic input arriving that fast. Every mature expander has the
-    /// same threshold for the same reason.
-    ///
-    /// Below it, typing is strictly better: it leaves the clipboard alone.
-    pub const TYPE_LIMIT: usize = 200;
 
     /// Deletes the keyword and types the replacement.
     ///
     /// Called from the app, not the hook: it sends input, which a hook
     /// callback must not sit and wait on.
-    pub fn replace(expander: &Expander, backspaces: usize, text: &str) {
+    pub fn replace(expander: &Expander, backspaces: usize, text: &str, html: &str) {
         use windows::Win32::UI::Input::KeyboardAndMouse::{
             SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
             KEYEVENTF_UNICODE,
@@ -439,13 +435,9 @@ mod windows_impl {
             events.push(key_event(VK_BACK.0, true));
         }
 
-        let long = text.chars().count() > TYPE_LIMIT;
+        let paste = crate::snippets::store::wants_pasting(text, html);
 
-        // Short text is typed as Unicode, which leaves the clipboard exactly
-        // as the user had it. Long text is pasted, because typing it is both
-        // slow to watch and unreliable in applications that drop rapid
-        // synthetic input.
-        if !long {
+        if !paste {
             for unit in text.encode_utf16() {
                 events.push(unicode_event(unit, false));
                 events.push(unicode_event(unit, true));
@@ -460,8 +452,8 @@ mod windows_impl {
             }
         }
 
-        if long {
-            paste_text(text);
+        if paste {
+            paste_text(text, html);
         }
 
         expander.inner.replacing.store(false, Ordering::SeqCst);
@@ -510,15 +502,43 @@ mod windows_impl {
     /// The restore is the part that matters: a snippet that silently emptied
     /// the clipboard would be a poor trade, and this path only exists for
     /// text too long to type.
-    fn paste_text(text: &str) {
-        let Ok(mut board) = arboard::Clipboard::new() else {
-            crate::say!("could not open the clipboard to paste a snippet");
+    /// Puts a snippet on the clipboard, pastes it, and gives the clipboard
+    /// back.
+    ///
+    /// `html` empty means plain text. When it is not, both formats are written
+    /// in one go and the target takes whichever it understands, so a plain
+    /// field still receives sensible text rather than markup as characters.
+    ///
+    /// Borrowed through [`crate::selection::Held`] rather than by hand, which
+    /// is a fix as well as a tidying: written by hand, the write and the
+    /// restore were **two clipboard changes the history recorded**, so pasting
+    /// a long snippet left the snippet and then the user's own older entry
+    /// sitting at the top of the history as though they had just copied both.
+    /// `Held` suspends the history for the whole borrow instead of trying to
+    /// count the changes.
+    ///
+    /// What goes back is text. An image on the clipboard does not survive,
+    /// which is true of every borrow in Sill and is written down here because
+    /// this is the one somebody triggers by typing.
+    fn paste_text(text: &str, html: &str) {
+        let Some(app) = APP.get() else {
+            crate::say!("no app handle, so a snippet cannot be pasted");
             return;
         };
 
-        let previous = board.get_text().ok();
+        let held = crate::selection::Held::take(app);
 
-        if board.set_text(text.to_string()).is_err() {
+        let wrote = arboard::Clipboard::new().ok().is_some_and(|mut board| {
+            if html.is_empty() {
+                board.set_text(text.to_string()).is_ok()
+            } else {
+                board.set().html(html.to_string(), Some(text.to_string())).is_ok()
+            }
+        });
+
+        if !wrote {
+            crate::say!("could not put a snippet on the clipboard");
+            held.give_back();
             return;
         }
 
@@ -527,12 +547,11 @@ mod windows_impl {
         std::thread::sleep(std::time::Duration::from_millis(60));
         crate::dictation::paste::chord();
 
-        // After the paste has been read, not before. Restoring immediately
-        // would hand the target the old contents instead of the snippet.
-        if let Some(previous) = previous {
-            std::thread::sleep(std::time::Duration::from_millis(120));
-            let _ = board.set_text(previous);
-        }
+        // After the paste has been read, not before. Giving it back
+        // immediately would hand the target the old contents instead of the
+        // snippet.
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        held.give_back();
     }
 
     /// Moves the caret back `count` characters, for a `{cursor}` placeholder.

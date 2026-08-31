@@ -175,6 +175,34 @@ pub struct Expansion {
     pub text: String,
     /// Characters from the start, or `None` when the snippet said nothing.
     pub cursor: Option<usize>,
+    /// The same thing with its formatting, when the snippet has any.
+    ///
+    /// Empty for the great majority. Beside the text rather than instead of
+    /// it: whatever receives this takes whichever of the two it understands.
+    pub html: String,
+}
+
+/// The five characters that mean something in markup.
+///
+/// Substituted values are somebody's clipboard, a file name, a selection: text
+/// that had no idea it was going into markup. Without this a clipboard holding
+/// `a < b` ends the paragraph it was dropped into, and one holding a tag is
+/// pasted as that tag rather than as the characters somebody copied.
+pub fn escape_markup(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+
+    for c in value.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            other => out.push(other),
+        }
+    }
+
+    out
 }
 
 /// Fills in every placeholder in `template`.
@@ -208,7 +236,13 @@ pub fn expand_with(
         let Some(close) = after.find('}') else {
             // An unclosed brace is just a brace.
             out.push_str(&rest[open..]);
-            return Expansion { text: out, cursor };
+            return Expansion {
+                text: out,
+                cursor,
+                // Filled by the caller when the snippet has formatting, which
+                // is a second expansion of a second template.
+                html: String::new(),
+            };
         };
 
         let name = &after[..close];
@@ -263,7 +297,11 @@ pub fn expand_with(
     }
 
     out.push_str(rest);
-    Expansion { text: out, cursor }
+    Expansion {
+        text: out,
+        cursor,
+        html: String::new(),
+    }
 }
 
 /// Whether `template` mentions the clipboard.
@@ -311,6 +349,67 @@ pub fn mentions(template: &str, name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    mod formatting {
+        use super::*;
+
+        /// A value going into markup is somebody's clipboard or a file name,
+        /// text that had no idea it was going near a tag.
+        #[test]
+        fn a_substituted_value_cannot_end_the_tag_it_lands_in() {
+            let escaped = escape_markup("a < b && c > d");
+            assert_eq!(escaped, "a &lt; b &amp;&amp; c &gt; d");
+        }
+
+        /// The classic one. Without escaping this is pasted as a tag rather
+        /// than as the characters somebody copied.
+        #[test]
+        fn markup_on_the_clipboard_arrives_as_characters() {
+            assert_eq!(
+                escape_markup("<b>not bold</b>"),
+                "&lt;b&gt;not bold&lt;/b&gt;",
+            );
+        }
+
+        #[test]
+        fn quotes_cannot_break_out_of_an_attribute() {
+            assert_eq!(
+                escape_markup(r#"" onclick="x"#),
+                "&quot; onclick=&quot;x",
+            );
+            assert_eq!(escape_markup("it's"), "it&#39;s");
+        }
+
+        /// The ampersand goes first, or every other escape gets escaped again
+        /// and `<` comes out as `&amp;lt;`.
+        #[test]
+        fn nothing_is_escaped_twice() {
+            assert_eq!(escape_markup("&lt;"), "&amp;lt;");
+            assert_eq!(escape_markup("&amp;"), "&amp;amp;");
+        }
+
+        #[test]
+        fn ordinary_text_is_left_exactly_alone() {
+            let plain = "Kind regards, Brandon";
+            assert_eq!(escape_markup(plain), plain);
+        }
+
+        /// The whole point: the two expansions say the same thing, and only
+        /// the formatted one is escaped.
+        #[test]
+        fn the_same_placeholder_fills_both_versions() {
+            let context = Context {
+                clipboard: "a < b".to_string(),
+                ..Default::default()
+            };
+
+            let plain = expand("Look: {clipboard}", &context);
+            let rich = expand_with("<p>Look: {clipboard}</p>", &context, &escape_markup);
+
+            assert_eq!(plain.text, "Look: a < b");
+            assert_eq!(rich.text, "<p>Look: a &lt; b</p>");
+        }
+    }
+
     use super::*;
 
     fn context() -> Context {

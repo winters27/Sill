@@ -324,6 +324,26 @@ pub(crate) struct Registry {
     pub(crate) aliases: crate::registry::Aliases,
 }
 
+impl Registry {
+    /// Everything a search can return.
+    ///
+    /// **One definition, used by both ends**, and that is the whole reason it
+    /// exists. Searching chained four lists and launching looked a chosen row
+    /// up in one of them, so a snippet, a quicklink and every one of Sill's
+    /// own settings could be found and then not run: pressing Enter answered
+    /// "no such command" with the id it had just been given.
+    ///
+    /// Nothing about either side said they had to agree. Now the only way to
+    /// add a list is here, where both of them read it.
+    pub(crate) fn everything(&self) -> impl Iterator<Item = &crate::registry::CommandRecord> {
+        self.commands
+            .iter()
+            .chain(self.snippets.iter())
+            .chain(self.quicklinks.iter())
+            .chain(self.own_settings.iter())
+    }
+}
+
 pub(crate) fn now_seconds() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -335,4 +355,82 @@ pub(crate) fn data_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::CommandRecord;
+
+    fn row(id: &str, mode: &str) -> CommandRecord {
+        CommandRecord {
+            id: id.to_string(),
+            extension: "x".into(),
+            extension_title: "X".into(),
+            command: id.to_string(),
+            title: id.to_string(),
+            subtitle: String::new(),
+            description: String::new(),
+            mode: mode.to_string(),
+            entrypoint: id.to_string(),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+        }
+    }
+
+    fn registry() -> Registry {
+        Registry {
+            commands: vec![row("app:one", "app")],
+            own_settings: vec![row("sill-setting:general:One", "sill-setting")],
+            snippets: vec![row("snippet:one", "snippet")],
+            quicklinks: vec![row("quicklink:one", "quicklink")],
+            frecency: Default::default(),
+            frecency_path: PathBuf::new(),
+            aliases: Default::default(),
+        }
+    }
+
+    /// What can be found must be able to be run.
+    ///
+    /// Searching chained four lists and launching looked in one, so a snippet,
+    /// a quicklink and every one of Sill's own settings were shown and then
+    /// refused: pressing Enter answered "no such command" with the id it had
+    /// just been handed. Nothing failed to compile and no test noticed.
+    #[test]
+    fn everything_holds_every_list_a_search_can_return() {
+        let registry = registry();
+
+        for id in [
+            "app:one",
+            "sill-setting:general:One",
+            "snippet:one",
+            "quicklink:one",
+        ] {
+            assert!(
+                registry.everything().any(|row| row.id == id),
+                "{id} can be searched for and not run",
+            );
+        }
+    }
+
+    /// A fifth list added to the struct and not to `everything` would be the
+    /// same bug again, and this is what says so.
+    #[test]
+    fn nothing_is_left_out_of_everything() {
+        let registry = registry();
+
+        let counted = registry.commands.len()
+            + registry.own_settings.len()
+            + registry.snippets.len()
+            + registry.quicklinks.len();
+
+        assert_eq!(
+            registry.everything().count(),
+            counted,
+            "a list of records is not in `everything`",
+        );
+    }
 }

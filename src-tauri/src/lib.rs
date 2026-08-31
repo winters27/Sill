@@ -603,12 +603,7 @@ pub(crate) fn reload_snippets(app: &AppHandle) {
     let records: Vec<CommandRecord> = loaded
         .iter()
         .map(|snippet| {
-            registry::snippet_record(
-                &snippet.id,
-                &snippet.name,
-                &snippet.keyword,
-                &snippet.content,
-            )
+            registry::snippet_record(snippet)
         })
         .collect();
 

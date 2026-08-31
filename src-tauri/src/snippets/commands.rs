@@ -161,9 +161,27 @@ pub fn expand_snippet(app: AppHandle, id: String) -> Result<Expansion, String> {
 
     snippet.uses = snippet.uses.saturating_add(1);
     let content = snippet.content.clone();
+    let markup = snippet.html.clone();
     let _ = store::save(&file, &snippets);
 
-    Ok(placeholder::expand(&content, &context(&app, &content)))
+    let context = context(&app, &content);
+    let mut expansion = placeholder::expand(&content, &context);
+
+    /*
+     * The formatted version, expanded a second time.
+     *
+     * The same placeholders in the same context, so the two say the same
+     * thing, but **escaped**: a value going into markup is somebody's
+     * clipboard or a file name, text that had no idea it was going anywhere
+     * near a tag. Without escaping, a clipboard holding `a < b` ends the
+     * paragraph it lands in.
+     */
+    if !markup.trim().is_empty() {
+        expansion.html =
+            placeholder::expand_with(&markup, &context, &placeholder::escape_markup).text;
+    }
+
+    Ok(expansion)
 }
 
 /// Expands a snippet and types it where the keyword was.
@@ -182,7 +200,12 @@ pub fn type_snippet(
 
     #[cfg(windows)]
     {
-        crate::snippets::expander::replace(&expander, backspaces, &expansion.text);
+        crate::snippets::expander::replace(
+            &expander,
+            backspaces,
+            &expansion.text,
+            &expansion.html,
+        );
 
         // After the text is in, walk the caret back to where the snippet
         // asked for it.
