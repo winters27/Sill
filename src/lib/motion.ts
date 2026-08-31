@@ -99,6 +99,48 @@ export function popover(_node: Element, options: PopoverOptions = {}) {
 }
 
 /**
+ * A drawer opening or closing inside the thing that owns it.
+ *
+ * **This one animates height, and is the deliberate exception to rule 1.**
+ * A drawer whose contents fade in while the box around them snaps to full
+ * size is not an opening, it is a jump with a fade over it: the movement the
+ * eye actually follows is the edge, and that edge was not moving. Nothing
+ * composited can move an edge, because moving an edge is a layout.
+ *
+ * The cost is bounded and it is worth naming rather than hiding: one element
+ * relaying out for the length of one user-initiated click, in a settings
+ * window, at most once per click. That is not the launcher, nothing here is
+ * on a hot path, and at rest it costs nothing at all.
+ *
+ * `scrollHeight` is read once when the transition starts rather than per
+ * frame, so this measures the layout once and then only writes to it.
+ */
+export function drawer(node: Element, options: { out?: boolean } = {}) {
+  const ms = durations();
+  const el = node as HTMLElement;
+
+  // Read before the first frame writes anything, so this is one measurement
+  // and not a read/write cycle per frame.
+  const style = getComputedStyle(el);
+  const height = el.scrollHeight;
+  const padTop = Number.parseFloat(style.paddingTop) || 0;
+  const padBottom = Number.parseFloat(style.paddingBottom) || 0;
+
+  return {
+    duration: reduced() ? 0 : options.out ? ms.exit : ms.enter,
+    easing: cubicOut,
+    css: (t: number) =>
+      `overflow: hidden;` +
+      `height: ${t * height}px;` +
+      `padding-top: ${t * padTop}px;` +
+      `padding-bottom: ${t * padBottom}px;` +
+      // Fades slightly ahead of the collapse, so the last frame is empty
+      // rather than a sliver of clipped text.
+      `opacity: ${Math.min(1, t * 1.4)};`,
+  };
+}
+
+/**
  * A panel's content being replaced.
  *
  * Smaller and quicker than a popover, and it does not scale: the panel is not

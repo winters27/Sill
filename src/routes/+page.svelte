@@ -7,6 +7,7 @@
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
   import RootList from "$lib/components/RootList.svelte";
+  import AiMark from "$lib/components/settings/AiMark.svelte";
   import { LISTBOX, isBrowsing, isListMode, merged, optionId } from "$lib/results";
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
@@ -1789,6 +1790,23 @@
    */
   let answersWith = $state<AiReady | null>(null);
 
+  /**
+   * What the chip says when it is hovered.
+   *
+   * The local case earns its own sentence. Whether a question costs money and
+   * whether it leaves the machine is the one thing about a provider worth
+   * knowing before pressing the key, and it is the only thing the mark itself
+   * cannot say.
+   */
+  const askingIs = $derived.by(() => {
+    if (!answersWith) return "";
+    if (!answersWith.ready) return answersWith.whyNot;
+
+    return answersWith.kind === "local"
+      ? `${answersWith.name} answers, on this machine`
+      : `${answersWith.name} answers when you press Tab`;
+  });
+
   async function refreshWhoAnswers() {
     try {
       answersWith = await aiReady();
@@ -2543,13 +2561,23 @@
         class="asker"
         class:unset={!answersWith.ready}
         onclick={() => void openSettings("ai")}
-        title={answersWith.ready
-          ? `${answersWith.name} answers when you press Tab`
-          : answersWith.whyNot}
+        title={askingIs}
       >
         {#if answersWith.ready}
-          <span class="pip {answersWith.kind}"></span>
-          <span class="who">{answersWith.model || answersWith.name}</span>
+          <!--
+            The service as its own mark, and then only the model.
+
+            Two names in a chip this size is the service said twice: the mark
+            already carries it, and the model is the half that changes. The
+            model is shortened in Rust, so this and the settings window agree
+            about what it is called.
+          -->
+          <!-- The mark and the model are one thing being said, so they are
+               grouped and sit closer to each other than to the key. -->
+          <span class="whom">
+            <AiMark name={answersWith.id} size={14} />
+            <span class="who">{answersWith.model || answersWith.name}</span>
+          </span>
           <!-- Revealed only once there is something to ask about, so an empty
                launcher is not carrying a key nobody can use yet. -->
           {#if query.trim()}
@@ -2787,10 +2815,9 @@
   .asker {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2);
     flex: none;
-    margin-right: var(--space-1);
-    padding: 3px var(--space-2);
+    gap: var(--space-2);
+    padding: 3px var(--space-2) 3px var(--space-1);
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--fill-1);
@@ -2821,31 +2848,12 @@
     color: var(--accent);
   }
 
-  /*
-   * Where the answer comes from, as a mark rather than a name.
-   *
-   * Three colours for three kinds: this machine, a subscription through a tool
-   * already signed in, or a key. Sill's own marks rather than the vendors',
-   * because shipping somebody else's logo is a licensing question and this
-   * answers the same one at a glance.
-   */
-  .pip {
-    width: 8px;
-    height: 8px;
-    flex: none;
-    border-radius: 50%;
-  }
-
-  .pip.local {
-    background: var(--accent-green);
-  }
-
-  .pip.cli {
-    background: var(--accent-orange);
-  }
-
-  .pip.key {
-    background: var(--accent-blue);
+  /* Who is answering: the mark and the model, held together. */
+  .whom {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
   }
 
   .who {
@@ -2978,7 +2986,17 @@
     align-items: center;
     gap: var(--space-3);
     height: var(--search-height);
+    /*
+     * The same room at both ends.
+     *
+     * There was none on the right, because until the chip arrived nothing was
+     * over there: the field simply ran to the edge, where a text caret needs
+     * no margin. A pill does, and without this it sat against the glass while
+     * the mark on the left had a comfortable inset, which reads as the row
+     * being pushed sideways rather than as one element being tight.
+     */
     padding-left: var(--space-4);
+    padding-right: var(--space-4);
     flex: none;
   }
 

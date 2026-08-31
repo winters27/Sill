@@ -254,6 +254,49 @@ enum Scheme {
     Https,
 }
 
+/// The model, named as short as it can be named and still be right.
+///
+/// The stored id is exact and never changes: this is only what is read. It
+/// matters because the id is often not a name at all.
+/// `huihui_ai/qwen3-abliterated:14b` is who published it, what it is, and how
+/// big, and only the last two are the answer to "which model is answering".
+/// The chip has room for about twenty characters and the leading path is the
+/// first thing to go.
+///
+/// No table of pretty names. A table mapping ids to titles is a list that goes
+/// stale the week a provider ships anything, and a model whose real name is on
+/// screen is never wrong in a way somebody has to discover.
+pub fn short_model(wire: Wire, model: &str) -> String {
+    let model = model.trim();
+
+    // Claude Code takes aliases rather than ids, and it already ships the only
+    // list of them there is. That list is maintained because the picker in
+    // settings reads it, so reading it here costs nothing to keep true.
+    if wire == Wire::ClaudeCode {
+        // Nothing chosen answers with nothing, so whatever is reading this
+        // falls back to the service name. The label for the empty alias is
+        // "Whatever Claude Code is set to", which is the right words in the
+        // picker that offers it and half a sentence too long anywhere else.
+        if model.is_empty() {
+            return String::new();
+        }
+
+        return super::claude_code::MODELS
+            .iter()
+            .find(|(id, _)| *id == model)
+            .map(|(_, label)| (*label).to_string())
+            .unwrap_or_else(|| model.to_string());
+    }
+
+    // Who published it is not which model it is. Everything up to the last
+    // slash goes: `anthropic/claude-sonnet-5` is Claude Sonnet 5 whoever is
+    // billing for it.
+    match model.rsplit_once('/') {
+        Some((_, name)) if !name.is_empty() => name.to_string(),
+        _ => model.to_string(),
+    }
+}
+
 /// Whether this address is this machine or this network.
 ///
 /// The same question the rule above asks, exposed on its own because two
@@ -425,6 +468,71 @@ mod tests {
         fn the_scheme_is_read_whatever_its_case() {
             assert_eq!(check("HTTPS://api.example.com/v1"), Ok(()));
             assert_eq!(check("HTTP://LOCALHOST:11434/v1"), Ok(()));
+        }
+    }
+
+    mod naming_the_model {
+        use super::*;
+
+        /// The ones that sent me looking for this. Both are the publisher,
+        /// then the model, and only the second half answers "which model is
+        /// answering".
+        #[test]
+        fn who_published_it_is_not_which_model_it_is() {
+            assert_eq!(
+                short_model(Wire::OpenAi, "huihui_ai/qwen3-abliterated:14b"),
+                "qwen3-abliterated:14b",
+            );
+            assert_eq!(
+                short_model(Wire::OpenAi, "anthropic/claude-sonnet-5"),
+                "claude-sonnet-5",
+            );
+        }
+
+        #[test]
+        fn a_plain_name_is_left_alone() {
+            assert_eq!(short_model(Wire::OpenAi, "qwen3:1.7b"), "qwen3:1.7b");
+            assert_eq!(short_model(Wire::OpenAi, "gpt-5.2"), "gpt-5.2");
+        }
+
+        /// A slash with nothing after it is not a prefix, and taking the empty
+        /// half would leave the chip with no model at all.
+        #[test]
+        fn a_trailing_slash_does_not_leave_it_nameless() {
+            assert_eq!(short_model(Wire::OpenAi, "something/"), "something/");
+        }
+
+        /// Only the last one. A model published under a nested path is still
+        /// named by its last segment.
+        #[test]
+        fn only_the_last_segment_survives() {
+            assert_eq!(short_model(Wire::OpenAi, "a/b/c-model"), "c-model");
+        }
+
+        /// Claude Code takes aliases, and the list of them is already
+        /// maintained because the settings picker reads it. Reading the same
+        /// list here is what stops the chip saying `sonnet` while the picker
+        /// beside it says Sonnet.
+        #[test]
+        fn an_alias_is_read_the_way_the_picker_writes_it() {
+            assert_eq!(short_model(Wire::ClaudeCode, "sonnet"), "Sonnet");
+            assert_eq!(short_model(Wire::ClaudeCode, "haiku"), "Haiku");
+        }
+
+        /// Empty means whatever Claude Code is set to. Its label in the
+        /// picker is a whole sentence, which is the right words there and
+        /// half a sentence too long in a chip, so nothing is answered and the
+        /// reader falls back to the service name.
+        #[test]
+        fn an_alias_nobody_chose_answers_with_nothing() {
+            assert_eq!(short_model(Wire::ClaudeCode, ""), "");
+        }
+
+        /// A model id Sill has never heard of still has to appear. Answering
+        /// with nothing would draw an empty chip.
+        #[test]
+        fn an_alias_that_is_not_in_the_list_is_still_shown() {
+            assert_eq!(short_model(Wire::ClaudeCode, "something-new"), "something-new");
         }
     }
 

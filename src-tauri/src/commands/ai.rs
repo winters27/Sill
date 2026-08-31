@@ -19,10 +19,14 @@ use crate::state::PrefsState;
 pub(crate) struct Ready {
     /// Whether anything is set up at all.
     pub ready: bool,
+    /// Which provider, so the window can draw its mark.
+    pub id: String,
     /// What the chosen one is called, for a line saying who answered.
     pub name: String,
-    /// The model, as it would be named to somebody. Empty when the provider
-    /// decides for itself, which is what Claude Code does by default.
+    /// The model as it is read, which is not the id it is asked for.
+    ///
+    /// Short on purpose: the mark beside it already says which service, so
+    /// repeating that here would spend the width twice.
     pub model: String,
     /// `local`, `cli` or `key`. What the mark on the chip is drawn from.
     ///
@@ -62,6 +66,7 @@ pub(crate) async fn ai_ready(prefs: State<'_, PrefsState>) -> Result<Ready, Stri
     let Some(chosen) = chosen(&settings) else {
         return Ok(Ready {
             ready: false,
+            id: String::new(),
             name: String::new(),
             model: String::new(),
             kind: String::new(),
@@ -78,8 +83,9 @@ pub(crate) async fn ai_ready(prefs: State<'_, PrefsState>) -> Result<Ready, Stri
     if let Some(missing) = what_is_missing(&chosen) {
         return Ok(Ready {
             ready: false,
+            id: chosen.id.clone(),
             name: chosen.name.clone(),
-            model: chosen.model.clone(),
+            model: provider::short_model(chosen.wire, &chosen.model),
             kind: kind_of(&chosen),
             why_not: missing,
         });
@@ -87,8 +93,9 @@ pub(crate) async fn ai_ready(prefs: State<'_, PrefsState>) -> Result<Ready, Stri
 
     Ok(Ready {
         ready: true,
+        id: chosen.id.clone(),
         name: chosen.name.clone(),
-        model: chosen.model.clone(),
+        model: provider::short_model(chosen.wire, &chosen.model),
         kind: kind_of(&chosen),
         why_not: String::new(),
     })

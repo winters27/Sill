@@ -251,9 +251,16 @@ export interface AiTurn {
 /** Whether asking would work, and who would answer. */
 export interface AiReady {
   ready: boolean;
+  /** Which provider, so the window can draw its mark. */
+  id: string;
   /** What the chosen one is called. */
   name: string;
-  /** The model, or empty when the provider decides for itself. */
+  /**
+   * The model as it is read, which is not the id it is asked for.
+   *
+   * Shortened in Rust so the chip and the settings window agree. Empty when
+   * the provider decides for itself, which is what Claude Code does.
+   */
   model: string;
   /**
    * Where the answer comes from: `local`, `cli` or `key`.

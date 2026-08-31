@@ -4,7 +4,7 @@
   import Select from "./Select.svelte";
   import TextField from "./TextField.svelte";
   import AiMark from "./AiMark.svelte";
-  import { swap } from "$lib/motion";
+  import { drawer } from "$lib/motion";
   import {
     aiKnown,
     aiModels,
@@ -165,6 +165,18 @@
     return one.model || "Needs a model";
   }
 
+  /**
+   * What this service wants from you, for the top of its setup.
+   *
+   * Read from the known table rather than from the saved provider, because
+   * `add` deliberately strips it: it is the settings window's prose about a
+   * service, and it has no business in somebody's config file. That also means
+   * it still shows for a provider added long ago.
+   */
+  function noteFor(id: string): string {
+    return known.find((one) => one.id === id)?.note ?? "";
+  }
+
   /** Whether that status is a job rather than a fact, so it can be marked. */
   const unfinished = (one: AiProvider) => one.wire !== "claudeCode" && !one.model;
 
@@ -255,7 +267,11 @@
           </div>
 
           {#if editing === one.id && open}
-            <div class="setup" in:swap out:swap={{ out: true }}>
+            <div class="setup" in:drawer out:drawer={{ out: true }}>
+              {#if noteFor(one.id)}
+                <p class="intro">{noteFor(one.id)}</p>
+              {/if}
+
               {#if open.wire !== "claudeCode"}
                 <div class="field">
                   <span class="what">Address</span>
@@ -362,12 +378,16 @@
             <div class="pick static">
               <AiMark name={one.id} />
 
+              <!--
+                The name and nothing else.
+
+                What each service wants from you is worth saying, but not
+                seven times at once in a list somebody is scanning for a name.
+                It moves to the top of that provider's own setup, which is
+                where it is actually needed and where there is room for it.
+              -->
               <span class="text">
                 <span class="name">{one.name}</span>
-                <!-- Kept, unlike the others: this is the one place the prose
-                     says something nobody could work out from the panel, which
-                     is what each service actually wants from you. -->
-                <span class="status">{one.note}</span>
               </span>
             </div>
 
@@ -571,6 +591,15 @@
     flex-direction: column;
     gap: var(--space-1);
     min-width: 0;
+  }
+
+  /* The one line of prose in the form, set apart from the fields below it. */
+  .intro {
+    margin: 0 0 var(--space-1);
+    max-width: 68ch;
+    color: var(--text-2);
+    font-size: var(--text-meta);
+    line-height: 1.55;
   }
 
   .note {
