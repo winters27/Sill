@@ -26,9 +26,16 @@ jobs:
             package-lock.json
             host/package-lock.json
 
+      # cache-on-failure, or a run that fails saves nothing and the next one
+      # compiles the whole dependency tree again. Every run here was 15 to 18
+      # minutes and every one of them logged "No cache found", because the
+      # early ones failed and a failed job does not write the cache by default.
+      # A gate is most useful while something is broken, which is exactly when
+      # the default leaves it slowest.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
 
       - run: npm ci
       - run: npm --prefix host ci
