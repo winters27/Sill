@@ -169,6 +169,21 @@ pub fn arguments(session: Option<&str>, model: Option<&str>) -> Vec<String> {
     args
 }
 
+/// The models this can be asked for.
+///
+/// Aliases rather than ids. Claude Code resolves `sonnet` to whichever model
+/// that currently means, and pinning an id here would freeze somebody on an
+/// old one every time a new release lands. The empty first entry means
+/// "whatever Claude Code is already set to", which is the right default: a
+/// choice made in Claude Code itself should not be overridden by a launcher.
+pub const MODELS: &[(&str, &str)] = &[
+    ("", "Whatever Claude Code is set to"),
+    ("fable", "Fable"),
+    ("opus", "Opus"),
+    ("sonnet", "Sonnet"),
+    ("haiku", "Haiku"),
+];
+
 /// The environment overrides for one question, if any.
 ///
 /// Empty means the subscription: Claude Code signed in as itself, reaching
@@ -242,8 +257,15 @@ fn likely_places() -> Vec<PathBuf> {
 
     if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
         let home = PathBuf::from(home);
+
+        // Where the installer puts it.
         out.push(home.join(".local").join("bin").join("claude.exe"));
         out.push(home.join(".local").join("bin").join("claude"));
+
+        // Where it ends up after moving off a global npm install, which is
+        // still how a lot of existing setups look.
+        out.push(home.join(".claude").join("local").join("claude.exe"));
+        out.push(home.join(".claude").join("local").join("claude"));
     }
 
     if let Some(appdata) = std::env::var_os("APPDATA") {
@@ -275,6 +297,41 @@ mod tests {
             base_url: base.into(),
             api_key: key.into(),
             ..Provider::default()
+        }
+    }
+
+    mod where_it_is_looked_for {
+        use super::*;
+
+        /// Every place it is actually installed.
+        ///
+        /// Not on this machine's PATH is the ordinary case: the launcher runs
+        /// as a desktop process, and a shell profile that put it on PATH is
+        /// not read by one. So the fallback list is the part that has to be
+        /// right, and it is the part nothing else exercises.
+        #[test]
+        fn the_fallback_list_covers_both_ways_it_is_installed() {
+            let places = likely_places();
+            let text: Vec<String> = places
+                .iter()
+                .map(|path| path.to_string_lossy().replace("\\", "/"))
+                .collect();
+
+            for expected in [".local/bin/claude", ".claude/local/claude", "npm/claude.cmd"] {
+                assert!(
+                    text.iter().any(|path| path.contains(expected)),
+                    "nothing looks in {expected}: {text:?}",
+                );
+            }
+        }
+
+        /// Absolute, because the process is started somewhere with nothing in
+        /// it and a relative path would resolve against that.
+        #[test]
+        fn every_place_is_an_absolute_path() {
+            for place in likely_places() {
+                assert!(place.is_absolute(), "{} is relative", place.display());
+            }
         }
     }
 

@@ -91,10 +91,77 @@ pub(crate) async fn ai_ask(
     crate::ai::chat::ask(&app, &chosen, &question).await
 }
 
+/// One model somebody can choose.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Model {
+    /// What goes into the request.
+    pub id: String,
+    /// What the settings window shows.
+    pub label: String,
+}
+
+/// Which models a provider offers.
+///
+/// Asked rather than typed. A model id is a string, and one character wrong is
+/// a request that fails with a message about a model nobody meant to ask for.
+///
+/// An empty list is not a failure: the settings window offers a text field
+/// instead of a picker, which still works. A service that will not say what it
+/// has should not stop somebody naming a model themselves.
+#[tauri::command]
+pub(crate) async fn ai_models(provider: Provider) -> Result<Vec<Model>, String> {
+    if provider.wire == provider::Wire::ClaudeCode {
+        // Its own aliases rather than an endpoint. Claude Code resolves
+        // `sonnet` to whichever model that currently means.
+        return Ok(crate::ai::claude_code::MODELS
+            .iter()
+            .map(|(id, label)| Model {
+                id: (*id).to_string(),
+                label: (*label).to_string(),
+            })
+            .collect());
+    }
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|err| format!("could not prepare the request: {err}"))?;
+
+    let ids = crate::ai::openai::models(&client, &provider).await?;
+
+    Ok(ids
+        .into_iter()
+        .map(|id| Model {
+            label: id.clone(),
+            id,
+        })
+        .collect())
+}
+
 /// The services Sill knows how to reach, for the settings window.
 #[tauri::command]
-pub(crate) fn ai_known() -> Vec<Provider> {
-    provider::KNOWN.iter().map(|known| known.provider()).collect()
+pub(crate) fn ai_known() -> Vec<Offer> {
+    provider::KNOWN
+        .iter()
+        .map(|known| Offer {
+            provider: known.provider(),
+            note: known.note.to_string(),
+        })
+        .collect()
+}
+
+/// A service on offer, with the line explaining what setting it up involves.
+///
+/// The note matters more here than anywhere: three of these have a
+/// subscription with the same name that does not pay for the thing being set
+/// up, and somebody about to paste a key should be told which.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Offer {
+    #[serde(flatten)]
+    pub provider: Provider,
+    pub note: String,
 }
 
 /// The chosen provider, or the only one if only one is set up.

@@ -1,0 +1,82 @@
+<script lang="ts">
+  /**
+   * The one text field the settings window uses.
+   *
+   * Same reason as the picker beside it: a field with no rule of its own is
+   * drawn by Windows, which paints it white whatever the panel behind it
+   * looks like.
+   */
+  interface Props {
+    value: string;
+    oninput: (value: string) => void;
+    placeholder?: string;
+    /** Fills the row rather than taking its natural width. */
+    full?: boolean;
+    disabled?: boolean;
+    /** Hides what is typed, for anything that should not be read over a shoulder. */
+    secret?: boolean;
+    /** Addresses and keys are read character by character, so they get the mono face. */
+    mono?: boolean;
+    ariaLabel?: string;
+  }
+
+  let {
+    value,
+    oninput,
+    placeholder,
+    full = false,
+    disabled = false,
+    secret = false,
+    mono = false,
+    ariaLabel,
+  }: Props = $props();
+</script>
+
+<input
+  type={secret ? "password" : "text"}
+  {value}
+  {disabled}
+  {placeholder}
+  class:full
+  class:mono
+  aria-label={ariaLabel}
+  spellcheck="false"
+  autocomplete="off"
+  oninput={(event) => oninput(event.currentTarget.value)}
+/>
+
+<style>
+  input {
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--fill-1);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--text-meta);
+    outline: none;
+    user-select: text;
+    transition: box-shadow 0.15s var(--ease);
+  }
+
+  input:focus {
+    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+  }
+
+  input:disabled {
+    opacity: 0.5;
+  }
+
+  input::placeholder {
+    color: var(--text-3);
+  }
+
+  .full {
+    width: 100%;
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+  }
+</style>

@@ -2,6 +2,7 @@
   export type IconName =
     | "general"
     | "appearance"
+    | "ai"
     | "dictation"
     | "snippets"
     | "emoji"
@@ -112,6 +113,11 @@
     <circle cx="16" cy="6" r="2" />
     <circle cx="8" cy="12" r="2" />
     <circle cx="14" cy="18" r="2" />
+  {:else if name === "ai"}
+    <!-- A speech bubble with a spark in it: something answering, rather than
+         a robot, which would say the wrong thing about who is talking. -->
+    <path d="M20 12a8 8 0 0 1-8 8H5l-1.5 2.5V12a8 8 0 0 1 16 0Z" />
+    <path d="M12 7.5l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5L8.5 11l2.5-1Z" />
   {:else if name === "appearance"}
     <circle cx="12" cy="12" r="9" />
     <path d="M12 3a9 9 0 0 0 0 18 4.5 4.5 0 0 0 0-9 4.5 4.5 0 0 1 0-9Z" />

@@ -1754,6 +1754,15 @@
    * results, shows an empty panel and then says "no provider" has thrown away
    * the search for nothing.
    */
+  /**
+   * What was in the field when the conversation started.
+   *
+   * Put back on the way out. Tab is autocomplete nearly everywhere else, so
+   * it gets pressed by reflex, and a search that vanished because of that is
+   * the one thing that would stop somebody pressing it on purpose.
+   */
+  let cameFrom = $state("");
+
   async function askAi(question: string) {
     let ready;
     try {
@@ -1769,6 +1778,10 @@
       status = `${ready.whyNot} Set one up in Settings.`;
       return;
     }
+
+    // Only on the way in. A follow-up is asked from inside the conversation
+    // and is not the place it was opened from.
+    if (mode !== "ai") cameFrom = question;
 
     mode = "ai";
     selected = 0;
@@ -1831,7 +1844,9 @@
     if (mode === "ai") {
       mode = "root";
       selected = 0;
-      query = "";
+      // The search this was opened from, so leaving lands where it started
+      // rather than on an empty list.
+      query = cameFrom;
       await refreshRoot();
       return;
     }
@@ -1950,15 +1965,20 @@
      * or the clipboard, Tab is not free and a question about nothing is not a
      * question.
      */
-    if (
-      event.key === "Tab" &&
-      !event.ctrlKey &&
-      !event.altKey &&
-      mode === "root" &&
-      query.trim()
-    ) {
-      event.preventDefault();
-      void askAi(query.trim());
+    if (event.key === "Tab" && !event.ctrlKey && !event.altKey) {
+      // A running command owns Tab: a form moves between its fields with it,
+      // and taking that away would leave the second field unreachable.
+      if (mode !== "command") {
+        // Swallowed whether or not it asks anything. Left alone it is the
+        // browser's own focus key, and the only other focusable thing is
+        // outside this window: the field lost focus, the launcher dismissed
+        // itself on blur, and a key that did nothing looked like a key that
+        // closed the launcher.
+        event.preventDefault();
+
+        if (mode === "root" && query.trim()) void askAi(query.trim());
+      }
+
       return;
     }
 

@@ -34,6 +34,7 @@ pub struct Setting {
 pub const PANELS: &[&str] = &[
     "general",
     "appearance",
+    "ai",
     "dictation",
     "snippets",
     "emoji",
@@ -142,6 +143,31 @@ pub const SETTINGS: &[Setting] = &[
         "Appearance",
         "Window width",
         "width size window",
+    ),
+    // ----------------------------------------------------------------- ask
+    s(
+        "ai",
+        "Ask",
+        "Who answers",
+        "ai model chat provider claude ollama openai gpt tab ask llm",
+    ),
+    s(
+        "ai",
+        "Ask",
+        "Model",
+        "ai which model change switch sonnet opus haiku gpt llama qwen",
+    ),
+    s(
+        "ai",
+        "Ask",
+        "Address",
+        "ai endpoint base url ollama local server http https lm studio",
+    ),
+    s(
+        "ai",
+        "Ask",
+        "Key",
+        "ai api key token secret credential paste anthropic openrouter",
     ),
     // ----------------------------------------------------------- dictation
     s(
@@ -629,6 +655,25 @@ mod tests {
                 "{} names an unknown panel {:?}",
                 setting.title,
                 setting.panel
+            );
+        }
+    }
+
+    /// The other direction, which is the one that fails quietly.
+    ///
+    /// A panel with no settings still draws in the sidebar, so it looks
+    /// finished; it is only unreachable from the launcher, where most people
+    /// look for a setting first. The Ask panel shipped that way and was found
+    /// by hand rather than by a test.
+    #[test]
+    fn every_panel_has_at_least_one_setting_somebody_can_search_for() {
+        let named: HashSet<&str> = SETTINGS.iter().map(|setting| setting.panel).collect();
+
+        for panel in PANELS {
+            assert!(
+                named.contains(panel),
+                "the {panel:?} panel has no settings, so nothing in it can be \
+                 found from the launcher",
             );
         }
     }

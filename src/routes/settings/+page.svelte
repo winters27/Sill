@@ -16,6 +16,9 @@
   import IndexList from "$lib/components/settings/IndexList.svelte";
   import EmojiPanel from "$lib/components/settings/EmojiPanel.svelte";
   import Button from "$lib/components/settings/Button.svelte";
+  import AiPanel from "$lib/components/settings/AiPanel.svelte";
+  import Select from "$lib/components/settings/Select.svelte";
+  import TextField from "$lib/components/settings/TextField.svelte";
   import DictationPanel from "$lib/components/settings/DictationPanel.svelte";
   import ClipboardPanel from "$lib/components/settings/ClipboardPanel.svelte";
   import SnippetsPanel from "$lib/components/settings/SnippetsPanel.svelte";
@@ -136,6 +139,12 @@
       id: "extensions",
       name: "Extensions",
       blurb: "Raycast extensions installed into Sill's host",
+    },
+    {
+      id: "ai",
+      name: "Ask",
+      blurb: "Who answers when you press Tab in the launcher",
+      group: "Ask",
     },
     {
       id: "dictation",
@@ -839,6 +848,8 @@
               {/snippet}
             </Row>
           </Section>
+          {:else if active === "ai"}
+            <AiPanel prefs={p} {commit} />
           {:else if active === "dictation"}
             <DictationPanel prefs={p} {commit} />
           {:else if active === "snippets"}
@@ -1137,18 +1148,16 @@
               disabled={!p.webSearch.enabled || p.webSearch.customUrl.trim() !== ""}
             >
               {#snippet control()}
-                <select
+                <Select
                   value={p.webSearch.engine}
-                  onchange={(e) => {
+                  options={engines.map((option) => ({ value: option.id, label: option.name }))}
+                  onchange={(next) => {
                     if (!prefs) return;
-                    p.webSearch.engine = e.currentTarget.value;
+                    p.webSearch.engine = next;
                     void commit();
                   }}
-                >
-                  {#each engines as option (option.id)}
-                    <option value={option.id}>{option.name}</option>
-                  {/each}
-                </select>
+                  ariaLabel="Engine"
+                />
               {/snippet}
             </Row>
             <Row
@@ -1157,11 +1166,17 @@
               disabled={!p.webSearch.enabled}
             >
               {#snippet children()}
-                <input
-                  bind:value={p.webSearch.customUrl}
-                  onchange={commit}
+                <TextField
+                  value={p.webSearch.customUrl}
+                  oninput={(next) => {
+                    if (!prefs) return;
+                    p.webSearch.customUrl = next;
+                    void commit();
+                  }}
                   placeholder="https://example.com/search?q={'{query}'}"
-                  spellcheck="false"
+                  ariaLabel="Your own address"
+                  full
+                  mono
                 />
               {/snippet}
             </Row>

@@ -39,6 +39,17 @@ const READ = new Set([
  */
 const REPLACEMENT = String.fromCodePoint(0xfffd);
 
+/**
+ * The settings window, where every picker and field looks the same.
+ *
+ * The launcher and the extension surfaces are deliberately not here: they draw
+ * their own chrome and answer to a different design.
+ */
+const SETTINGS_SURFACE = /[\\/]settings[\\/]/;
+
+/** The file that owns the look, which cannot use itself. */
+const OWNS_A_CONTROL = /Select\.svelte$/;
+
 let failures = 0;
 
 function fail(file, line, what) {
@@ -131,6 +142,26 @@ for (const file of sources(".")) {
         "inline accent alpha; the accent means selection, match, focus or an " +
           "affirmative state, and each has a named token",
       );
+    }
+
+    /*
+     * A hand-rolled picker in the settings window.
+     *
+     * Windows draws an open `<select>` list itself, in a window of its own,
+     * and starts it white whatever the page looks like. A panel that writes
+     * its own picker therefore has to remember a rule for the options as
+     * well, and nothing in its own styling hints that the rule is missing.
+     * Three panels remembered and two did not; the two rendered white text
+     * on a white list, readable only on the highlighted row.
+     *
+     * Only `<select>` is checked. A panel that forgets to style an
+     * `<input>` is wrong too, but it is wrong visibly, in the panel, the
+     * first time anybody looks at it. This is for the failure that hides.
+     */
+    if (SETTINGS_SURFACE.test(file) && !OWNS_A_CONTROL.test(file)) {
+      for (const m of text.matchAll(/<select\b/g)) {
+        fail(file, lineOf(text, m.index), "a bare <select> in settings; use Select.svelte");
+      }
     }
   }
 }

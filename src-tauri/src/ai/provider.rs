@@ -167,7 +167,11 @@ pub const KNOWN: &[Known] = &[
         name: "Ollama",
         wire: Wire::OpenAi,
         base_url: "http://localhost:11434/v1",
-        model: "llama4",
+        // Named by the machine rather than here. What is installed differs
+        // per machine, so any name shipped in this table is one most people
+        // do not have, and it arrives as a picker showing nothing beside a
+        // line saying there are five to choose from.
+        model: "",
         needs_key: false,
         note: "A model running on this machine, or on another one you point \
                this at. Nothing leaves for anybody else.",
@@ -502,13 +506,29 @@ mod tests {
             }
         }
 
-        /// A default model, except for the one whose model the CLI already
-        /// knows: naming one there would override a choice somebody made in
-        /// Claude Code itself.
+        /// A default model, except in the two cases where naming one would be
+        /// a guess at something decided elsewhere.
+        ///
+        /// Claude Code already has a model chosen inside Claude Code, and a
+        /// name here would quietly override it. A model on somebody's own
+        /// machine is whichever one they installed, so any name shipped here
+        /// is one most people do not have: it arrives as a picker showing
+        /// nothing beside a line saying there are five to choose from. Both
+        /// are left empty and filled in from what is actually there.
         #[test]
-        fn everything_that_needs_a_model_named_names_one() {
-            for known in KNOWN.iter().filter(|k| k.wire != Wire::ClaudeCode) {
-                assert!(!known.model.is_empty(), "{} has no default model", known.id);
+        fn everything_whose_models_are_the_same_everywhere_names_one() {
+            for known in KNOWN {
+                let host = strip_scheme(known.base_url).map(|(_, host)| host);
+                let decided_elsewhere = known.wire == Wire::ClaudeCode
+                    || host.is_some_and(is_local);
+
+                assert_eq!(
+                    known.model.is_empty(),
+                    decided_elsewhere,
+                    "{} names {:?}",
+                    known.id,
+                    known.model,
+                );
             }
         }
     }

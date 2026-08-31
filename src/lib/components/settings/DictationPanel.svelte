@@ -5,6 +5,7 @@
   import Row from "./Row.svelte";
   import Segmented from "./Segmented.svelte";
   import Button from "./Button.svelte";
+  import Select from "./Select.svelte";
   import ServerStatus from "./ServerStatus.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
   import DictationStats from "./DictationStats.svelte";
@@ -387,18 +388,19 @@
     description="Auto detects per dictation. Pinning one is faster and stops a strong accent being read as a neighbouring language."
   >
     {#snippet control()}
-      <select
+      <Select
         value={prefs.dictation.language ?? ""}
-        onchange={(e) => {
-          const value = e.currentTarget.value;
-          prefs.dictation.language = value === "" ? null : value;
+        options={LANGUAGES.map((option) => ({
+          value: option.code ?? "",
+          label: option.name,
+        }))}
+        onchange={(next) => {
+          prefs.dictation.language = next === "" ? null : next;
           commit();
         }}
-      >
-        {#each LANGUAGES as option (option.name)}
-          <option value={option.code ?? ""}>{option.name}</option>
-        {/each}
-      </select>
+        ariaLabel="Language"
+        steady
+      />
     {/snippet}
   </Row>
 
@@ -693,7 +695,6 @@
     color: var(--text-2);
   }
 
-  select,
   input,
   textarea {
     padding: var(--space-1) var(--space-2);
@@ -709,19 +710,9 @@
     transition: box-shadow 0.15s var(--ease);
   }
 
-  select:focus,
   input:focus,
   textarea:focus {
     box-shadow: inset 0 0 0 1px var(--hairline-strong);
-  }
-
-  select {
-    min-width: 210px;
-    cursor: pointer;
-  }
-
-  select option {
-    background: var(--core-secondary-background);
   }
 
   input {

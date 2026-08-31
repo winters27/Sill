@@ -188,6 +188,77 @@ pub async fn ask(
     Ok(())
 }
 
+/// Which models this service has.
+///
+/// Asked rather than typed. A model id is a string like `gemini-3-flash` or
+/// `anthropic/claude-sonnet-5`, and one character wrong is a request that
+/// fails with a message about a model nobody meant to ask for. Every service
+/// that speaks this shape publishes the list, so the choice can be a list.
+///
+/// Sorted, because a service returns them in whatever order its database felt
+/// like and a picker that reorders itself between openings is one nobody can
+/// learn.
+pub async fn models(client: &reqwest::Client, provider: &Provider) -> Result<Vec<String>, String> {
+    super::provider::check(&provider.base_url).map_err(|why| why.message().to_string())?;
+
+    let base = provider.base_url.trim().trim_end_matches('/');
+    let mut request = client.get(format!("{base}/models"));
+
+    for (name, value) in headers(provider) {
+        request = request.header(name, value);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format!("could not reach {}: {err}", provider.name))?;
+
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let said = response.text().await.unwrap_or_default();
+        return Err(complaint(status, &said));
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|err| format!("that list could not be read: {err}"))?;
+
+    Ok(model_ids(&body))
+}
+
+/// The ids out of a models response.
+///
+/// Its own function so the shape can be tested without a service. Both the
+/// documented `{"data": [...]}` and the bare array some gateways return, in
+/// case the second is what arrives.
+pub fn model_ids(body: &serde_json::Value) -> Vec<String> {
+    let rows = body
+        .get("data")
+        .and_then(|d| d.as_array())
+        .or_else(|| body.as_array());
+
+    let Some(rows) = rows else {
+        return Vec::new();
+    };
+
+    let mut ids: Vec<String> = rows
+        .iter()
+        .filter_map(|row| {
+            row.get("id")
+                .and_then(|id| id.as_str())
+                // A bare list of names, which is what a couple of gateways send.
+                .or_else(|| row.as_str())
+        })
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect();
+
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// What to say when a provider refuses.
 ///
 /// Its own words where there are any, because "400" tells somebody nothing
@@ -278,6 +349,57 @@ mod tests {
         fn a_key_is_sent_as_a_bearer_token() {
             let sent = headers(&provider("https://x/v1", "sk-abc", "m"));
             assert_eq!(sent, vec![("Authorization".into(), "Bearer sk-abc".into())]);
+        }
+    }
+
+    mod listing_the_models {
+        use super::*;
+
+        #[test]
+        fn the_documented_shape_reads() {
+            let body = serde_json::json!({
+                "object": "list",
+                "data": [
+                    {"id": "gpt-5.2", "object": "model"},
+                    {"id": "gpt-5.2-mini", "object": "model"},
+                ],
+            });
+
+            assert_eq!(model_ids(&body), vec!["gpt-5.2", "gpt-5.2-mini"]);
+        }
+
+        /// A picker that reorders itself between openings is one nobody can
+        /// learn, and services return these in whatever order they like.
+        #[test]
+        fn they_come_back_sorted() {
+            let body = serde_json::json!({"data": [{"id": "zeta"}, {"id": "alpha"}]});
+            assert_eq!(model_ids(&body), vec!["alpha", "zeta"]);
+        }
+
+        #[test]
+        fn a_bare_array_reads_too() {
+            let body = serde_json::json!([{"id": "a"}, "b"]);
+            assert_eq!(model_ids(&body), vec!["a", "b"]);
+        }
+
+        /// Nothing usable is an empty list, not a failure: the panel then
+        /// offers a text field instead of a picker, which still works.
+        #[test]
+        fn something_unrecognisable_is_no_models_rather_than_an_error() {
+            for body in [
+                serde_json::json!({}),
+                serde_json::json!({"data": "not a list"}),
+                serde_json::json!({"data": [{"name": "no id here"}]}),
+                serde_json::json!(null),
+            ] {
+                assert!(model_ids(&body).is_empty(), "{body}");
+            }
+        }
+
+        #[test]
+        fn the_same_model_listed_twice_appears_once() {
+            let body = serde_json::json!({"data": [{"id": "a"}, {"id": "a"}]});
+            assert_eq!(model_ids(&body), vec!["a"]);
         }
     }
 

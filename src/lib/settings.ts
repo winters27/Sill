@@ -160,6 +160,14 @@ export interface SnippetSettings {
   expandKeywords: boolean;
 }
 
+/** Who answers when you ask something. */
+export interface AiSettings {
+  /** The id of the provider that answers. Empty means none is chosen. */
+  provider: string;
+  /** The ones set up. Each key is sealed before this file is written. */
+  providers: import("$lib/ai").AiProvider[];
+}
+
 /** A modifier, as a person thinks of it rather than as Windows sends it. */
 export type TapModifier = "control" | "alt" | "shift" | "win";
 
@@ -198,6 +206,7 @@ export interface Preferences {
   general: General;
   snippets: SnippetSettings;
   taps: TapSettings;
+  ai: AiSettings;
   dictation: DictationSettings;
   clipboard: ClipboardHistorySettings;
   hotkey: Hotkey;

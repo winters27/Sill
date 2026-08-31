@@ -12,6 +12,7 @@
   import Button from "./Button.svelte";
   import Toggle from "../Toggle.svelte";
   import Segmented from "./Segmented.svelte";
+  import Select from "./Select.svelte";
   import { actionsFor, searchCommands, type ActionInfo } from "$lib/exthost/commands";
   import { chordFrom, navigationKeys, type NavigationKey } from "$lib/settings";
   import type { Binding, BindingSource, Preferences, TapModifier } from "$lib/settings";
@@ -252,27 +253,25 @@
           {/if}
         </button>
 
-        <select
+        <Select
           value={binding.action}
-          onchange={(e) => update(at, { action: e.currentTarget.value })}
-        >
-          {#each textActions as action (action.id)}
-            <option value={action.id}>{action.title}</option>
-          {/each}
-        </select>
+          options={textActions.map((action) => ({ value: action.id, label: action.title }))}
+          onchange={(next) => update(at, { action: next })}
+          ariaLabel="What it does"
+        />
 
-        <select
+        <Select
           value={binding.source.from}
-          onchange={(e) =>
+          options={[
+            { value: "selection", label: "Selection" },
+            { value: "clipboard", label: "Clipboard" },
+          ]}
+          onchange={(next) =>
             update(at, {
-              source: e.currentTarget.value === "clipboard"
-                ? { from: "clipboard" }
-                : { from: "selection" },
+              source: next === "clipboard" ? { from: "clipboard" } : { from: "selection" },
             })}
-        >
-          <option value="selection">Selection</option>
-          <option value="clipboard">Clipboard</option>
-        </select>
+          ariaLabel="What it runs on"
+        />
 
         <Button label="Remove" tone="danger" onclick={() => remove(at)} />
       </div>
@@ -395,15 +394,6 @@
     border-color: var(--accent-bright);
   }
 
-  select {
-    padding: var(--space-1) var(--space-2);
-    font: inherit;
-    font-size: var(--text-meta);
-    color: var(--text);
-    background: var(--surface-raised);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-md);
-  }
 
   .empty {
     margin: 0;

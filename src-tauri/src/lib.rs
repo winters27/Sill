@@ -1126,6 +1126,7 @@ pub fn run() {
             commands::ai::ai_transcript,
             commands::ai::ai_clear,
             commands::ai::ai_known,
+            commands::ai::ai_models,
             commands::search::window_preview,
             commands::search::forget_previews,
             commands::search::timings,

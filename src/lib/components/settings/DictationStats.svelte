@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Select from "./Select.svelte";
   import {
     dictationStats,
     formatCount,
@@ -31,11 +32,12 @@
 
 <div class="head">
   <span class="label">Statistics</span>
-  <select bind:value={range} aria-label="Statistics range">
-    {#each RANGES as option (option.id)}
-      <option value={option.id}>{option.label}</option>
-    {/each}
-  </select>
+  <Select
+    value={range}
+    options={RANGES.map((option) => ({ value: option.id, label: option.label }))}
+    onchange={(next) => (range = next as StatsRange)}
+    ariaLabel="Statistics range"
+  />
   <span class="spacer"></span>
   {#if stats}
     <span class="count">
@@ -81,28 +83,6 @@
     font-weight: var(--weight-strong);
     letter-spacing: 0.14em;
     text-transform: uppercase;
-  }
-
-  select {
-    padding: 2px var(--space-1);
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-2);
-    font: inherit;
-    font-size: var(--text-meta);
-    outline: none;
-    cursor: pointer;
-    transition: color 0.15s var(--ease);
-  }
-
-  select:hover {
-    color: var(--text-1);
-  }
-
-  select option {
-    background: var(--core-secondary-background);
-    color: var(--text-1);
   }
 
   .spacer {

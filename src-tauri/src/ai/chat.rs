@@ -223,7 +223,6 @@ async fn through_the_cli(
 
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         // No console window. Without this a black box flashes on screen every
         // time somebody asks a question.
         const NO_WINDOW: u32 = 0x0800_0000;
