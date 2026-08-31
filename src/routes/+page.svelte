@@ -863,6 +863,29 @@
         return;
       }
 
+      /*
+       * A file is not in the index, so there is nothing to launch by id.
+       *
+       * It used to fall through to `launchCommand`, which looks a record up by
+       * id and fails: a file result's id is `file:` and its path, and the
+       * index holds no such record. So **every file result failed to open**,
+       * with "no such command" in the status line, and the branch below that
+       * knew how to open one was never reached.
+       *
+       * The use is still recorded. Ranking has to see it, or a file reached
+       * for daily never rises in the list.
+       */
+      if (command.mode === "file") {
+        void recordUse(command.id, query);
+        try {
+          await openPath(command.entrypoint);
+          await dismiss();
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
       // A search is not in the index either, and there is not even an address
       // yet: the words are carried and Rust turns them into one, because which
       // engine to use is a setting and the escaping is the part that is easy to
@@ -907,13 +930,6 @@
         // The query goes with it, so Sill learns the user's own shorthand
         // for this rather than only that they opened it.
         const launched = await launchCommand(command.id, query);
-
-        // A file is opened by the shell and has no session of its own.
-        if (command.mode === "file") {
-          await openPath(command.entrypoint);
-          await dismiss();
-          return;
-        }
 
         // Launching an app hands the screen to that app, so the launcher
         // gets out of the way rather than sitting on top of what it opened.
