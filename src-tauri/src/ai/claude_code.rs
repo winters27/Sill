@@ -133,7 +133,12 @@ pub fn parse_event(line: &str) -> Event {
 /// The prompt is not among them: it goes in on stdin, so a long question
 /// cannot run into a command-line length limit and nothing has to be quoted
 /// for a shell that is not involved.
-pub fn arguments(session: Option<&str>, model: Option<&str>) -> Vec<String> {
+///
+/// `tools` is the MCP config naming Sill's own server, and it is what gives
+/// this path the nine reading tools and the two acting ones that the HTTP path
+/// has always had. Optional because the answer to "Sill could not open a port"
+/// is a question answered without tools, not a question that fails.
+pub fn arguments(session: Option<&str>, model: Option<&str>, tools: Option<&Path>) -> Vec<String> {
     let mut args: Vec<String> = vec![
         // Non-interactive. Deliberately without `--bare`, which would skip the
         // OAuth credentials that are the entire reason for coming this way.
@@ -155,6 +160,39 @@ pub fn arguments(session: Option<&str>, model: Option<&str>) -> Vec<String> {
         "--permission-mode".into(),
         "dontAsk".into(),
     ];
+
+    if let Some(config) = tools {
+        args.push("--mcp-config".into());
+        args.push(config.to_string_lossy().into_owned());
+
+        /*
+         * Sill's server, and no other.
+         *
+         * Without this the session also loads whatever servers are configured
+         * for the person running it, which is the same objection as the empty
+         * working directory: a question asked from a launcher must not be
+         * answered by something the launcher never chose. The empty directory
+         * already handles a project's own servers; this handles the ones
+         * configured for the user.
+         */
+        args.push("--strict-mcp-config".into());
+
+        /*
+         * `dontAsk` denies anything not named here, which is the point of it,
+         * and that includes these until they are named.
+         *
+         * One rule per tool rather than one for the whole server. Comma
+         * separated in a single argument because the flag is variadic: given
+         * them as separate arguments it would go on swallowing whatever came
+         * next, and what comes next is `--resume` and the session id.
+         *
+         * Allowing an acting tool here is not the same as allowing the action.
+         * `run_action` stops on Sill's own approval card whoever called it, so
+         * what this permits is the request reaching Sill, not the file moving.
+         */
+        args.push("--allowedTools".into());
+        args.push(super::mcp::allowed().join(","));
+    }
 
     if let Some(session) = session.filter(|s| !s.is_empty()) {
         args.push("--resume".into());
@@ -269,11 +307,54 @@ fn likely_places() -> Vec<PathBuf> {
     }
 
     if let Some(appdata) = std::env::var_os("APPDATA") {
+        let appdata = PathBuf::from(appdata);
+
         // Where a global npm install lands on Windows.
-        out.push(PathBuf::from(appdata).join("npm").join("claude.cmd"));
+        out.push(appdata.join("npm").join("claude.cmd"));
+
+        // The one most machines actually have.
+        out.extend(bundled_with_the_desktop_app(&appdata));
     }
 
     out
+}
+
+/// The copy the Claude desktop application carries.
+///
+/// It puts nothing on `PATH`, so a machine with the desktop application
+/// installed and nothing else looks exactly like a machine with no Claude Code
+/// on it. That is the common case rather than an edge one, and the whole
+/// Claude Code path was unreachable here for it.
+///
+/// Newest first, by version rather than by name. `2.1.9` sorts above `2.1.10`
+/// as text, and a directory listing is in whatever order the filesystem feels
+/// like, so neither can be trusted to put the current one at the front.
+fn bundled_with_the_desktop_app(appdata: &Path) -> Vec<PathBuf> {
+    let installs = appdata.join("Claude").join("claude-code");
+
+    let Ok(reading) = std::fs::read_dir(&installs) else {
+        return Vec::new();
+    };
+
+    let mut versions: Vec<(Vec<u32>, PathBuf)> = reading
+        .flatten()
+        .filter_map(|found| {
+            let name = found.file_name().to_string_lossy().to_string();
+            let numbered: Vec<u32> = name.split('.').filter_map(|part| part.parse().ok()).collect();
+
+            // Anything that is not a version number is not an install: the
+            // directory has held caches and lock files beside them.
+            if numbered.is_empty() {
+                return None;
+            }
+
+            Some((numbered, found.path().join("claude.exe")))
+        })
+        .collect();
+
+    versions.sort_by(|left, right| right.0.cmp(&left.0));
+
+    versions.into_iter().map(|(_, path)| path).collect()
 }
 
 /// A directory with nothing in it, to run from.
@@ -333,25 +414,105 @@ mod tests {
                 assert!(place.is_absolute(), "{} is relative", place.display());
             }
         }
+
+        /// Builds an AppData with the given versions installed under it.
+        fn desktop_app_with(versions: &[&str]) -> std::path::PathBuf {
+            let root = std::env::temp_dir().join(format!("sill-claude-{}", versions.join("-")));
+            let _ = std::fs::remove_dir_all(&root);
+
+            for version in versions {
+                let at = root.join("Claude").join("claude-code").join(version);
+                std::fs::create_dir_all(&at).unwrap();
+                std::fs::write(at.join("claude.exe"), b"not really").unwrap();
+            }
+
+            root
+        }
+
+        /// The copy most machines actually have.
+        ///
+        /// The desktop application puts nothing on `PATH`, so a machine with
+        /// it installed and nothing else looked exactly like a machine with no
+        /// Claude Code on it, and the whole subscription path was unreachable.
+        #[test]
+        fn the_copy_the_desktop_application_carries_is_found() {
+            let root = desktop_app_with(&["2.1.241"]);
+
+            let found = bundled_with_the_desktop_app(&root);
+
+            assert_eq!(found.len(), 1, "{found:?}");
+            assert!(found[0].ends_with("2.1.241/claude.exe"), "{found:?}");
+
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        /// Newest first, by number.
+        ///
+        /// `2.1.9` sorts above `2.1.10` as text, and a directory listing
+        /// arrives in whatever order the filesystem feels like, so neither can
+        /// be trusted to put the current one at the front. An old build left
+        /// behind by an update is a working binary, which is the bad case:
+        /// it answers, and it answers as a version nobody is running.
+        #[test]
+        fn the_newest_version_is_offered_first() {
+            let root = desktop_app_with(&["2.1.9", "2.1.10", "2.0.300"]);
+
+            let found = bundled_with_the_desktop_app(&root);
+            let first = found[0].to_string_lossy().replace('\\', "/");
+
+            assert_eq!(found.len(), 3, "{found:?}");
+            assert!(first.contains("/2.1.10/"), "{first}");
+
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        /// The directory holds caches and lock files beside the installs, and
+        /// a name that is not a version is not a version.
+        #[test]
+        fn something_that_is_not_a_version_is_not_an_install() {
+            let root = desktop_app_with(&["2.1.241", "locks", "sentry"]);
+
+            let found = bundled_with_the_desktop_app(&root);
+
+            assert_eq!(found.len(), 1, "{found:?}");
+
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        /// Not having the desktop application is the ordinary case, not a
+        /// fault to report.
+        #[test]
+        fn no_desktop_application_is_no_paths_rather_than_a_failure() {
+            let nowhere = std::env::temp_dir().join("sill-claude-nowhere-at-all");
+            let _ = std::fs::remove_dir_all(&nowhere);
+
+            assert!(bundled_with_the_desktop_app(&nowhere).is_empty());
+        }
     }
 
     mod what_is_asked {
         use super::*;
 
+        /// The plain question, with no toolset offered.
+        fn plain(session: Option<&str>, model: Option<&str>) -> Vec<String> {
+            arguments(session, model, None)
+        }
+
         /// Bare mode "never reads OAuth credentials or the system keychain",
         /// which is the one thing this path exists for.
         #[test]
         fn it_is_never_asked_in_bare_mode() {
-            let args = arguments(None, None);
-            assert!(
-                !args.iter().any(|a| a == "--bare"),
-                "bare mode would skip the subscription: {args:?}",
-            );
+            for args in [plain(None, None), arguments(None, None, Some(Path::new("m.json")))] {
+                assert!(
+                    !args.iter().any(|a| a == "--bare"),
+                    "bare mode would skip the subscription: {args:?}",
+                );
+            }
         }
 
         #[test]
         fn it_streams_rather_than_waiting_for_the_whole_answer() {
-            let args = arguments(None, None);
+            let args = plain(None, None);
 
             for wanted in ["-p", "stream-json", "--verbose", "--include-partial-messages"] {
                 assert!(args.iter().any(|a| a == wanted), "{wanted} is missing");
@@ -359,22 +520,26 @@ mod tests {
         }
 
         /// A chat window is a place to ask a question, not a place to hand
-        /// something a shell.
+        /// something a shell. Sill's own tools are named one at a time below;
+        /// nothing the CLI brings with it is ever named.
         #[test]
         fn nothing_is_allowed_to_run_on_this_machine() {
-            let args = arguments(None, None);
+            for args in [plain(None, None), arguments(None, None, Some(Path::new("m.json")))] {
+                let at = args.iter().position(|a| a == "--permission-mode");
+                assert_eq!(at.map(|at| args[at + 1].as_str()), Some("dontAsk"));
 
-            let at = args.iter().position(|a| a == "--permission-mode");
-            assert_eq!(at.map(|at| args[at + 1].as_str()), Some("dontAsk"));
-            assert!(
-                !args.iter().any(|a| a == "--allowedTools"),
-                "something was allowed: {args:?}",
-            );
+                for never in ["Bash", "Edit", "Write", "Read", "WebFetch"] {
+                    assert!(
+                        !args.iter().any(|a| a.split(',').any(|one| one == never)),
+                        "{never} was allowed: {args:?}",
+                    );
+                }
+            }
         }
 
         #[test]
         fn a_follow_up_continues_the_same_conversation() {
-            let args = arguments(Some("abc-123"), None);
+            let args = plain(Some("abc-123"), None);
 
             let at = args.iter().position(|a| a == "--resume");
             assert_eq!(at.map(|at| args[at + 1].as_str()), Some("abc-123"));
@@ -384,19 +549,92 @@ mod tests {
         #[test]
         fn nothing_is_resumed_when_there_is_nothing_to_resume() {
             for session in [None, Some(""), Some("   ")] {
-                let args = arguments(session.filter(|s| !s.trim().is_empty()), None);
+                let args = plain(session.filter(|s| !s.trim().is_empty()), None);
                 assert!(!args.iter().any(|a| a == "--resume"), "{session:?}");
             }
         }
 
         #[test]
         fn a_model_is_named_only_when_one_was_chosen() {
-            assert!(!arguments(None, None).iter().any(|a| a == "--model"));
-            assert!(!arguments(None, Some("  ")).iter().any(|a| a == "--model"));
+            assert!(!plain(None, None).iter().any(|a| a == "--model"));
+            assert!(!plain(None, Some("  ")).iter().any(|a| a == "--model"));
 
-            let args = arguments(None, Some("opus"));
+            let args = plain(None, Some("opus"));
             let at = args.iter().position(|a| a == "--model");
             assert_eq!(at.map(|at| args[at + 1].as_str()), Some("opus"));
+        }
+    }
+
+    mod the_toolset {
+        use super::*;
+
+        fn with_tools() -> Vec<String> {
+            arguments(Some("abc-123"), Some("opus"), Some(Path::new("C:/x/mcp.json")))
+        }
+
+        /// The whole reason this path had no tools until now.
+        #[test]
+        fn the_config_is_named_when_there_is_one() {
+            let args = with_tools();
+
+            let at = args.iter().position(|a| a == "--mcp-config");
+            assert_eq!(at.map(|at| args[at + 1].as_str()), Some("C:/x/mcp.json"));
+        }
+
+        /// Sill's server and no other. Without this the session also loads
+        /// whatever servers are configured for the person running it, which is
+        /// the same objection as running from a folder with nothing in it.
+        #[test]
+        fn no_other_servers_come_along() {
+            assert!(with_tools().iter().any(|a| a == "--strict-mcp-config"));
+        }
+
+        /// `dontAsk` denies whatever is not named, so an unnamed tool is a
+        /// tool the model can see and cannot use.
+        #[test]
+        fn every_tool_sill_offers_is_named() {
+            let args = with_tools();
+
+            let at = args
+                .iter()
+                .position(|a| a == "--allowedTools")
+                .expect("nothing was allowed");
+
+            let allowed: Vec<&str> = args[at + 1].split(',').collect();
+
+            for tool in crate::ai::tools::CATALOGUE {
+                let expected = format!("mcp__sill__{}", tool.name);
+                assert!(allowed.contains(&expected.as_str()), "{expected} is not allowed");
+            }
+
+            assert_eq!(allowed.len(), crate::ai::tools::CATALOGUE.len());
+        }
+
+        /// One argument, comma separated, because the flag is variadic. Given
+        /// as separate arguments it goes on swallowing whatever follows, and
+        /// what follows is the session id and the model.
+        #[test]
+        fn the_allow_list_does_not_swallow_what_comes_after_it() {
+            let args = with_tools();
+
+            let at = args.iter().position(|a| a == "--allowedTools").unwrap();
+            assert!(args[at + 1].contains(','), "{:?} is not one argument", args[at + 1]);
+
+            let resumed = args.iter().position(|a| a == "--resume");
+            assert_eq!(resumed.map(|at| args[at + 1].as_str()), Some("abc-123"));
+
+            let model = args.iter().position(|a| a == "--model");
+            assert_eq!(model.map(|at| args[at + 1].as_str()), Some("opus"));
+        }
+
+        /// A question asked when no port could be opened is still a question.
+        #[test]
+        fn none_of_it_appears_when_there_is_no_toolset() {
+            let args = arguments(None, None, None);
+
+            for never in ["--mcp-config", "--strict-mcp-config", "--allowedTools"] {
+                assert!(!args.iter().any(|a| a == never), "{never} is there: {args:?}");
+            }
         }
     }
 

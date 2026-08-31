@@ -863,6 +863,9 @@ pub fn run() {
         .manage(ai::chat::Chat::new())
         .manage(ai::approval::Pending::new())
         .manage(ai::approval::Halt::new())
+        // Nothing is bound yet. The port opens the first time a question goes
+        // to Claude Code, which on most days is never.
+        .manage(ai::mcp::link::Link::new())
         .manage(commands::system::Marking::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {

@@ -402,8 +402,18 @@ setting having been lost.
 
 Verified by driving it: a local model answers, keeps context across a follow-up,
 and switching the model persists. **The Claude Code path is not verified end to
-end**, because that CLI is not installed on this machine. Its refusal is, and
-reads correctly.
+end.** Its refusal is, and reads correctly.
+
+That was first written as "the CLI is not installed on this machine", and that
+was wrong. It is installed: the desktop application carries its own copy under
+`%APPDATA%\Claude\claude-code\<version>\claude.exe` and puts nothing on `PATH`,
+so a machine with the desktop application and nothing else looked exactly like
+a machine with no Claude Code on it. `locate` now looks there too, newest
+version first by number rather than by name. What actually stands in the way
+today is that the sign-in on this machine has expired: the CLI answers
+`Failed to authenticate: OAuth session expired and could not be refreshed`,
+which needs `claude` run once in a terminal and is nothing Sill can do from
+its side.
 
 Three things the panel work turned up that were broken elsewhere. Tab outside
 the root list fell through to the browser's own focus key, and since the only
@@ -416,6 +426,61 @@ painted, so three panels remembered to colour the options, two did not, and Web
 Search had no rule at all and drew a white control on dark glass. One `Select`
 and one `TextField` decide it once now, and `verify:source` refuses a
 hand-rolled picker in settings.
+
+### P3.11, the tools reach Claude Code
+
+The chat window's eleven tools worked over HTTP and nowhere else, because a
+request in that shape carries a tool list and `claude -p` has no request to put
+one in. So the one provider that costs nothing to run was the one that could
+not look at the machine it was running on.
+
+MCP is the interface it does have. Sill now answers it, and the same work makes
+the tools reachable from any other client that speaks it.
+
+**One list, two transports.** Nothing about a tool is written twice. The
+catalogue carries the name, the description and the schema; one function shapes
+it for a chat completions request and another for an MCP `tools/list`, and a
+test asserts the two agree on membership, order, description and schema. That
+failure would otherwise be silent: a tool added for the chat window that no MCP
+client can see compiles and passes everything.
+
+**Two processes, because stdio means the client starts a program.** The tools
+need the running Sill and nothing else will do: the index took a scan to build,
+the clipboard history is a database one process has open, the window list is
+about this moment, and the approval card has to appear in front of the person
+answering it. So `sill.exe --mcp` is a bridge rather than a server. It connects
+back to the running Sill over the loopback interface and copies bytes. It
+parses no JSON and knows no methods, so there is no second implementation of
+the protocol living in a process nothing tests.
+
+**What stops anything else connecting.** A loopback port is reachable by
+everything else on the machine, so the first line down the socket has to be a
+secret minted when Sill started. The honest boundary is the one `secrets.rs`
+already describes: this does not defend against a process already running as
+this user, and it does defend against everything that cannot read that user's
+files.
+
+**The approval card is not optional here.** Nothing in the MCP layer runs an
+action. It reaches `tools::run`, which reaches the same registry, the same
+declared `Capability` and the same paused turn the chat window waits on. What
+did change is that a card now raises a window to appear in when none of Sill's
+are on screen. Over HTTP the window asking the question was visible by
+definition; over MCP the caller may have no window at all, and a card nobody
+can see is not a gate, it is a refusal ninety seconds later that reads as the
+tool being broken.
+
+**The permission mode had to be answered, not assumed.** `--permission-mode
+dontAsk` is documented by the CLI itself as "don't prompt for permissions, deny
+if not pre-approved", so the tools were denied until they were named. They are
+named one at a time, `mcp__sill__<tool>`, derived from the catalogue, in a
+single comma separated argument because the flag is variadic and separate
+arguments would go on swallowing the session id after them. `--strict-mcp-config`
+goes with it: the empty working directory already keeps a project's own servers
+out, and this keeps out the ones configured for the user.
+
+Naming an acting tool there is not the same as allowing the action. It permits
+the request to reach Sill; the file still does not move until somebody presses
+Enter on Sill's own card.
 
 ## Built since the audit, and not on it: web search
 

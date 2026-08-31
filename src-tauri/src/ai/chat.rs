@@ -29,6 +29,7 @@
 //! window appends it, so the first words are on screen while the rest is still
 //! being written.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -677,6 +678,44 @@ fn subject_of(call: &super::openai::ToolCall) -> String {
     String::new()
 }
 
+/// The MCP config naming Sill's own server, when one can be made.
+///
+/// Everything here can fail without the question failing. A port that would
+/// not open or a config that would not write costs the tools, and a Claude
+/// Code that answers from what it knows is far better than one that refuses to
+/// answer at all. The reason is written to the log rather than dropped,
+/// because "it stopped using the tools" is otherwise a silent change in
+/// behaviour with nowhere to look.
+async fn the_toolset(app: &tauri::AppHandle, data_dir: &std::path::Path) -> Option<PathBuf> {
+    let reachable = match app
+        .state::<super::mcp::link::Link>()
+        .reachable(app)
+        .await
+    {
+        Ok(reachable) => reachable,
+        Err(why) => {
+            crate::log::write(&format!("[ai] no tools for Claude Code: {why}"));
+            return None;
+        }
+    };
+
+    let bridge = match super::mcp::link::this_program() {
+        Ok(bridge) => bridge,
+        Err(why) => {
+            crate::log::write(&format!("[ai] no tools for Claude Code: {why}"));
+            return None;
+        }
+    };
+
+    match super::mcp::write_config(data_dir, &bridge, reachable.port, &reachable.token) {
+        Ok(path) => Some(path),
+        Err(why) => {
+            crate::log::write(&format!("[ai] could not write the MCP config: {why}"));
+            None
+        }
+    }
+}
+
 /// Through the Claude Code binary, on the subscription.
 ///
 /// Only the new question is sent: the CLI holds the conversation and is asked
@@ -694,21 +733,28 @@ async fn through_the_cli(
             .to_string()
     })?;
 
-    let chat = app.state::<Chat>();
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("no data directory: {err}"))?;
 
-    let working = super::claude_code::neutral_directory(
-        &app.path()
-            .app_data_dir()
-            .map_err(|err| format!("no data directory: {err}"))?,
-    );
+    let working = super::claude_code::neutral_directory(&data_dir);
     std::fs::create_dir_all(&working)
         .map_err(|err| format!("could not make a place to run from: {err}"))?;
+
+    // Sill's own tools, over MCP, because this CLI has no other way to be
+    // handed any. Awaited before the chat state is borrowed below: the port is
+    // opened once and this is where that happens.
+    let tools = the_toolset(app, &data_dir).await;
+
+    let chat = app.state::<Chat>();
 
     let mut command = tokio::process::Command::new(&binary);
     command
         .args(super::claude_code::arguments(
             chat.session().as_deref(),
             Some(&provider.model).filter(|m| !m.is_empty()).map(|m| m.as_str()),
+            tools.as_deref(),
         ))
         // The reason is in `claude_code.rs`: a session that is not bare runs
         // the hooks and servers of wherever it starts.

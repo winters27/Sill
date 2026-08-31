@@ -145,6 +145,54 @@ impl Pending {
     }
 }
 
+/// The windows that draw a card.
+///
+/// The chat window draws one whenever there is one. The launcher draws one
+/// only while it is showing a conversation, which is always true when the
+/// launcher itself asked the question and is why it counts here.
+const SURFACES: &[&str] = &["ask", "main"];
+
+/// Puts a card in front of somebody, and makes sure there is a front.
+///
+/// The event alone was enough while the only way to reach an action was to ask
+/// a question in one of Sill's own windows: the window asking was on screen by
+/// definition. Over MCP it is not. A card raised with every Sill window hidden
+/// is a question nobody can see, and ninety seconds later it refuses itself,
+/// which reads to whoever asked as the tool being broken rather than as
+/// permission being withheld.
+///
+/// So when nothing of Sill's is on screen, the chat window is opened to hold
+/// it. Only then: a window arriving unasked in front of what somebody is doing
+/// is a cost, and it is worth paying exactly when the alternative is a
+/// decision they never got to make.
+///
+/// The one case this does not cover is the launcher being open on an ordinary
+/// search when a card arrives from somewhere else. Rust cannot see which mode
+/// the page is in, and drawing the card there anyway would take Enter and
+/// Escape away from somebody in the middle of typing.
+pub fn raise(app: &tauri::AppHandle, asking: Asking) {
+    use tauri::Manager;
+
+    let _ = tauri::Emitter::emit(app, "sill://ai-asking", &asking);
+
+    let seen = SURFACES.iter().any(|label| {
+        app.get_webview_window(label)
+            .and_then(|window| window.is_visible().ok())
+            .unwrap_or(false)
+    });
+
+    if seen {
+        return;
+    }
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(why) = crate::commands::ai::open_ask(app).await {
+            crate::log::write(&format!("[ai] nowhere to show an approval card: {why}"));
+        }
+    });
+}
+
 /// Whether the turn in flight has been told to stop.
 ///
 /// A counter rather than a flag, and the difference matters: a flag set while

@@ -230,6 +230,31 @@ pub fn as_request() -> Value {
     )
 }
 
+/// The same list, in the shape MCP carries it.
+///
+/// Beside `as_request` rather than off in the MCP module, because the two
+/// shapes describing one catalogue is the whole arrangement: a tool added
+/// below is offered over both transports by the same act, and the test under
+/// this file is what says they still agree.
+///
+/// The differences are only spelling. MCP puts the name and description at the
+/// top level and calls the schema `inputSchema`; a chat completions request
+/// wraps the same three things in a function object.
+pub fn as_mcp() -> Value {
+    Value::Array(
+        CATALOGUE
+            .iter()
+            .map(|tool| {
+                json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": (tool.schema)(),
+                })
+            })
+            .collect(),
+    )
+}
+
 /// Whether Sill knows this tool at all.
 ///
 /// A model will occasionally call something that is not here, usually a name
@@ -547,9 +572,11 @@ async fn run_action(app: &AppHandle, action: &str, target: &str, kind: &str) -> 
         let pending = app.state::<super::approval::Pending>();
         let id = pending.next_id();
 
-        let _ = tauri::Emitter::emit(
+        // Raised rather than emitted. Over MCP the caller may be something
+        // with no window of its own, and a card nobody can see is a refusal
+        // ninety seconds later rather than a decision.
+        super::approval::raise(
             app,
-            "sill://ai-asking",
             super::approval::Asking {
                 id: id.clone(),
                 title: title.to_string(),
@@ -641,6 +668,54 @@ mod tests {
                     "{} is not a plain name",
                     tool.name,
                 );
+            }
+        }
+
+        /// The two shapes are one catalogue, and this is what says so.
+        ///
+        /// Nothing else would notice them parting company. A tool added to the
+        /// chat window's request and missing from the MCP list compiles, tests
+        /// green, and is invisible until somebody asks the Claude Code
+        /// provider a question it should have been able to answer. Order as
+        /// well as membership, because the model reads them in the order they
+        /// arrive and two lists that agree on the set and not the sequence are
+        /// still two lists.
+        #[test]
+        fn both_transports_offer_the_same_tools_in_the_same_order() {
+            let over_http: Vec<String> = as_request()
+                .as_array()
+                .expect("the request shape is a list")
+                .iter()
+                .map(|tool| tool["function"]["name"].as_str().unwrap_or_default().into())
+                .collect();
+
+            let over_mcp: Vec<String> = as_mcp()
+                .as_array()
+                .expect("the mcp shape is a list")
+                .iter()
+                .map(|tool| tool["name"].as_str().unwrap_or_default().into())
+                .collect();
+
+            let named: Vec<String> = CATALOGUE.iter().map(|tool| tool.name.into()).collect();
+
+            assert_eq!(over_http, named, "the request shape has drifted");
+            assert_eq!(over_mcp, named, "the mcp shape has drifted");
+        }
+
+        /// Same catalogue, same descriptions and same schemas. A tool
+        /// described one way to one transport and another way to the other is
+        /// two tools wearing one name.
+        #[test]
+        fn both_transports_say_the_same_thing_about_each_tool() {
+            let over_http = as_request();
+            let over_mcp = as_mcp();
+
+            for (at, tool) in CATALOGUE.iter().enumerate() {
+                let http = &over_http[at]["function"];
+                let mcp = &over_mcp[at];
+
+                assert_eq!(http["description"], mcp["description"], "{}", tool.name);
+                assert_eq!(http["parameters"], mcp["inputSchema"], "{}", tool.name);
             }
         }
 
