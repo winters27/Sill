@@ -1853,6 +1853,33 @@
   let steps = $state<AiStep[]>([]);
 
   /**
+   * What to ask, offered to an empty conversation.
+   *
+   * Not decoration. Nothing anywhere else says the model can read this
+   * machine, so somebody who does not already know asks it the questions they
+   * would ask any chat window and never finds out. Each of these needs a tool
+   * to answer, and each names a different one.
+   */
+  const OPENERS = [
+    "What windows do I have open?",
+    "What did I copy earlier?",
+    "Find the largest files in my Downloads folder",
+    "What is my volume set to?",
+  ];
+
+  /**
+   * Fills the field rather than sending it.
+   *
+   * One more keystroke, and the keystroke is the point: an example that sends
+   * itself spends money on a question somebody was reading rather than
+   * asking.
+   */
+  function offer(question: string) {
+    query = question;
+    searchInput?.focus();
+  }
+
+  /**
    * What one step did, in words.
    *
    * A table rather than the tool's own name, because the names are written for
@@ -2690,7 +2717,31 @@
     {:else if mode === "emoji"}
       <span class="crumb">Emoji</span>
     {:else if mode === "ai"}
-      <span class="crumb">Ask</span>
+      <!--
+        Who is answering, in the place that says where you are.
+
+        In every other mode the crumb names the surface, because the surface is
+        the thing you are in. Here the thing you are in is a conversation with
+        a particular model, and "Ask" said that a launcher feature was open
+        without saying the one fact that changes what comes back. The mark also
+        does the work no label was doing: it is unmistakably a conversation
+        with something rather than another list.
+
+        Still a button, and the same button as the chip in the root list, so
+        changing model is in one place whichever end you reach it from.
+      -->
+      {#if answersWith?.ready}
+        <button
+          class="crumb who-crumb"
+          onclick={() => void openSettings("ai")}
+          title={askingIs}
+        >
+          <AiMark name={answersWith.id} size={13} />
+          <span class="who">{answersWith.model || answersWith.name}</span>
+        </button>
+      {:else}
+        <span class="crumb">Ask</span>
+      {/if}
     {:else if mode === "conversations"}
       <span class="crumb">Conversations</span>
     {:else if mode === "appVolume"}
@@ -2730,7 +2781,9 @@
         : mode === "ai"
           ? asking
             ? "Waiting for the answer…"
-            : "Ask a follow-up…"
+            : conversation.length === 0
+              ? "Ask anything…"
+              : "Ask a follow-up…"
         : mode === "conversations"
           ? "Filter what you have asked…"
         : mode === "appVolume"
@@ -2837,6 +2890,37 @@
       question was.
     -->
     <div class="chat sill-scrolls" bind:this={chatScroll}>
+      <!--
+        An empty conversation says what this is and what it can reach.
+
+        The launcher's own answer to a blank window: not a greeting, but the
+        four questions that are worth asking here and nowhere else. They are
+        the only place the tools are visible before one runs.
+      -->
+      {#if conversation.length === 0 && !asking && !answering}
+        <div class="opening">
+          {#if answersWith?.ready}
+            <!-- An invitation rather than a label. The crumb two lines above
+                 already names the model; saying it again as a heading reads as
+                 the same fact twice, and as part of a sentence it does not. -->
+            <p class="lead">
+              <AiMark name={answersWith.id} size={15} />
+              <span>Ask {answersWith.model || answersWith.name} anything</span>
+            </p>
+          {/if}
+          <p class="reach">
+            It can look through this machine to answer: what is installed and
+            open, what you have copied or selected, a file or a folder, and
+            what is on screen.
+          </p>
+          <div class="openers">
+            {#each OPENERS as opener (opener)}
+              <button class="opener" onclick={() => offer(opener)}>{opener}</button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
       {#each conversation as turn, at (at)}
         {#if turn.role === "user"}
           <article class="turn asked"><p>{turn.text}</p></article>
@@ -3185,6 +3269,76 @@
   }
 
   /*
+   * The empty conversation.
+   *
+   * Left aligned with the answers rather than centred, because it sits where
+   * the first answer will and centring it would move everything the moment one
+   * arrives.
+   */
+  .opening {
+    align-self: flex-start;
+    max-width: 62ch;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding-top: var(--space-2);
+  }
+
+  .lead {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    color: var(--text-1);
+    font-size: var(--text-heading);
+    font-weight: var(--weight-strong);
+  }
+
+  .reach {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--text-body);
+    line-height: 1.6;
+  }
+
+  .openers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  /*
+   * An example, which fills the field rather than sending it.
+   *
+   * Drawn as something pressable rather than as a bullet, because it is; and
+   * quiet rather than accented, because four accented chips in an empty window
+   * read as the main event when they are a way in.
+   */
+  .opener {
+    padding: var(--space-1) var(--space-3);
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--fill-1);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-meta);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+  }
+
+  .opener:hover {
+    background: var(--fill-2);
+    color: var(--text-1);
+  }
+
+  .opener:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  /*
    * What was looked at, kept quiet.
    *
    * Below the question and above the answer, in the smallest step on the
@@ -3378,6 +3532,30 @@
     color: var(--text-2);
     font-size: var(--text-meta);
     white-space: nowrap;
+  }
+
+  /* The one crumb that is pressable, so it says so on hover rather than only
+     when the pointer is already on it. */
+  .who-crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    border: 0;
+    padding-left: var(--space-1);
+    font: inherit;
+    font-size: var(--text-meta);
+    cursor: pointer;
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+  }
+
+  .who-crumb:hover {
+    background: var(--hairline-strong);
+    color: var(--text-1);
+  }
+
+  .who-crumb:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .search input {
