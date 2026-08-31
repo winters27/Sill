@@ -2,11 +2,18 @@
 
 use tauri::{AppHandle, State};
 
+use tauri::Manager;
+
 use crate::ai::chat::{Chat, Turn};
 use crate::ai::provider::{self, Provider};
 use crate::state::PrefsState;
 
 /// Who is set up to answer, and who is chosen.
+///
+/// Read by the chip at the end of the search field, which is the only place
+/// anybody ever discovers that Tab does anything. So it carries enough to draw
+/// that chip without a second call: the name, the model, and which of the
+/// three kinds of provider it is.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Ready {
@@ -14,8 +21,33 @@ pub(crate) struct Ready {
     pub ready: bool,
     /// What the chosen one is called, for a line saying who answered.
     pub name: String,
+    /// The model, as it would be named to somebody. Empty when the provider
+    /// decides for itself, which is what Claude Code does by default.
+    pub model: String,
+    /// `local`, `cli` or `key`. What the mark on the chip is drawn from.
+    ///
+    /// Three kinds rather than seven names, because the useful distinction is
+    /// where the answer comes from and who pays for it: this machine, a
+    /// subscription through a tool already signed in, or a key.
+    pub kind: String,
     /// Why not, when not. Empty when it is ready.
     pub why_not: String,
+}
+
+/// Which of the three kinds of provider this is.
+fn kind_of(provider: &Provider) -> String {
+    if provider.wire == provider::Wire::ClaudeCode {
+        return "cli".to_string();
+    }
+
+    // Local means the machine answers, whoever owns it. The address rule
+    // already knows how to tell, and asking it here means one definition of
+    // "local" rather than two that drift.
+    if provider::is_on_this_network(&provider.base_url) {
+        return "local".to_string();
+    }
+
+    "key".to_string()
 }
 
 /// Whether asking would work, and who would answer.
@@ -31,6 +63,8 @@ pub(crate) async fn ai_ready(prefs: State<'_, PrefsState>) -> Result<Ready, Stri
         return Ok(Ready {
             ready: false,
             name: String::new(),
+            model: String::new(),
+            kind: String::new(),
             why_not: if settings.providers.is_empty() {
                 "Nothing is set up to answer yet.".to_string()
             } else {
@@ -45,6 +79,8 @@ pub(crate) async fn ai_ready(prefs: State<'_, PrefsState>) -> Result<Ready, Stri
         return Ok(Ready {
             ready: false,
             name: chosen.name.clone(),
+            model: chosen.model.clone(),
+            kind: kind_of(&chosen),
             why_not: missing,
         });
     }
@@ -52,6 +88,8 @@ pub(crate) async fn ai_ready(prefs: State<'_, PrefsState>) -> Result<Ready, Stri
     Ok(Ready {
         ready: true,
         name: chosen.name.clone(),
+        model: chosen.model.clone(),
+        kind: kind_of(&chosen),
         why_not: String::new(),
     })
 }
@@ -68,7 +106,12 @@ pub(crate) fn ai_clear(chat: State<'_, Chat>) {
     chat.clear();
 }
 
-/// Asks, and streams the answer to the window as events.
+/// Asks the first question of a new conversation.
+///
+/// What Tab does, and the reason it is a separate command from the follow-up
+/// below rather than a flag on one: appending to whatever came before, forever,
+/// is exactly the behaviour this replaces, and a boolean argument is a thing
+/// somebody can get wrong at a call site. Two names cannot be.
 ///
 /// Returns the whole answer as well, so a caller that only wants the text does
 /// not have to reassemble it from the events.
@@ -78,17 +121,61 @@ pub(crate) async fn ai_ask(
     prefs: State<'_, PrefsState>,
     question: String,
 ) -> Result<String, String> {
+    let chosen = who_answers(&prefs).await?;
+
+    // Before the request, not after: the conversation is named by its first
+    // question whether or not the answer ever arrives.
+    app.state::<Chat>().begin(&question, crate::state::now_seconds());
+
+    crate::ai::chat::ask(&app, &chosen, &question).await
+}
+
+/// Asks the next question of the conversation already open.
+#[tauri::command]
+pub(crate) async fn ai_follow_up(
+    app: AppHandle,
+    prefs: State<'_, PrefsState>,
+    question: String,
+) -> Result<String, String> {
+    let chosen = who_answers(&prefs).await?;
+    crate::ai::chat::ask(&app, &chosen, &question).await
+}
+
+/// Sets the open conversation aside so the next question begins its own.
+///
+/// Not `ai_clear`, which forgets everything. The one set aside is still
+/// offered back from the root list until it goes stale.
+#[tauri::command]
+pub(crate) fn ai_new(chat: State<'_, Chat>) {
+    chat.set_aside();
+}
+
+/// Reopens a conversation, and answers with everything said in it.
+#[tauri::command]
+pub(crate) fn ai_resume(chat: State<'_, Chat>, id: String) -> Result<Vec<Turn>, String> {
+    if !chat.resume(&id, crate::state::now_seconds()) {
+        return Err("That conversation is no longer here.".to_string());
+    }
+
+    Ok(chat.transcript())
+}
+
+/// The chosen provider, or why there is not one.
+///
+/// The same two checks in front of both ways of asking. Written once, because
+/// the failure it guards against is a request going out shaped for a provider
+/// that has no address.
+async fn who_answers(prefs: &State<'_, PrefsState>) -> Result<Provider, String> {
     let settings = prefs.inner.lock().await.ai.clone();
 
     let chosen = chosen(&settings).ok_or_else(|| {
         "Nothing is set up to answer. Choose a provider in Settings.".to_string()
     })?;
 
-    if let Some(missing) = what_is_missing(&chosen) {
-        return Err(missing);
+    match what_is_missing(&chosen) {
+        Some(missing) => Err(missing),
+        None => Ok(chosen),
     }
-
-    crate::ai::chat::ask(&app, &chosen, &question).await
 }
 
 /// One model somebody can choose.

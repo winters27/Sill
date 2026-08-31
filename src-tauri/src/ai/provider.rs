@@ -108,7 +108,7 @@ pub const KNOWN: &[Known] = &[
         // Whatever the CLI is already set to.
         model: "",
         needs_key: false,
-        note: "Uses the Claude Code you already have, signed in as you, on                your own subscription. Nothing is stored by Sill.",
+        note: "The Claude Code already on this machine, signed in as you. No key, and \n               nothing stored by Sill.",
     },
     Known {
         id: "openai",
@@ -117,8 +117,7 @@ pub const KNOWN: &[Known] = &[
         base_url: "https://api.openai.com/v1",
         model: "gpt-5.2",
         needs_key: true,
-        note: "A key from the OpenAI developer console. A ChatGPT subscription is \
-               a different thing and does not pay for this.",
+        note: "A developer console key. A ChatGPT subscription is a different thing and \n               does not pay for this.",
     },
     Known {
         id: "anthropic",
@@ -127,8 +126,7 @@ pub const KNOWN: &[Known] = &[
         base_url: "https://api.anthropic.com",
         model: "claude-sonnet-5",
         needs_key: true,
-        note: "A key from the Anthropic console. A Claude subscription cannot be \
-               used here: their terms do not allow it in other applications.",
+        note: "A console key. A Claude subscription cannot be used here, as their terms \n               do not allow it.",
     },
     Known {
         id: "google",
@@ -139,8 +137,7 @@ pub const KNOWN: &[Known] = &[
         base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
         model: "gemini-3-flash",
         needs_key: true,
-        note: "A key from Google AI Studio. There is a free tier that is enough \
-               for personal use.",
+        note: "A key from Google AI Studio. The free tier covers personal use.",
     },
     Known {
         id: "xai",
@@ -149,8 +146,7 @@ pub const KNOWN: &[Known] = &[
         base_url: "https://api.x.ai/v1",
         model: "grok-4",
         needs_key: true,
-        note: "A key from the xAI console. A SuperGrok or Premium+ subscription \
-               is separate and cannot be used here.",
+        note: "A console key. SuperGrok and Premium+ are separate and cannot be used \n               here.",
     },
     Known {
         id: "openrouter",
@@ -159,8 +155,7 @@ pub const KNOWN: &[Known] = &[
         base_url: "https://openrouter.ai/api/v1",
         model: "anthropic/claude-sonnet-5",
         needs_key: true,
-        note: "One key for many models, billed by them rather than by each \
-               service separately.",
+        note: "One key for many models, billed in one place.",
     },
     Known {
         id: "ollama",
@@ -173,8 +168,7 @@ pub const KNOWN: &[Known] = &[
         // line saying there are five to choose from.
         model: "",
         needs_key: false,
-        note: "A model running on this machine, or on another one you point \
-               this at. Nothing leaves for anybody else.",
+        note: "A model on this machine, or one you point this at. Nothing leaves for \n               anybody else.",
     },
 ];
 
@@ -258,6 +252,17 @@ pub fn check(base_url: &str) -> Result<(), Refused> {
 enum Scheme {
     Http,
     Https,
+}
+
+/// Whether this address is this machine or this network.
+///
+/// The same question the rule above asks, exposed on its own because two
+/// things need the answer now: where a key may be sent, and the mark on the
+/// chip that says whether an answer costs anything or leaves the machine.
+/// Asking here rather than matching on `localhost` at the call site is what
+/// keeps one definition of local rather than two that drift.
+pub fn is_on_this_network(base_url: &str) -> bool {
+    strip_scheme(base_url).is_some_and(|(_, host)| is_local(host))
 }
 
 /// The scheme, and the host that follows it.

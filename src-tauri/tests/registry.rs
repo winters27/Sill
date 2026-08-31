@@ -2401,6 +2401,100 @@ mod a_switch_is_reached_first {
         assert_eq!(first("audio output"), "Speakers");
     }
 
+    /*
+     * Where you were, above what exists.
+     *
+     * The conversation you left is one row and it expires by itself, so it
+     * takes the top of the list outright rather than being nudged towards it.
+     * The switch floor above deliberately skips the empty query; this one
+     * does not, and these tests are the difference written down.
+     */
+    mod the_conversation_you_left {
+        use super::*;
+
+        fn with_a_conversation() -> Vec<CommandRecord> {
+            let mut rows = corpus();
+            rows.push(registry::conversation_record(
+                "chat:1",
+                "why is my bluetooth dropping",
+                "Just now · 2 replies",
+            ));
+            rows
+        }
+
+        /// The empty query is ordered purely by what you reach for, and this
+        /// still comes first: it is where you were, and it is about to stop
+        /// existing.
+        #[test]
+        fn it_is_first_on_the_empty_root_list() {
+            let mut frecency = Frecency::default();
+            // Something reached for constantly, at the top of the frecency
+            // curve. Recency 100 and the frequency cap both maxed out, which
+            // is the highest score the ranker can produce.
+            for _ in 0..40 {
+                frecency.record("setting:sound", NOW - 60);
+            }
+
+            let found = search(&with_a_conversation(), "", &frecency, NOW, 20);
+
+            assert_eq!(
+                found.first().map(|hit| hit.command.mode.as_str()),
+                Some("conversation"),
+                "the most-used command in the index outranked it",
+            );
+        }
+
+        /// Escape puts the search back in the field, and the search is usually
+        /// the question. So the row is found by the words already there,
+        /// which is why it is a record rather than a row spliced on top.
+        #[test]
+        fn typing_the_question_finds_it() {
+            let found = search(
+                &with_a_conversation(),
+                "bluetooth",
+                &Frecency::default(),
+                NOW,
+                20,
+            );
+
+            assert_eq!(
+                found.first().map(|hit| hit.command.mode.as_str()),
+                Some("conversation"),
+                "it lost to a switch of the same name",
+            );
+        }
+
+        /// It is one row about the past sitting in a list about the present.
+        /// A query it has nothing to do with must not surface it.
+        #[test]
+        fn a_query_it_does_not_match_does_not_surface_it() {
+            let found = search(
+                &with_a_conversation(),
+                "speakers",
+                &Frecency::default(),
+                NOW,
+                20,
+            );
+
+            assert!(
+                !found.iter().any(|hit| hit.command.mode == "conversation"),
+                "it appeared for a query that has nothing to do with it",
+            );
+        }
+
+        /// The id is what the window sends back to reopen it, and the row id
+        /// is what frecency and the keyed list use. They are not the same
+        /// string, and mixing them up reopens nothing.
+        #[test]
+        fn the_row_carries_the_conversation_id_separately_from_its_own() {
+            let row = registry::conversation_record("chat:7", "a question", "Just now · 1 reply");
+
+            assert_eq!(row.entrypoint, "chat:7", "what gets reopened");
+            assert_eq!(row.id, "sill:chat:7", "what the list is keyed by");
+            assert_ne!(row.id, row.entrypoint);
+        }
+    }
+
     /// One visit is not a preference, and this is where a bonus was too small.
     ///
     /// The first attempt added a dozen points, which read as enough. It was

@@ -19,6 +19,15 @@ export function groupOf(command: RankedCommand): string {
     case "answer":
       return "Answer";
     /*
+     * Where you were, rather than what exists.
+     *
+     * The only heading in the list that is about the past. It holds one row,
+     * it sorts above everything because of the floor in the ranker, and it
+     * disappears on its own within ten minutes.
+     */
+    case "conversation":
+      return "Continue";
+    /*
      * The collection it is in, or "Snippets" when it is in none.
      *
      * Rust puts the collection here, in the same field an extension command

@@ -5,9 +5,27 @@ use tauri::{AppHandle, Manager, State};
 use crate::state::{now_seconds, CatalogState, PrefsState, RegistryState};
 use crate::{browsers, calculator, files, registry, windowing};
 
+/// What the row offering a conversation back says underneath the question.
+///
+/// Both halves earn their place. The age is why the row is there at all and
+/// why it will not be there for long; the count is what distinguishes a
+/// conversation worth returning to from one question that got one answer.
+fn said_about(offer: &crate::ai::chat::Offer) -> String {
+    let when = if offer.age < 60 {
+        "Just now".to_string()
+    } else {
+        let minutes = offer.age / 60;
+        format!("{minutes} minute{} ago", if minutes == 1 { "" } else { "s" })
+    };
+
+    let replies = offer.replies;
+    format!("{when} · {replies} repl{}", if replies == 1 { "y" } else { "ies" })
+}
+
 /// The root list, or what matches a query.
 #[tauri::command]
 pub(crate) async fn search_commands(
+    app: AppHandle,
     state: State<'_, RegistryState>,
     prefs: State<'_, PrefsState>,
     query: String,
@@ -18,9 +36,24 @@ pub(crate) async fn search_commands(
     };
     let registry = state.inner.lock().await;
 
+    /*
+     * The conversation you left, for as long as it is worth offering.
+     *
+     * Built here and chained into the corpus rather than pushed onto the
+     * results, so that it is found by typing like everything else. It has to
+     * outlive the search below, which borrows it, which is why it is a
+     * binding rather than an expression inside the chain.
+     */
+    let offered = app
+        .state::<crate::ai::chat::Chat>()
+        .offer(now_seconds())
+        .map(|offer| {
+            registry::conversation_record(&offer.id, &offer.title, &said_about(&offer))
+        });
+
     // Chained, not collected: both sides are borrowed and nothing is copied.
     let mut results = registry::search_excluding(
-        registry.everything(),
+        registry.everything().chain(offered.iter()),
         &query,
         &registry.frecency,
         &registry.aliases,

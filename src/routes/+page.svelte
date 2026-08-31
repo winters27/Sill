@@ -25,6 +25,9 @@
     launchCommand,
     movePath,
     aiAsk,
+    aiFollowUp,
+    aiNew,
+    aiResume,
     aiClear,
     aiReady,
     aiTranscript,
@@ -59,6 +62,7 @@
     asTarget,
     undoAction,
     type ActionInfo,
+    type AiReady,
     type AiTurn,
     type RankedCommand,
     type UndoToken,
@@ -1046,6 +1050,18 @@
         return;
       }
 
+      /*
+       * The conversation you left, reopened rather than launched.
+       *
+       * Intercepted here for the same reason the clipboard is: it opens a mode
+       * in this window, and there is nothing for the action registry to run.
+       */
+      if (command.mode === "conversation") {
+        void recordUse(command.id, query);
+        void resumeConversation(command.entrypoint, command.title);
+        return;
+      }
+
       if (command.id === "sill:clipboard") {
         // Opened here rather than launched, but it is still a use, and
         // ranking has to see it or the history can never rise in the root
@@ -1763,6 +1779,26 @@
    */
   let cameFrom = $state("");
 
+  /**
+   * Who answers, for the chip at the end of the field.
+   *
+   * Asked once when the launcher opens and again whenever the settings change,
+   * never per keystroke. It is one row of managed state and a preferences
+   * read; doing it on every character typed would be a lock taken fifteen
+   * times a second for an answer that changes about once a month.
+   */
+  let answersWith = $state<AiReady | null>(null);
+
+  async function refreshWhoAnswers() {
+    try {
+      answersWith = await aiReady();
+    } catch {
+      // A chip that cannot say who answers says nothing, which is the same
+      // launcher anybody had before this existed.
+      answersWith = null;
+    }
+  }
+
   async function askAi(question: string) {
     let ready;
     try {
@@ -1779,9 +1815,21 @@
       return;
     }
 
-    // Only on the way in. A follow-up is asked from inside the conversation
-    // and is not the place it was opened from.
-    if (mode !== "ai") cameFrom = question;
+    /*
+     * A question from the root list begins its own conversation.
+     *
+     * The launcher used to hold exactly one, for the life of the process, and
+     * every press of Tab joined it. Nothing on screen said so, which is what
+     * made it wrong: a launcher that carries hidden state between summons
+     * surprises you every time. What you left is offered back as a row that
+     * expires, so returning is something you choose.
+     */
+    const starting = mode !== "ai";
+
+    if (starting) {
+      cameFrom = question;
+      conversation = [];
+    }
 
     mode = "ai";
     selected = 0;
@@ -1795,10 +1843,50 @@
     query = "";
 
     try {
-      await aiAsk(question);
+      await (starting ? aiAsk(question) : aiFollowUp(question));
     } catch (err) {
       status = `${err}`;
     }
+  }
+
+  /**
+   * Reopens the conversation the root list offered back.
+   *
+   * The transcript comes from Rust rather than from anything the window kept:
+   * the page reloads on every rebuild and the window is closed most of the
+   * time, so what it holds is never the record.
+   */
+  async function resumeConversation(id: string, title: string) {
+    try {
+      conversation = await aiResume(id);
+    } catch (err) {
+      status = `${err}`;
+      return;
+    }
+
+    cameFrom = title;
+    mode = "ai";
+    selected = 0;
+    aiWhoNot = "";
+    answering = "";
+    asking = false;
+    query = "";
+  }
+
+  /**
+   * Starts a fresh conversation without leaving the one open.
+   *
+   * The one set aside is still offered back from the root list, so this is not
+   * a delete. Nothing is asked yet: the field is simply empty and waiting.
+   */
+  async function freshConversation() {
+    await aiNew();
+    conversation = [];
+    answering = "";
+    asking = false;
+    aiWhoNot = "";
+    cameFrom = "";
+    query = "";
   }
 
   /** Starts again, keeping the mode. */
@@ -1979,6 +2067,23 @@
         if (mode === "root" && query.trim()) void askAi(query.trim());
       }
 
+      return;
+    }
+
+    /*
+     * Ctrl N starts a fresh conversation from inside one.
+     *
+     * The same key that means a new document nearly everywhere else. Only in a
+     * conversation, because in the root list there is nothing to be new
+     * relative to.
+     */
+    if (
+      mode === "ai" &&
+      event.key.toLowerCase() === "n" &&
+      (event.ctrlKey || event.metaKey)
+    ) {
+      event.preventDefault();
+      void freshConversation();
       return;
     }
 
@@ -2316,6 +2421,9 @@
         // The navigation preset may have changed, and the map is resolved in
         // Rust, so it is asked for again rather than recomputed here.
         navKeys = await navigationChords();
+        // Choosing a different model in Settings is exactly when the chip is
+        // wrong, so it is asked again here rather than read once at startup.
+        void refreshWhoAnswers();
       });
 
       if (disposed) return;
@@ -2325,6 +2433,7 @@
       browser = await defaultBrowser();
       navKeys = await navigationChords();
       past = await queryHistory();
+      void refreshWhoAnswers();
       await refreshRoot();
       searchInput?.focus();
     })();
@@ -2417,6 +2526,40 @@
       spellcheck="false"
       autocomplete="off"
     />
+
+    <!--
+      Who is about to answer, and the key that asks them.
+
+      The only place anybody discovers that Tab does anything at all, which is
+      why it is drawn even when nothing is set up: an invitation reads better
+      than an empty corner. A button, so changing the model is two clicks from
+      the thing you were about to ask rather than a trip through Settings.
+
+      Only in the root list. In a conversation the crumb already says Ask, and
+      in the clipboard or the switcher Tab is not free to ask anything.
+    -->
+    {#if mode === "root" && answersWith}
+      <button
+        class="asker"
+        class:unset={!answersWith.ready}
+        onclick={() => void openSettings("ai")}
+        title={answersWith.ready
+          ? `${answersWith.name} answers when you press Tab`
+          : answersWith.whyNot}
+      >
+        {#if answersWith.ready}
+          <span class="pip {answersWith.kind}"></span>
+          <span class="who">{answersWith.model || answersWith.name}</span>
+          <!-- Revealed only once there is something to ask about, so an empty
+               launcher is not carrying a key nobody can use yet. -->
+          {#if query.trim()}
+            <span class="sill-key">Tab</span>
+          {/if}
+        {:else}
+          <span class="who">Set up Ask</span>
+        {/if}
+      </button>
+    {/if}
   </div>
 
   <div class="divider"></div>
@@ -2633,6 +2776,84 @@
    * It scrolls on its own so the field below stays put: a composer that moves
    * down the window as the answer grows is a composer you have to chase.
    */
+  /*
+   * The chip at the end of the field.
+   *
+   * Quiet by default: it is a label that happens to be pressable, not a call
+   * to action competing with what somebody is typing. It brightens on hover
+   * and takes the accent only when there is nothing set up, which is the one
+   * state that is asking to be pressed.
+   */
+  .asker {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: none;
+    margin-right: var(--space-1);
+    padding: 3px var(--space-2);
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--fill-1);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-meta);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 0.15s var(--ease),
+      color 0.15s var(--ease);
+  }
+
+  .asker:hover {
+    background: var(--fill-2);
+    color: var(--text-1);
+  }
+
+  .asker:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  .asker.unset {
+    background: var(--accent-fill);
+    box-shadow: none;
+    color: var(--accent);
+  }
+
+  /*
+   * Where the answer comes from, as a mark rather than a name.
+   *
+   * Three colours for three kinds: this machine, a subscription through a tool
+   * already signed in, or a key. Sill's own marks rather than the vendors',
+   * because shipping somebody else's logo is a licensing question and this
+   * answers the same one at a glance.
+   */
+  .pip {
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border-radius: 50%;
+  }
+
+  .pip.local {
+    background: var(--accent-green);
+  }
+
+  .pip.cli {
+    background: var(--accent-orange);
+  }
+
+  .pip.key {
+    background: var(--accent-blue);
+  }
+
+  .who {
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .chat {
     flex: 1;
     min-height: 0;

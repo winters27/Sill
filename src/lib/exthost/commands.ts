@@ -70,7 +70,15 @@ export interface RankedCommand {
     /** One program's own volume, while it is playing something. */
     | "audio-session"
     /** A folder offered as somewhere to move something into. */
-    | "destination";
+    | "destination"
+    /**
+     * The conversation you left, offered back.
+     *
+     * Not an index entry and not launched: choosing it reopens a mode in this
+     * window. It exists only while the conversation is recent, and there is
+     * never more than one.
+     */
+    | "conversation";
   entrypoint: string;
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;
@@ -245,6 +253,16 @@ export interface AiReady {
   ready: boolean;
   /** What the chosen one is called. */
   name: string;
+  /** The model, or empty when the provider decides for itself. */
+  model: string;
+  /**
+   * Where the answer comes from: `local`, `cli` or `key`.
+   *
+   * Three kinds rather than seven names, because the useful distinction is
+   * whose machine answers and who pays: this one, a subscription through a
+   * tool already signed in, or a key.
+   */
+  kind: string;
   /** Why not, when not. Empty when it is ready. */
   whyNot: string;
 }
@@ -268,6 +286,32 @@ export function aiReady(): Promise<AiReady> {
  */
 export function aiAsk(question: string): Promise<string> {
   return invoke<string>("ai_ask", { question });
+}
+
+/**
+ * Asks the next thing in the conversation already open.
+ *
+ * Its own call rather than a flag on the one above. Appending to whatever came
+ * before, forever, is the behaviour these two replace, and a boolean argument
+ * is a thing a call site can get wrong. Two names cannot be.
+ */
+export function aiFollowUp(question: string): Promise<string> {
+  return invoke<string>("ai_follow_up", { question });
+}
+
+/**
+ * Sets the open conversation aside so the next question begins its own.
+ *
+ * Not `aiClear`, which forgets every conversation. The one set aside is still
+ * offered back from the root list until it goes stale.
+ */
+export function aiNew(): Promise<void> {
+  return invoke<void>("ai_new");
+}
+
+/** Reopens a conversation, and answers with everything said in it. */
+export function aiResume(id: string): Promise<AiTurn[]> {
+  return invoke<AiTurn[]>("ai_resume", { id });
 }
 
 /** Everything said so far, for a window that has just opened. */

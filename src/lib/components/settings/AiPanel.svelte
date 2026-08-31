@@ -1,9 +1,10 @@
 <script lang="ts">
   import Section from "./Section.svelte";
-  import Row from "./Row.svelte";
   import Button from "./Button.svelte";
   import Select from "./Select.svelte";
   import TextField from "./TextField.svelte";
+  import AiMark from "./AiMark.svelte";
+  import { swap } from "$lib/motion";
   import {
     aiKnown,
     aiModels,
@@ -20,10 +21,10 @@
 
   let { prefs, commit }: Props = $props();
 
-  /** The services Sill knows how to reach, for the Add row. */
+  /** The services Sill knows how to reach, for the Add list. */
   let known = $state<AiProvider[]>([]);
 
-  /** Which provider is open in the editor, by id. Empty means none. */
+  /** Which provider is open for setup, by id. Empty means none. */
   let editing = $state("");
 
   /** The models the open provider offers, once asked. */
@@ -144,20 +145,28 @@
   }
 
   /**
-   * What a row says underneath its name.
+   * What a card says underneath its name.
+   *
+   * Either the model it will answer with or the one thing left to do. It used
+   * to say "No model chosen yet", which is the empty field restated in more
+   * words: a line of text that costs a row of height and tells somebody
+   * something they can already see.
    *
    * The model as it is stored, not as the open editor happens to label it:
    * there is one list of models and it belongs to whichever provider is open,
-   * so a row reading its label showed the wrong thing as soon as a second
+   * so a card reading its label showed the wrong thing as soon as a second
    * provider was opened.
    */
-  function describe(one: AiProvider): string {
+  function status(one: AiProvider): string {
     if (one.wire === "claudeCode") {
       return one.model ? `Your subscription, ${one.model}` : "Your subscription";
     }
 
-    return one.model || "No model chosen yet";
+    return one.model || "Needs a model";
   }
+
+  /** Whether that status is a job rather than a fact, so it can be marked. */
+  const unfinished = (one: AiProvider) => one.wire !== "claudeCode" && !one.model;
 
   /**
    * What the picker offers.
@@ -181,166 +190,375 @@
   );
 </script>
 
+<!--
+  Cards, not settings rows, and `bare` so they are not cards inside a card.
+
+  The setup form opens INSIDE the card it belongs to rather than as a second
+  card below it. Nesting one filled, bevelled box in another is what made this
+  read as a dialog stacked on a dialog when the only thing happening is that a
+  row got taller.
+-->
 <Section
+  bare
   label="Who answers"
   description="Press Tab in the launcher to ask whatever you have typed. One of these answers; the rest stay set up and unused."
 >
-  {#each providers as one (one.id)}
-    <Row title={one.name} description={describe(one)}>
-      {#snippet control()}
-        <div class="controls">
-          {#if answering === one.id}
-            <span class="answering">Answering</span>
-          {:else}
-            <Button label="Use this" onclick={() => choose(one.id)} />
-          {/if}
-          <Button
-            label={editing === one.id ? "Done" : "Set up"}
-            onclick={() => edit(one)}
-          />
-        </div>
-      {/snippet}
-    </Row>
-
-    {#if editing === one.id && open}
-      <div class="editor">
-        {#if open.wire !== "claudeCode"}
-          <div class="field">
-            <span class="what">Address</span>
-            <TextField
-              value={open.baseUrl}
-              oninput={(next) => change(one.id, { baseUrl: next })}
-              placeholder="https://api.example.com/v1"
-              ariaLabel="Address"
-              full
-              mono
-            />
-            <!-- The rule, said once, where somebody would otherwise meet it as
-                 a refusal. -->
-            <span class="hint">
-              Plain http only to this machine or this network. Anywhere else
-              needs https, or your key travels in the clear.
-            </span>
-          </div>
-        {/if}
-
-        {#if open.wire !== "claudeCode"}
-          <div class="field">
-            <span class="what">Key</span>
-            <TextField
-              value={open.apiKey}
-              oninput={(next) => change(one.id, { apiKey: next })}
-              placeholder="Paste it here"
-              ariaLabel="Key"
-              full
-              mono
-              secret
-            />
-            <span class="hint">
-              Encrypted with your Windows account before it is written to disk.
-            </span>
-          </div>
-        {/if}
-
-        <div class="field">
-          <span class="what">Model</span>
-          {#if models.length}
-            <Select
-              value={open.model}
-              options={choices}
-              onchange={(next) => change(one.id, { model: next })}
-              ariaLabel="Model"
-              full
-            />
-          {:else}
-            <TextField
-              value={open.model}
-              oninput={(next) => change(one.id, { model: next })}
-              placeholder="Name the model"
-              ariaLabel="Model"
-              full
-              mono
-            />
-          {/if}
-
-          <span class="hint">
-            {#if loadingModels}
-              Asking what it has…
-            {:else if modelTrouble}
-              {modelTrouble} Type the name instead.
-            {:else if strayModel}
-              {open.model} was not in the list it gave. Keep it if you know it
-              works, or pick one of the {models.length} it named.
-            {:else if models.length}
-              {models.length} to choose from.
-            {/if}
-          </span>
-        </div>
-
-        <div class="editor-actions">
-          <Button label="Refresh models" onclick={() => loadModels(open)} />
-          <span class="spacer"></span>
-          <Button label="Remove" tone="danger" onclick={() => remove(one.id)} />
-        </div>
-      </div>
-    {/if}
-  {/each}
-
   {#if providers.length === 0}
     <p class="empty">
-      Nothing set up yet. Add one below. Claude Code uses the subscription you
-      already have; a model running on this machine costs nothing and sends
-      nothing anywhere.
+      Nothing set up yet. Claude Code uses the subscription you already have,
+      and a model running on this machine costs nothing and sends nothing
+      anywhere.
     </p>
+  {:else}
+    <div class="stack" role="radiogroup" aria-label="Who answers">
+      {#each providers as one (one.id)}
+        <div class="provider" class:on={answering === one.id} class:open={editing === one.id}>
+          <div class="head">
+            <!--
+              The card is the choice. A row carrying a "Use this" button beside
+              a "Set up" button is two identical grey rectangles per provider
+              and fourteen down the panel, none of which says which one is
+              picked without reading it.
+            -->
+            <button
+              type="button"
+              class="pick"
+              role="radio"
+              aria-checked={answering === one.id}
+              onclick={() => choose(one.id)}
+            >
+              <AiMark name={one.id} />
+
+              <span class="text">
+                <span class="name">{one.name}</span>
+                <span class="status" class:todo={unfinished(one)}>{status(one)}</span>
+              </span>
+
+              {#if answering === one.id}
+                <span class="answering">Answering</span>
+              {/if}
+            </button>
+
+            <button
+              type="button"
+              class="disclose"
+              aria-expanded={editing === one.id}
+              aria-label="Set up {one.name}"
+              onclick={() => edit(one)}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          </div>
+
+          {#if editing === one.id && open}
+            <div class="setup" in:swap out:swap={{ out: true }}>
+              {#if open.wire !== "claudeCode"}
+                <div class="field">
+                  <span class="what">Address</span>
+                  <div class="control">
+                    <TextField
+                      value={open.baseUrl}
+                      oninput={(next) => change(one.id, { baseUrl: next })}
+                      placeholder="https://api.example.com/v1"
+                      ariaLabel="Address"
+                      full
+                      mono
+                    />
+                    <!-- The rule, said once, where somebody would otherwise
+                         meet it as a refusal. -->
+                    <span class="note">
+                      Plain http only to this machine or this network. Anywhere
+                      else needs https, or your key travels in the clear.
+                    </span>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <span class="what">Key</span>
+                  <div class="control">
+                    <TextField
+                      value={open.apiKey}
+                      oninput={(next) => change(one.id, { apiKey: next })}
+                      placeholder="Paste it here"
+                      ariaLabel="Key"
+                      full
+                      mono
+                      secret
+                    />
+                    <span class="note">
+                      Encrypted with your Windows account before it is written
+                      to disk.
+                    </span>
+                  </div>
+                </div>
+              {/if}
+
+              <div class="field">
+                <span class="what">Model</span>
+                <div class="control">
+                  {#if models.length}
+                    <Select
+                      value={open.model}
+                      options={choices}
+                      onchange={(next) => change(one.id, { model: next })}
+                      ariaLabel="Model"
+                      full
+                    />
+                  {:else}
+                    <TextField
+                      value={open.model}
+                      oninput={(next) => change(one.id, { model: next })}
+                      placeholder="Name the model"
+                      ariaLabel="Model"
+                      full
+                      mono
+                    />
+                  {/if}
+
+                  <!--
+                    Only when there is something to say. "12 to choose from" is
+                    a count of the list directly above it.
+                  -->
+                  {#if loadingModels}
+                    <span class="note">Asking what it has…</span>
+                  {:else if modelTrouble}
+                    <span class="note warn">{modelTrouble} Type the name instead.</span>
+                  {:else if strayModel}
+                    <span class="note warn">
+                      {open.model} was not in the list it gave. Keep it if you
+                      know it works, or pick one it named.
+                    </span>
+                  {/if}
+                </div>
+              </div>
+
+              <div class="actions">
+                <Button label="Refresh models" onclick={() => loadModels(open)} />
+                <span class="spacer"></span>
+                <Button label="Remove" tone="danger" onclick={() => remove(one.id)} />
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/each}
+    </div>
   {/if}
 </Section>
 
 {#if addable.length}
-  <Section label="Add" description="Each of these is set up separately, and you can keep several.">
-    {#each addable as one (one.id)}
-      <Row title={one.name} description={one.note}>
-        {#snippet control()}
-          <Button label="Add" onclick={() => add(one)} />
-        {/snippet}
-      </Row>
-    {/each}
+  <Section
+    bare
+    label="Add"
+    description="Each of these is set up separately, and you can keep several."
+  >
+    <div class="stack">
+      {#each addable as one (one.id)}
+        <div class="provider addable">
+          <div class="head">
+            <div class="pick static">
+              <AiMark name={one.id} />
+
+              <span class="text">
+                <span class="name">{one.name}</span>
+                <!-- Kept, unlike the others: this is the one place the prose
+                     says something nobody could work out from the panel, which
+                     is what each service actually wants from you. -->
+                <span class="status">{one.note}</span>
+              </span>
+            </div>
+
+            <Button label="Add" onclick={() => add(one)} />
+          </div>
+        </div>
+      {/each}
+    </div>
   </Section>
 {/if}
 
 <style>
-  .controls {
-    display: flex;
-    align-items: center;
+  /*
+   * A grid, because a provider card is not a settings row.
+   *
+   * A mark, a name and a model id stretched across the full 872px content
+   * column left most of every card empty, and seven of them read as seven
+   * banners rather than as a set of things to choose between. Cards want to be
+   * about as wide as they are informative.
+   */
+  .stack {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
     gap: var(--space-2);
   }
 
+  .provider {
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--radius-lg);
+    background: var(--fill-1);
+    transition:
+      background-color var(--motion-enter) ease,
+      box-shadow var(--motion-enter) ease;
+  }
+
   /*
-   * Which one answers, said rather than drawn as a control.
+   * The one that answers, washed rather than badged.
    *
-   * A selected radio beside an unselected button is two things that look
-   * clickable and only one that is. A word is unambiguous.
+   * This is the accent doing the job it is reserved for: saying which of
+   * several things is selected. It is the same treatment the settings sidebar
+   * gives the open panel, so the two read as the same kind of state.
    */
+  .provider.on {
+    background: var(--accent-fill);
+  }
+
+  /* Being set up needs the whole width, so an open card takes the whole row. */
+  .provider.open {
+    grid-column: 1 / -1;
+    background: var(--fill-2);
+  }
+
+  .provider.on.open {
+    background: var(--accent-fill);
+    box-shadow: inset 0 0 0 1px var(--accent-line);
+  }
+
+  /* Fills a card the grid has stretched, so the contents stay centred in it. */
+  .head {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-3) 0 0;
+  }
+
+  .pick {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    /* Two lines of text beside a 28px mark, with room to breathe. */
+    min-height: 56px;
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-radius: var(--radius-lg);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  /* The Add list is not a choice, so its head must not look pressable. */
+  .pick.static {
+    cursor: default;
+  }
+
+  .pick:not(.static):hover {
+    background: var(--fill-1);
+  }
+
+  .pick:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--accent-line);
+  }
+
+  .text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .name {
+    color: var(--text-1);
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
+  }
+
+  .status {
+    color: var(--text-2);
+    font-size: var(--text-meta);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  /* Something left to do, dimmed rather than alarmed: nothing is broken. */
+  .status.todo {
+    color: var(--text-3);
+  }
+
   .answering {
+    flex: none;
     color: var(--accent);
     font-size: var(--text-meta);
     white-space: nowrap;
   }
 
-  .editor {
+  .disclose {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-3);
+    cursor: pointer;
+    transition:
+      transform var(--motion-enter) ease,
+      color var(--motion-enter) ease,
+      background-color var(--motion-enter) ease;
+  }
+
+  .disclose:hover {
+    background: var(--fill-2);
+    color: var(--text-1);
+  }
+
+  .disclose:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--accent-line);
+  }
+
+  .provider.open .disclose {
+    transform: rotate(180deg);
+    color: var(--text-1);
+  }
+
+  /*
+   * The form, inside the card it configures.
+   *
+   * A hairline instead of a second background: the setup belongs to the card
+   * above it, and giving it a fill of its own is what made a provider being
+   * configured look like a window that had opened on top of the panel.
+   */
+  .setup {
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-    margin: var(--space-2) 0 var(--space-4);
-    padding: var(--space-4);
-    border-radius: var(--radius-lg);
-    background: var(--fill-1);
-    box-shadow: var(--bevel-tile);
+    margin: 0 var(--space-3);
+    padding: var(--space-4) 0;
+    border-top: 1px solid var(--hairline);
   }
 
+  /*
+   * A label column, so the fields line up.
+   *
+   * Stacked label-over-input-over-hint gave three left edges per field and
+   * nine down the form, which is the shape of a page with no stylesheet.
+   */
   .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
+    display: grid;
+    grid-template-columns: 68px minmax(0, 1fr);
+    align-items: baseline;
+    gap: var(--space-3);
   }
 
   .what {
@@ -348,16 +566,30 @@
     font-size: var(--text-meta);
   }
 
-  .hint {
+  .control {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .note {
     color: var(--text-3);
     font-size: var(--text-meta);
     line-height: 1.5;
+    max-width: 62ch;
   }
 
-  .editor-actions {
+  .note.warn {
+    color: var(--text-2);
+  }
+
+  .actions {
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    /* Clears the label column, so the buttons sit under the fields. */
+    padding-left: calc(68px + var(--space-3));
   }
 
   .spacer {
@@ -367,7 +599,7 @@
   .empty {
     margin: 0;
     max-width: 62ch;
-    padding: var(--space-4) 0;
+    padding: var(--space-2) 0;
     color: var(--text-2);
     font-size: var(--text-meta);
     line-height: 1.65;

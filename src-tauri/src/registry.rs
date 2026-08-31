@@ -934,6 +934,38 @@ pub fn snippet_record(snippet: &crate::snippets::store::Snippet) -> CommandRecor
 ///
 /// Scored far above anything the ranker can produce, because when a query is
 /// a sum the answer is the only thing being asked for.
+/// The conversation you left, as a row offering it back.
+///
+/// A record rather than a row spliced in at the top, so that typing finds it
+/// the way typing finds everything else. That matters more than it sounds:
+/// Escape out of a conversation puts your search back in the field, and the
+/// search is usually the question you asked, so the row you want is found by
+/// the words already there.
+pub fn conversation_record(id: &str, title: &str, said: &str) -> CommandRecord {
+    CommandRecord {
+        id: format!("sill:{id}"),
+        extension: "sill".to_string(),
+        extension_title: "Continue".to_string(),
+        command: "conversation".to_string(),
+        title: title.to_string(),
+        subtitle: said.to_string(),
+        description: String::new(),
+        mode: "conversation".to_string(),
+        // Which conversation to reopen. The row's own id carries a prefix so
+        // it cannot collide with anything scanned; this is the bare one.
+        entrypoint: id.to_string(),
+        // Nobody types "conversation" to find one. They type the question, and
+        // the question is the title.
+        keywords: Vec::new(),
+        icon: None,
+        toggle: None,
+        // Wears the mark of the panel it belongs to, like everything else Sill
+        // owns.
+        panel: Some("ai".to_string()),
+        preferences: serde_json::Value::Null,
+    }
+}
+
 pub fn answer_record(text: &str, input: &str) -> RankedCommand {
     RankedCommand {
         // An answer is only ever produced because the query was a sum, so it
@@ -1931,6 +1963,20 @@ pub const SEARCH_LIMIT: usize = 120;
 /// somebody happened to visit, and loses to one they actually rely on.
 const SWITCH_FLOOR: i64 = 80;
 
+/// Where the conversation you left ranks.
+///
+/// Above everything, including the empty query, which is the one place the
+/// switch floor above deliberately does not apply. The reasoning differs
+/// because the rows differ: there are twelve switches and they would bury a
+/// list ordered by what you reach for, whereas there is only ever one of
+/// these and it expires by itself within ten minutes.
+///
+/// The number is arithmetic rather than taste. Frecency tops out at 300: the
+/// best recency tier is 100 and the capped frequency multiplier is 30, over
+/// ten. So anything above 300 is first, and 400 says so without being
+/// `i64::MAX`, which would also outrank a calculator answer.
+const CONVERSATION_FLOOR: i64 = 400;
+
 /// Ranks commands for a query.
 ///
 /// An empty query is the root list, ordered purely by frecency, which is what
@@ -2062,6 +2108,12 @@ pub fn search_excluding<'a>(
          */
         if !query.is_empty() && command.mode == "system" {
             weight = weight.max(SWITCH_FLOOR);
+        }
+
+        // Where you were, above what exists. On the empty query as well, for
+        // the reason written on the constant.
+        if command.mode == "conversation" {
+            weight = weight.max(CONVERSATION_FLOOR);
         }
 
         scored.push((class, weight, command, matched));
