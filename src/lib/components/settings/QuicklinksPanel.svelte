@@ -6,13 +6,68 @@
   import {
     blankQuicklink,
     deleteQuicklink,
+    exportQuicklinks,
+    importQuicklinks,
     listQuicklinks,
     needsArgument,
     saveQuicklink,
     type Quicklink,
   } from "$lib/quicklinks";
 
+  /**
+   * Writes them out, and says where they went.
+   *
+   * Closing the dialog without choosing answers nothing, which is somebody
+   * changing their mind rather than something failing.
+   */
+  async function sendOut() {
+    transfer = "";
+
+    try {
+      const where = await exportQuicklinks();
+      if (where) transfer = `Written to ${where}`;
+    } catch (err) {
+      transfer = `${err}`;
+    }
+  }
+
+  /**
+   * Reads them in, and says exactly what changed.
+   *
+   * Counted rather than summarised, because the two surprising outcomes both
+   * need naming: links skipped for being here already, and keywords left off
+   * because another link answers to them.
+   */
+  async function bringIn() {
+    transfer = "";
+
+    try {
+      const done = await importQuicklinks();
+      if (!done) return;
+
+      const said: string[] = [];
+      if (done.added) said.push(`${done.added} added`);
+      if (done.updated) said.push(`${done.updated} updated`);
+      if (done.skipped) said.push(`${done.skipped} already here`);
+      if (done.keywordsTaken) {
+        said.push(
+          `${done.keywordsTaken} came without ${
+            done.keywordsTaken === 1 ? "its keyword" : "their keywords"
+          }, which ${done.keywordsTaken === 1 ? "was" : "were"} already in use`,
+        );
+      }
+
+      transfer = said.length ? `${said.join(", ")}.` : "Nothing to bring in.";
+      links = await listQuicklinks();
+    } catch (err) {
+      transfer = `${err}`;
+    }
+  }
+
   let links = $state<Quicklink[]>([]);
+
+  /** What the last export or import did, said once and left on screen. */
+  let transfer = $state("");
   let editing = $state<Quicklink | null>(null);
   let error = $state("");
   let confirmingDelete = $state("");
@@ -210,6 +265,24 @@
 {#if !editing}
   <Section label="Add" bare>
     <Button label="New quicklink" onclick={() => edit(blankQuicklink())} />
+  </Section>
+
+  <Section
+    label="Moving them around"
+    description="A file of quicklinks, so they can be backed up, carried to another machine, or brought over from another tool. Importing only ever adds: nothing already here is removed."
+  >
+    <Row title="Quicklinks as a file">
+      {#snippet control()}
+        <div class="actions">
+          <Button label="Export" onclick={sendOut} />
+          <Button label="Import" onclick={bringIn} />
+        </div>
+      {/snippet}
+    </Row>
+
+    {#if transfer}
+      <p class="note">{transfer}</p>
+    {/if}
   </Section>
 {/if}
 

@@ -107,3 +107,82 @@ fn open(target: &str, open_with: &str) -> Result<(), String> {
         .map(|_| ())
         .map_err(|e| format!("Could not open {target} with {open_with}: {e}"))
 }
+
+/// Writes every quicklink to a file, and says where it went.
+///
+/// A dialog rather than a fixed location, because the point of an export is
+/// that it goes somewhere the person can find it again.
+#[tauri::command]
+pub fn export_quicklinks(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let links = store::load(&store::path(&store::data_dir(&app)));
+    if links.is_empty() {
+        return Err("There are no quicklinks to export.".to_string());
+    }
+
+    let chosen = app
+        .dialog()
+        .file()
+        .set_title("Export quicklinks")
+        .set_file_name("quicklinks.json")
+        .add_filter("Quicklinks", &["json"])
+        .blocking_save_file();
+
+    // Nothing chosen is not a failure. Somebody opened the dialog and changed
+    // their mind, which is an ordinary thing to do and needs no message.
+    let Some(target) = chosen else {
+        return Ok(None);
+    };
+
+    let path = target
+        .into_path()
+        .map_err(|err| format!("that location cannot be written to: {err}"))?;
+
+    std::fs::write(&path, super::transfer::to_json(&links))
+        .map_err(|err| format!("could not write that file: {err}"))?;
+
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Reads quicklinks from a file and folds them into the ones already here.
+///
+/// Additive, always. Whatever the file contains, every link already held is
+/// still there afterwards: an import that could quietly delete somebody's set
+/// is not something to offer behind a single button.
+#[tauri::command]
+pub fn import_quicklinks(app: AppHandle) -> Result<Option<super::transfer::Summary>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let chosen = app
+        .dialog()
+        .file()
+        .set_title("Import quicklinks")
+        .add_filter("Quicklinks", &["json"])
+        .blocking_pick_file();
+
+    let Some(source) = chosen else {
+        return Ok(None);
+    };
+
+    let path = source
+        .into_path()
+        .map_err(|err| format!("that file cannot be read: {err}"))?;
+
+    let text = std::fs::read_to_string(&path)
+        .map_err(|err| format!("could not read that file: {err}"))?;
+
+    let arriving = super::transfer::parse(&text)?;
+    if arriving.is_empty() {
+        return Err("That file has no quicklinks in it.".to_string());
+    }
+
+    let file = store::path(&store::data_dir(&app));
+    let (merged, summary) =
+        super::transfer::merge(&store::load(&file), arriving, crate::state::now_seconds());
+
+    store::save(&file, &merged).map_err(|err| err.to_string())?;
+    crate::reload_quicklinks(&app);
+
+    Ok(Some(summary))
+}

@@ -57,7 +57,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.11 | Browser history and bookmarks | **Done.** Chromium and Firefox families, read on demand and never indexed. Off by default |
 | P2.12 | Workspace profiles | Not started |
 | P2.13 | Live command results | Not started |
-| P2.14 | Migration import | **Partly.** Snippets read a file written by other tools |
+| P2.14 | Migration import | **Done.** Snippets and quicklinks both read a file written by other tools, and both write one another tool has a chance of reading. Importing only ever adds |
 | P2.15 | Dictation retention policy | Not started |
 
 ## Built since the audit, and not on it
@@ -245,6 +245,32 @@ the part we cannot see.
 the median summon or the cold start is over budget. The numbers are also in
 Settings under Advanced, because a launcher's pitch is that it is quick and
 that is a claim about numbers.
+
+### Carrying quicklinks in and out
+
+The same shape snippets already had, and deliberately so. Somebody arriving
+with thirty saved searches is not going to retype them, somebody leaving should
+not feel trapped, and somebody with two machines should not keep them in step
+by hand.
+
+Reading is forgiving and merging is not. A file can be written by anything and
+is read as generously as it can be understood: a bare array or one wrapped in
+an object, and any of `link`, `url` or `target` for the address. What happens
+to the links already here afterwards is exactly one predictable thing.
+**Importing only ever adds.** A link that is here and not in the file stays,
+because somebody importing a colleague's file should not lose their own.
+
+Two things an import will not do quietly. It will not let two links answer one
+keyword, which is a coin toss every time it is typed, so the arriving one comes
+in without it and the count says how many. And it will not overwrite how often
+something has been used, because that is this machine's history rather than the
+file's, and a zero from somebody else's export would throw away the ranking.
+
+**A backup that restores less than it saved is not a backup.** Snippets grew a
+collection, a program list and formatting, and the export wrote six fields by
+hand, so all three were dropped on the way out and the way back in. Nothing
+failed; the snippets simply came back plainer than they went. There is a test
+that exports and reads back now.
 
 ## Built since the audit, and not on it: web search
 

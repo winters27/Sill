@@ -45,6 +45,26 @@ export function openQuicklink(id: string, query: string): Promise<string> {
  * Mirrors `Quicklink::needs_argument`. Only `{query}` counts: the other
  * placeholders answer themselves from the clipboard or the clock.
  */
+/** What an import changed, counted rather than summarised. */
+export interface TransferSummary {
+  added: number;
+  updated: number;
+  /** Already here word for word, and left alone. */
+  skipped: number;
+  /** Arrived with a keyword another link already answers to. */
+  keywordsTaken: number;
+}
+
+/** Writes them all to a file, and says where. Nothing chosen returns null. */
+export function exportQuicklinks(): Promise<string | null> {
+  return invoke<string | null>("export_quicklinks");
+}
+
+/** Reads a file in. Additive: nothing already here is removed. */
+export function importQuicklinks(): Promise<TransferSummary | null> {
+  return invoke<TransferSummary | null>("import_quicklinks");
+}
+
 export function needsArgument(link: string): boolean {
   return /\{\s*query\s*\}/i.test(link);
 }

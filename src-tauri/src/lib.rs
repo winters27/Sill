@@ -1067,6 +1067,8 @@ pub fn run() {
             quicklinks::commands::save_quicklink,
             quicklinks::commands::delete_quicklink,
             quicklinks::commands::open_quicklink,
+            quicklinks::commands::export_quicklinks,
+            quicklinks::commands::import_quicklinks,
             commands::settings::get_preferences,
             commands::settings::set_preferences,
             commands::settings::open_settings,

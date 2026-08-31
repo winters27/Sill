@@ -36,6 +36,17 @@ struct Incoming {
     /// Another spelling of the same idea.
     shortcut: Option<String>,
     whole_word: Option<bool>,
+    /*
+     * Sill's own, read so that its own export can be read back.
+     *
+     * Another tool's file will not have these and does not need to: they are
+     * `Option` like everything else here. But leaving them out meant Sill
+     * exported a collection and then dropped it on the way back in, so a
+     * backup restored fewer snippets than it saved, quietly.
+     */
+    collection: Option<String>,
+    only_in: Option<Vec<String>>,
+    html: Option<String>,
 }
 
 impl Incoming {
@@ -138,10 +149,12 @@ pub fn parse(text: &str) -> Result<Vec<Snippet>, String> {
                 uses: 0,
                 created: 0,
                 whole_word: row.whole_word.unwrap_or(true),
-                // Nothing another tool's file carries. A collection, a program
-                // list and formatting are Sill's own, so an imported snippet
-                // arrives plain and ungrouped rather than with something
-                // invented for it.
+                // Sill's own, when the file has them. Another tool's will not,
+                // and an imported snippet then arrives plain and ungrouped
+                // rather than with something invented for it.
+                collection: row.collection.clone().unwrap_or_default(),
+                only_in: row.only_in.clone().unwrap_or_default(),
+                html: row.html.clone().unwrap_or_default(),
                 ..Snippet::default()
             })
         })
@@ -221,18 +234,45 @@ fn keyword_taken(existing: &[Snippet], id: &str, keyword: &str) -> bool {
 /// The shape Sill holds, plus `text` beside `content` saying the same thing.
 /// Costing a few bytes to be readable by anything that expects the commoner
 /// spelling is a better trade than being a format only one program knows.
+///
+/// **Everything a snippet has, not everything another tool would understand.**
+/// This listed six fields by hand, so a collection, a program list and any
+/// formatting were simply absent from the file: a backup restored snippets
+/// plainer than the ones it saved, and nothing said so. What another tool
+/// cannot read it will ignore; what Sill does not write is gone.
+///
+/// The three of Sill's own are written only when they hold something, so the
+/// file for a plain snippet stays exactly as short as it was.
 pub fn to_json(snippets: &[Snippet]) -> String {
     let rows: Vec<serde_json::Value> = snippets
         .iter()
         .map(|snippet| {
-            serde_json::json!({
+            let mut row = serde_json::json!({
                 "id": snippet.id,
                 "name": snippet.name,
                 "keyword": snippet.keyword,
                 "content": snippet.content,
                 "text": snippet.content,
                 "wholeWord": snippet.whole_word,
-            })
+            });
+
+            let Some(fields) = row.as_object_mut() else {
+                return row;
+            };
+
+            if !snippet.collection.is_empty() {
+                fields.insert("collection".into(), snippet.collection.clone().into());
+            }
+
+            if !snippet.only_in.is_empty() {
+                fields.insert("onlyIn".into(), snippet.only_in.clone().into());
+            }
+
+            if !snippet.html.is_empty() {
+                fields.insert("html".into(), snippet.html.clone().into());
+            }
+
+            row
         })
         .collect();
 
@@ -254,6 +294,65 @@ mod tests {
             whole_word: true,
             ..Snippet::default()
         }
+    }
+
+    /// What Sill writes, Sill can read.
+    ///
+    /// A backup is only a backup if restoring it gives back what was saved.
+    /// Export serialises the whole snippet and import read only the fields
+    /// another tool would write, so a collection, a program list and any
+    /// formatting were written to the file and dropped on the way back in.
+    /// Nothing failed; the snippets simply came back plainer than they went.
+    #[test]
+    fn a_snippet_survives_being_exported_and_read_back() {
+        let saved = vec![Snippet {
+            id: "one".into(),
+            name: "Formatted note".into(),
+            keyword: ";note".into(),
+            content: "Heads up: this is important".into(),
+            uses: 7,
+            created: 1_700_000_000,
+            whole_word: true,
+            collection: "Email".into(),
+            only_in: vec!["outlook".into()],
+            html: "Heads up: <b>this is important</b>".into(),
+        }];
+
+        let read = parse(&to_json(&saved)).expect("reads what it wrote");
+
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].collection, "Email");
+        assert_eq!(read[0].only_in, vec!["outlook".to_string()]);
+        assert_eq!(read[0].html, "Heads up: <b>this is important</b>");
+        assert_eq!(read[0].content, "Heads up: this is important");
+        assert_eq!(read[0].keyword, ";note");
+    }
+
+    /// A plain snippet's file stays exactly as short as it was.
+    ///
+    /// The three fields Sill added are written only when they hold something,
+    /// so somebody who has never made a collection does not find the word in
+    /// their export, and another tool reading it sees what it always saw.
+    #[test]
+    fn nothing_is_written_for_a_snippet_that_has_none_of_it() {
+        let plain = vec![snippet("one", "Sig", ";sig", "Kind regards")];
+        let written = to_json(&plain);
+
+        for absent in ["collection", "onlyIn", "html"] {
+            assert!(!written.contains(absent), "{absent} is in {written}");
+        }
+    }
+
+    /// Another tool's file has none of those, and must still read.
+    #[test]
+    fn a_file_from_elsewhere_arrives_plain_rather_than_refused() {
+        let read = parse(r#"[{"name": "Sig", "text": "Kind regards", "keyword": ";sig"}]"#)
+            .expect("reads");
+
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].collection, "");
+        assert!(read[0].only_in.is_empty());
+        assert_eq!(read[0].html, "");
     }
 
     // ------------------------------------------------------------- reading
