@@ -157,7 +157,11 @@ impl Slot {
             Slot::BottomLeft => "Bottom Left Quarter",
             Slot::BottomRight => "Bottom Right Quarter",
             Slot::FirstThird => "First Third",
-            Slot::CenterThird => "Centre Third",
+            // Not "Centre Third". The action panel filters by substring and
+            // draws these in this order, so that name sat above "Centre" and
+            // typing the word selected the third rather than the centre.
+            // "First, Middle, Last" reads as the trio it is anyway.
+            Slot::CenterThird => "Middle Third",
             Slot::LastThird => "Last Third",
             Slot::FirstTwoThirds => "First Two Thirds",
             Slot::LastTwoThirds => "Last Two Thirds",

@@ -52,7 +52,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.6 | Process and resource view | Not started |
 | P2.7 | Terminal execution, capability gated | Not started |
 | P2.8 | Scripting | Not started |
-| P2.9 | File actions | **Done, except moving.** Copy path, copy name, reveal, open a terminal, recycle bin, SHA-256, compress, rename. Moving needs a destination picker, which is its own question |
+| P2.9 | File actions | **Done.** Copy path, copy name, reveal, open a terminal, recycle bin, SHA-256, compress, rename, and move to a folder with a picker and an undo |
 | P2.10 | Hyperkey and double-tap modifiers | Not started in Sill. **Double-tap is written already in AuraKey**, see below |
 | P2.11 | Browser history and bookmarks | **Done.** Chromium and Firefox families, read on demand and never indexed. Off by default |
 | P2.12 | Workspace profiles | Not started |
@@ -147,6 +147,32 @@ than two opinions.
 so its switch says whether mute is on. A program's row is called by the
 program's name, so its switch says whether the program is audible. The
 percentage underneath says the one thing the switch cannot.
+
+### Moving a file somewhere, and putting it back
+
+The destination picker was the question, not the move. A path typed into a
+launcher is a path typed wrong: no completion, no telling whether it exists,
+and no way to see that there are three folders called "src". So picking a
+folder is a list, the same list everything else uses, and typing narrows it.
+
+**What is offered before a letter is typed decides whether this is one
+keystroke or twenty.** The folders already moved to come first, then the
+folders sitting beside the thing being moved, then the standard places. The
+siblings are read off the disk rather than looked up, and that is the
+difference between working and not: a folder made a minute ago is in no index
+yet, and a folder somebody just made is exactly the one they are about to move
+something into. Searching alone answered "Nothing found" for it.
+
+The folder it is already in is never offered. It is the one destination that
+cannot be right.
+
+**It moves between drives.** `fs::rename` cannot cross a volume, so between two
+drives it copies and then removes, and a failure part way through takes the
+half-written copy with it rather than leaving two incomplete versions and
+nothing saying which is real. Verified against two real drives.
+
+Ctrl+Z puts it back. The token is two paths, so undoing a move of a ten
+gigabyte folder costs what undoing a move of a text file costs.
 
 ## Built since the audit, and not on it: web search
 

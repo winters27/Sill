@@ -526,6 +526,67 @@ fn nothing_else_is_offered_a_system_switch_action() {
     }
 }
 
+/// A name that begins another's is listed above it.
+///
+/// The panel filters by substring, so everything a short title matches, a
+/// longer one starting with the same words matches too. That is harmless when
+/// the short one is listed first, which is what typing it is trying to reach.
+/// It is not harmless the other way round: the longer one is then selected and
+/// Enter runs it.
+///
+/// This is not a tidiness rule. "Move To" was a prefix of "Move to Recycle
+/// Bin" **and listed below it**, so typing "move to" selected the action that
+/// removes the file. It was found by a test doing exactly that to a file it had
+/// made, which is the only reason it was found at all.
+///
+/// "Open" begins "Open Terminal Here" and is fine, because "Open" is what
+/// Enter does and sorts first.
+#[test]
+fn a_name_that_begins_another_is_listed_above_it() {
+    let registry = builtins();
+
+    for kind in ObjectKind::ALL {
+        let offered = registry.for_kind(*kind);
+
+        for (at, one) in offered.iter().enumerate() {
+            let short = one.title().to_lowercase();
+
+            for (also, other) in offered.iter().enumerate() {
+                if at == also {
+                    continue;
+                }
+
+                if !other.title().to_lowercase().starts_with(&short) {
+                    continue;
+                }
+
+                assert!(
+                    at < also,
+                    "{:?}: typing {:?} selects {:?}, which is listed above it",
+                    kind,
+                    one.title(),
+                    other.title(),
+                );
+            }
+        }
+    }
+}
+
+/// The one action that removes something is offered last.
+///
+/// The panel is drawn in registration order after the primary, and a file has
+/// a dozen actions. The one that takes the file away should not sit among the
+/// ones that copy its path, where a mistyped filter reaches it first.
+#[test]
+fn the_recycle_bin_is_the_last_thing_offered_for_a_file() {
+    let registry = builtins();
+    let offered = registry.for_kind(ObjectKind::File);
+
+    let last = offered.last().expect("a file has actions");
+    assert_eq!(last.id(), "sill.file.recycle", "offered: {:?}",
+        offered.iter().map(|a| a.title()).collect::<Vec<_>>());
+}
+
 /// A program's own volume is a kind of thing with a full set of actions.
 ///
 /// Enter mutes and unmutes, which is what a mixer gets opened for, and the

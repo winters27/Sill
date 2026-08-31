@@ -76,6 +76,19 @@ pub enum Undo {
     /// exactly. Never used to undo anything that removed or replaced a file,
     /// because that is not something a descriptor can reverse.
     DeleteFile { path: String, name: String },
+    /// Put something back in the folder it came out of.
+    ///
+    /// Two paths and a name, which is all a move is. Safe to keep because it
+    /// describes the change rather than holding what was changed: undoing a
+    /// move of a ten gigabyte folder costs the same as undoing a move of a
+    /// text file.
+    MovePath {
+        /// Where it is now.
+        path: String,
+        /// The folder to put it back in.
+        back_to: String,
+        name: String,
+    },
     /// Put a window back where it was, and back how it was.
     ///
     /// The state matters as much as the rectangle: a window that was maximized
@@ -289,6 +302,21 @@ pub fn undo(ctx: &ActionCtx, undo: &Undo) -> Result<String, String> {
                 .map_err(|err| format!("could not remove {name}: {err}"))?;
 
             Ok(format!("{name} removed"))
+        }
+
+        Undo::MovePath {
+            path,
+            back_to,
+            name,
+        } => {
+            let landed = crate::files_ops::move_to(
+                std::path::Path::new(path),
+                std::path::Path::new(back_to),
+            )?;
+
+            Ok(format!("{name} put back in {}", crate::files_ops::name_of(
+                landed.parent().unwrap_or(&landed)
+            )))
         }
 
         Undo::RestoreWindow {

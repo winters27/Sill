@@ -23,7 +23,9 @@
     activateHandler,
     dismiss,
     launchCommand,
+    movePath,
     searchAppVolume,
+    searchDestinations,
     systemStates,
     searchCommands,
     unloadExtension,
@@ -89,6 +91,15 @@
      * anything about sound was typed.
      */
     | "appVolume"
+    /**
+     * Picking somewhere to move a file to.
+     *
+     * A list rather than a typed path, because a path typed into a launcher is
+     * a path typed wrong: no completion, no telling whether it exists, and no
+     * way to see that there are three folders called "src". The rows are
+     * folders and Enter picks one.
+     */
+    | "destination"
   >("root");
   /**
    * The quicklink waiting for something to be typed into it.
@@ -111,6 +122,15 @@
     title: string;
     link: string;
   } | null>(null);
+
+  /**
+   * What is being moved, while somewhere is being picked for it.
+   *
+   * Not part of `awaiting`, which borrows the field to collect a line of text.
+   * This borrows the whole list instead: the answer is one of the rows rather
+   * than whatever was typed, and typing only narrows them.
+   */
+  let moving = $state<{ path: string; title: string } | null>(null);
   let session = $state<string | null>(null);
   let running = $state<{ title: string; extensionTitle: string } | null>(null);
 
@@ -132,6 +152,24 @@
   let searchInput = $state<HTMLInputElement | null>(null);
   let formView = $state<ReturnType<typeof FormView> | null>(null);
   let panelOpen = $state(false);
+
+  /*
+   * The field takes the keyboard back when the panel closes.
+   *
+   * The panel has a filter box of its own, so while it is open the field does
+   * not have focus, and nothing was giving it back. Anything that runs an
+   * action and then expects typing got nothing: picking "Move to Folder" left
+   * the launcher showing a list of folders with the caret still in a box that
+   * was no longer on screen, so typing a folder name did nothing at all and
+   * Enter took whatever was first. Renaming had the same hole.
+   *
+   * An effect rather than a line at each of the eight places the panel closes,
+   * because the ninth is the one that would be forgotten.
+   */
+  $effect(() => {
+    if (!panelOpen) searchInput?.focus();
+  });
+
   /**
    * What the action panel is filtered to.
    *
@@ -586,6 +624,22 @@
 
     clearTimeout(fileTimer);
 
+    if (mode === "destination") {
+      const source = moving;
+      if (!source) return;
+
+      try {
+        const found = await searchDestinations(current, source.path);
+        if (id !== searchId) return;
+
+        commands = found;
+        if (selected >= commands.length) selected = 0;
+      } catch (err) {
+        if (id === searchId) status = `could not look for folders: ${err}`;
+      }
+      return;
+    }
+
     if (mode === "appVolume") {
       try {
         const found = await searchAppVolume(current);
@@ -798,6 +852,29 @@
       if (!emoji) return;
 
       await useEmoji(emoji);
+      return;
+    }
+
+    if (mode === "destination") {
+      const source = moving;
+      const folder = commands[selected];
+      if (!source || !folder) return;
+
+      try {
+        const outcome = await movePath(source.path, folder.entrypoint);
+        status = outcome.message;
+        lastUndo = outcome.undo ?? null;
+
+        moving = null;
+        mode = "root";
+        selected = 0;
+        query = "";
+        await refreshRoot();
+      } catch (err) {
+        // Left where it is, because the folder that refused is the one worth
+        // looking at rather than starting the search again.
+        status = `${err}`;
+      }
       return;
     }
 
@@ -1425,6 +1502,23 @@
        * nowhere in that for a question. The field is borrowed exactly as a
        * quicklink with a hole in it borrows it.
        */
+      /*
+       * Moving needs somewhere to move to, and the picking is the feature.
+       *
+       * The whole list is borrowed rather than the field, because the answer
+       * is a folder and typing only narrows which one. Same reason the action
+       * itself refuses to run: it is handed one object, and there is nowhere
+       * in that for a question with a list of answers.
+       */
+      if (chosen === "sill.file.move") {
+        moving = { path: command.entrypoint, title: command.title };
+        mode = "destination";
+        selected = 0;
+        query = "";
+        await refreshRoot();
+        return;
+      }
+
       if (chosen === "sill.file.rename") {
         awaiting = {
           what: "rename",
@@ -1536,7 +1630,9 @@
       return;
     }
 
-    if (mode === "emoji" || mode === "appVolume") {
+    if (mode === "emoji" || mode === "appVolume" || mode === "destination") {
+      // Whatever was being moved is no longer being moved.
+      moving = null;
       mode = "root";
       selected = 0;
       query = "";
@@ -1958,6 +2054,8 @@
       <span class="crumb">Emoji</span>
     {:else if mode === "appVolume"}
       <span class="crumb">App Volume</span>
+    {:else if mode === "destination" && moving}
+      <span class="crumb">Move {moving.title}</span>
     {:else if mode === "collection"}
       <span class="crumb">Collection</span>
     {:else if mode === "alias" && naming}
@@ -1990,6 +2088,8 @@
           ? "Search emoji by name…"
         : mode === "appVolume"
           ? "Filter by program name…"
+        : mode === "destination"
+          ? "Search for a folder, then Enter…"
           : mode === "alias"
             ? "Type a short name, then Enter. Empty forgets it…"
           : mode === "collection"
@@ -2040,7 +2140,7 @@
     by exactly that mode and sharing one would be wrong in one direction or the
     other. Written out, and this comment is why.
   -->
-  {:else if mode === "root" || mode === "switcher" || mode === "alias" || mode === "emoji" || mode === "appVolume"}
+  {:else if mode === "root" || mode === "switcher" || mode === "alias" || mode === "emoji" || mode === "appVolume" || mode === "destination"}
     <!-- Kept on screen while a name is typed, so what is being named stays
          visible. -->
     <RootList

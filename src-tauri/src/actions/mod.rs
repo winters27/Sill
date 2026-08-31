@@ -37,6 +37,10 @@ pub fn builtins() -> ActionRegistry {
         Box::new(MarkUp),
         Box::new(SearchWeb),
         Box::new(OpenUrl),
+        // Above every other "Copy something", because the panel filters by
+        // substring and is drawn in this order. Below them, typing "copy" on
+        // an emoji selected "Copy Name" and copied the words "grinning face".
+        Box::new(CopyClipboardEntry),
         Box::new(CopyUrl),
         Box::new(CopyAnswer),
         Box::new(CopyPath),
@@ -44,13 +48,16 @@ pub fn builtins() -> ActionRegistry {
         Box::new(CopyName),
         Box::new(TerminalHere),
         Box::new(ToggleSystem),
-        Box::new(RecycleFile),
         Box::new(VerifyFile),
         Box::new(LookUpFile),
         Box::new(HashFile),
         Box::new(CompressFile),
         Box::new(RenameFile),
-        Box::new(CopyClipboardEntry),
+        Box::new(MoveFile),
+        // Last, and deliberately. The panel is drawn in this order, and the
+        // one action here that removes something should not sit above the ones
+        // that copy a path.
+        Box::new(RecycleFile),
         Box::new(ToggleSessionMute),
         Box::new(SessionLouder),
         Box::new(SessionQuieter),
@@ -414,7 +421,9 @@ const SESSION_STEP: f32 = 0.1;
 /// Shared by the four that move the slider, so they cannot drift on what a
 /// step is, on rounding, or on what to say afterwards.
 async fn nudge(
-    ctx: &ActionCtx,
+    // Unused, and taken anyway so all five of these read the same. A capture
+    // or an undo would want it and the signature should not have to change.
+    _ctx: &ActionCtx,
     object: &Object,
     to: impl Fn(f32) -> f32 + Send + 'static,
 ) -> Result<Outcome, String> {
@@ -1858,6 +1867,42 @@ impl Action for RenameFile {
     /// here means something dispatched it without asking.
     async fn run(&self, _ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
         Err("renaming needs a new name, which the launcher asks for".to_string())
+    }
+}
+
+/// Moves a file or folder somewhere else.
+///
+/// Refuses to run for the reason renaming does: it needs a destination, and an
+/// action is handed one object and acts. The launcher asks where first and
+/// then calls `move_path`. Reaching here means something dispatched it without
+/// asking, and doing nothing loudly is better than guessing at a folder.
+struct MoveFile;
+
+#[async_trait]
+impl Action for MoveFile {
+    fn id(&self) -> &'static str {
+        "sill.file.move"
+    }
+
+    fn title(&self) -> &'static str {
+        // Not "Move To". The panel filters by substring, so that is a prefix
+        // of "Move to Recycle Bin" and typing "move to" put the one that
+        // removes the file above the one that moves it. The extra word is the
+        // difference between the two.
+        "Move to Folder"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        matches!(kind, ObjectKind::File | ObjectKind::Folder)
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        // Read as well: between two drives this copies before it removes.
+        &[Capability::FileRead, Capability::FileWrite]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
+        Err("moving needs somewhere to move to, which the launcher asks for".to_string())
     }
 }
 

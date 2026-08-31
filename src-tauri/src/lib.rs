@@ -1079,6 +1079,8 @@ pub fn run() {
             commands::search::search_windows,
             commands::search::system_states,
             commands::search::search_app_volume,
+            commands::launch::move_path,
+            commands::launch::search_destinations,
             commands::search::search_emoji,
             commands::search::file_search_missing,
             commands::search::list_drives,

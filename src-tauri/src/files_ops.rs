@@ -150,6 +150,210 @@ pub fn rename(path: &Path, to: &str) -> Result<PathBuf, String> {
     Ok(target)
 }
 
+/// The folders somebody is likely to be moving something into.
+///
+/// What is offered before a single letter is typed, and it decides whether
+/// this feature is one keystroke or twenty. The folders already used come
+/// first, because "the place I always put these" beats any list somebody else
+/// wrote; the standard places follow, so the list is never empty on a machine
+/// that has not moved anything yet.
+///
+/// Anything that has stopped existing is dropped rather than offered and then
+/// refused, and a folder named twice is kept once, at its first position.
+pub fn likely_destinations(recent: Vec<String>, beside: &Path) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let standard = ["Desktop", "Downloads", "Documents", "Pictures", "Music", "Videos"];
+
+    let home = std::env::var("USERPROFILE")
+        .ok()
+        .filter(|home| !home.is_empty());
+
+    /*
+     * The folders sitting next to the thing being moved.
+     *
+     * Second, after the ones already used and before the standard places,
+     * because "into that folder there" is what most moves are: a download
+     * beside the folder it belongs in, a file beside the archive folder it
+     * came from.
+     *
+     * These are read off the disk rather than looked up, which matters more
+     * than it sounds. A folder made a minute ago is not in any index yet, and
+     * a folder somebody just made is exactly the one they are about to move
+     * something into. Searching alone answered "Nothing found" for it.
+     */
+    let siblings: Vec<String> = beside
+        .parent()
+        .and_then(|parent| std::fs::read_dir(parent).ok())
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| entry.path().is_dir())
+                .map(|entry| entry.path().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let places = recent.into_iter().chain(siblings).chain(
+        home.iter()
+            .flat_map(|home| {
+                standard
+                    .iter()
+                    .map(|folder| format!("{home}\\{folder}"))
+                    .collect::<Vec<_>>()
+            })
+            .chain(home.clone()),
+    );
+
+    for place in places {
+        // Compared case-insensitively because Windows paths are, so the same
+        // folder reached two ways is one folder.
+        let key = place.to_lowercase();
+
+        if !seen.insert(key) {
+            continue;
+        }
+
+        if std::path::Path::new(&place).is_dir() {
+            out.push(place);
+        }
+    }
+
+    out
+}
+
+/// Moves a file or folder into another folder, and says where it landed.
+///
+/// ## Three things this refuses, and why each one matters
+///
+/// **A folder into itself, or into anything inside it.** `fs::rename` gives an
+/// unhelpful error for the first and the copy fallback below would walk into
+/// its own output forever on the second. Caught by comparing the paths, before
+/// anything touches the disk.
+///
+/// **A name that is already taken.** Moving over the top of something is a
+/// silent deletion of whatever was there. `exists` is a moment out of date by
+/// the time the move runs, so this is a courtesy rather than a guarantee, and
+/// the rename underneath will refuse a genuine race on its own.
+///
+/// **Somewhere that is not a folder.** Otherwise the destination becomes a
+/// name and this is a rename wearing the wrong word.
+///
+/// ## Why there is a copy at all
+///
+/// `fs::rename` cannot cross a volume. Windows answers `ERROR_NOT_SAME_DEVICE`
+/// and nothing moves, which reads as the feature not working: the launcher
+/// offers a folder, somebody picks it, and nothing happens. Between drives the
+/// only way is to copy and then remove, so that is what happens, and a failure
+/// part way through takes the half-written copy with it rather than leaving
+/// two incomplete versions and no way to tell which is which.
+pub fn move_to(path: &Path, folder: &Path) -> Result<PathBuf, String> {
+    let name = path
+        .file_name()
+        .ok_or_else(|| "that has no name to move".to_string())?;
+
+    if !folder.is_dir() {
+        return Err(format!("{} is not a folder", name_of(folder)));
+    }
+
+    let target = folder.join(name);
+
+    if target == path {
+        return Err(format!("{} is already there", name_of(path)));
+    }
+
+    // A folder cannot go inside itself, and this is the check that stops the
+    // copy below walking into its own output.
+    if path.is_dir() && folder.starts_with(path) {
+        return Err(format!(
+            "{} cannot go inside itself",
+            name_of(path)
+        ));
+    }
+
+    if target.exists() {
+        return Err(format!(
+            "{} already has something called {}",
+            name_of(folder),
+            name_of(path),
+        ));
+    }
+
+    // The cheap way first. Within one volume this is a directory entry being
+    // rewritten, whatever the size of what is being moved.
+    match std::fs::rename(path, &target) {
+        Ok(()) => return Ok(target),
+        Err(err) if !crosses_a_volume(&err) => {
+            return Err(format!("could not move that: {err}"));
+        }
+        // Different drives. Fall through and copy.
+        Err(_) => {}
+    }
+
+    if let Err(err) = copy_across(path, &target) {
+        // Take the half-written copy with it. Leaving it behind means two
+        // incomplete versions and nothing saying which one is real.
+        let _ = if target.is_dir() {
+            std::fs::remove_dir_all(&target)
+        } else {
+            std::fs::remove_file(&target)
+        };
+
+        return Err(err);
+    }
+
+    let removed = if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+
+    if let Err(err) = removed {
+        // The copy landed, so this is not a failed move: it is a move that
+        // left the original behind. Said plainly, because the difference
+        // decides what somebody does next.
+        return Err(format!(
+            "copied {} to {} but could not remove the original: {err}",
+            name_of(path),
+            name_of(folder),
+        ));
+    }
+
+    Ok(target)
+}
+
+/// Whether this failure is the one that means "those are different drives".
+///
+/// Windows answers `ERROR_NOT_SAME_DEVICE`, which is 17, and so does Unix with
+/// `EXDEV`. Matched on the raw number because the portable `ErrorKind` for it
+/// was not stable when this was written, and treating every rename failure as
+/// a cross-volume one would turn a permission error into a needless copy of
+/// something large.
+fn crosses_a_volume(err: &std::io::Error) -> bool {
+    err.raw_os_error() == Some(17)
+}
+
+/// Copies a file, or a whole folder, to a path that does not exist yet.
+fn copy_across(from: &Path, to: &Path) -> Result<(), String> {
+    if from.is_file() {
+        std::fs::copy(from, to).map_err(|err| format!("could not copy that: {err}"))?;
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(to).map_err(|err| format!("could not make {}: {err}", name_of(to)))?;
+
+    let entries = std::fs::read_dir(from)
+        .map_err(|err| format!("could not read {}: {err}", name_of(from)))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("could not read {}: {err}", name_of(from)))?;
+        copy_across(&entry.path(), &to.join(entry.file_name()))?;
+    }
+
+    Ok(())
+}
+
 /// Puts a file or folder into a zip beside it, and says where.
 pub fn compress(path: &Path) -> Result<PathBuf, String> {
     let parent = path
@@ -326,6 +530,248 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("scratch");
         dir
+    }
+
+    mod where_to_move_things {
+        use super::*;
+
+        /// The folder somebody just made is the one they are about to use.
+        ///
+        /// Searching alone answered "Nothing found" for it, because no index
+        /// has seen a folder made a minute ago. These are read off the disk.
+        #[test]
+        fn the_folders_beside_it_are_offered() {
+            let dir = scratch("beside");
+            let file = dir.join("note.txt");
+            std::fs::write(&file, b"a").expect("written");
+            std::fs::create_dir_all(dir.join("archive")).expect("made");
+            std::fs::create_dir_all(dir.join("drafts")).expect("made");
+
+            let offered = likely_destinations(Vec::new(), &file);
+
+            for wanted in ["archive", "drafts"] {
+                assert!(
+                    offered.iter().any(|folder| folder.ends_with(wanted)),
+                    "{wanted} was not offered: {offered:?}",
+                );
+            }
+        }
+
+        /// A file beside it is not somewhere to put anything.
+        #[test]
+        fn only_the_folders_beside_it() {
+            let dir = scratch("beside-files");
+            let file = dir.join("note.txt");
+            std::fs::write(&file, b"a").expect("written");
+            std::fs::write(dir.join("other.txt"), b"b").expect("written");
+
+            let offered = likely_destinations(Vec::new(), &file);
+            assert!(
+                !offered.iter().any(|folder| folder.ends_with("other.txt")),
+                "a file was offered as a destination: {offered:?}",
+            );
+        }
+
+        /// What was used before comes first. It is the best guess there is.
+        #[test]
+        fn the_folders_already_used_come_first() {
+            let dir = scratch("recent-first");
+            let file = dir.join("note.txt");
+            std::fs::write(&file, b"a").expect("written");
+            let used = dir.join("used-before");
+            std::fs::create_dir_all(&used).expect("made");
+            std::fs::create_dir_all(dir.join("aaa-alphabetically-first")).expect("made");
+
+            let offered = likely_destinations(
+                vec![used.to_string_lossy().to_string()],
+                &file,
+            );
+
+            assert_eq!(offered.first().map(String::as_str), used.to_str());
+        }
+
+        /// Offered twice is a repeated row, and a repeated row is a repeated
+        /// id, which the list draws once at best.
+        #[test]
+        fn a_folder_reached_two_ways_is_offered_once() {
+            let dir = scratch("no-repeats");
+            let file = dir.join("note.txt");
+            std::fs::write(&file, b"a").expect("written");
+            let both = dir.join("both");
+            std::fs::create_dir_all(&both).expect("made");
+
+            // Once as a folder used before, and once as a folder beside it.
+            let offered = likely_destinations(
+                vec![both.to_string_lossy().to_string()],
+                &file,
+            );
+
+            let times = offered
+                .iter()
+                .filter(|folder| folder.eq_ignore_ascii_case(&both.to_string_lossy()))
+                .count();
+
+            assert_eq!(times, 1, "offered {times} times: {offered:?}");
+        }
+
+        /// A folder that has been removed since is not offered and then
+        /// refused, which reads as the picker being broken.
+        #[test]
+        fn a_folder_that_is_gone_is_not_offered() {
+            let dir = scratch("gone");
+            let file = dir.join("note.txt");
+            std::fs::write(&file, b"a").expect("written");
+
+            let offered = likely_destinations(
+                vec![dir.join("never-existed").to_string_lossy().to_string()],
+                &file,
+            );
+
+            assert!(
+                !offered.iter().any(|folder| folder.ends_with("never-existed")),
+                "{offered:?}",
+            );
+        }
+    }
+
+    mod moving {
+        use super::*;
+
+        #[test]
+        fn a_file_lands_in_the_folder_and_leaves_nothing_behind() {
+            let dir = scratch("move-file");
+            let from = dir.join("note.txt");
+            let into = dir.join("somewhere");
+            std::fs::write(&from, b"hello").expect("written");
+            std::fs::create_dir_all(&into).expect("made");
+
+            let landed = move_to(&from, &into).expect("moves");
+
+            assert_eq!(landed, into.join("note.txt"));
+            assert!(landed.exists(), "it is not where it was put");
+            assert!(!from.exists(), "the original is still there");
+            assert_eq!(std::fs::read(&landed).expect("read"), b"hello");
+        }
+
+        #[test]
+        fn a_whole_folder_moves_with_what_is_in_it() {
+            let dir = scratch("move-folder");
+            let from = dir.join("project");
+            std::fs::create_dir_all(from.join("src")).expect("made");
+            std::fs::write(from.join("src").join("main.rs"), b"fn main() {}").expect("written");
+            let into = dir.join("archive");
+            std::fs::create_dir_all(&into).expect("made");
+
+            let landed = move_to(&from, &into).expect("moves");
+
+            assert!(landed.join("src").join("main.rs").exists());
+            assert!(!from.exists());
+        }
+
+        /// Moving over the top of something is a silent deletion of whatever
+        /// was there, which is the one outcome nobody would ask for.
+        #[test]
+        fn a_name_already_taken_is_refused_rather_than_overwritten() {
+            let dir = scratch("move-clash");
+            let from = dir.join("note.txt");
+            let into = dir.join("somewhere");
+            std::fs::write(&from, b"new").expect("written");
+            std::fs::create_dir_all(&into).expect("made");
+            std::fs::write(into.join("note.txt"), b"old").expect("written");
+
+            let refused = move_to(&from, &into).expect_err("refuses");
+            assert!(refused.contains("already has"), "{refused}");
+
+            // Both of them still exactly as they were.
+            assert_eq!(std::fs::read(&from).expect("read"), b"new");
+            assert_eq!(std::fs::read(into.join("note.txt")).expect("read"), b"old");
+        }
+
+        /// The trap that would make the copy below walk into its own output.
+        #[test]
+        fn a_folder_cannot_go_inside_itself() {
+            let dir = scratch("move-into-self");
+            let from = dir.join("project");
+            let inside = from.join("nested");
+            std::fs::create_dir_all(&inside).expect("made");
+
+            let straight = move_to(&from, &from).expect_err("refuses");
+            assert!(straight.contains("inside itself"), "{straight}");
+
+            let deeper = move_to(&from, &inside).expect_err("refuses");
+            assert!(deeper.contains("inside itself"), "{deeper}");
+
+            assert!(inside.exists(), "the folder was disturbed");
+        }
+
+        #[test]
+        fn somewhere_that_is_not_a_folder_is_refused() {
+            let dir = scratch("move-into-file");
+            let from = dir.join("note.txt");
+            let wrong = dir.join("other.txt");
+            std::fs::write(&from, b"a").expect("written");
+            std::fs::write(&wrong, b"b").expect("written");
+
+            let refused = move_to(&from, &wrong).expect_err("refuses");
+            assert!(refused.contains("not a folder"), "{refused}");
+        }
+
+        #[test]
+        fn a_folder_that_is_not_there_is_refused() {
+            let dir = scratch("move-nowhere");
+            let from = dir.join("note.txt");
+            std::fs::write(&from, b"a").expect("written");
+
+            let refused = move_to(&from, &dir.join("missing")).expect_err("refuses");
+            assert!(refused.contains("not a folder"), "{refused}");
+            assert!(from.exists());
+        }
+
+        /// Moving something to where it already is says so rather than
+        /// reporting a move that did not happen.
+        #[test]
+        fn moving_to_where_it_already_is_says_so() {
+            let dir = scratch("move-same");
+            let from = dir.join("note.txt");
+            std::fs::write(&from, b"a").expect("written");
+
+            let refused = move_to(&from, &dir).expect_err("refuses");
+            assert!(refused.contains("already there"), "{refused}");
+            assert!(from.exists());
+        }
+
+        /// Only the real one, or a permission error turns into a needless copy
+        /// of something that may be enormous.
+        #[test]
+        fn only_a_cross_volume_failure_falls_back_to_copying() {
+            use std::io::{Error, ErrorKind};
+
+            assert!(crosses_a_volume(&Error::from_raw_os_error(17)));
+            assert!(!crosses_a_volume(&Error::from_raw_os_error(5)));
+            assert!(!crosses_a_volume(&Error::new(ErrorKind::Other, "no code")));
+        }
+
+        /// The copy path is what runs between two drives, and this machine may
+        /// have only one, so it is exercised directly.
+        #[test]
+        fn the_copy_used_between_drives_carries_a_whole_tree() {
+            let dir = scratch("copy-across");
+            let from = dir.join("tree");
+            std::fs::create_dir_all(from.join("a").join("b")).expect("made");
+            std::fs::write(from.join("top.txt"), b"1").expect("written");
+            std::fs::write(from.join("a").join("mid.txt"), b"2").expect("written");
+            std::fs::write(from.join("a").join("b").join("deep.txt"), b"3").expect("written");
+
+            let to = dir.join("copied");
+            copy_across(&from, &to).expect("copies");
+
+            assert_eq!(std::fs::read(to.join("top.txt")).expect("read"), b"1");
+            assert_eq!(std::fs::read(to.join("a").join("mid.txt")).expect("read"), b"2");
+            assert_eq!(
+                std::fs::read(to.join("a").join("b").join("deep.txt")).expect("read"),
+                b"3",
+            );
+        }
     }
 
     mod hashing {

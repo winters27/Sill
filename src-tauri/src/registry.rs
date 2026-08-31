@@ -778,6 +778,38 @@ fn builtin(id: &str, panel: &str, title: &str, subtitle: &str, keywords: &[&str]
     }
 }
 
+/// A folder offered as somewhere to move something, shaped as a row.
+///
+/// The title is the folder's own name and the subtitle is the path, which is
+/// the pair that tells three folders called "src" apart. The same shape a file
+/// result uses, because it is the same question with a different answer.
+pub fn destination_record(folder: &str) -> CommandRecord {
+    let path = std::path::Path::new(folder);
+    let name = crate::files_ops::name_of(path);
+
+    CommandRecord {
+        id: format!("destination:{folder}"),
+        extension: "destination".to_string(),
+        extension_title: "Folders".to_string(),
+        command: name.clone(),
+        title: name,
+        subtitle: folder.to_string(),
+        description: String::new(),
+        mode: "destination".to_string(),
+        entrypoint: folder.to_string(),
+        keywords: Vec::new(),
+        // Nothing separate to point at. The row's own path is what the shell
+        // is asked about, the way a file's is, and setting it here as well
+        // would be dropped: a record's icon is thrown away when it is the same
+        // string as its entrypoint, because that means "there is nothing extra
+        // to look at".
+        icon: None,
+        toggle: None,
+        panel: None,
+        preferences: serde_json::Value::Null,
+    }
+}
+
 /// One program's volume, shaped as a row.
 ///
 /// The switch shows whether you can hear it, not whether it is muted, because
@@ -1214,6 +1246,33 @@ impl Frecency {
     /// A command used constantly but not for a month lands near the bottom,
     /// while one used constantly *and* recently dominates, which is the
     /// behaviour that makes the root list usually right before you type.
+    /// The ids under a prefix, the ones reached for most first.
+    ///
+    /// For corpora that are not the index: a folder somebody moves things to
+    /// is worth offering again, and it has no command to be. The prefix keeps
+    /// them out of the way of everything else stored here.
+    ///
+    /// Scored the same way commands are, so "most recently and most often"
+    /// means the same thing here as everywhere else.
+    pub fn recent_with_prefix(&self, prefix: &str, limit: usize) -> Vec<String> {
+        let now = crate::state::now_seconds();
+
+        let mut found: Vec<(&String, i64)> = self
+            .entries
+            .keys()
+            .filter(|id| id.starts_with(prefix))
+            .map(|id| (id, self.score(id, now)))
+            .collect();
+
+        found.sort_by(|(a_id, a), (b_id, b)| b.cmp(a).then_with(|| a_id.cmp(b_id)));
+
+        found
+            .into_iter()
+            .take(limit)
+            .map(|(id, _)| id[prefix.len()..].to_string())
+            .collect()
+    }
+
     pub fn score(&self, id: &str, now: i64) -> i64 {
         let Some(&(count, last)) = self.entries.get(id) else {
             return 0;

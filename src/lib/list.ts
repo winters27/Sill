@@ -61,6 +61,8 @@ export function groupOf(command: RankedCommand): string {
       return "Emoji";
     case "audio-session":
       return "Playing Now";
+    case "destination":
+      return "Folders";
     // What they are rather than who uses them: plenty of these ship with
     // Windows and have nothing to do with development.
     case "exe":

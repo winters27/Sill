@@ -239,7 +239,10 @@
       command.mode === "app" ||
       command.mode === "exe" ||
       command.mode === "setting" ||
-      command.mode === "file"
+      command.mode === "file" ||
+      // A folder offered as somewhere to move something. Real on disk, and
+      // the shell draws it as a folder.
+      command.mode === "destination"
     );
   }
 
@@ -284,6 +287,8 @@
         return "Open Window";
       case "audio-session":
         return "App Volume";
+      case "destination":
+        return "Folder";
       case "emoji":
         // The group, which is the only useful thing to say about one.
         return command.extensionTitle;

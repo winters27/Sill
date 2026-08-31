@@ -57,7 +57,13 @@ export function merged(into: RankedCommand[], extra: RankedCommand[]): RankedCom
  * search stops re-running, in one place and not the others. Two hand-kept
  * copies of the mode union have already drifted in this codebase.
  */
-export const LIST_MODES = ["root", "switcher", "emoji", "appVolume"] as const;
+export const LIST_MODES = [
+  "root",
+  "switcher",
+  "emoji",
+  "appVolume",
+  "destination",
+] as const;
 
 /** Whether this mode draws a list of rows at all. */
 export function isListMode(mode: string): boolean {

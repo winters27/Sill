@@ -68,7 +68,9 @@ export interface RankedCommand {
     /** One emoji. Its own corpus, reached through its own command. */
     | "emoji"
     /** One program's own volume, while it is playing something. */
-    | "audio-session";
+    | "audio-session"
+    /** A folder offered as somewhere to move something into. */
+    | "destination";
   entrypoint: string;
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;
@@ -186,6 +188,25 @@ export function searchCommands(query: string): Promise<RankedCommand[]> {
  * audio sessions costs about three milliseconds and the root list runs on
  * every keystroke whether or not anything about sound was typed.
  */
+/**
+ * The folders something could be moved into.
+ *
+ * With nothing typed these are the folders already used and then the standard
+ * places; once something is typed it is a folder search. `source` is what is
+ * being moved, so the folder it is already in is never offered.
+ */
+export function searchDestinations(
+  query: string,
+  source: string,
+): Promise<RankedCommand[]> {
+  return invoke<RankedCommand[]>("search_destinations", { query, source });
+}
+
+/** Moves a file or folder, and comes back with a way to put it back. */
+export function movePath(path: string, folder: string): Promise<ActionOutcome> {
+  return invoke<ActionOutcome>("move_path", { path, folder });
+}
+
 export function searchAppVolume(query: string): Promise<RankedCommand[]> {
   return invoke<RankedCommand[]>("search_app_volume", { query });
 }

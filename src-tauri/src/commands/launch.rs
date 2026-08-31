@@ -13,9 +13,10 @@
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 
-use crate::action::{ActionCtx, ActionRegistry};
+use crate::action::{ActionCtx, ActionRegistry, Outcome, Undo};
 use crate::object::Object;
-use crate::state::{now_seconds, RegistryState};
+use crate::registry;
+use crate::state::{now_seconds, CatalogState, PrefsState, RegistryState};
 
 /// Runs a command from the root list.
 ///
@@ -231,6 +232,168 @@ pub(crate) async fn rename_path(path: String, to: String) -> Result<String, Stri
         crate::files_ops::name_of(&landed)
     ))
 }
+
+/// Moves a file or folder into another folder.
+///
+/// A command rather than an action for the reason renaming is one: the
+/// launcher has to ask where first, and an action is handed an object and
+/// acts. Picking the folder is most of what moving is.
+///
+/// Unlike renaming, this comes back with an undo. A move is the one file
+/// operation that reverses exactly, and the token is two paths rather than
+/// anything copied, so undoing a move of something enormous costs what undoing
+/// a move of a text file costs.
+#[tauri::command]
+pub(crate) async fn move_path(
+    state: State<'_, RegistryState>,
+    path: String,
+    folder: String,
+) -> Result<Outcome, String> {
+    let from = std::path::PathBuf::from(&path);
+    let into = std::path::PathBuf::from(&folder);
+
+    let name = crate::files_ops::name_of(&from);
+
+    // Where it came out of, captured before the move, because afterwards
+    // there is nothing left at the old path to ask.
+    let came_from = from
+        .parent()
+        .map(|parent| parent.to_string_lossy().to_string())
+        .ok_or_else(|| format!("{name} has nowhere to be put back"))?;
+
+    let landed = {
+        let from = from.clone();
+        let into = into.clone();
+
+        // Blocking: between two drives this copies, and that is as slow as
+        // whatever is being moved is large.
+        tokio::task::spawn_blocking(move || crate::files_ops::move_to(&from, &into))
+            .await
+            .map_err(|err| format!("could not move that: {err}"))??
+    };
+
+    /*
+     * Remembered, so the next move offers it first.
+     *
+     * Kept in the same store that ranks everything else, under a prefix of its
+     * own: a folder somebody moves things to is exactly the kind of thing
+     * frecency is for, and a second store would be a second answer to "what do
+     * you reach for" that could disagree with the first.
+     *
+     * After the move rather than before, so a destination that turned out to
+     * be refused is not learned as one somebody uses.
+     */
+    {
+        let mut registry = state.inner.lock().await;
+        let now = now_seconds();
+
+        registry.frecency.record(&format!("{MOVED_TO}{folder}"), now);
+
+        let saved = registry.frecency_path.clone();
+        if let Err(err) = registry.frecency.save(&saved) {
+            // Losing which folder was used is not worth failing a move over.
+            crate::say!("could not save frecency: {err}");
+        }
+    }
+
+    Ok(Outcome {
+        message: format!("Moved {name} to {}", crate::files_ops::name_of(&into)),
+        undo: Some(Undo::MovePath {
+            path: landed.to_string_lossy().to_string(),
+            back_to: came_from,
+            name,
+        }),
+        session: None,
+        text: None,
+    })
+}
+
+/// The folders something could be moved into, for a query.
+///
+/// Two lists behind one command, because they answer the same question at two
+/// moments. With nothing typed it is the folders somebody is likely to mean:
+/// the ones they have moved things to before, then the standard places. Once
+/// they type it is a folder search, because the answer is a folder somewhere
+/// on the machine and no fixed list can hold it.
+///
+/// The folder the thing is already in is never offered. It is the one
+/// destination that cannot be right, and it would otherwise rank first for
+/// somebody typing the name of where they are.
+#[tauri::command]
+pub(crate) async fn search_destinations(
+    prefs: State<'_, PrefsState>,
+    catalog: State<'_, CatalogState>,
+    state: State<'_, RegistryState>,
+    query: String,
+    // What is being moved, so its own folder can be left out.
+    source: String,
+) -> Result<Vec<registry::SearchResult>, String> {
+    let already_in = std::path::PathBuf::from(&source)
+        .parent()
+        .map(|parent| parent.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let recent = {
+        let registry = state.inner.lock().await;
+        registry.frecency.recent_with_prefix(MOVED_TO, 8)
+    };
+
+    // Always. These are read off the disk rather than looked up, so a folder
+    // made a minute ago is here even though no index has seen it yet, and a
+    // folder somebody just made is exactly the one they are about to move
+    // something into.
+    let close_by =
+        crate::files_ops::likely_destinations(recent, std::path::Path::new(&source));
+
+    let typed = query.trim();
+
+    let mut folders: Vec<String> = if typed.is_empty() {
+        close_by
+    } else {
+        // Matched by the same rules the launcher matches everything else by,
+        // so a folder answers to the same letters here as it does in a search.
+        let needle: Vec<char> = typed.to_lowercase().chars().collect();
+
+        let mut near: Vec<String> = close_by
+            .into_iter()
+            .filter(|folder| {
+                let name = crate::files_ops::name_of(std::path::Path::new(folder));
+                registry::match_name(&needle, &name).is_some()
+            })
+            .collect();
+
+        let settings = prefs.inner.lock().await.files.clone();
+        let wanted = settings.max_results as usize;
+
+        // Then the index, for everywhere else on the machine. Sill's own only:
+        // the whole-volume indexer answers with files as well and cannot be
+        // asked for folders alone, so it would spend a search returning things
+        // that cannot be a destination.
+        let found = catalog
+            .inner
+            .load()
+            .search(typed, wanted, &settings.only_in);
+
+        near.extend(found.into_iter().filter(|hit| hit.is_dir).map(|hit| hit.path));
+        near
+    };
+
+    // One row per folder, however many ways it arrived.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    folders.retain(|folder| seen.insert(folder.to_lowercase()));
+
+    Ok(folders
+        .into_iter()
+        .filter(|folder| folder != &already_in)
+        .map(|folder| registry::SearchResult::from_record(registry::destination_record(&folder)))
+        .collect())
+}
+
+/// What a folder chosen as a destination is remembered under.
+///
+/// Its own prefix so these never collide with a command id, and so the ones
+/// worth offering again can be found without walking everything ever launched.
+pub(crate) const MOVED_TO: &str = "moved-to:";
 
 /// Reads the words out of the last picture copied.
 ///
