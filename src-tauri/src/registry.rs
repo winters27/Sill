@@ -384,15 +384,24 @@ pub fn builtins() -> Vec<CommandRecord> {
         builtin(
             "ask",
             "ai",
-            "Ask",
-            "A window with room for a conversation and everything asked before",
-            &["ai", "chat", "conversation", "model", "question", "talk"],
+            "AI Chat",
+            "Talk to a model that can see this machine, with room to think",
+            &[
+                "ai",
+                "chat",
+                "ask",
+                "conversation",
+                "model",
+                "question",
+                "talk",
+                "assistant",
+            ],
         ),
         builtin(
             "conversations",
             "ai",
             "Past Conversations",
-            "Everything you have asked, to reopen or forget",
+            "Every AI chat you have had, to reopen or forget",
             &[
                 "ask",
                 "ai",

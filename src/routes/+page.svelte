@@ -2361,8 +2361,10 @@
       (event.ctrlKey || event.metaKey)
     ) {
       event.preventDefault();
-      void openAsk();
-      dismiss();
+      // Opened before the launcher steps aside, and awaited. Dismissing hands
+      // the screen back to whatever was in front, so doing it first, or at the
+      // same time, is what put the new window behind that.
+      void openAsk().then(() => dismiss());
       return;
     }
 
@@ -2796,7 +2798,7 @@
 
         In every other mode the crumb names the surface, because the surface is
         the thing you are in. Here the thing you are in is a conversation with
-        a particular model, and "Ask" said that a launcher feature was open
+        a particular model, and a bare name said that a launcher feature was open
         without saying the one fact that changes what comes back. The mark also
         does the work no label was doing: it is unmistakably a conversation
         with something rather than another list.
@@ -2814,7 +2816,7 @@
           <span class="who">{answersWith.model || answersWith.name}</span>
         </button>
       {:else}
-        <span class="crumb">Ask</span>
+        <span class="crumb">AI Chat</span>
       {/if}
     {:else if mode === "conversations"}
       <span class="crumb">Conversations</span>
@@ -2918,7 +2920,7 @@
             <span class="sill-key">Tab</span>
           {/if}
         {:else}
-          <span class="who">Set up Ask</span>
+          <span class="who">Set up AI Chat</span>
         {/if}
       </button>
     {/if}

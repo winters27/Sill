@@ -147,25 +147,25 @@ pub const SETTINGS: &[Setting] = &[
     // ----------------------------------------------------------------- ask
     s(
         "ai",
-        "Ask",
+        "AI Chat",
         "Who answers",
-        "ai model chat provider claude ollama openai gpt tab ask llm",
+        "ai model chat provider claude ollama openai gpt tab ask llm chat",
     ),
     s(
         "ai",
-        "Ask",
+        "AI Chat",
         "Model",
         "ai which model change switch sonnet opus haiku gpt llama qwen",
     ),
     s(
         "ai",
-        "Ask",
+        "AI Chat",
         "Address",
         "ai endpoint base url ollama local server http https lm studio",
     ),
     s(
         "ai",
-        "Ask",
+        "AI Chat",
         "Key",
         "ai api key token secret credential paste anthropic openrouter",
     ),

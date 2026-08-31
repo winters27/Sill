@@ -258,6 +258,33 @@
     await aiStop();
   }
 
+  /**
+   * Grows the composer to fit what is in it.
+   *
+   * Done here rather than left to `field-sizing`, which is new enough that
+   * whether it works depends on which WebView2 runtime is installed. A box
+   * that silently stays one line high on somebody's machine is not a thing to
+   * find out about later.
+   *
+   * Height is cleared before it is read, because `scrollHeight` on an element
+   * with a height already set reports that height rather than the content.
+   */
+  function fit(box: HTMLTextAreaElement | null) {
+    if (!box) return;
+    box.style.height = "auto";
+    box.style.height = `${Math.min(box.scrollHeight, GROWS_TO)}px`;
+  }
+
+  /** As far as it grows before it starts scrolling instead. */
+  const GROWS_TO = 200;
+
+  // Whatever changes what is in it changes how tall it is: typing, sending,
+  // and putting a question back to ask again.
+  $effect(() => {
+    draft;
+    fit(composer);
+  });
+
   async function open(id: string) {
     if (asking) return;
 
@@ -501,7 +528,7 @@
   class="window"
   class:hovering
   role="application"
-  aria-label="Ask"
+  aria-label="AI Chat"
   ondragover={(event) => {
     event.preventDefault();
     hovering = true;
@@ -512,7 +539,7 @@
     hovering = false;
   }}
 >
-  <TitleBar title="Ask" />
+  <TitleBar title="AI Chat" />
 
   <div class="body">
     <aside class="past">
@@ -573,7 +600,7 @@
             </p>
             {#if !answersWith?.ready}
               <button class="setup" onclick={() => void openSettings("ai")}>
-                Set up Ask
+                Set up AI Chat
               </button>
             {/if}
           </div>
@@ -681,7 +708,7 @@
         {/if}
 
         <div class="line">
-        <button class="attach" onclick={() => void pick()} aria-label="Attach a file" title="Attach a file">
+        <button class="round attach" onclick={() => void pick()} aria-label="Attach a file" title="Attach a file">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path
               d="M21 11.5l-8.5 8.5a5.5 5.5 0 01-7.8-7.8l8.7-8.7a3.7 3.7 0 015.2 5.2l-8.6 8.6a1.8 1.8 0 01-2.6-2.6l7.9-7.9"
@@ -711,17 +738,42 @@
         ></textarea>
 
         {#if asking}
-          <!-- Stopping keeps what has arrived, so it is a plain control rather
-               than a destructive one. -->
-          <button class="stop" onclick={() => void stop()} aria-label="Stop">Stop</button>
+          <!--
+            Stopping keeps what has arrived, so it is a plain control rather
+            than a destructive one. A square inside, which is what stop has
+            meant on every machine since tape.
+          -->
+          <button class="round stop" onclick={() => void stop()} aria-label="Stop" title="Stop">
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+              <rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor" />
+            </svg>
+          </button>
         {:else}
+          <!--
+            An arrow, not a key cap.
+
+            The cap was a hint wearing a button's clothes: it named the key
+            that does this rather than the thing itself, so it read as a label
+            somebody had put in the wrong place. An arrow is what send has
+            looked like in every message box for twenty years, and the key is
+            still the key.
+          -->
           <button
-            class="send"
+            class="round send"
             onclick={() => void send()}
             disabled={!draft.trim() && carrying.length === 0}
             aria-label="Send"
+            title="Send"
           >
-            <span class="sill-key">Enter</span>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M8 13V3M8 3L3.5 7.5M8 3l4.5 4.5"
+                stroke="currentColor"
+                stroke-width="1.9"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
           </button>
         {/if}
         </div>
@@ -1192,18 +1244,9 @@
   }
 
   .attach {
-    flex: none;
-    height: 38px;
-    width: 38px;
-    display: grid;
-    place-items: center;
-    border: 0;
-    border-radius: var(--radius-md);
     background: var(--fill-1);
     box-shadow: inset 0 0 0 1px var(--hairline);
     color: var(--text-2);
-    cursor: pointer;
-    transition: color 0.15s var(--ease), background-color 0.15s var(--ease);
   }
 
   .attach:hover {
@@ -1217,16 +1260,8 @@
    * press, which is the opposite of what it is for.
    */
   .stop {
-    flex: none;
-    height: 38px;
-    padding: 0 var(--space-3);
-    border: 0;
-    border-radius: var(--radius-md);
     background: var(--fill-2);
     color: var(--text-1);
-    font: inherit;
-    font-size: var(--text-meta);
-    cursor: pointer;
   }
 
   .stop:hover {
@@ -1305,10 +1340,13 @@
   textarea {
     flex: 1;
     min-width: 0;
-    /* Grows with what is written, up to the point where the conversation above
-       it would start disappearing. */
+    /* The height is set from the content by `fit`; these are the ends of that
+       range. Past the top it scrolls rather than eating the conversation. */
     min-height: 38px;
     max-height: 200px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
     padding: var(--space-2) var(--space-3);
     border: 0;
     border-radius: var(--radius-md);
@@ -1318,9 +1356,8 @@
     font: inherit;
     font-size: var(--text-body);
     line-height: 1.5;
-    resize: vertical;
+    resize: none;
     outline: none;
-    field-sizing: content;
   }
 
   textarea:focus {
@@ -1331,24 +1368,51 @@
     color: var(--text-3);
   }
 
-  .send {
+  /*
+   * Round, and the same size as the paperclip opposite it.
+   *
+   * The pair reads as a pair: one thing to add something on the left, one
+   * thing to send on the right, and a box of text between them. A wide button
+   * with a word in it made the composer read as a form with a submit.
+   */
+  .round {
     flex: none;
+    width: 38px;
     height: 38px;
-    padding: 0 var(--space-3);
+    display: grid;
+    place-items: center;
     border: 0;
-    border-radius: var(--radius-md);
-    background: var(--accent-fill);
-    color: var(--accent);
+    border-radius: 50%;
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), opacity 0.15s var(--ease);
+    transition:
+      background-color 0.15s var(--ease),
+      color 0.15s var(--ease),
+      opacity 0.15s var(--ease);
+  }
+
+  .round:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+
+  .send {
+    background: var(--accent);
+    color: var(--core-background);
   }
 
   .send:hover:not(:disabled) {
-    background: var(--accent-fill-strong);
+    background: var(--accent-hover);
   }
 
+  /*
+   * Nothing to send reads as nothing to press.
+   *
+   * Quieter than a dimmed accent circle, which still draws the eye to a
+   * control that will not do anything.
+   */
   .send:disabled {
-    opacity: 0.4;
+    background: var(--fill-2);
+    color: var(--text-3);
     cursor: default;
   }
 </style>

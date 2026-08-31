@@ -224,8 +224,13 @@ pub(crate) async fn open_ask(app: AppHandle) -> Result<(), String> {
     use tauri::Manager;
 
     if let Some(existing) = app.get_webview_window("ask") {
+        // Unminimised first. `show` on a minimised window leaves it minimised,
+        // so asking for it again did nothing visible and it had to be found in
+        // the taskbar, which is the opposite of asking for it.
+        let _ = existing.unminimize();
         let _ = existing.show();
         let _ = existing.set_focus();
+        crate::summon::forget_foreground();
         return Ok(());
     }
 
@@ -234,7 +239,7 @@ pub(crate) async fn open_ask(app: AppHandle) -> Result<(), String> {
         "ask",
         tauri::WebviewUrl::App("ask".into()),
     )
-    .title("Ask")
+    .title("AI Chat")
     // Room for a list of conversations beside a column of prose that does not
     // have to wrap at forty characters.
     .inner_size(1060.0, 760.0)
@@ -246,8 +251,29 @@ pub(crate) async fn open_ask(app: AppHandle) -> Result<(), String> {
     .decorations(false)
     .transparent(true)
     .center()
+    // Said here as well as asked for below, because the two happen at
+    // different moments and the race between them is what was losing it.
+    .focused(true)
     .build()
     .map_err(|err| err.to_string())?;
+
+    let _ = window.set_focus();
+
+    /*
+     * The launcher must not hand the screen back.
+     *
+     * Dismissing restores whatever was in front before the launcher appeared,
+     * which is right for every command that does something in place and wrong
+     * for one that opens a window: the window arrives and is immediately put
+     * behind the thing it was opened from.
+     *
+     * Said here rather than in the action, because `hands_over_the_screen` is
+     * decided from the object's kind and every one of these is a `Builtin`.
+     * Reloading the index is a Builtin too and must not forget anything, so
+     * the kind cannot tell them apart. The code that put a window in front is
+     * the code that knows it did.
+     */
+    crate::summon::forget_foreground();
 
     let appearance = {
         let prefs = app.state::<PrefsState>();

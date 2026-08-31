@@ -142,9 +142,9 @@
     },
     {
       id: "ai",
-      name: "Ask",
+      name: "AI Chat",
       blurb: "Who answers when you press Tab in the launcher",
-      group: "Ask",
+      group: "AI Chat",
     },
     {
       id: "dictation",

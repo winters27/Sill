@@ -156,11 +156,15 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
     };
 
     if let Some(existing) = app.get_webview_window("settings") {
+        // Unminimised first: `show` on a minimised window leaves it minimised,
+        // so asking for settings again did nothing visible.
+        let _ = existing.unminimize();
         let _ = existing.show();
         let _ = existing.set_focus();
         if let Some(name) = section {
             let _ = existing.emit("sill://settings-section", name);
         }
+        summon::forget_foreground();
         return Ok(());
     }
 
@@ -178,8 +182,15 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
             .decorations(false)
             .transparent(true)
             .center()
+            .focused(true)
             .build()
             .map_err(|e| e.to_string())?;
+
+    let _ = window.set_focus();
+
+    // The launcher must not hand the screen back to whatever was in front
+    // before it. See the same note in `open_ask`.
+    summon::forget_foreground();
 
     let appearance = {
         let prefs = app.state::<PrefsState>();

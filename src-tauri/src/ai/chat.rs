@@ -83,6 +83,16 @@ const KEEP_PAST: usize = 50;
 /// looks like it helps.
 const FILE: &str = "conversations.json";
 
+/// Where a file that could not be read is put instead of being lost.
+///
+/// Loading tolerates a file it cannot parse, which is right: refusing to start
+/// because of one bad byte helps nobody. But saving then wrote what was in
+/// memory over the top, and for a failed load that is nothing at all, so one
+/// unreadable byte silently replaced every conversation with an empty list.
+/// Moving it aside means the next save writes a clean file and what could not
+/// be read is still on disk to look at.
+const BROKEN: &str = "conversations.broken.json";
+
 /// The longest a question may be before it is shortened into a name.
 const TITLE: usize = 80;
 
@@ -145,6 +155,13 @@ pub struct Offer {
 #[derive(Default)]
 pub struct Chat {
     held: Mutex<Held>,
+    /// Whether what is on disk has been read.
+    ///
+    /// Nothing is written until it has. Saving is writing what is in memory
+    /// over the file, and before a load there is nothing in memory: one save
+    /// that got in first would replace every conversation with an empty list,
+    /// and nothing about that failure looks like a failure.
+    read_the_file: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -341,12 +358,27 @@ impl Chat {
     /// Nothing is opened: a conversation from yesterday is somewhere to go
     /// back to, not somewhere to be when the launcher appears.
     pub fn load(&self, dir: &std::path::Path) {
+        // Nothing there is a thing that was read: an empty history is the
+        // ordinary state of a machine nobody has asked anything on yet.
         let Ok(text) = std::fs::read_to_string(dir.join(FILE)) else {
+            self.read_the_file
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             return;
         };
 
-        let Ok(saved) = serde_json::from_str::<Vec<Conversation>>(&text) else {
-            return;
+        let saved = match serde_json::from_str::<Vec<Conversation>>(&text) {
+            Ok(saved) => saved,
+            Err(why) => {
+                // Moved aside rather than left where the next save will land
+                // on it. See the note on `BROKEN`.
+                crate::say!("conversations could not be read, keeping them aside: {why}");
+                let _ = std::fs::rename(dir.join(FILE), dir.join(BROKEN));
+                // Safe to write from here: what could not be read is on disk
+                // under another name, so a fresh file destroys nothing.
+                self.read_the_file
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                return;
+            }
         };
 
         if let Ok(mut held) = self.held.lock() {
@@ -355,6 +387,9 @@ impl Chat {
             // a saved conversation already has.
             held.begun = held.past.len() as u64;
         }
+
+        self.read_the_file
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Writes them out.
@@ -363,6 +398,12 @@ impl Chat {
     /// are at most fifty and the whole file is a few kilobytes, so this costs
     /// less than deciding when to do it would.
     pub fn save(&self, dir: &std::path::Path) {
+        // Never over a file nobody read. See the field this reads.
+        if !self.read_the_file.load(std::sync::atomic::Ordering::Relaxed) {
+            crate::say!("not saving conversations: they were never loaded");
+            return;
+        }
+
         let Ok(held) = self.held.lock() else {
             return;
         };
@@ -1060,6 +1101,9 @@ mod tests {
             let dir = a_directory("survives");
 
             let before = Chat::new();
+            // What the app does before anything else, and what the guard on
+            // `save` now requires: never write over a file nobody read.
+            before.load(&dir);
             before.begin("asked yesterday", 100);
             said(&before, "asked yesterday", "answered yesterday", 100);
             before.save(&dir);
@@ -1080,6 +1124,9 @@ mod tests {
             let dir = a_directory("nothing-open");
 
             let before = Chat::new();
+            // What the app does before anything else, and what the guard on
+            // `save` now requires: never write over a file nobody read.
+            before.load(&dir);
             before.begin("asked yesterday", 100);
             said(&before, "asked yesterday", "an answer", 100);
             before.save(&dir);
@@ -1098,6 +1145,9 @@ mod tests {
             let dir = a_directory("reopened");
 
             let before = Chat::new();
+            // What the app does before anything else, and what the guard on
+            // `save` now requires: never write over a file nobody read.
+            before.load(&dir);
             before.begin("the question", 100);
             said(&before, "the question", "the answer", 100);
             before.save(&dir);
@@ -1121,6 +1171,9 @@ mod tests {
             let dir = a_directory("no-session");
 
             let before = Chat::new();
+            // What the app does before anything else, and what the guard on
+            // `save` now requires: never write over a file nobody read.
+            before.load(&dir);
             before.begin("asked", 0);
             said(&before, "asked", "an answer", 0);
             before.set_session("session-abc".to_string());
@@ -1157,6 +1210,108 @@ mod tests {
             unique.sort();
             unique.dedup();
             assert_eq!(ids.len(), unique.len(), "an id came back twice: {ids:?}");
+        }
+
+        /// A file written before attachments existed.
+        ///
+        /// Exactly the shape that was on disk, keys and all. If this stops
+        /// parsing, every conversation somebody has ever had is silently
+        /// replaced by an empty list the next time anything is asked.
+        #[test]
+        fn a_file_from_an_older_build_still_reads() {
+            let dir = a_directory("older");
+            std::fs::write(
+                dir.join(FILE),
+                r#"[{"id":"chat:1","title":"what windows are open","last":1788201736,
+                     "messages":[{"role":"user","content":"what windows are open"},
+                                 {"role":"assistant","content":"eleven"}]}]"#,
+            )
+            .expect("written");
+
+            let chat = Chat::new();
+            chat.load(&dir);
+
+            let all = chat.summaries(1788201800);
+            assert_eq!(all.len(), 1, "an older file was thrown away");
+            assert_eq!(all[0].title, "what windows are open");
+            assert_eq!(all[0].replies, 1);
+        }
+
+        /*
+         * The one that turns a bad read into a permanent loss.
+         *
+         * Loading tolerates a file it cannot parse, which is right. Saving
+         * then wrote whatever was in memory over the top, which for a failed
+         * load is nothing at all: one unreadable byte and every conversation
+         * is gone, with no way back and nothing said about it.
+         */
+        #[test]
+        fn a_file_that_could_not_be_read_is_not_overwritten() {
+            let dir = a_directory("kept");
+            let nonsense = "{not json at all";
+            std::fs::write(dir.join(FILE), nonsense).expect("written");
+
+            let chat = Chat::new();
+            chat.load(&dir);
+            chat.begin("something new", 0);
+            said(&chat, "something new", "an answer", 0);
+            chat.save(&dir);
+
+            let aside = std::fs::read_to_string(dir.join(BROKEN)).expect("kept aside");
+            assert_eq!(aside, nonsense, "what could not be read was thrown away");
+
+            let now: Vec<serde_json::Value> =
+                serde_json::from_str(&std::fs::read_to_string(dir.join(FILE)).expect("written"))
+                    .expect("valid");
+            assert_eq!(now.len(), 1, "the new conversation was not saved");
+        }
+
+        /*
+         * The failure that has no symptom.
+         *
+         * Saving writes what is in memory over the file, and before a load
+         * there is nothing in memory. One save that got in first would replace
+         * every conversation with an empty list, and nothing about that looks
+         * wrong at the time: the window simply says nothing has been asked.
+         */
+        #[test]
+        fn nothing_is_written_over_a_file_that_was_never_read() {
+            let dir = a_directory("unread");
+
+            let first = Chat::new();
+            first.begin("worth keeping", 0);
+            said(&first, "worth keeping", "an answer", 0);
+            first.load(&dir);
+            first.save(&dir);
+
+            // A second `Chat` that never loaded, doing what it does.
+            let careless = Chat::new();
+            careless.begin("brand new", 10);
+            said(&careless, "brand new", "an answer", 10);
+            careless.save(&dir);
+
+            let after = Chat::new();
+            after.load(&dir);
+
+            let titles: Vec<String> = after.summaries(20).into_iter().map(|s| s.title).collect();
+            assert_eq!(titles, vec!["worth keeping"], "the file was written over");
+        }
+
+        /// Having read an empty machine counts as having read it, or the very
+        /// first conversation anybody has could never be saved.
+        #[test]
+        fn a_machine_with_no_history_can_still_save_its_first_conversation() {
+            let dir = a_directory("first-ever");
+
+            let chat = Chat::new();
+            chat.load(&dir);
+            chat.begin("the first thing", 0);
+            said(&chat, "the first thing", "an answer", 0);
+            chat.save(&dir);
+
+            let after = Chat::new();
+            after.load(&dir);
+            assert_eq!(after.summaries(1).len(), 1);
         }
 
         #[test]
