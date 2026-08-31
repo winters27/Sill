@@ -9,4 +9,5 @@
 //! reached by signing into a chat subscription; see `provider.rs` for why,
 //! per service.
 
+pub mod claude_code;
 pub mod provider;
