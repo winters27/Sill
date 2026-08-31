@@ -23,6 +23,7 @@
   import TitleBar from "$lib/components/TitleBar.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
   import AiMark from "$lib/components/settings/AiMark.svelte";
+  import Steps from "$lib/components/Steps.svelte";
   import { open as pickFiles } from "@tauri-apps/plugin-dialog";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import {
@@ -366,26 +367,6 @@
     }
   }
 
-  /** What one step did, in words. Shared meaning with the launcher's list. */
-  const DID: Record<string, string> = {
-    search_sill: "Searched what is on this machine for",
-    find_files: "Looked for files called",
-    read_file: "Read",
-    list_directory: "Looked inside",
-    read_clipboard: "Read what you have copied",
-    list_windows: "Looked at what is open",
-    system_state: "Checked how this machine is set",
-    read_selection: "Read what was selected",
-    read_screen: "Read what is on screen",
-    what_can_be_done: "Worked out what can be done to",
-    run_action: "Acted on",
-  };
-
-  function didWhat(step: AiStep): string {
-    const said = DID[step.tool] ?? step.tool;
-    return step.subject ? `${said} ${step.subject}` : said;
-  }
-
   /**
    * How long ago, read against a clock that moves.
    *
@@ -623,13 +604,7 @@
               {#if turn.text}<p>{turn.text}</p>{/if}
             </article>
           {:else}
-            {#if turn.steps.length}
-              <div class="steps">
-                {#each turn.steps as step, n (n)}
-                  <p class="step"><span class="pip" aria-hidden="true"></span>{didWhat(step)}</p>
-                {/each}
-              </div>
-            {/if}
+            <Steps steps={turn.steps} />
             <article class="turn said md">
               <Markdown text={turn.text} />
 
@@ -652,12 +627,8 @@
           {/if}
         {/each}
 
-        {#if asking && steps.length}
-          <div class="steps">
-            {#each steps as step, at (at)}
-              <p class="step"><span class="pip" aria-hidden="true"></span>{didWhat(step)}</p>
-            {/each}
-          </div>
+        {#if asking}
+          <Steps {steps} live />
         {/if}
 
         {#if asked}
@@ -990,32 +961,6 @@
     align-self: flex-start;
     max-width: 74ch;
     width: 100%;
-  }
-
-  .steps {
-    align-self: flex-start;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .step {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-2);
-    margin: 0;
-    color: var(--text-3);
-    font-size: var(--text-meta);
-    line-height: 1.5;
-  }
-
-  .pip {
-    width: 4px;
-    height: 4px;
-    flex: none;
-    border-radius: 50%;
-    background: var(--accent);
-    opacity: 0.7;
   }
 
   .permission {

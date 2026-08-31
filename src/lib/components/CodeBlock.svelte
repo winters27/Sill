@@ -50,7 +50,18 @@
 </div>
 
 <style>
+  /*
+   * As wide as the code, and no wider.
+   *
+   * A three line shell snippet stretched across a seventy character column is
+   * mostly empty box, and the Copy button ends up a screen away from the
+   * language it belongs to. `max-width` keeps a long line scrolling inside
+   * rather than pushing the conversation sideways.
+   */
   .block {
+    width: fit-content;
+    min-width: 16ch;
+    max-width: 100%;
     margin: 0 0 var(--space-3);
     border-radius: var(--radius-md);
     background: var(--fill-1);

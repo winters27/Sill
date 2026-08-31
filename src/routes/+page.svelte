@@ -9,6 +9,7 @@
   import RootList from "$lib/components/RootList.svelte";
   import AiMark from "$lib/components/settings/AiMark.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
+  import Steps from "$lib/components/Steps.svelte";
   import { LISTBOX, isBrowsing, isListMode, merged, optionId } from "$lib/results";
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
@@ -1909,34 +1910,6 @@
     searchInput?.focus();
   }
 
-  /**
-   * What one step did, in words.
-   *
-   * A table rather than the tool's own name, because the names are written for
-   * a model and read like an API. Anything unknown falls back to the name
-   * rather than to nothing: a tool added later should read oddly rather than
-   * vanish, which is the mistake this codebase has made four times with
-   * lists of modes.
-   */
-  const DID: Record<string, string> = {
-    search_sill: "Searched what is on this machine for",
-    find_files: "Looked for files called",
-    read_file: "Read",
-    list_directory: "Looked inside",
-    read_clipboard: "Read what you have copied",
-    list_windows: "Looked at what is open",
-    system_state: "Checked how this machine is set",
-    read_selection: "Read what was selected",
-    read_screen: "Read what is on screen",
-    what_can_be_done: "Worked out what can be done to",
-    run_action: "Acted on",
-  };
-
-  function didWhat(step: AiStep): string {
-    const said = DID[step.tool] ?? step.tool;
-    return step.subject ? `${said} ${step.subject}` : said;
-  }
-
   /** Every conversation, while the list of them is open. */
   let pastConversations = $state<AiConversation[]>([]);
 
@@ -3010,29 +2983,13 @@
             that a question about your machine was answered by reading your
             clipboard is part of the answer.
           -->
-          {#if turn.steps.length}
-            <div class="steps">
-              {#each turn.steps as step, n (n)}
-                <p class="step">
-                  <span class="pip" aria-hidden="true"></span>
-                  {didWhat(step)}
-                </p>
-              {/each}
-            </div>
-          {/if}
+          <Steps steps={turn.steps} />
           <article class="turn said md"><Markdown text={turn.text} /></article>
         {/if}
       {/each}
 
-      {#if asking && steps.length}
-        <div class="steps">
-          {#each steps as step, at (at)}
-            <p class="step">
-              <span class="pip" aria-hidden="true"></span>
-              {didWhat(step)}
-            </p>
-          {/each}
-        </div>
+      {#if asking}
+        <Steps {steps} live />
       {/if}
 
       {#if asked}
@@ -3522,39 +3479,6 @@
   .answers button:focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 1px var(--accent);
-  }
-
-  /*
-   * What was looked at, kept quiet.
-   *
-   * Below the question and above the answer, in the smallest step on the
-   * scale. It is provenance rather than content: worth being able to read,
-   * never worth reading first.
-   */
-  .steps {
-    align-self: flex-start;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .step {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-2);
-    margin: 0;
-    color: var(--text-3);
-    font-size: var(--text-meta);
-    line-height: 1.5;
-  }
-
-  .pip {
-    width: 4px;
-    height: 4px;
-    flex: none;
-    border-radius: 50%;
-    background: var(--accent);
-    opacity: 0.7;
   }
 
   /*
