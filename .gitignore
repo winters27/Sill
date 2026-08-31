@@ -27,3 +27,10 @@ vite.config.ts.timestamp-*
 /src-tauri/icons/android/
 /src-tauri/icons/ios/
 /src-tauri/icons/icon.icns
+
+# The interface font. Satoshi is under the ITF Free Font License, which lets
+# this application embed it but forbids offering the file itself through a
+# "repository" or "publicly accessible servers". `npm run fonts` fetches it
+# per machine, direct from Fontshare, which is the arrangement that licence
+# describes. `verify:source` fails if a font is ever tracked again.
+/src/lib/theme/fonts/*.woff2

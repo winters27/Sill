@@ -11,20 +11,27 @@ find them. They exist only as a catalog, and this is Microsoft's own.
 
 --------------------------------------------------------------------------
 
-Satoshi-Variable.woff2
+Satoshi (src/lib/theme/fonts/Satoshi-Variable.woff2)
 
-Satoshi, by Indian Type Foundry. Obtained from Fontshare
-(https://www.fontshare.com/fonts/satoshi).
+Satoshi, by Indian Type Foundry. Distributed through Fontshare
+(https://www.fontshare.com/fonts/satoshi) under the ITF Free Font License,
+which is not an open source licence and is not this project's MIT licence.
 
-Not covered by this project's MIT licence. The typeface remains the property
-of its foundry and is used under the Fontshare licence, which permits personal
-and commercial use on its own terms. Anyone redistributing or forking this
-repository is responsible for reading those terms rather than assuming the
-MIT grant reaches the font file.
+**The font file is not part of this repository.** `npm run fonts` fetches it
+from Fontshare on each machine, and `.gitignore` and `npm run verify:source`
+together keep it from being committed.
 
-It is bundled rather than fetched so the interface looks the same on a machine
-that has never seen it, and so nothing is requested from a font host at
-runtime.
+That is not tidiness. Section 02 of the ITF Free Font License forbids making
+the Font Software available through "another font website, font library,
+marketplace, repository, download service, application or platform [...]
+publicly accessible servers", and a public git repository is exactly that:
+anyone cloning it could take the file out and use it on its own. What the
+licence does permit, in section 01, is embedding the font in a desktop
+application, which is what a built copy of Sill does. So the built application
+carries it and the source does not.
+
+If you fork this, `npm install` fetches your own copy direct from Fontshare and
+you are bound by that licence yourself, which is the arrangement it describes.
 
 --------------------------------------------------------------------------
 

@@ -6,6 +6,7 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
+import { spawnSync } from "node:child_process";
 
 const SKIP = new Set([
   "node_modules",
@@ -270,6 +271,36 @@ else if (Number(css[1]) !== Number(rust[1])) {
     `ROW is ${rust[1]} but --row-height is ${css[1]}px, so the window will clip its last row`,
   );
 }
+
+/*
+ * No font file is tracked by git.
+ *
+ * Satoshi is under the ITF Free Font License, which permits embedding it in a
+ * desktop application but forbids making the file available through a
+ * "repository" or "publicly accessible servers". It was committed anyway, from
+ * the initial commit until this check existed, to a public repository, which
+ * is the breach that licence names most directly.
+ *
+ * `scripts/fetch-fonts.mjs` puts it on disk per machine and `.gitignore` keeps
+ * it out. Neither stops `git add -f`, and neither stops a second font being
+ * added later by somebody who never heard why the first one could not be.
+ * This does.
+ */
+const FONTS = /\.(woff2?|ttf|otf|eot)$/i;
+const tracked = spawnSync("git", ["ls-files"], { encoding: "utf8" });
+
+if (tracked.status !== 0) {
+  console.log("skip no git here, so the tracked-font check did not run");
+} else {
+  for (const file of tracked.stdout.split("\n").filter((f) => FONTS.test(f))) {
+    fail(
+      file,
+      null,
+      "a font is tracked. Fonts are fetched by `npm run fonts`, never committed",
+    );
+  }
+}
+
 
 console.log(
   failures === 0 ? "source verification passed" : `\n${failures} problem(s) found`,

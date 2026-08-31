@@ -12,6 +12,8 @@
     "tauri": "tauri",
     "host:build": "npm --prefix host run build",
     "host:test": "npm --prefix host test",
+    "fonts": "node scripts/fetch-fonts.mjs",
+    "postinstall": "node scripts/fetch-fonts.mjs",
     "verify:tree": "node scripts/verify-tree.mjs",
     "verify:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "verify": "npm run host:test && npm run check && npm run verify:web && npm run verify:rust && npm run verify:source && npm run verify:tree && npm run gate:views",

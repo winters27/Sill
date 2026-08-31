@@ -90,6 +90,13 @@ For a release build:
 npm run tauri build
 ```
 
+`npm install` also fetches the interface font. Satoshi is not open source and
+its licence does not allow the file to sit in a public repository, so it is
+pulled from [Fontshare](https://www.fontshare.com/fonts/satoshi) per machine
+instead. Building offline is fine: the interface falls back to Segoe UI
+Variable, and `npm run fonts` picks it up later. See
+[resources/NOTICE](resources/NOTICE).
+
 Optional at runtime: [Everything](https://www.voidtools.com/) for file search.
 Without it the launcher offers to install it, and everything else still works.
 
@@ -124,4 +131,10 @@ accent is for selection, matches, focus and affirmative state, and nothing else.
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE) and [resources/NOTICE](resources/NOTICE).
+MIT. See [LICENSE](LICENSE).
+
+Three third-party works travel with this project under their own terms, and
+[resources/NOTICE](resources/NOTICE) names each: a Windows settings catalogue
+from Microsoft PowerToys (MIT), the menu glyphs from Phosphor Icons (MIT), and
+the Satoshi typeface from Indian Type Foundry, which is not open source and is
+fetched rather than committed.
