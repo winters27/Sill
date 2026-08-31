@@ -1,0 +1,5 @@
+# Shell scripts must reach a runner with LF endings whatever the checkout does.
+# `verify` runs gate-views.sh through git-bash on Windows, and a CRLF line ending
+# arrives as a stray carriage return at the end of every command, which fails in
+# a way that names nothing useful.
+*.sh text eol=lf

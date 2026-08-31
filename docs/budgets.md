@@ -95,9 +95,10 @@ changed instead of walking everything again. That is not done yet.
 
 ## What is not measured yet
 
-- **Summon latency**, and keystroke to first result on screen. Both need
-  instrumentation inside the window rather than around it.
-- **Cold start**, from launch to a usable launcher.
+Summon latency and cold start have moved out of this section: measured on the
+release build at 25 ms median and 846 ms, held there by
+`scripts/measure-summon.ps1`, and written up in `docs/roadmap.md`.
+
 - **Screen reader behaviour.** The markup follows the combobox pattern and the
   rule for when it applies is unit tested, but nothing here has been heard by
   NVDA or Narrator.
