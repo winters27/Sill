@@ -188,6 +188,37 @@ for (const file of sources(".")) {
       }
     }
   }
+
+  /*
+   * An `@import` that a rule has already silenced.
+   *
+   * CSS requires every `@import` to come before every other rule, so an import
+   * written below one is not reported as a mistake: it is dropped, quietly,
+   * and the stylesheet still parses and still applies. That happened here.
+   * Satoshi's `@font-face` was declared above the Inter import, which took
+   * Inter out of the build entirely, and the only outward sign was the
+   * interface font setting falling through to a system face for anybody who
+   * picked it.
+   *
+   * A `{` before the last `@import` is the whole test, because an `@import` is
+   * a statement and never opens a block. Comments are blanked first so a brace
+   * in prose does not count, and blanked rather than cut so the offsets still
+   * land on the right lines.
+   */
+  if (extname(file) === ".css") {
+    const bare = text.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " "));
+    const lastImport = bare.lastIndexOf("@import");
+    const opens = lastImport === -1 ? -1 : bare.slice(0, lastImport).indexOf("{");
+
+    if (opens !== -1) {
+      fail(
+        file,
+        lineOf(text, opens),
+        `a rule opens here, above the @import on line ${lineOf(text, lastImport)}, ` +
+          "so that import is dropped and nothing says so",
+      );
+    }
+  }
 }
 
 /*
