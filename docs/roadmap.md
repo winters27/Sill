@@ -102,6 +102,30 @@ exactly what an ordinary row answers, so every switch quietly kept the state it
 had before it was pressed with no error and nothing logged. The translation now
 happens in one place with a test on it.
 
+### Reaching one before the pages about it
+
+A switch that does the thing should not sit below three pages that open a
+window where the thing can be done. Three causes, each fixed on its own terms.
+
+**The hyphen in Wi-Fi was a wall.** `wifi` is the word people type and the mark
+was the only thing between it and the title, so the switch matched as a
+scattered subsequence and lost to a PATH executable. Matching now reads through
+the marks that join one word, in both directions, so `e-mail` finds `Email`
+too. Not spaces: removing those would make every pair of words in a title one
+word.
+
+**A phrase only matched inside one field**, so `audio output` found nothing at
+all. Every word landing somewhere is now enough, and each word has to be a
+whole word of a title or a keyword of its own, which is strict enough that
+`the file` still matches nothing.
+
+**A switch nobody has pressed ranks as a familiar one.** A floor, not a bonus,
+and the difference is the whole reason it works: recency dominates the frecency
+curve, so a settings page opened once earlier today scores 77 and a bonus of a
+dozen points is invisible next to it. A page somebody opens repeatedly still
+wins, because that is a preference worth honouring. The empty query is exempt,
+or twelve switches would climb a list ordered by what you reach for.
+
 ## Built since the audit, and not on it: web search
 
 The row every launcher has and the audit never listed. Type anything and the
