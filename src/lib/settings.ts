@@ -375,6 +375,16 @@ export function openSettings(section?: string): Promise<void> {
   return invoke("open_settings", { section: section ?? null });
 }
 
+/**
+ * Opens the window where a conversation has room.
+ *
+ * Built when first asked for rather than declared, so a session that never
+ * opens it never pays for the renderer.
+ */
+export function openAsk(): Promise<void> {
+  return invoke("open_ask");
+}
+
 export function quitApp(): Promise<void> {
   return invoke("quit_app");
 }

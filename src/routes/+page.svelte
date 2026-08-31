@@ -77,7 +77,13 @@
     type UndoToken,
   } from "$lib/exthost/commands";
   import { ViewTree, isHandlerRef, type ElementNode, type Op } from "$lib/exthost/tree";
-  import { applyAppearance, getPreferences, openSettings, type Preferences } from "$lib/settings";
+  import {
+    applyAppearance,
+    getPreferences,
+    openAsk,
+    openSettings,
+    type Preferences,
+  } from "$lib/settings";
   import "$lib/theme/theme.css";
 
   type UiEvent =
@@ -2338,6 +2344,25 @@
       event.preventDefault();
       const row = conversationRows[selected];
       if (row) void forgetConversation(row.entrypoint);
+      return;
+    }
+
+    /*
+     * Ctrl O moves the conversation into the window with room.
+     *
+     * The gesture for "this needs more space than a launcher has". Nothing is
+     * carried across because nothing has to be: Rust holds the one open
+     * conversation and the window reads the same one, so it opens showing
+     * exactly what was on screen a moment ago.
+     */
+    if (
+      mode === "ai" &&
+      event.key.toLowerCase() === "o" &&
+      (event.ctrlKey || event.metaKey)
+    ) {
+      event.preventDefault();
+      void openAsk();
+      dismiss();
       return;
     }
 

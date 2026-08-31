@@ -3,12 +3,13 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": [
-    "main",
-    "settings",
-    "dictation",
-    "traymenu",
+    "ask",
     "capture",
-    "markup"
+    "dictation",
+    "main",
+    "markup",
+    "settings",
+    "traymenu"
   ],
   "permissions": [
     "core:default",

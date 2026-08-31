@@ -156,6 +156,55 @@ pub(crate) async fn ai_follow_up(
     answer
 }
 
+/// Opens the window where a conversation has room.
+///
+/// Built when it is first asked for rather than declared, like the settings
+/// window and for the same reason: a window that exists from startup costs a
+/// renderer whether or not anybody opens it, and most sessions never do.
+///
+/// Shown and focused when it is already there, because asking for a window
+/// you already have open means bring it to me.
+#[tauri::command]
+pub(crate) async fn open_ask(app: AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+
+    if let Some(existing) = app.get_webview_window("ask") {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let window = tauri::WebviewWindowBuilder::new(
+        &app,
+        "ask",
+        tauri::WebviewUrl::App("ask".into()),
+    )
+    .title("Ask")
+    // Room for a list of conversations beside a column of prose that does not
+    // have to wrap at forty characters.
+    .inner_size(1060.0, 760.0)
+    .min_inner_size(780.0, 520.0)
+    .resizable(true)
+    // Frameless and transparent, so the page draws the same glass every other
+    // Sill window draws. A default title bar beside one of these looks like
+    // two applications.
+    .decorations(false)
+    .transparent(true)
+    .center()
+    .build()
+    .map_err(|err| err.to_string())?;
+
+    let appearance = {
+        let prefs = app.state::<PrefsState>();
+        let guard = prefs.inner.lock().await;
+        (guard.appearance.backdrop, guard.appearance.tint_alpha)
+    };
+
+    crate::summon::apply_backdrop(&window, appearance.0, appearance.1);
+
+    Ok(())
+}
+
 /// Answers a card that asked before changing something.
 ///
 /// Its own command rather than a field on the next question, because the turn

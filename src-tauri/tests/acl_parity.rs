@@ -88,6 +88,58 @@ fn every_declared_window_can_invoke() {
     );
 }
 
+/// Every window label handed to `WebviewWindowBuilder`, found in the source.
+///
+/// Two of Sill's windows are not in the config at all: settings and the Ask
+/// window are both built the first time somebody opens one, because a window
+/// declared up front costs a renderer whether or not it is ever shown. This
+/// reads them out of the code rather than keeping a list beside it.
+fn built_at_runtime(dir: &Path) -> BTreeSet<String> {
+    const MARKER: &str = "WebviewWindowBuilder::new(";
+
+    let mut found = BTreeSet::new();
+
+    for file in rust_files(dir) {
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+
+        for (at, _) in text.match_indices(MARKER) {
+            // The label is the first string literal after the opening bracket,
+            // whether it is on the same line or three lines down.
+            let rest = &text[at + MARKER.len()..];
+            let Some(open) = rest.find('"') else { continue };
+            let Some(close) = rest[open + 1..].find('"') else {
+                continue;
+            };
+
+            found.insert(rest[open + 1..open + 1 + close].to_string());
+        }
+    }
+
+    found
+}
+
+fn rust_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+
+    let Ok(reading) = std::fs::read_dir(dir) else {
+        return out;
+    };
+
+    for entry in reading.flatten() {
+        let path = entry.path();
+
+        if path.is_dir() {
+            out.extend(rust_files(&path));
+        } else if path.extension().is_some_and(|kind| kind == "rs") {
+            out.push(path);
+        }
+    }
+
+    out
+}
+
 /// The reverse, which is a typo rather than a broken feature.
 ///
 /// A capability naming a window that does not exist grants nothing to nobody.
@@ -103,10 +155,12 @@ fn no_capability_names_a_window_that_does_not_exist() {
     let declared = declared_windows(&conf);
     let permitted = permitted_windows(&root.join("capabilities"));
 
-    // Windows created at runtime rather than declared up front. `settings` is
-    // built by `WebviewWindowBuilder` when it is first opened, so it is
-    // legitimately absent from the config.
-    let runtime: BTreeSet<String> = ["settings".to_string()].into_iter().collect();
+    // Windows created at runtime rather than declared up front, read out of
+    // the source that creates them rather than listed here. A list here would
+    // be a third place that has to agree with the other two, and the way it
+    // fails is a window that works perfectly while this test says it does not
+    // exist.
+    let runtime = built_at_runtime(&root.join("src"));
 
     let stray: Vec<&String> = permitted
         .difference(&declared)

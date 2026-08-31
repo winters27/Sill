@@ -304,6 +304,7 @@ impl Action for RunBuiltin {
 
         match object.target.as_str() {
             "settings" => crate::commands::settings::open_settings(app.clone(), None).await?,
+            "ask" => crate::commands::ai::open_ask(app.clone()).await?,
             "reload" => crate::reload_index(app),
             // Dismissed first: the launcher is frontmost right now, and a
             // dictation started here has to land in whatever was in front of

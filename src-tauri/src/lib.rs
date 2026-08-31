@@ -1132,6 +1132,7 @@ pub fn run() {
             commands::ai::ai_ask,
             commands::ai::ai_follow_up,
             commands::ai::ai_new,
+            commands::ai::open_ask,
             commands::ai::ai_decide,
             commands::ai::ai_refuse_pending,
             commands::ai::ai_conversations,
