@@ -245,6 +245,17 @@ impl Default for Taps {
     }
 }
 
+/// Who answers when you ask something.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Ai {
+    /// The id of the provider that answers. Empty means none is set up, and
+    /// asking says so rather than failing at the request.
+    pub provider: String,
+    /// The ones configured. Each key is sealed before this file is written.
+    pub providers: Vec<crate::ai::provider::Provider>,
+}
+
 impl Default for Snippets {
     fn default() -> Self {
         Self {
@@ -672,6 +683,9 @@ pub struct Preferences {
     /// Double-tapping a modifier to reach the launcher.
     #[serde(default)]
     pub taps: Taps,
+    /// Who answers when you ask something.
+    #[serde(default)]
+    pub ai: Ai,
     pub appearance: Appearance,
     pub sources: Sources,
     pub files: FileSearch,

@@ -10,6 +10,7 @@
 //! module holding the whole surface is the thing that becomes impossible to
 //! reason about, and it does so gradually enough that nobody notices.
 
+pub mod ai;
 pub mod diagnostics;
 pub mod extensions;
 pub mod launch;

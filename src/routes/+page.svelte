@@ -24,6 +24,10 @@
     dismiss,
     launchCommand,
     movePath,
+    aiAsk,
+    aiClear,
+    aiReady,
+    aiTranscript,
     forgetPreviews,
     searchAppVolume,
     searchDestinations,
@@ -55,6 +59,7 @@
     asTarget,
     undoAction,
     type ActionInfo,
+    type AiTurn,
     type RankedCommand,
     type UndoToken,
   } from "$lib/exthost/commands";
@@ -94,6 +99,14 @@
      * anything about sound was typed.
      */
     | "appVolume"
+    /**
+     * A conversation with a model.
+     *
+     * Its own mode rather than a row in the list, because an answer is a
+     * paragraph and a list is a list. Reached by Tab from the root, which is
+     * where the question was already being typed.
+     */
+    | "ai"
     /**
      * Picking somewhere to move a file to.
      *
@@ -855,6 +868,21 @@
       if (!emoji) return;
 
       await useEmoji(emoji);
+      return;
+    }
+
+    /*
+     * In a conversation, Enter asks the next thing.
+     *
+     * The field is the composer, so a follow-up is typed where the question
+     * was. Nothing is sent while an answer is still arriving: two questions
+     * in flight would interleave their answers into one paragraph.
+     */
+    if (mode === "ai") {
+      const next = query.trim();
+      if (!next || asking) return;
+
+      await askAi(next);
       return;
     }
 
@@ -1680,6 +1708,94 @@
     }, PREVIEW_SETTLE_MS);
   });
 
+  /**
+   * The conversation on screen.
+   *
+   * Held in Rust, not here: this window is closed most of the time and
+   * reloaded whenever the page does, and a conversation that lived here would
+   * be lost every time somebody pressed Escape. This is a copy for drawing.
+   */
+  let conversation = $state<AiTurn[]>([]);
+
+  /** The answer being written right now, before it becomes a turn. */
+  let answering = $state("");
+
+  /** The scrolling column, so it can be kept at the bottom as text arrives. */
+  let chatScroll = $state<HTMLDivElement | null>(null);
+
+  /*
+   * Kept at the bottom while an answer is being written.
+   *
+   * Only while it is being written, and only if the reader is already at the
+   * bottom: yanking somebody back down while they are reading what was said
+   * earlier is worse than letting the new text arrive out of sight.
+   */
+  $effect(() => {
+    answering;
+    conversation;
+
+    const box = chatScroll;
+    if (!box) return;
+
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    if (nearBottom) box.scrollTop = box.scrollHeight;
+  });
+
+  /** Whether a question is in flight, so the composer can say so. */
+  let asking = $state(false);
+
+  /** Who answers, and why not when nothing does. */
+  let aiWhoNot = $state("");
+
+  /**
+   * Asks, and switches to the conversation to watch it arrive.
+   *
+   * Checked before switching rather than after: a launcher that leaves the
+   * results, shows an empty panel and then says "no provider" has thrown away
+   * the search for nothing.
+   */
+  async function askAi(question: string) {
+    let ready;
+    try {
+      ready = await aiReady();
+    } catch (err) {
+      status = `${err}`;
+      return;
+    }
+
+    if (!ready.ready) {
+      // Said where the search still is, so Escape is not needed to get back
+      // to what was typed.
+      status = `${ready.whyNot} Set one up in Settings.`;
+      return;
+    }
+
+    mode = "ai";
+    selected = 0;
+    aiWhoNot = "";
+    answering = "";
+    asking = true;
+
+    // Shown immediately, so the question is on screen before the answer
+    // starts rather than after.
+    conversation = [...conversation, { role: "user", text: question }];
+    query = "";
+
+    try {
+      await aiAsk(question);
+    } catch (err) {
+      status = `${err}`;
+    }
+  }
+
+  /** Starts again, keeping the mode. */
+  async function newConversation() {
+    await aiClear();
+    conversation = [];
+    answering = "";
+    status = "";
+  }
+
   async function openSwitcher() {
     panelOpen = false;
     // Whatever was on screen was a picture of a moment that has passed.
@@ -1698,6 +1814,21 @@
 
     if (mode === "argument") {
       awaiting = null;
+      mode = "root";
+      selected = 0;
+      query = "";
+      await refreshRoot();
+      return;
+    }
+
+    /*
+     * Escape goes back to the results, and the conversation is kept.
+     *
+     * Leaving is not finishing: somebody who looks something up mid-answer and
+     * comes back should find it where it was. Rust holds it, so this only
+     * stops drawing it.
+     */
+    if (mode === "ai") {
       mode = "root";
       selected = 0;
       query = "";
@@ -1803,6 +1934,31 @@
       void undoAction(token)
         .then((message) => (status = message))
         .catch((err) => (status = `${err}`));
+      return;
+    }
+
+    /*
+     * Tab asks whatever is in the field.
+     *
+     * The gesture every launcher with an AI in it has settled on, and it is
+     * the right one: the question is already typed, because searching for
+     * something and asking about it start the same way. Nothing is lost if
+     * the search was what you meant, because Escape comes straight back to it
+     * with the words still there.
+     *
+     * Only from the root list, and only with something typed. In the switcher
+     * or the clipboard, Tab is not free and a question about nothing is not a
+     * question.
+     */
+    if (
+      event.key === "Tab" &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      mode === "root" &&
+      query.trim()
+    ) {
+      event.preventDefault();
+      void askAi(query.trim());
       return;
     }
 
@@ -1987,6 +2143,9 @@
     let indexed: UnlistenFn | undefined;
     let changed: UnlistenFn | undefined;
     let ran: UnlistenFn | undefined;
+    let said: UnlistenFn | undefined;
+    let finished: UnlistenFn | undefined;
+    let wentWrong: UnlistenFn | undefined;
     let disposed = false;
 
     (async () => {
@@ -2086,6 +2245,36 @@
       // list. A separate event rather than a flag read on show, because the
       // page has to react to being opened this way even when it was already
       // sitting on something else.
+      /*
+       * Each piece of an answer as it arrives.
+       *
+       * Appended to a separate string rather than to the last turn, so a
+       * half-written answer is visibly in progress and a failure part way
+       * through does not leave something that looks like a finished reply.
+       */
+      said = await listen<string>("sill://ai-said", ({ payload }) => {
+        answering += payload;
+      });
+
+      finished = await listen("sill://ai-done", () => {
+        if (answering) {
+          conversation = [...conversation, { role: "assistant", text: answering }];
+        }
+        answering = "";
+        asking = false;
+      });
+
+      wentWrong = await listen<string>("sill://ai-failed", ({ payload }) => {
+        // Whatever arrived before it failed is kept: half an answer is often
+        // enough to see what went wrong.
+        if (answering) {
+          conversation = [...conversation, { role: "assistant", text: answering }];
+        }
+        answering = "";
+        asking = false;
+        status = payload;
+      });
+
       switcher = await listen("sill://switcher", () => {
         void openSwitcher();
       });
@@ -2130,6 +2319,9 @@
       indexed?.();
       changed?.();
       ran?.();
+      said?.();
+      finished?.();
+      wentWrong?.();
     };
   });
 </script>
@@ -2147,6 +2339,8 @@
       <span class="crumb">Open Windows</span>
     {:else if mode === "emoji"}
       <span class="crumb">Emoji</span>
+    {:else if mode === "ai"}
+      <span class="crumb">Ask</span>
     {:else if mode === "appVolume"}
       <span class="crumb">App Volume</span>
     {:else if mode === "destination" && moving}
@@ -2181,6 +2375,10 @@
         ? "Type what to search for, then Enter…"
         : mode === "emoji"
           ? "Search emoji by name…"
+        : mode === "ai"
+          ? asking
+            ? "Waiting for the answer…"
+            : "Ask a follow-up…"
         : mode === "appVolume"
           ? "Filter by program name…"
         : mode === "destination"
@@ -2229,6 +2427,30 @@
       onrich={(rich) => (richEntry = rich)}
       oncollection={(open) => (openCollection = open)}
     />
+  {:else if mode === "ai"}
+    <!--
+      A conversation reads as a column of paragraphs, not as a list of rows.
+      The field below stays the composer, so a follow-up is typed where the
+      question was.
+    -->
+    <div class="chat" bind:this={chatScroll}>
+      {#each conversation as turn, at (at)}
+        <article class="turn" class:asked={turn.role === "user"}>
+          <p>{turn.text}</p>
+        </article>
+      {/each}
+
+      {#if answering}
+        <article class="turn">
+          <p>{answering}</p>
+        </article>
+      {:else if asking}
+        <!-- Something between pressing Tab and the first token arriving,
+             because a blank panel reads as nothing having happened. -->
+        <p class="thinking">Thinking…</p>
+      {/if}
+    </div>
+
   <!--
     Not `isListMode`. This set is not the same one: `alias` draws the list too,
     with the field holding a name rather than a query, so the two lists differ
@@ -2385,6 +2607,53 @@
 </main>
 
 <style>
+  /*
+   * A conversation, which reads as a column of paragraphs rather than a list.
+   *
+   * It scrolls on its own so the field below stays put: a composer that moves
+   * down the window as the answer grows is a composer you have to chase.
+   */
+  .chat {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4) var(--space-4);
+  }
+
+  .turn {
+    max-width: 68ch;
+  }
+
+  .turn p {
+    margin: 0;
+    color: var(--text-1);
+    font-size: var(--text-body);
+    line-height: 1.6;
+    /* An answer arrives as written, and models write in paragraphs. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  /*
+   * What was asked, set apart from what was answered.
+   *
+   * Quieter rather than boxed. A question is a heading for the answer under
+   * it, and drawing a bubble round each turn would make a short exchange look
+   * like a chat application rather than a launcher.
+   */
+  .asked p {
+    color: var(--text-2);
+  }
+
+  .thinking {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--text-body);
+  }
+
   /*
    * The list, with room beside it for a picture in the switcher.
    *

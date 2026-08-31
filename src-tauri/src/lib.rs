@@ -860,6 +860,7 @@ pub fn run() {
         .manage(actions::builtins())
         .manage(timing::Timings::new())
         .manage(previews::Previews::new())
+        .manage(ai::chat::Chat::new())
         .manage(commands::system::Marking::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
@@ -1120,6 +1121,11 @@ pub fn run() {
             commands::search::search_windows,
             commands::search::system_states,
             commands::search::summon_painted,
+            commands::ai::ai_ready,
+            commands::ai::ai_ask,
+            commands::ai::ai_transcript,
+            commands::ai::ai_clear,
+            commands::ai::ai_known,
             commands::search::window_preview,
             commands::search::forget_previews,
             commands::search::timings,

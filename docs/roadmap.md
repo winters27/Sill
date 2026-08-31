@@ -338,6 +338,48 @@ both ask the expander rather than each deciding for themselves.
 
 Off until asked for, like snippet expansion and for the same reason.
 
+### Asking a model, from the launcher
+
+Tab asks whatever is in the field. It is the gesture every launcher with an AI
+in it has settled on and it is the right one: the question is already typed,
+because searching for something and asking about it start the same way. Escape
+comes back to the results with the words still there, so nothing is lost if the
+search was what you meant.
+
+Enter asks a follow-up. The conversation is held in Rust rather than in the
+window, because the window is closed most of the time and reloaded whenever the
+page does; a conversation living there would be lost every time somebody
+pressed Escape, which is the opposite of what a follow-up is for.
+
+**Two ways to reach a model, and only one of them needs a key.**
+
+Over HTTP, in the shape nearly everything speaks: OpenAI, xAI, Google's
+compatibility route, OpenRouter, LM Studio, Ollama, or anything else pointed
+at. One adapter for all of them, and a second for Anthropic's own format when
+it is written.
+
+Or through **Claude Code**, which is already installed and already signed in,
+on the subscription. That is the sanctioned way to reach one: the Agent SDK,
+`claude -p` and third-party tools all draw on the ordinary subscription pools,
+and running the official tool is a different thing from minting its tokens.
+Sill holds no credential at all on that path.
+
+The same path reaches every other provider too, because Claude Code reads
+`ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`. Other tools write those into
+the user's own settings file; Sill sets them in the environment of the process
+it spawns and nowhere else, so it cannot break somebody's Claude Code setup and
+there is nothing to restore if it is killed half way.
+
+**Where a key may be sent is a rule, not a checkbox.** Plain http to this
+machine or this network is fine, because a local model has no certificate and
+never will. Plain http anywhere else is refused: the key and every word of the
+conversation would be readable by anything on the path. A checkbox marked
+"allow insecure" is one people tick to make an error go away.
+
+Keys are sealed with DPAPI before the preferences file is written. The sealer
+learned to walk arrays for this, since there is a key per provider and no fixed
+path names them all.
+
 ## Built since the audit, and not on it: web search
 
 The row every launcher has and the audit never listed. Type anything and the

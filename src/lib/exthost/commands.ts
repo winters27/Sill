@@ -233,6 +233,53 @@ export function forgetPreviews(): Promise<void> {
   return invoke<void>("forget_previews");
 }
 
+/** One thing said, in a conversation with a model. */
+export interface AiTurn {
+  /** "user" or "assistant". */
+  role: string;
+  text: string;
+}
+
+/** Whether asking would work, and who would answer. */
+export interface AiReady {
+  ready: boolean;
+  /** What the chosen one is called. */
+  name: string;
+  /** Why not, when not. Empty when it is ready. */
+  whyNot: string;
+}
+
+/**
+ * Whether anything is set up to answer.
+ *
+ * Asked before offering the question rather than after: inviting somebody to
+ * press Tab and then saying "no provider" wastes the keystroke and the
+ * sentence they typed.
+ */
+export function aiReady(): Promise<AiReady> {
+  return invoke<AiReady>("ai_ready");
+}
+
+/**
+ * Asks, and streams the answer back as `sill://ai-said` events.
+ *
+ * Resolves with the whole answer as well, so a caller that only wants the text
+ * does not have to reassemble it from the events.
+ */
+export function aiAsk(question: string): Promise<string> {
+  return invoke<string>("ai_ask", { question });
+}
+
+/** Everything said so far, for a window that has just opened. */
+export function aiTranscript(): Promise<AiTurn[]> {
+  return invoke<AiTurn[]>("ai_transcript");
+}
+
+/** Forgets the conversation. */
+export function aiClear(): Promise<void> {
+  return invoke<void>("ai_clear");
+}
+
 export function summonPainted(): Promise<void> {
   return invoke<void>("summon_painted");
 }

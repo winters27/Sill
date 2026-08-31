@@ -40,6 +40,12 @@ pub enum Wire {
     OpenAi,
     /// Anthropic's messages API, which is its own shape.
     Anthropic,
+    /// Not a wire format at all: the Claude Code binary on this machine.
+    ///
+    /// Listed here because it is a way of reaching a model and the chooser has
+    /// to be able to offer it, and because it is the only one that reaches a
+    /// **subscription** rather than a metered key. See `claude_code.rs`.
+    ClaudeCode,
 }
 
 /// One service, as configured.
@@ -93,6 +99,17 @@ pub struct Known {
 /// and xAI's own endpoints. A custom entry covers anything not listed, which
 /// in practice is another OpenAI-compatible gateway.
 pub const KNOWN: &[Known] = &[
+    Known {
+        id: "claudeCode",
+        name: "Claude Code",
+        wire: Wire::ClaudeCode,
+        // Not an address. This one runs the binary already installed here.
+        base_url: "",
+        // Whatever the CLI is already set to.
+        model: "",
+        needs_key: false,
+        note: "Uses the Claude Code you already have, signed in as you, on                your own subscription. Nothing is stored by Sill.",
+    },
     Known {
         id: "openai",
         name: "OpenAI",
@@ -407,14 +424,24 @@ mod tests {
 
         /// Two adapters, and only one service needs the second.
         #[test]
-        fn all_but_one_speak_the_same_shape() {
-            let anthropic = KNOWN.iter().filter(|k| k.wire == Wire::Anthropic).count();
-            assert_eq!(anthropic, 1, "a second wire format grew a second user");
+        fn nearly_everything_speaks_the_same_shape() {
+            let odd = KNOWN
+                .iter()
+                .filter(|k| k.wire != Wire::OpenAi)
+                .count();
+
+            // Anthropic's own format, and the CLI. Everything else is one
+            // adapter, and a third exception should be argued for rather than
+            // arrived at.
+            assert_eq!(odd, 2, "something grew a wire format of its own");
         }
 
+        /// Of the ones that are an address. Claude Code is not: it runs a
+        /// binary, and a rule about where a key may be sent has nothing to
+        /// say about it.
         #[test]
         fn every_shipped_address_is_one_a_key_may_be_sent_to() {
-            for known in KNOWN {
+            for known in KNOWN.iter().filter(|k| k.wire != Wire::ClaudeCode) {
                 assert_eq!(
                     check(known.base_url),
                     Ok(()),
@@ -424,13 +451,33 @@ mod tests {
             }
         }
 
-        /// A model on this machine is the one that needs no key.
+        /// Exactly one entry is not an address, and it is the one that runs a
+        /// program rather than making a request.
         #[test]
-        fn only_the_local_one_needs_no_key() {
+        fn the_only_one_without_an_address_is_the_one_that_runs_a_binary() {
             for known in KNOWN {
-                let local = check(known.base_url).is_ok() && known.base_url.starts_with("http://");
+                let has_address = !known.base_url.is_empty();
                 assert_eq!(
-                    known.needs_key, !local,
+                    has_address,
+                    known.wire != Wire::ClaudeCode,
+                    "{} disagrees about being an address",
+                    known.id,
+                );
+            }
+        }
+
+        /// The two that need no key: a model on this machine, and the CLI that
+        /// is already signed in as you.
+        #[test]
+        fn a_key_is_needed_by_everything_that_reaches_somebody_elses_machine() {
+            for known in KNOWN {
+                let local_http =
+                    !known.base_url.is_empty() && known.base_url.starts_with("http://");
+                let signed_in_already = known.wire == Wire::ClaudeCode;
+
+                assert_eq!(
+                    known.needs_key,
+                    !(local_http || signed_in_already),
                     "{} disagrees about needing a key",
                     known.id,
                 );
@@ -452,6 +499,15 @@ mod tests {
         fn every_one_of_them_explains_itself() {
             for known in KNOWN {
                 assert!(!known.note.is_empty(), "{} says nothing", known.id);
+            }
+        }
+
+        /// A default model, except for the one whose model the CLI already
+        /// knows: naming one there would override a choice somebody made in
+        /// Claude Code itself.
+        #[test]
+        fn everything_that_needs_a_model_named_names_one() {
+            for known in KNOWN.iter().filter(|k| k.wire != Wire::ClaudeCode) {
                 assert!(!known.model.is_empty(), "{} has no default model", known.id);
             }
         }
