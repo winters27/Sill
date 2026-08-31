@@ -502,6 +502,8 @@ fn system_commands() -> Vec<CommandRecord> {
     let audio = format!(r"{root}\System32\SndVol.exe");
     let theme = format!(r"{root}\System32\themecpl.dll");
     let padlock = format!(r"{root}\System32\imageres.dll,54");
+    let network = format!(r"{root}\System32\ncpa.cpl");
+    let bluetooth = format!(r"{root}\System32\bthprops.cpl");
 
     let mut rows = vec![
         system_switch(
@@ -579,6 +581,27 @@ fn system_commands() -> Vec<CommandRecord> {
                 "Send sound here"
             },
             &["audio", "sound", "output", "speakers", "headphones", "device", "system"],
+        ));
+    }
+
+    /*
+     * One row per radio, if the machine has any.
+     *
+     * Named for what pressing it does rather than for the radio, because the
+     * row is a switch: "Wi-Fi" alone reads as somewhere to go, and the settings
+     * catalog already has several of those.
+     */
+    for radio in crate::radios::radios() {
+        let id = format!("{}{}", crate::actions::RADIO, radio.kind);
+
+        rows.push(system_switch(
+            &id,
+            // The network applet for one and the Bluetooth applet for the
+            // other, which is what Windows draws them with.
+            if radio.kind == "wifi" { &network } else { &bluetooth },
+            &format!("Turn {} {}", radio.name, if radio.on { "Off" } else { "On" }),
+            if radio.on { "It is on" } else { "It is off" },
+            &["wifi", "wireless", "bluetooth", "radio", "network", "toggle", "system"],
         ));
     }
 

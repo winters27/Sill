@@ -377,6 +377,9 @@ impl Action for ToggleSystem {
 /// A toggle reads the current state and inverts it rather than being told,
 /// because the row was drawn a moment ago and the answer could have changed
 /// since. Being told would let a stale row turn the sound off twice.
+/// What a radio row's id starts with, before which radio it is.
+pub(crate) const RADIO: &str = "system.radio:";
+
 /// What an audio output row's id starts with, before the device's own.
 pub(crate) const AUDIO_OUTPUT: &str = "system.audio.output:";
 
@@ -421,6 +424,28 @@ fn run_system(id: &str) -> Result<String, String> {
 
             crate::audio::set_output(device)?;
             Ok(format!("Sound goes to {name}"))
+        }
+
+        /*
+         * A radio row carries which one after the prefix, and toggles it.
+         *
+         * Read then set, rather than remembering: something else may have
+         * switched it since the index was built, and a row that says "on" on a
+         * radio that is off would turn it off again.
+         */
+        other if other.starts_with(RADIO) => {
+            let kind = &other[RADIO.len()..];
+
+            let now = crate::radios::radios()
+                .into_iter()
+                .find(|radio| radio.kind == kind)
+                .map(|radio| radio.on)
+                .ok_or_else(|| "there is no such radio in this machine".to_string())?;
+
+            let set = crate::radios::set_radio(kind, !now)?;
+            let name = if kind == "wifi" { "Wi-Fi" } else { "Bluetooth" };
+
+            Ok(format!("{name} {}", if set { "on" } else { "off" }))
         }
 
         "system.lock" => {

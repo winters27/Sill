@@ -26,6 +26,7 @@ pub mod ocr;
 pub mod object;
 pub mod preferences;
 pub mod quicklinks;
+pub mod radios;
 pub mod registry;
 pub mod secrets;
 pub mod selection;

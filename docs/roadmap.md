@@ -48,7 +48,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.2 | Screenshot | **Done.** Drag an area or take every screen, with a markup editor: box, arrow, ellipse, pen, highlight, hide, text |
 | P2.3 | OCR on demand | **Done.** WinRT recognition, ported from AuraKey. Reads a picture on the clipboard, never automatically. Measured: 35 ms on a 640x160 capture |
 | P2.4 | Read aloud | Not started |
-| P2.5 | System control | **Partly.** Volume, mute, dark mode, lock and **switching audio output** are done. Wifi and bluetooth are next. Per-app volume is possible; do not disturb and night light have no public way to set them, see below |
+| P2.5 | System control | **Done, except per-app volume.** Volume, mute, dark mode, lock, audio output switching, Wi-Fi and Bluetooth. Do not disturb and night light have no public way to set them, see below |
 | P2.6 | Process and resource view | Not started |
 | P2.7 | Terminal execution, capability gated | Not started |
 | P2.8 | Scripting | Not started |
