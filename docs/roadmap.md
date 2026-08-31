@@ -34,7 +34,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P1.8 | Navigation bindings | **Done.** Vim and Emacs presets |
 | P1.9 | Command history | **Done.** Up recalls what was searched |
 | P1.10 | Application and command hotkeys | **Done** |
-| P1.11 | Extension install path | **Decided 2026-08-31: esbuild.** Not built yet |
+| P1.11 | Extension install path | **Done.** Point at a folder and its commands are built and listed. esbuild ships beside the host; the build is Rust, not a repository script |
 | P1.12 | Emoji and symbols | **Done.** In the picker and in ordinary searches |
 | P1.13 | Snippets: collections, rich text, app-specific, forms | **Done, except forms.** Placeholders, import and export, collections, formatting, and limiting one to the programs it belongs in. Multi-field forms need a surface that does not exist yet |
 | P1.14 | Native dictation panel | **Dropped 2026-08-31.** Its justification, removing a second renderer, was measured false; both windows share one. Reconsider only on a recording-time processor measurement |
@@ -677,9 +677,23 @@ JavaScript and already vendored; `sucrase` is 1.1 MB with seven dependencies;
 JSX parser with a long tail of silent wrongness. This is an install-size call
 rather than a technical one.
 
-Decided 2026-08-31: **esbuild**, and the 10.1 MB per platform is accepted. What
-it transpiles is code arriving from outside, where a parser's long tail of
-silent wrongness produces a broken extension with nothing to report.
+Decided 2026-08-31 and **built the same day**: esbuild, and the 10.1 MB per
+platform is accepted. What it transpiles is code arriving from outside, where a
+parser's long tail of silent wrongness produces a broken extension with nothing
+to report.
+
+The install-size question turned out to be the only one open. esbuild was
+already what `scripts/build-extension.mjs` used, so choosing it cost no new
+dependency, only a resource entry: `host/node_modules/@esbuild/win32-x64/`
+ships as `esbuild/esbuild.exe` beside the host, found through the same three
+candidates `host.js` uses.
+
+`extension_install.rs` is the build itself rather than a wrapper around the
+script. Everything that decides anything is a function over data and only two
+functions touch the machine, which is what makes a manifest whose command
+redeclares one of the extension's preferences a value in a test rather than a
+directory somebody has to make. Installing merges, so installing one extension
+never uninstalls another, and installing the same one twice updates it.
 
 **Re-indexing cost.** About a tenth of one core while files are changing in an
 indexed folder, and zero at rest. The real answer is patching the index for the
