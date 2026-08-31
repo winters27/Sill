@@ -10,4 +10,5 @@
 //! per service.
 
 pub mod claude_code;
+pub mod openai;
 pub mod provider;
