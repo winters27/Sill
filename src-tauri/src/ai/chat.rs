@@ -34,7 +34,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
-use super::openai::Message;
+use super::openai::{Attached, Message};
 use super::provider::{Provider, Wire};
 
 /// One tool being used, as the window draws it.
@@ -53,6 +53,10 @@ pub struct Turn {
     /// `user` or `assistant`.
     pub role: String,
     pub text: String,
+    /// What was handed over with it, so a reopened conversation still shows
+    /// the picture that was asked about rather than a question with no
+    /// subject.
+    pub attachments: Vec<Attached>,
 }
 
 /// How long the offer to go back to a conversation lasts, in seconds.
@@ -275,6 +279,7 @@ impl Chat {
             .map(|message| Turn {
                 role: message.role.clone(),
                 text: message.content.clone(),
+                attachments: message.attachments.clone(),
             })
             .collect()
     }
@@ -449,14 +454,22 @@ pub async fn ask(
     app: &tauri::AppHandle,
     provider: &Provider,
     question: &str,
+    attachments: Vec<Attached>,
 ) -> Result<String, String> {
     let question = question.trim();
-    if question.is_empty() {
+
+    // Something handed over is a question in itself. "What is this" with a
+    // screenshot attached and nothing typed is the most ordinary thing
+    // somebody does with a picture.
+    if question.is_empty() && attachments.is_empty() {
         return Err("there is nothing to ask".to_string());
     }
 
     let chat = app.state::<Chat>();
-    chat.said(Message::user(question), crate::state::now_seconds());
+    chat.said(
+        Message::with(question, attachments),
+        crate::state::now_seconds(),
+    );
 
     let answer = match provider.wire {
         Wire::ClaudeCode => through_the_cli(app, provider, question).await,
@@ -513,14 +526,38 @@ async fn over_http(
     let mut conversation = messages.to_vec();
     let mut whole = String::new();
 
+    // The number this turn started at. Everything below asks whether it has
+    // moved, which is the only thing "stop" means.
+    // Read and dropped on the same line rather than bound. A managed state
+    // guard held across an await makes the whole future not `Send`, and Tauri
+    // needs it to be; the error says nothing about which line did it.
+    let since = app.state::<super::approval::Halt>().mark();
+    let give_up = || app.state::<super::approval::Halt>().stopped(since);
+
     for step in 0..MOST_STEPS {
-        let said = super::openai::ask(&client, provider, &conversation, Some(&tools), |piece| {
-            whole.push_str(&piece);
-            let _ = app.emit(SAID, &piece);
-        })
+        let said = super::openai::ask(
+            &client,
+            provider,
+            &conversation,
+            Some(&tools),
+            &give_up,
+            |piece| {
+                whole.push_str(&piece);
+                let _ = app.emit(SAID, &piece);
+            },
+        )
         .await?;
 
-        if said.calls.is_empty() {
+        // What arrived is still an answer. Somebody who stops a reply has
+        // usually read enough of it, and throwing it away would be its own
+        // small betrayal.
+        if said.stopped || said.calls.is_empty() {
+            return Ok(whole);
+        }
+
+        // Checked again between steps: a stop pressed while a tool was running
+        // should not be followed by another request.
+        if give_up() {
             return Ok(whole);
         }
 
@@ -554,12 +591,23 @@ async fn over_http(
         }
     }
 
+    if give_up() {
+        return Ok(whole);
+    }
+
     // One more, with no tools, so a model that kept calling them still ends
     // with words rather than with nothing.
-    let said = super::openai::ask(&client, provider, &conversation, None, |piece| {
-        whole.push_str(&piece);
-        let _ = app.emit(SAID, &piece);
-    })
+    let said = super::openai::ask(
+        &client,
+        provider,
+        &conversation,
+        None,
+        &give_up,
+        |piece| {
+            whole.push_str(&piece);
+            let _ = app.emit(SAID, &piece);
+        },
+    )
     .await?;
 
     Ok(if whole.is_empty() { said.text } else { whole })

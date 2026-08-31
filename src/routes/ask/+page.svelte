@@ -23,8 +23,11 @@
   import TitleBar from "$lib/components/TitleBar.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
   import AiMark from "$lib/components/settings/AiMark.svelte";
+  import { open as pickFiles } from "@tauri-apps/plugin-dialog";
+  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import {
     aiAsk,
+    aiAttach,
     aiConversations,
     aiDecide,
     aiFollowUp,
@@ -33,9 +36,13 @@
     aiReady,
     aiRefusePending,
     aiResume,
+    aiLimits,
+    aiStop,
     aiTranscript,
     type AiAsking,
+    type AiAttached,
     type AiConversation,
+    type AiLimits,
     type AiReady,
     type AiStep,
   } from "$lib/exthost/commands";
@@ -45,6 +52,7 @@
     role: string;
     text: string;
     steps: AiStep[];
+    attachments: AiAttached[];
   }
 
   let conversation = $state<Shown[]>([]);
@@ -59,15 +67,120 @@
   let trouble = $state("");
 
   let draft = $state("");
+  /** What is waiting to go with the next question. */
+  let carrying = $state<AiAttached[]>([]);
+  /** Whether something is being dragged over the window right now. */
+  let hovering = $state(false);
+  /** Which answer has just been copied, so the button can say so. */
+  let copied = $state(-1);
+
+  /**
+   * The clock the sidebar reads ages against.
+   *
+   * Ticking rather than baked in when the list is fetched. A window left open
+   * for an hour showed every conversation as it was an hour ago, because the
+   * age was a string worked out once and never again.
+   */
+  let now = $state(Math.floor(Date.now() / 1000));
   let composer = $state<HTMLTextAreaElement | null>(null);
   let transcript = $state<HTMLDivElement | null>(null);
 
   /** Which conversation is open, so the list can mark it. */
   const openId = $derived(past.find((one) => one.open)?.id ?? "");
 
+  /**
+   * Takes files and says what could not be taken.
+   *
+   * Each answers for itself: five files where one is an archive attaches four
+   * and explains one, rather than attaching nothing and complaining about the
+   * archive.
+   */
+  async function take(paths: string[]) {
+    const refused: string[] = [];
+
+    for (const path of paths) {
+      try {
+        carrying = [...carrying, await aiAttach(path)];
+      } catch (err) {
+        refused.push(`${err}`);
+      }
+    }
+
+    trouble = refused.join(" ");
+  }
+
+  async function pick() {
+    const chosen = await pickFiles({ multiple: true });
+    if (!chosen) return;
+    await take(Array.isArray(chosen) ? chosen : [chosen]);
+    composer?.focus();
+  }
+
+  function drop(name: string) {
+    carrying = carrying.filter((one) => one.name !== name);
+  }
+
+  /** The ceilings, read once from the one place that defines them. */
+  let ceiling = $state<AiLimits>({ image: 4 * 1024 * 1024, text: 100_000 });
+
+  /**
+   * A picture pasted from the clipboard.
+   *
+   * It never touches the disk, so it cannot go through the reader every other
+   * attachment goes through, and this is the one path that builds an
+   * attachment itself. The ceiling it checks is the same one, asked for rather
+   * than repeated.
+   */
+  async function onPaste(event: ClipboardEvent) {
+    const pictures = [...(event.clipboardData?.files ?? [])].filter((one) =>
+      one.type.startsWith("image/"),
+    );
+
+    if (pictures.length === 0) return;
+    event.preventDefault();
+
+    for (const picture of pictures) {
+      if (picture.size > ceiling.image) {
+        trouble = `That picture is ${size(picture.size)}, and one has to be under ${size(ceiling.image)} to send.`;
+        continue;
+      }
+
+      const body = await new Promise<string>((done, fail) => {
+        const reader = new FileReader();
+        reader.onload = () => done(String(reader.result));
+        reader.onerror = () => fail(reader.error);
+        reader.readAsDataURL(picture);
+      }).catch(() => "");
+
+      if (!body) continue;
+
+      carrying = [
+        ...carrying,
+        {
+          // A pasted screenshot has no name of its own on Windows.
+          name: picture.name || `pasted picture ${carrying.length + 1}`,
+          kind: "image",
+          body,
+          bytes: picture.size,
+        },
+      ];
+    }
+  }
+
+  /** A size somebody would say out loud. */
+  function size(bytes: number): string {
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${bytes} bytes`;
+  }
+
+  /** When the list was last fetched, so its ages can be anchored. */
+  let fetched = $state(Math.floor(Date.now() / 1000));
+
   async function refreshList() {
     try {
       past = await aiConversations();
+      fetched = Math.floor(Date.now() / 1000);
     } catch (err) {
       trouble = `${err}`;
     }
@@ -82,12 +195,20 @@
    */
   async function send() {
     const question = draft.trim();
-    if (!question || asking) return;
+
+    // Something attached is a question in itself. A screenshot with nothing
+    // typed is the most ordinary thing anybody does with a picture.
+    if ((!question && carrying.length === 0) || asking) return;
 
     const starting = conversation.length === 0;
+    const going = carrying;
 
-    conversation = [...conversation, { role: "user", text: question, steps: [] }];
+    conversation = [
+      ...conversation,
+      { role: "user", text: question, steps: [], attachments: going },
+    ];
     draft = "";
+    carrying = [];
     answering = "";
     steps = [];
     asked = null;
@@ -95,13 +216,46 @@
     asking = true;
 
     try {
-      await (starting ? aiAsk(question) : aiFollowUp(question));
+      await (starting ? aiAsk(question, going) : aiFollowUp(question, going));
     } catch (err) {
       trouble = `${err}`;
       asking = false;
     }
 
     await refreshList();
+  }
+
+  /**
+   * Asks the last question again.
+   *
+   * The whole turn is sent afresh rather than the answer being patched,
+   * because there is nothing to patch: the conversation held in Rust already
+   * has the question in it, and asking again is what everybody means by this.
+   */
+  async function again() {
+    if (asking) return;
+
+    const last = [...conversation].reverse().find((turn) => turn.role === "user");
+    if (!last) return;
+
+    draft = last.text;
+    carrying = last.attachments;
+    await send();
+  }
+
+  async function copy(at: number, text: string) {
+    try {
+      await writeText(text);
+      copied = at;
+      setTimeout(() => (copied = -1), 1400);
+    } catch {
+      // The clipboard refusing is rare and the answer is still on screen to be
+      // selected. Saying nothing beats a message over a two line reply.
+    }
+  }
+
+  async function stop() {
+    await aiStop();
   }
 
   async function open(id: string) {
@@ -205,12 +359,35 @@
     return step.subject ? `${said} ${step.subject}` : said;
   }
 
+  /**
+   * How long ago, read against a clock that moves.
+   *
+   * `one.age` is how old it was when the list was fetched, so a window left
+   * open shows every row as it was then. What was fetched is turned back into
+   * an absolute moment and compared against now, which ticks.
+   */
   function when(one: AiConversation): string {
-    if (one.age < 60) return "Just now";
-    if (one.age < 3600) return `${Math.floor(one.age / 60)} min ago`;
-    if (one.age < 86_400) return `${Math.floor(one.age / 3600)} hr ago`;
-    return `${Math.floor(one.age / 86_400)} d ago`;
+    const at = fetched - one.age;
+    const age = Math.max(0, now - at);
+
+    if (age < 60) return "Just now";
+    if (age < 3600) return `${Math.floor(age / 60)} min ago`;
+    if (age < 86_400) return `${Math.floor(age / 3600)} hr ago`;
+    return `${Math.floor(age / 86_400)} d ago`;
   }
+
+  /*
+   * The clock, moved once a minute.
+   *
+   * The coarsest thing that keeps every row true, because nothing here is
+   * measured in seconds after the first one. A window nobody is looking at
+   * costs one wakeup a minute, which is the smallest honest price for a list
+   * that does not lie about when things happened.
+   */
+  $effect(() => {
+    const ticking = setInterval(() => (now = Math.floor(Date.now() / 1000)), 60_000);
+    return () => clearInterval(ticking);
+  });
 
   /** Sticks to the bottom while an answer is arriving. */
   $effect(() => {
@@ -223,6 +400,7 @@
   });
 
   onMount(() => {
+    let dropped: UnlistenFn | undefined;
     let said: UnlistenFn | undefined;
     let using: UnlistenFn | undefined;
     let wants: UnlistenFn | undefined;
@@ -234,10 +412,24 @@
       const prefs: Preferences = await getPreferences();
       applyAppearance(prefs);
 
+      ceiling = await aiLimits().catch(() => ceiling);
+
       answersWith = await aiReady().catch(() => null);
 
       conversation = (await aiTranscript()).map((turn) => ({ ...turn, steps: [] }));
       await refreshList();
+
+      /*
+       * Dropping files on the window.
+       *
+       * Tauri's own event rather than the DOM's: a browser drop hands over a
+       * File with no path, and everything here works from paths. The DOM
+       * handlers on the window only draw the outline.
+       */
+      dropped = await listen<{ paths: string[] }>("tauri://drag-drop", ({ payload }) => {
+        hovering = false;
+        void take(payload.paths ?? []);
+      });
 
       said = await listen<string>("sill://ai-said", ({ payload }) => {
         answering += payload;
@@ -253,7 +445,10 @@
 
       finished = await listen("sill://ai-done", () => {
         if (answering) {
-          conversation = [...conversation, { role: "assistant", text: answering, steps }];
+          conversation = [
+            ...conversation,
+            { role: "assistant", text: answering, steps, attachments: [] },
+          ];
         }
         answering = "";
         asking = false;
@@ -263,7 +458,10 @@
       wentWrong = await listen<string>("sill://ai-failed", ({ payload }) => {
         // Half an answer is often enough to see what went wrong.
         if (answering) {
-          conversation = [...conversation, { role: "assistant", text: answering, steps }];
+          conversation = [
+            ...conversation,
+            { role: "assistant", text: answering, steps, attachments: [] },
+          ];
         }
         answering = "";
         asking = false;
@@ -279,6 +477,7 @@
     })();
 
     return () => {
+      dropped?.();
       said?.();
       using?.();
       wants?.();
@@ -292,7 +491,27 @@
   });
 </script>
 
-<div class="window">
+<!--
+  Dropping a file anywhere on the window attaches it.
+
+  The whole window rather than a target inside it: somebody dragging a
+  screenshot is looking at the screenshot, not at where to put it.
+-->
+<div
+  class="window"
+  class:hovering
+  role="application"
+  aria-label="Ask"
+  ondragover={(event) => {
+    event.preventDefault();
+    hovering = true;
+  }}
+  ondragleave={() => (hovering = false)}
+  ondrop={(event) => {
+    event.preventDefault();
+    hovering = false;
+  }}
+>
   <TitleBar title="Ask" />
 
   <div class="body">
@@ -362,7 +581,20 @@
 
         {#each conversation as turn, at (at)}
           {#if turn.role === "user"}
-            <article class="turn asked"><p>{turn.text}</p></article>
+            <article class="turn asked">
+              {#if turn.attachments.length}
+                <div class="carried">
+                  {#each turn.attachments as one (one.name)}
+                    {#if one.kind === "image"}
+                      <img class="shot" src={one.body} alt={one.name} />
+                    {:else}
+                      <span class="paper">{one.name}</span>
+                    {/if}
+                  {/each}
+                </div>
+              {/if}
+              {#if turn.text}<p>{turn.text}</p>{/if}
+            </article>
           {:else}
             {#if turn.steps.length}
               <div class="steps">
@@ -371,7 +603,25 @@
                 {/each}
               </div>
             {/if}
-            <article class="turn said md"><Markdown text={turn.text} /></article>
+            <article class="turn said md">
+              <Markdown text={turn.text} />
+
+              <!--
+                Copy and ask again, on the answer they belong to.
+
+                Quiet until the answer is hovered, because they are about the
+                answer rather than part of it, and a row of controls under
+                every reply is a conversation with furniture in it.
+              -->
+              <div class="afters">
+                <button onclick={() => void copy(at, turn.text)}>
+                  {copied === at ? "Copied" : "Copy"}
+                </button>
+                {#if at === conversation.length - 1}
+                  <button onclick={() => void again()} disabled={asking}>Again</button>
+                {/if}
+              </div>
+            </article>
           {/if}
         {/each}
 
@@ -411,10 +661,43 @@
       </div>
 
       <div class="composer">
+        {#if carrying.length}
+          <div class="waiting">
+            {#each carrying as one (one.name)}
+              <span class="chip">
+                {#if one.kind === "image"}
+                  <img class="thumb" src={one.body} alt="" />
+                {/if}
+                <span class="chip-name">{one.name}</span>
+                <span class="chip-size">{size(one.bytes)}</span>
+                <button
+                  class="chip-drop"
+                  aria-label={`Remove ${one.name}`}
+                  onclick={() => drop(one.name)}>&times;</button
+                >
+              </span>
+            {/each}
+          </div>
+        {/if}
+
+        <div class="line">
+        <button class="attach" onclick={() => void pick()} aria-label="Attach a file" title="Attach a file">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M21 11.5l-8.5 8.5a5.5 5.5 0 01-7.8-7.8l8.7-8.7a3.7 3.7 0 015.2 5.2l-8.6 8.6a1.8 1.8 0 01-2.6-2.6l7.9-7.9"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+
         <textarea
           bind:this={composer}
           bind:value={draft}
           onkeydown={onComposerKey}
+          onpaste={onPaste}
           placeholder={asked
             ? "Answer above first…"
             : asking
@@ -427,14 +710,21 @@
           aria-label="Ask"
         ></textarea>
 
-        <button
-          class="send"
-          onclick={() => void send()}
-          disabled={!draft.trim() || asking}
-          aria-label="Send"
-        >
-          <span class="sill-key">Enter</span>
-        </button>
+        {#if asking}
+          <!-- Stopping keeps what has arrived, so it is a plain control rather
+               than a destructive one. -->
+          <button class="stop" onclick={() => void stop()} aria-label="Stop">Stop</button>
+        {:else}
+          <button
+            class="send"
+            onclick={() => void send()}
+            disabled={!draft.trim() && carrying.length === 0}
+            aria-label="Send"
+          >
+            <span class="sill-key">Enter</span>
+          </button>
+        {/if}
+        </div>
       </div>
     </main>
   </div>
@@ -818,13 +1108,198 @@
 
   /* ---------------------------------------------------------------- composer */
 
+  /*
+   * What a drop would land on.
+   *
+   * The whole window rather than a target inside it: somebody dragging a
+   * screenshot is looking at the screenshot, not at where to put it.
+   */
+  .hovering {
+    box-shadow: var(--bevel-window), inset 0 0 0 2px var(--accent);
+  }
+
   .composer {
     flex: none;
     display: flex;
-    align-items: flex-end;
+    flex-direction: column;
     gap: var(--space-2);
     padding: var(--space-3) var(--space-5) var(--space-4);
     border-top: 1px solid var(--hairline);
+  }
+
+  .line {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
+  }
+
+  /* What is waiting to go with the next question. */
+  .waiting {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 3px var(--space-1) 3px var(--space-2);
+    border-radius: var(--radius-pill);
+    background: var(--fill-1);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    font-size: var(--text-meta);
+  }
+
+  /* The picture itself, so what is attached is recognisable rather than named. */
+  .thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+  }
+
+  .chip-name {
+    color: var(--text-1);
+    max-width: 24ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chip-size {
+    color: var(--text-3);
+    font-size: var(--text-micro);
+  }
+
+  .chip-drop {
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--text-body);
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .chip-drop:hover {
+    background: var(--fill-2);
+    color: var(--text-1);
+  }
+
+  .attach {
+    flex: none;
+    height: 38px;
+    width: 38px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--fill-1);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    color: var(--text-2);
+    cursor: pointer;
+    transition: color 0.15s var(--ease), background-color 0.15s var(--ease);
+  }
+
+  .attach:hover {
+    background: var(--fill-2);
+    color: var(--text-1);
+  }
+
+  /*
+   * Stopping keeps what has arrived, so it is a plain control rather than a
+   * destructive one. Painting it red would make it the button nobody dares
+   * press, which is the opposite of what it is for.
+   */
+  .stop {
+    flex: none;
+    height: 38px;
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--fill-2);
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--text-meta);
+    cursor: pointer;
+  }
+
+  .stop:hover {
+    background: var(--hairline-strong);
+  }
+
+  /* What was handed over with a question, drawn inside its bubble. */
+  .carried {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+  }
+
+  .carried:last-child {
+    margin-bottom: 0;
+  }
+
+  .shot {
+    max-width: 220px;
+    max-height: 160px;
+    border-radius: var(--radius-md);
+    display: block;
+  }
+
+  .paper {
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--fill-2);
+    color: var(--text-1);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+  }
+
+  /*
+   * Copy and ask again, quiet until the answer is hovered.
+   *
+   * They are about the answer rather than part of it, and a row of controls
+   * under every reply is a conversation with furniture in it.
+   */
+  .afters {
+    display: flex;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+    opacity: 0;
+    transition: opacity 0.15s var(--ease);
+  }
+
+  .said:hover .afters,
+  .afters:focus-within {
+    opacity: 1;
+  }
+
+  .afters button {
+    padding: 2px var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-3);
+    font: inherit;
+    font-size: var(--text-micro);
+    cursor: pointer;
+    transition: color 0.15s var(--ease), background-color 0.15s var(--ease);
+  }
+
+  .afters button:hover:not(:disabled) {
+    background: var(--fill-2);
+    color: var(--text-1);
+  }
+
+  .afters button:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   textarea {

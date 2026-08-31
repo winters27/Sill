@@ -5,6 +5,7 @@ use tauri::{AppHandle, State};
 use tauri::Manager;
 
 use crate::ai::chat::{Chat, Summary, Turn};
+use crate::ai::openai::Attached;
 use crate::ai::provider::{self, Provider};
 use crate::state::PrefsState;
 
@@ -128,16 +129,28 @@ pub(crate) async fn ai_ask(
     app: AppHandle,
     prefs: State<'_, PrefsState>,
     question: String,
+    attachments: Option<Vec<Attached>>,
 ) -> Result<String, String> {
     let chosen = who_answers(&prefs).await?;
+    let attachments = attachments.unwrap_or_default();
 
     // Before the request, not after: the conversation is named by its first
-    // question whether or not the answer ever arrives.
+    // question whether or not the answer ever arrives. A question that is only
+    // a picture is named by the picture, because "" is not a name.
+    let naming = if question.trim().is_empty() {
+        attachments
+            .first()
+            .map(|one| one.name.clone())
+            .unwrap_or_default()
+    } else {
+        question.clone()
+    };
+
     let chat = app.state::<Chat>();
-    chat.begin(&question, crate::state::now_seconds());
+    chat.begin(&naming, crate::state::now_seconds());
     chat.save(&crate::state::data_dir(&app));
 
-    let answer = crate::ai::chat::ask(&app, &chosen, &question).await;
+    let answer = crate::ai::chat::ask(&app, &chosen, &question, attachments).await;
     app.state::<Chat>().save(&crate::state::data_dir(&app));
     answer
 }
@@ -148,12 +161,54 @@ pub(crate) async fn ai_follow_up(
     app: AppHandle,
     prefs: State<'_, PrefsState>,
     question: String,
+    attachments: Option<Vec<Attached>>,
 ) -> Result<String, String> {
     let chosen = who_answers(&prefs).await?;
 
-    let answer = crate::ai::chat::ask(&app, &chosen, &question).await;
+    let answer = crate::ai::chat::ask(
+        &app,
+        &chosen,
+        &question,
+        attachments.unwrap_or_default(),
+    )
+    .await;
     app.state::<Chat>().save(&crate::state::data_dir(&app));
     answer
+}
+
+/// How big anything handed over may be.
+///
+/// Asked for rather than repeated, because a picture pasted from the clipboard
+/// never touches the disk and so cannot be measured by the reader that knows
+/// these numbers.
+#[tauri::command]
+pub(crate) fn ai_limits() -> crate::ai::files::Limits {
+    crate::ai::files::limits()
+}
+
+/// Stops whatever is being written.
+///
+/// Not a cancel: what has already arrived is kept and becomes the answer.
+/// Somebody who stops a reply has usually read enough of it, and throwing that
+/// away would make the button one nobody dares press.
+#[tauri::command]
+pub(crate) fn ai_stop(
+    halt: State<'_, crate::ai::approval::Halt>,
+    pending: State<'_, crate::ai::approval::Pending>,
+) {
+    halt.stop();
+    // A card still waiting is part of the turn being stopped.
+    pending.refuse_everything();
+}
+
+/// Reads a file into something that can be handed to a model.
+///
+/// One at a time, and each answers for itself. A person choosing five files
+/// where one is a zip should get four attached and one explained, rather than
+/// nothing and a message about the zip.
+#[tauri::command]
+pub(crate) fn ai_attach(path: String) -> Result<Attached, String> {
+    crate::ai::files::read(&path)
 }
 
 /// Opens the window where a conversation has room.

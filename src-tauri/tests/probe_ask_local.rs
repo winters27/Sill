@@ -66,6 +66,8 @@ async fn a_local_model_answers_and_the_answer_arrives_in_pieces() {
         // No tools: this measures the streaming, and a model that decided to
         // look something up would measure something else.
         None,
+        // Never stops. What is being measured is a whole answer arriving.
+        &|| false,
         |text| {
             if first_piece_after.is_none() {
                 first_piece_after = Some(started.elapsed());
@@ -121,7 +123,7 @@ async fn a_model_that_is_not_installed_says_which_one() {
         ..Provider::default()
     };
 
-    let refused = openai::ask(&client, &provider, &[Message::user("hello")], None, |_| {})
+    let refused = openai::ask(&client, &provider, &[Message::user("hello")], None, &|| false, |_| {})
         .await
         .expect_err("a model that is not there cannot answer");
 

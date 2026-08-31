@@ -249,11 +249,24 @@ export function forgetPreviews(): Promise<void> {
   return invoke<void>("forget_previews");
 }
 
+/** Something handed to the model along with a question. */
+export interface AiAttached {
+  name: string;
+  /** `image` or `text`. */
+  kind: string;
+  /** A data URI for a picture; the text itself for a text file. */
+  body: string;
+  /** How big the original was. */
+  bytes: number;
+}
+
 /** One thing said, in a conversation with a model. */
 export interface AiTurn {
   /** "user" or "assistant". */
   role: string;
   text: string;
+  /** What was handed over with it, so a reopened conversation still shows it. */
+  attachments: AiAttached[];
 }
 
 /** Whether asking would work, and who would answer. */
@@ -299,8 +312,44 @@ export function aiReady(): Promise<AiReady> {
  * Resolves with the whole answer as well, so a caller that only wants the text
  * does not have to reassemble it from the events.
  */
-export function aiAsk(question: string): Promise<string> {
-  return invoke<string>("ai_ask", { question });
+export function aiAsk(question: string, attachments: AiAttached[] = []): Promise<string> {
+  return invoke<string>("ai_ask", { question, attachments });
+}
+
+/**
+ * Reads a file into something that can be handed to a model.
+ *
+ * One at a time, and each answers for itself: choosing five files where one is
+ * an archive should attach four and explain one, rather than attaching nothing.
+ */
+export function aiAttach(path: string): Promise<AiAttached> {
+  return invoke<AiAttached>("ai_attach", { path });
+}
+
+/**
+ * Stops whatever is being written.
+ *
+ * Not a cancel. What has already arrived is kept and becomes the answer,
+ * because somebody who stops a reply has usually read enough of it.
+ */
+export function aiStop(): Promise<void> {
+  return invoke<void>("ai_stop");
+}
+
+/** How big anything handed over may be. */
+export interface AiLimits {
+  image: number;
+  text: number;
+}
+
+/**
+ * The ceilings, asked for rather than repeated.
+ *
+ * A picture pasted from the clipboard never touches the disk, so it cannot go
+ * through the reader that knows these numbers. Asking keeps one definition.
+ */
+export function aiLimits(): Promise<AiLimits> {
+  return invoke<AiLimits>("ai_limits");
 }
 
 /**
@@ -310,8 +359,11 @@ export function aiAsk(question: string): Promise<string> {
  * before, forever, is the behaviour these two replace, and a boolean argument
  * is a thing a call site can get wrong. Two names cannot be.
  */
-export function aiFollowUp(question: string): Promise<string> {
-  return invoke<string>("ai_follow_up", { question });
+export function aiFollowUp(
+  question: string,
+  attachments: AiAttached[] = [],
+): Promise<string> {
+  return invoke<string>("ai_follow_up", { question, attachments });
 }
 
 /**

@@ -31,12 +31,42 @@ pub struct Called {
     pub arguments: String,
 }
 
+/// Something handed to the model along with a question.
+///
+/// Two kinds, because the services take exactly two. A picture goes as its own
+/// content part and only a model that can see gets anything from it; a text
+/// file has no content type of its own anywhere, so it is folded into the
+/// words with its name above it, which is what every chat window does and what
+/// a model reads correctly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attached {
+    pub name: String,
+    /// `image` or `text`.
+    pub kind: String,
+    /// A data URI for a picture; the text itself for a text file.
+    pub body: String,
+    /// How big the original was, for the chip that names it.
+    pub bytes: usize,
+}
+
+impl Attached {
+    pub fn is_image(&self) -> bool {
+        self.kind == "image"
+    }
+}
+
 /// Who said what.
 ///
 /// Four roles rather than three now. `assistant` carries the calls it wants
 /// made, and `tool` carries one result labelled with the call it answers. Both
 /// extra fields are skipped when empty, because a service given
 /// `"tool_calls": null` on every ordinary message rejects the request.
+///
+/// This is the shape Sill stores, not the shape a service receives. The two
+/// differ once a picture is involved, and keeping them apart is what lets a
+/// saved conversation stay readable while the wire format follows whatever the
+/// services decided to require. `wire` below is the one place they meet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
     /// `system`, `user`, `assistant` or `tool`.
@@ -47,6 +77,61 @@ pub struct Message {
     /// Which call this answers. Only ever set on a `tool` message.
     #[serde(rename = "tool_call_id", default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Anything handed over with the question.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attached>,
+}
+
+/// One message, in the shape a service receives.
+///
+/// Ordinary messages keep a plain string, because that is what every service
+/// has always taken and several still insist on. Only a message carrying a
+/// picture becomes the array form, and then the text goes in as its own part
+/// beside it.
+pub fn wire(message: &Message) -> serde_json::Value {
+    let mut out = serde_json::json!({ "role": message.role });
+
+    if !message.tool_calls.is_empty() {
+        out["tool_calls"] = serde_json::to_value(&message.tool_calls).unwrap_or_default();
+    }
+
+    if let Some(id) = &message.tool_call_id {
+        out["tool_call_id"] = serde_json::Value::String(id.clone());
+    }
+
+    // A text file has no content type anywhere, so it becomes part of what was
+    // said, named so the model knows where it came from.
+    let mut said = message.content.clone();
+
+    for file in message.attachments.iter().filter(|one| !one.is_image()) {
+        said.push_str(&format!(
+            "\n\n--- {} ---\n{}\n--- end of {} ---",
+            file.name, file.body, file.name
+        ));
+    }
+
+    let pictures: Vec<&Attached> = message
+        .attachments
+        .iter()
+        .filter(|one| one.is_image())
+        .collect();
+
+    if pictures.is_empty() {
+        out["content"] = serde_json::Value::String(said);
+        return out;
+    }
+
+    let mut parts = vec![serde_json::json!({ "type": "text", "text": said })];
+
+    for picture in pictures {
+        parts.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": { "url": picture.body },
+        }));
+    }
+
+    out["content"] = serde_json::Value::Array(parts);
+    out
 }
 
 impl Message {
@@ -56,6 +141,15 @@ impl Message {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            attachments: Vec::new(),
+        }
+    }
+
+    /// A question with something handed over alongside it.
+    pub fn with(content: impl Into<String>, attachments: Vec<Attached>) -> Self {
+        Self {
+            attachments,
+            ..Self::plain("user", content)
         }
     }
 
@@ -82,6 +176,7 @@ impl Message {
             content: content.into(),
             tool_calls: calls,
             tool_call_id: None,
+            attachments: Vec::new(),
         }
     }
 
@@ -92,6 +187,7 @@ impl Message {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_call_id: Some(id.into()),
+            attachments: Vec::new(),
         }
     }
 }
@@ -143,7 +239,7 @@ pub fn endpoint(base_url: &str) -> String {
 pub fn body(provider: &Provider, messages: &[Message], tools: Option<&serde_json::Value>) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": provider.model,
-        "messages": messages,
+        "messages": messages.iter().map(wire).collect::<Vec<_>>(),
         // Tokens as they are produced. A launcher that shows nothing for four
         // seconds and then a paragraph feels broken even when it is not.
         "stream": true,
@@ -301,6 +397,15 @@ pub async fn ask(
     provider: &Provider,
     messages: &[Message],
     tools: Option<&serde_json::Value>,
+    /*
+     * Asked between chunks rather than awaited on, because the answer is
+     * already arriving and what stopping means is stopping reading it.
+     *
+     * `Sync` on purpose. Tauri needs a command's future to be `Send`, and a
+     * plain `&dyn Fn` is neither, so leaving it off makes the whole command
+     * fail to compile with an error that names the await rather than this.
+     */
+    give_up: &(dyn Fn() -> bool + Sync),
     mut on_text: impl FnMut(String),
 ) -> Result<Said, String> {
     use futures_util::StreamExt;
@@ -337,6 +442,16 @@ pub async fn ask(
     let mut calls = Calls::default();
 
     while let Some(chunk) = stream.next().await {
+        // Checked before the chunk is read rather than after, so a stop takes
+        // effect on the next thing to arrive rather than one thing later.
+        if give_up() {
+            return Ok(Said {
+                text: said,
+                calls: Vec::new(),
+                stopped: true,
+            });
+        }
+
         let chunk = chunk.map_err(|err| format!("the answer stopped part way: {err}"))?;
         pending.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -355,6 +470,7 @@ pub async fn ask(
                     return Ok(Said {
                         text: said,
                         calls: calls.finish(),
+                        stopped: false,
                     })
                 }
                 Event::Ignored => {}
@@ -367,6 +483,7 @@ pub async fn ask(
     Ok(Said {
         text: said,
         calls: calls.finish(),
+        stopped: false,
     })
 }
 
@@ -378,6 +495,11 @@ pub async fn ask(
 pub struct Said {
     pub text: String,
     pub calls: Vec<ToolCall>,
+    /// Whether it was told to stop rather than finishing.
+    ///
+    /// Not an error. What arrived is still an answer and is still worth
+    /// keeping: somebody who stops a reply has usually read enough of it.
+    pub stopped: bool,
 }
 
 /// Which models this service has.
@@ -779,6 +901,140 @@ mod tests {
         fn a_wall_of_text_is_cut_rather_than_shown_whole() {
             let said = complaint(502, &"x".repeat(5000));
             assert!(said.len() < 400, "{} characters", said.len());
+        }
+    }
+
+    mod handing_it_something {
+        use super::*;
+
+        fn a_picture(name: &str) -> Attached {
+            Attached {
+                name: name.into(),
+                kind: "image".into(),
+                body: "data:image/png;base64,AAAA".into(),
+                bytes: 3,
+            }
+        }
+
+        fn a_file(name: &str, body: &str) -> Attached {
+            Attached {
+                name: name.into(),
+                kind: "text".into(),
+                body: body.into(),
+                bytes: body.len(),
+            }
+        }
+
+        /// The shape every service has always taken, and several still insist
+        /// on. A plain question must not become an array just because the
+        /// field could hold one.
+        #[test]
+        fn an_ordinary_message_keeps_a_plain_string() {
+            let sent = wire(&Message::user("what is this"));
+            assert_eq!(sent["content"], "what is this");
+            assert!(sent["content"].is_string());
+        }
+
+        #[test]
+        fn a_picture_becomes_its_own_content_part() {
+            let sent = wire(&Message::with("what is this", vec![a_picture("shot.png")]));
+
+            let parts = sent["content"].as_array().expect("an array");
+            assert_eq!(parts.len(), 2);
+            assert_eq!(parts[0]["type"], "text");
+            assert_eq!(parts[0]["text"], "what is this");
+            assert_eq!(parts[1]["type"], "image_url");
+            assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,AAAA");
+        }
+
+        #[test]
+        fn several_pictures_all_go() {
+            let sent = wire(&Message::with(
+                "compare these",
+                vec![a_picture("one.png"), a_picture("two.png")],
+            ));
+
+            assert_eq!(sent["content"].as_array().expect("an array").len(), 3);
+        }
+
+        /*
+         * A text file has no content type anywhere, so it is folded into the
+         * words with its name above it. That is what every chat window does
+         * and what a model reads correctly; sending it as an unknown part type
+         * earns a complaint about the request.
+         */
+        #[test]
+        fn a_text_file_is_folded_into_what_was_said() {
+            let sent = wire(&Message::with("summarise", vec![a_file("notes.md", "the body")]));
+
+            let said = sent["content"].as_str().expect("a string");
+            assert!(said.starts_with("summarise"), "{said}");
+            assert!(said.contains("notes.md"), "the name is missing: {said}");
+            assert!(said.contains("the body"), "the text is missing: {said}");
+        }
+
+        /// One of each. The file goes into the text part, not beside it.
+        #[test]
+        fn a_file_and_a_picture_together() {
+            let sent = wire(&Message::with(
+                "look",
+                vec![a_file("notes.md", "the body"), a_picture("shot.png")],
+            ));
+
+            let parts = sent["content"].as_array().expect("an array");
+            assert_eq!(parts.len(), 2, "the file became its own part");
+            assert!(parts[0]["text"].as_str().unwrap_or_default().contains("the body"));
+            assert_eq!(parts[1]["type"], "image_url");
+        }
+
+        /// The whole turn still has to go back when tools are in play, and
+        /// attaching something must not disturb that.
+        #[test]
+        fn a_turn_asking_for_a_tool_is_unchanged() {
+            let call = ToolCall {
+                id: "call_a".into(),
+                kind: "function".into(),
+                function: Called { name: "system_state".into(), arguments: "{}".into() },
+            };
+
+            let sent = wire(&Message::calling("Let me look.", vec![call]));
+            assert_eq!(sent["role"], "assistant");
+            assert_eq!(sent["content"], "Let me look.");
+            assert_eq!(sent["tool_calls"][0]["id"], "call_a");
+        }
+
+        #[test]
+        fn a_result_still_names_the_call_it_answers() {
+            let sent = wire(&Message::answered("call_a", "{}"));
+            assert_eq!(sent["role"], "tool");
+            assert_eq!(sent["tool_call_id"], "call_a");
+            assert_eq!(sent["content"], "{}");
+        }
+
+        /// Neither extra field may appear on an ordinary message: a service
+        /// given `"tool_calls": null` on every one rejects the request.
+        #[test]
+        fn nothing_extra_rides_along_on_a_plain_message() {
+            let sent = wire(&Message::user("hello"));
+            assert!(sent.get("tool_calls").is_none(), "{sent}");
+            assert!(sent.get("tool_call_id").is_none(), "{sent}");
+            assert!(sent.get("attachments").is_none(), "{sent}");
+        }
+
+        /// What is stored and what is sent are different shapes on purpose.
+        /// A saved conversation keeps the attachment as an attachment so it
+        /// can be drawn again; only the wire folds it into the content.
+        #[test]
+        fn what_is_stored_keeps_the_attachment_whole() {
+            let held = Message::with("look", vec![a_picture("shot.png")]);
+            let saved = serde_json::to_value(&held).expect("stored");
+
+            assert_eq!(saved["content"], "look");
+            assert_eq!(saved["attachments"][0]["name"], "shot.png");
+
+            let read: Message = serde_json::from_value(saved).expect("read back");
+            assert_eq!(read.attachments.len(), 1);
+            assert_eq!(read.content, "look");
         }
     }
 

@@ -145,6 +145,39 @@ impl Pending {
     }
 }
 
+/// Whether the turn in flight has been told to stop.
+///
+/// A counter rather than a flag, and the difference matters: a flag set while
+/// one turn is running and cleared by whoever notices would also stop the next
+/// turn if the timing went badly. A turn remembers the number it started at
+/// and stops when the number is no longer that, which cannot reach past the
+/// turn it was meant for.
+#[derive(Default)]
+pub struct Halt {
+    at: std::sync::atomic::AtomicU64,
+}
+
+impl Halt {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The number to remember, taken as a turn begins.
+    pub fn mark(&self) -> u64 {
+        self.at.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Stops whatever is running.
+    pub fn stop(&self) {
+        self.at.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether the turn that started at this number should give up.
+    pub fn stopped(&self, since: u64) -> bool {
+        self.at.load(std::sync::atomic::Ordering::Relaxed) != since
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,5 +276,43 @@ mod tests {
 
         assert_eq!(answer, Answer::Unanswered);
         assert_ne!(answer, Answer::Allowed);
+    }
+
+    mod stopping {
+        use super::*;
+
+        #[test]
+        fn a_turn_stops_when_it_is_told_to() {
+            let halt = Halt::new();
+            let since = halt.mark();
+
+            assert!(!halt.stopped(since));
+            halt.stop();
+            assert!(halt.stopped(since));
+        }
+
+        /// The reason it counts rather than flags. A stop pressed while one
+        /// turn is running must not reach the next one, and a flag cleared by
+        /// whoever notices first would.
+        #[test]
+        fn stopping_one_turn_does_not_stop_the_next() {
+            let halt = Halt::new();
+
+            let first = halt.mark();
+            halt.stop();
+            assert!(halt.stopped(first));
+
+            let second = halt.mark();
+            assert!(!halt.stopped(second), "the next turn started already stopped");
+        }
+
+        #[test]
+        fn stopping_twice_is_not_a_problem() {
+            let halt = Halt::new();
+            let since = halt.mark();
+            halt.stop();
+            halt.stop();
+            assert!(halt.stopped(since));
+        }
     }
 }
