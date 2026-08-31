@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
-   * TEMPORARY. Deleted with the rest of `src/routes/preview/`.
+   * A development route. Reachable with `npm run dev`, never linked from the
+   * app, and of no use to anyone running Sill rather than working on it.
    *
    * An answer, rendered outside Tauri so the markdown can be judged whole.
    * Waiting for a model to write one of these takes half a minute and produces

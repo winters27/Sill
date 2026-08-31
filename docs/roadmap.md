@@ -34,10 +34,10 @@ A line is done when something checks it. Where that is a test, it is named.
 | P1.8 | Navigation bindings | **Done.** Vim and Emacs presets |
 | P1.9 | Command history | **Done.** Up recalls what was searched |
 | P1.10 | Application and command hotkeys | **Done** |
-| P1.11 | Extension install path | **Not started.** Blocked on a decision, see below |
+| P1.11 | Extension install path | **Decided 2026-08-31: esbuild.** Not built yet |
 | P1.12 | Emoji and symbols | **Done.** In the picker and in ordinary searches |
 | P1.13 | Snippets: collections, rich text, app-specific, forms | **Done, except forms.** Placeholders, import and export, collections, formatting, and limiting one to the programs it belongs in. Multi-field forms need a surface that does not exist yet |
-| P1.14 | Native dictation panel | **Not started, and the reason for it was wrong.** See below |
+| P1.14 | Native dictation panel | **Dropped 2026-08-31.** Its justification, removing a second renderer, was measured false; both windows share one. Reconsider only on a recording-time processor measurement |
 | P1.15 | Disabled means stopped | **Done** |
 
 ## P2, power user
@@ -545,10 +545,10 @@ Four of the P2 items are not really unstarted. They exist, working, in
 There is more beside it: `input.rs` (23 KB), `recorder.rs` (38 KB) and
 `daemon.rs` (42 KB).
 
-**All of it is Brandon's own.** AuraKey and Aura Battlemate are both his, and
-Battlemate is the project AuraKey grew out of, so there is no third party
-anywhere in the lineage and nothing to clear. Code can move into Sill and be
-published under MIT because he holds the copyright on it.
+**All of it shares this project's author.** AuraKey and Aura Battlemate are the
+same author's, and Battlemate is the project AuraKey grew out of, so there is
+no third party anywhere in the lineage and nothing to clear. Code can move into
+Sill and be published under MIT because the copyright is held here.
 
 The only question was ever what to publish rather than what may be used.
 AuraKey went private on 2026-08-29, which settles it: the code is available to
@@ -677,10 +677,9 @@ JavaScript and already vendored; `sucrase` is 1.1 MB with seven dependencies;
 JSX parser with a long tail of silent wrongness. This is an install-size call
 rather than a technical one.
 
-**P1.14, the native dictation panel.** Its justification was that a second
-window costs a second renderer. That was measured and found to be false: both
-windows share one. The item should be re-scoped or dropped rather than built
-for a reason that turned out not to hold.
+Decided 2026-08-31: **esbuild**, and the 10.1 MB per platform is accepted. What
+it transpiles is code arriving from outside, where a parser's long tail of
+silent wrongness produces a broken extension with nothing to report.
 
 **Re-indexing cost.** About a tenth of one core while files are changing in an
 indexed folder, and zero at rest. The real answer is patching the index for the

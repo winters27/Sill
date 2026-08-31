@@ -1,6 +1,6 @@
 //! Reading the words out of a picture.
 //!
-//! Ported from AuraKey's `ocr_watcher.rs`, which is Brandon's own and had
+//! Ported from AuraKey's `ocr_watcher.rs`, which shares this author and had
 //! already solved this. The recognition itself, the pre-multiplied Bgra8
 //! `SoftwareBitmap`, the `IMemoryBufferByteAccess` cast to reach its pixels,
 //! and the upscale for small captures are all its work; what is new here is

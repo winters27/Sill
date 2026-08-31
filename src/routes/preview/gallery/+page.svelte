@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
-   * TEMPORARY. Delete this route before shipping (plan step 9).
+   * A development route. Reachable with `npm run dev`, never linked from the
+   * app, and of no use to anyone running Sill rather than working on it.
    *
    * Every primitive in Sill, rendered side by side on one page, so the design
    * system can be judged as a system rather than by clicking through the app.
@@ -366,7 +367,7 @@
     {/each}
   </div>
 
-  <div class="foot">Temporary preview route. Deleted at plan step 9.</div>
+  <div class="foot">Development route. Not part of the app.</div>
 </div>
 
 <style>

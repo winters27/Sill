@@ -2,9 +2,9 @@
 //!
 //! A port of Neve's `DictationBands` (`app/src/main/java/app/winters/keys/
 //! input/DictationBands.kt`), so this surface and the keyboard's react to
-//! speech the same way. Brandon's own code, carried across deliberately.
+//! speech the same way. Same author, so the lift is clean.
 //!
-//! The point, in his words there: a single loudness number makes every dot
+//! The point, as written there: a single loudness number makes every dot
 //! move together, which reads as a pulsing meter rather than a voice. So the
 //! window is transformed and split into bands, and each dot tracks one part
 //! of the spectrum.

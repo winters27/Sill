@@ -18,3 +18,12 @@ vite.config.ts.timestamp-*
 # Bundled extension host output.
 /host/dist/
 /host/node_modules/
+
+# `tauri icon` regenerates every platform's icon set from `master.png`, Android
+# and iOS trees and a macOS `.icns` included. Sill is a Win32 application and
+# runs on none of them, so those are not kept, and `bundle.icon` in
+# `tauri.conf.json` no longer names the `.icns`. Ignored rather than only
+# deleted, because the next person to regenerate icons would commit them back.
+/src-tauri/icons/android/
+/src-tauri/icons/ios/
+/src-tauri/icons/icon.icns

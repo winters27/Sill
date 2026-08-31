@@ -109,36 +109,38 @@
         }}
         onkeydown={(e) => e.key === "Enter" && choose(index)}
       >
+        <!--
+          Phosphor Icons, regular weight (MIT, phosphoricons.com), vendored as
+          path data rather than taken as a dependency: six paths is 4KB, and a
+          package would pull a build step and a tree-shaking question for
+          drawings that change about never.
+
+          Filled outlines rather than the strokes these replaced, so the box is
+          `fill` and carries no stroke settings. Regular weight because its
+          effective stroke at 14px is 0.88px against the 0.99px this had, where
+          bold would have been half again as heavy as everything around it.
+        -->
         <svg
           class="glyph"
           width="14"
           height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.7"
-          stroke-linecap="round"
-          stroke-linejoin="round"
+          viewBox="0 0 256 256"
+          fill="currentColor"
           aria-hidden="true"
         >
           {#if item.glyph === "gear"}
-            <circle cx="12" cy="12" r="3.2" />
-            <path d="M12 2.6v2.6M12 18.8v2.6M21.4 12h-2.6M5.2 12H2.6M18.6 5.4l-1.8 1.8M7.2 16.8l-1.8 1.8M18.6 18.6l-1.8-1.8M7.2 7.2 5.4 5.4" />
+            <path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Zm-16.1-6.5a73.93,73.93,0,0,1,0,8.68,8,8,0,0,0,1.74,5.48l14.19,17.73a91.57,91.57,0,0,1-6.23,15L187,173.11a8,8,0,0,0-5.1,2.64,74.11,74.11,0,0,1-6.14,6.14,8,8,0,0,0-2.64,5.1l-2.51,22.58a91.32,91.32,0,0,1-15,6.23l-17.74-14.19a8,8,0,0,0-5-1.75h-.48a73.93,73.93,0,0,1-8.68,0,8,8,0,0,0-5.48,1.74L100.45,215.8a91.57,91.57,0,0,1-15-6.23L82.89,187a8,8,0,0,0-2.64-5.1,74.11,74.11,0,0,1-6.14-6.14,8,8,0,0,0-5.1-2.64L46.43,170.6a91.32,91.32,0,0,1-6.23-15l14.19-17.74a8,8,0,0,0,1.74-5.48,73.93,73.93,0,0,1,0-8.68,8,8,0,0,0-1.74-5.48L40.2,100.45a91.57,91.57,0,0,1,6.23-15L69,82.89a8,8,0,0,0,5.1-2.64,74.11,74.11,0,0,1,6.14-6.14A8,8,0,0,0,82.89,69L85.4,46.43a91.32,91.32,0,0,1,15-6.23l17.74,14.19a8,8,0,0,0,5.48,1.74,73.93,73.93,0,0,1,8.68,0,8,8,0,0,0,5.48-1.74L155.55,40.2a91.57,91.57,0,0,1,15,6.23L173.11,69a8,8,0,0,0,2.64,5.1,74.11,74.11,0,0,1,6.14,6.14,8,8,0,0,0,5.1,2.64l22.58,2.51a91.32,91.32,0,0,1,6.23,15l-14.19,17.74A8,8,0,0,0,199.87,123.66Z" />
           {:else if item.glyph === "palette"}
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 3a9 9 0 0 0 0 18 4.5 4.5 0 0 0 0-9 4.5 4.5 0 0 1 0-9Z" />
+            <path d="M200.77,53.89A103.27,103.27,0,0,0,128,24h-1.07A104,104,0,0,0,24,128c0,43,26.58,79.06,69.36,94.17A32,32,0,0,0,136,192a16,16,0,0,1,16-16h46.21a31.81,31.81,0,0,0,31.2-24.88,104.43,104.43,0,0,0,2.59-24A103.28,103.28,0,0,0,200.77,53.89Zm13,93.71A15.89,15.89,0,0,1,198.21,160H152a32,32,0,0,0-32,32,16,16,0,0,1-21.31,15.07C62.49,194.3,40,164,40,128a88,88,0,0,1,87.09-88h.9a88.35,88.35,0,0,1,88,87.25A88.86,88.86,0,0,1,213.81,147.6ZM140,76a12,12,0,1,1-12-12A12,12,0,0,1,140,76ZM96,100A12,12,0,1,1,84,88,12,12,0,0,1,96,100Zm0,56a12,12,0,1,1-12-12A12,12,0,0,1,96,156Zm88-56a12,12,0,1,1-12-12A12,12,0,0,1,184,100Z" />
           {:else if item.glyph === "puzzle"}
-            <path d="M9 4.5a2 2 0 1 1 4 0V6h3.2a.8.8 0 0 1 .8.8V10h1.5a2 2 0 1 1 0 4H17v3.2a.8.8 0 0 1-.8.8H13v-1.5a2 2 0 1 0-4 0V18H5.8a.8.8 0 0 1-.8-.8V6.8a.8.8 0 0 1 .8-.8H9V4.5Z" />
+            <path d="M220.27,158.54a8,8,0,0,0-7.7-.46,20,20,0,1,1,0-36.16A8,8,0,0,0,224,114.69V72a16,16,0,0,0-16-16H171.78a35.36,35.36,0,0,0,.22-4,36.11,36.11,0,0,0-11.36-26.24,36,36,0,0,0-60.55,23.62,36.56,36.56,0,0,0,.14,6.62H64A16,16,0,0,0,48,72v32.22a35.36,35.36,0,0,0-4-.22,36.12,36.12,0,0,0-26.24,11.36,35.7,35.7,0,0,0-9.69,27,36.08,36.08,0,0,0,33.31,33.6,35.68,35.68,0,0,0,6.62-.14V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V165.31A8,8,0,0,0,220.27,158.54ZM208,208H64V165.31a8,8,0,0,0-11.43-7.23,20,20,0,1,1,0-36.16A8,8,0,0,0,64,114.69V72h46.69a8,8,0,0,0,7.23-11.43,20,20,0,1,1,36.16,0A8,8,0,0,0,161.31,72H208v32.23a35.68,35.68,0,0,0-6.62-.14A36,36,0,0,0,204,176a35.36,35.36,0,0,0,4-.22Z" />
           {:else if item.glyph === "refresh"}
-            <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" />
-            <path d="M21 4v4.5h-4.5" />
+            <path d="M224,48V96a8,8,0,0,1-8,8H168a8,8,0,0,1,0-16h28.69L182.06,73.37a79.56,79.56,0,0,0-56.13-23.43h-.45A79.52,79.52,0,0,0,69.59,72.71,8,8,0,0,1,58.41,61.27a96,96,0,0,1,135,.79L208,76.69V48a8,8,0,0,1,16,0ZM186.41,183.29a80,80,0,0,1-112.47-.66L59.31,168H88a8,8,0,0,0,0-16H40a8,8,0,0,0-8,8v48a8,8,0,0,0,16,0V179.31l14.63,14.63A95.43,95.43,0,0,0,130,222.06h.53a95.36,95.36,0,0,0,67.07-27.33,8,8,0,0,0-11.18-11.44Z" />
           {:else if item.glyph === "info"}
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 11v5.5M12 7.8h.01" />
+            <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm16-40a8,8,0,0,1-8,8,16,16,0,0,1-16-16V128a8,8,0,0,1,0-16,16,16,0,0,1,16,16v40A8,8,0,0,1,144,176ZM112,84a12,12,0,1,1,12,12A12,12,0,0,1,112,84Z" />
           {:else}
             <!-- Power: the one glyph nobody has to be taught. -->
-            <path d="M12 3v8.5" />
-            <path d="M7.1 6.4a8 8 0 1 0 9.8 0" />
+            <path d="M120,128V48a8,8,0,0,1,16,0v80a8,8,0,0,1-16,0Zm60.37-78.7a8,8,0,0,0-8.74,13.4C194.74,77.77,208,101.57,208,128a80,80,0,0,1-160,0c0-26.43,13.26-50.23,36.37-65.3a8,8,0,0,0-8.74-13.4C47.9,67.38,32,96.06,32,128a96,96,0,0,0,192,0C224,96.06,208.1,67.38,180.37,49.3Z" />
           {/if}
         </svg>
         <span class="label">{item.label}</span>
@@ -152,16 +154,16 @@
 {/if}
 
 <!--
-  The mark and a chevron, and no label.
+  One caret, and nothing else.
 
-  It carried the word "Sill" briefly, which said nothing: the mark already is
-  Sill's identity. Naming the running extension instead would have duplicated
-  the crumb the search row already shows. A label with no unique job in either
-  state is not a label, so what is left is an identity and an affordance, which
-  is all a menu button in a corner has to be.
+  It carried the word "Sill" briefly, then the mark. Both said the same thing,
+  which is an identity, and identity is not the job of a button in a corner:
+  by the time anybody looks down here the window is unmistakably Sill's. What
+  is left is the affordance on its own, which is all this ever needed to be.
 
-  Still a real button rather than the bare glyph this replaced: it has a
-  target, a hover state and a chevron saying a menu rises out of it.
+  Still a real button rather than a bare glyph: it has a target, a hover state,
+  and a caret that turns over when the menu is open, so it says what pressing
+  it will do next rather than what it did last.
 
   `tabindex="-1"` with mousedown prevented, because the search field must keep
   document focus. A plain button takes it on click and the arrow keys then stop
@@ -181,9 +183,8 @@
     selected = 0;
   }}
 >
-  <img src="/sill.png" alt="" width="18" height="18" draggable="false" />
-  <svg class="chevron" width="9" height="9" viewBox="0 0 12 12" aria-hidden="true">
-    <path d="M2.5 7.5 6 4l3.5 3.5" stroke="currentColor" stroke-width="1.6"
+  <svg class="caret" width="14" height="14" viewBox="0 0 12 12" aria-hidden="true">
+    <path d="M2.5 7.5 6 4l3.5 3.5" stroke="currentColor" stroke-width="1.7"
       stroke-linecap="round" stroke-linejoin="round" fill="none" />
   </svg>
 </button>
@@ -205,16 +206,24 @@
     transition: background-color 0.16s var(--ease), color 0.16s var(--ease);
   }
 
-  .trigger img {
+  /*
+   * Points up because the menu rises, and turns over when it is open so the
+   * button says what pressing it will do next rather than what it did last.
+   *
+   * The whole trigger now, rather than a mark with a chevron beside it. A logo
+   * is an identity, and identity is not what a corner button is for: the
+   * window is already unmistakably Sill's by the time anybody looks down here.
+   */
+  .caret {
     flex: none;
-    -webkit-user-drag: none;
+    color: var(--text-3);
+    transition:
+      color 0.16s var(--ease),
+      transform var(--motion-enter) var(--ease);
   }
 
-  /* Points up, because the menu rises. */
-  .chevron {
-    flex: none;
-    color: var(--text-4);
-    transition: color 0.16s var(--ease);
+  .trigger.open .caret {
+    transform: rotate(180deg);
   }
 
   .trigger:hover,
@@ -223,9 +232,9 @@
     color: var(--text-1);
   }
 
-  .trigger:hover .chevron,
-  .trigger.open .chevron {
-    color: var(--text-2);
+  .trigger:hover .caret,
+  .trigger.open .caret {
+    color: var(--text-1);
   }
 
   .scrim {

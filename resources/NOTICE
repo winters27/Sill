@@ -8,3 +8,35 @@ Licensed under the MIT License.
 
 Windows settings pages are not files, so no filesystem or registry scan can
 find them. They exist only as a catalog, and this is Microsoft's own.
+
+--------------------------------------------------------------------------
+
+Satoshi-Variable.woff2
+
+Satoshi, by Indian Type Foundry. Obtained from Fontshare
+(https://www.fontshare.com/fonts/satoshi).
+
+Not covered by this project's MIT licence. The typeface remains the property
+of its foundry and is used under the Fontshare licence, which permits personal
+and commercial use on its own terms. Anyone redistributing or forking this
+repository is responsible for reading those terms rather than assuming the
+MIT grant reaches the font file.
+
+It is bundled rather than fetched so the interface looks the same on a machine
+that has never seen it, and so nothing is requested from a font host at
+runtime.
+
+--------------------------------------------------------------------------
+
+Menu glyphs in src/lib/components/LauncherMenu.svelte and
+src/routes/traymenu/+page.svelte
+
+Phosphor Icons, regular weight (https://phosphoricons.com).
+
+Copyright (c) 2023 Phosphor Icons.
+Licensed under the MIT License.
+
+Vendored as path data rather than taken as a dependency: a handful of paths is
+a few kilobytes, and a package would pull a build step and a tree-shaking
+question for drawings that change about never. Vendoring does not shorten the
+licence, so the notice lives here.

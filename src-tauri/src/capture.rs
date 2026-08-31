@@ -1,6 +1,6 @@
 //! Taking a picture of the screen.
 //!
-//! Ported from AuraKey's `ocr_watcher.rs`, which is Brandon's own: the BitBlt
+//! Ported from AuraKey's `ocr_watcher.rs`, which shares this author: the BitBlt
 //! into a memory device context and the `GetDIBits` read-back with a negative
 //! height are its work. What is added here is saying when it failed, cleaning
 //! up on every path out of it, and knowing where the screen actually is when

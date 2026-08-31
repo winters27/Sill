@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
-   * TEMPORARY. Deleted with the rest of `src/routes/preview/` (plan step 9).
+   * A development route. Reachable with `npm run dev`, never linked from the
+   * app, and of no use to anyone running Sill rather than working on it.
    *
    * The Ask AI panel, rendered outside Tauri so its layout can be measured.
    * It talks to Rust for the known-provider list and for models, so both are
