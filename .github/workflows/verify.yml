@@ -56,8 +56,12 @@ jobs:
       # able to answer that. The cost is that an upstream change can turn this
       # red; pinning is one line here if it ever does.
       #
-      # No npm install in either: `build-extension.mjs` reads the source and
-      # the manifest, and needs none of their dependencies. Verified.
+      # Their dependencies are installed, and that is not optional. The gate
+      # bundles four commands and one of them, uuid-generator's generateV7,
+      # imports uuid, typeid-js and ulidx. esbuild bundles what it is pointed
+      # at, so an unresolved import is a build failure rather than a warning.
+      # viewHistory builds without them, which is what made it look as though
+      # none of them were needed.
       - name: Fetch the real extensions gate:views builds against
         shell: bash
         run: |
@@ -65,6 +69,9 @@ jobs:
             https://github.com/raycast/extensions.git extensions/raycast-src
           git -C extensions/raycast-src sparse-checkout set \
             extensions/uuid-generator extensions/password-generator
+          for extension in uuid-generator password-generator; do
+            npm --prefix "extensions/raycast-src/extensions/$extension" ci
+          done
 
       # bash because gate:views is a shell script; it is git-bash on this image.
       - run: npm run verify
