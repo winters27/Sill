@@ -58,7 +58,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.12 | Workspace profiles | Not started |
 | P2.13 | Live command results | Not started |
 | P2.14 | Migration import | **Done.** Snippets and quicklinks both read a file written by other tools, and both write one another tool has a chance of reading. Importing only ever adds |
-| P2.15 | Dictation retention policy | **Done.** Days a transcript is kept, the same shape the clipboard uses. Zero keeps everything, and it is the default here on purpose |
+| P2.15 | Dictation retention policy | **Done.** Days a transcript is kept, set beside "Keep a history" in Dictation settings. Zero keeps everything, and it is the default here on purpose |
 
 ## Built since the audit, and not on it
 

@@ -48,6 +48,8 @@ export interface DictationSettings {
   customInstructions: string;
   appContext: boolean;
   keepHistory: boolean;
+  /** Days a transcript is kept. Zero keeps everything, which is the default. */
+  retainDays: number;
 }
 
 /** One finished dictation. */

@@ -673,3 +673,36 @@ mod a_program_has_more_than_one_volume_action {
         }
     }
 }
+
+/// Reading aloud is reachable without anybody having written frontend code.
+///
+/// The claim the action registry exists to make is that an action written in
+/// Rust turns up wherever its kind is offered, with no second list to update.
+/// That is worth asserting rather than repeating: the settings panel asks for
+/// `text` actions to offer as bindable keys, and the clipboard view asks for
+/// `clipboard` ones to draw in its panel, so an action accepting both is
+/// reachable in two places the moment it is registered.
+///
+/// Both spellings are checked through `ObjectKind::from_mode`, because that is
+/// the translation the window actually goes through: it sends the mode string,
+/// not the kind.
+#[test]
+fn reading_aloud_reaches_both_places_that_ask_for_text_actions() {
+    let registry = sill_lib::actions::builtins();
+
+    for mode in ["text", "clipboard"] {
+        let kind = sill_lib::object::ObjectKind::from_mode(mode)
+            .unwrap_or_else(|| panic!("{mode} is a mode the window sends"));
+
+        let offered: Vec<&str> = registry.describe(kind).into_iter().map(|a| a.id).collect();
+
+        assert!(
+            offered.contains(&"text.readAloud"),
+            "nothing offers Read Aloud for {mode}, so no key can be bound to it: {offered:?}"
+        );
+        assert!(
+            offered.contains(&"text.stopReading"),
+            "Stop Reading is unreachable for {mode}, which leaves no way to stop it: {offered:?}"
+        );
+    }
+}

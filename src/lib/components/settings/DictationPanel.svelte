@@ -40,6 +40,17 @@
 
   let { prefs, commit }: Props = $props();
 
+  /** Longer than the clipboard's, because this is a record of your own use
+   *  rather than a pile of one-time codes, and a year of it is worth reading
+   *  back. "Forever" is the default. */
+  const RETENTION = [
+    { value: "7", label: "1 week" },
+    { value: "30", label: "1 month" },
+    { value: "90", label: "3 months" },
+    { value: "365", label: "1 year" },
+    { value: "0", label: "Forever" },
+  ];
+
   let devices = $state<AudioInputDevice[]>([]);
   let models = $state<WhisperModel[]>([]);
   let status = $state<LocalSetupStatus | null>(null);
@@ -456,6 +467,24 @@
       <Toggle bind:checked={prefs.dictation.keepHistory} onchange={commit} label="Keep a history" />
     {/snippet}
   </Row>
+
+  {#if prefs.dictation.keepHistory}
+    <Row
+      title="Keep transcripts for"
+      description="Anything older is dropped the next time you dictate. Kept forever unless you say otherwise, because nothing lands here that you did not speak into it, and the statistics above read less well the more of it is thrown away."
+    >
+      {#snippet control()}
+        <Segmented
+          value={String(prefs.dictation.retainDays)}
+          options={RETENTION}
+          onchange={(next) => {
+            prefs.dictation.retainDays = Number(next);
+            commit();
+          }}
+        />
+      {/snippet}
+    </Row>
+  {/if}
 </Section>
 
 <Section
