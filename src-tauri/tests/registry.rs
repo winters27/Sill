@@ -2255,6 +2255,185 @@ fn initials_only_count_where_words_actually_begin() {
     assert_ne!(class, MatchClass::TitleWordStarts, "read as initials");
 }
 
+// --------------------------------------------------- reaching a switch first
+
+/// A switch is the thing that acts, so it wins a tie against a page about it.
+///
+/// Every one of these lost before, and each for its own reason: the hyphen in
+/// "Wi-Fi", a tie broken by title length, and a phrase whose words sit in
+/// different fields. Kept together because the answer somebody wants is the
+/// same in all three, whatever it took to get there.
+mod a_switch_is_reached_first {
+    use super::*;
+
+    /// A switch, built the way `builtins` builds one.
+    ///
+    /// A fixture rather than `registry::builtins()`, and the first version of
+    /// this used the real thing and was flaky for two reasons at once: the
+    /// corpus reads live hardware, so a machine with no Wi-Fi has no Wi-Fi
+    /// switch to rank, and the title of a radio switch **names the state**, so
+    /// "Turn Wi-Fi Off" becomes "Turn Wi-Fi On" the moment somebody turns it
+    /// off. Both make the test say the ranking broke when nothing did.
+    ///
+    /// The titles and keywords here are copied from `registry::system_switch`
+    /// rather than invented, so what is ranked is what ships.
+    fn switch(id: &str, title: &str, keywords: &[&str]) -> CommandRecord {
+        let mut row = command(id, title, "System Controls");
+        row.mode = "system".to_string();
+        row.keywords = keywords.iter().map(|k| k.to_string()).collect();
+        row
+    }
+
+    /// The real switches against the real settings pages they compete with.
+    fn corpus() -> Vec<CommandRecord> {
+        let mut rows = vec![
+            switch(
+                "sill:system.radio:wifi",
+                "Turn Wi-Fi Off",
+                &["wifi", "wi-fi", "wireless", "wlan", "internet", "network"],
+            ),
+            switch(
+                "sill:system.radio:bluetooth",
+                "Turn Bluetooth Off",
+                &["bluetooth", "bt", "wireless", "pair", "headphones"],
+            ),
+            switch(
+                "sill:system.audio.output:speakers",
+                "Speakers",
+                &["audio", "sound", "output", "speakers", "headphones", "device"],
+            ),
+        ];
+
+        // Titles taken from the Windows settings index, not invented: these
+        // are the rows that actually outranked the switches.
+        for (id, title) in [
+            ("setting:wifi", "Wi Fi"),
+            ("setting:wifi-calling", "Wi Fi Calling"),
+            ("setting:bluetooth", "Bluetooth Devices"),
+            ("setting:bluetooth-devices", "Bluetooth And Devices"),
+            ("setting:sound", "Sound"),
+        ] {
+            let mut row = command(id, title, "Windows Settings");
+            row.mode = "setting".to_string();
+            rows.push(row);
+        }
+
+        // The PATH executable that took first place for "wifi".
+        let mut exe = command("exe:wifitask", "wifitask", "Command Line");
+        exe.mode = "exe".to_string();
+        rows.push(exe);
+
+        rows
+    }
+
+    fn first(query: &str) -> String {
+        search(&corpus(), query, &Frecency::default(), NOW, 20)
+            .first()
+            .map(|hit| hit.command.title.clone())
+            .unwrap_or_else(|| format!("nothing matched {query:?}"))
+    }
+
+    /// The mark in the middle of a word is not a wall, in either direction.
+    ///
+    /// Asked of the matcher rather than of a ranking, because that is where
+    /// the change is. "wifi" against "Turn Wi-Fi Off" was a scattered
+    /// subsequence, which is the weakest class there is above a typo, so two
+    /// settings pages and a PATH executable came first.
+    #[test]
+    fn the_hyphen_in_wi_fi_is_not_a_wall() {
+        for (typed, title) in [
+            ("wifi", "Turn Wi-Fi Off"),
+            ("wi-fi", "Turn WiFi Off"),
+            ("nodejs", "Node.js"),
+            ("dont", "Don't Ask Again"),
+        ] {
+            let word: Vec<char> = typed.chars().collect();
+            let class = registry::match_name(&word, title).map(|(class, _)| class);
+
+            assert!(
+                matches!(
+                    class,
+                    Some(registry::MatchClass::ExactTitle | registry::MatchClass::TitleWord)
+                ),
+                "{typed:?} against {title:?} is {class:?}, not a name",
+            );
+        }
+    }
+
+    /// And the highlight skips the mark rather than running through it.
+    #[test]
+    fn the_mark_is_not_underlined_as_though_it_were_typed() {
+        let word: Vec<char> = "wifi".chars().collect();
+        let (_, matched) = registry::match_name(&word, "Turn Wi-Fi Off").expect("a match");
+
+        // T u r n _ W i - F i _ O f f
+        // 0 1 2 3 4 5 6 7 8 9
+        assert_eq!(matched, vec![5, 6, 8, 9], "the hyphen at 7 is not a match");
+    }
+
+    #[test]
+    fn the_switch_is_first_for_the_name_of_the_thing_it_switches() {
+        assert_eq!(first("wifi"), "Turn Wi-Fi Off");
+        assert_eq!(first("wi-fi"), "Turn Wi-Fi Off");
+    }
+
+    #[test]
+    fn a_switch_beats_a_settings_page_that_matches_as_well() {
+        // Both are word matches, so the shorter title won and "Bluetooth
+        // Devices" came first. One of them opens a window where the thing can
+        // be done; the other does it.
+        assert_eq!(first("bluetooth"), "Turn Bluetooth Off");
+    }
+
+    #[test]
+    fn a_phrase_reaches_a_switch_whose_words_are_spread_across_its_fields() {
+        // "audio" and "output" are both keywords of the audio switches and
+        // neither is in a title, so nothing matched at all: the row was not
+        // ranked badly, it was absent.
+        assert_eq!(first("audio output"), "Speakers");
+    }
+
+    /// One visit is not a preference, and this is where a bonus was too small.
+    ///
+    /// The first attempt added a dozen points, which read as enough. It was
+    /// not: recency dominates the frecency curve, so a page opened **once,
+    /// earlier today** scores 77 and buried the switch in the running app
+    /// while every test passed. Hence a floor rather than a bonus.
+    #[test]
+    fn a_page_visited_once_today_does_not_bury_the_switch() {
+        let mut frecency = Frecency::default();
+        frecency.record("setting:bluetooth", NOW - 5 * HOUR);
+
+        let found = search(&corpus(), "bluetooth", &frecency, NOW, 20);
+        assert_eq!(found[0].command.title, "Turn Bluetooth Off");
+    }
+
+    /// The floor is a starting point. It does not overrule what somebody uses.
+    #[test]
+    fn a_page_someone_opens_every_day_still_wins() {
+        let mut frecency = Frecency::default();
+        for _ in 0..5 {
+            frecency.record("setting:bluetooth", NOW - HOUR);
+        }
+
+        let found = search(&corpus(), "bluetooth", &frecency, NOW, 20);
+        assert_eq!(found[0].command.title, "Bluetooth Devices");
+    }
+
+    /// The root list is ordered by what you reach for, not by what is a switch.
+    #[test]
+    fn an_empty_query_is_not_reshuffled_by_the_floor() {
+        let mut frecency = Frecency::default();
+        frecency.record("setting:sound", NOW - HOUR);
+
+        let found = search(&corpus(), "", &frecency, NOW, 20);
+        assert_eq!(
+            found[0].command.title, "Sound",
+            "a switch climbed a list that nobody typed into",
+        );
+    }
+}
+
 // ----------------------------------------------------------- system switches
 
 #[test]
@@ -2405,7 +2584,15 @@ mod text_recognition_is_findable {
 
     #[test]
     fn the_words_somebody_would_actually_type_find_it() {
-        for query in ["ocr", "read", "text", "scan", "picture", "screenshot", "extract text"] {
+        // "read text" is here because it used to be impossible. A query of
+        // more than one word only matched when those words sat together in one
+        // field, and "read" is a keyword while "text" is in the title, so
+        // nothing put them together. A phrase now matches when every word of
+        // it lands somewhere on the row.
+        for query in [
+            "ocr", "read", "text", "scan", "picture", "screenshot",
+            "extract text", "read text",
+        ] {
             let titles = found(query);
             assert!(
                 titles.iter().any(|t| t == "Extract Text from Image"),
@@ -2414,24 +2601,16 @@ mod text_recognition_is_findable {
         }
     }
 
-    /// A limitation this found, written down rather than worked around.
+    /// A phrase still has to be about this row, not merely overlap it.
     ///
-    /// A query of more than one word only matches when those words sit
-    /// together in one field. "extract text" finds this because both words are
-    /// in the title; "read text" does not, because "read" is a keyword and
-    /// "text" is in the title and nothing puts them together.
-    ///
-    /// Single words are covered well, which is what most people type, so this
-    /// is recorded rather than patched with a keyword for every phrase
-    /// somebody might think of. If it is fixed, this test says so by failing.
+    /// Every word landing somewhere is the rule, and each word has to be a
+    /// whole word of the title or a keyword of its own. Without that strictness
+    /// a phrase would find something for almost anything typed, which is worse
+    /// than finding nothing.
     #[test]
-    fn words_split_across_a_title_and_a_keyword_do_not_match_together() {
-        let titles = found("read text");
-
-        assert!(
-            titles.is_empty(),
-            "multi-word matching across fields now works, which is an improvement:              fold this into the test above and delete this one. Found {titles:?}",
-        );
+    fn a_phrase_with_a_word_that_lands_nowhere_does_not_match() {
+        assert!(found("read banana").is_empty());
+        assert!(found("extract sandwich").is_empty());
     }
 }
 

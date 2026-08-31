@@ -637,8 +637,11 @@ fn system_commands() -> Vec<CommandRecord> {
              * exact keyword on both, and an exact keyword outranks the
              * subsequence match that "wifi" makes against "Turn Wi-Fi Off".
              *
-             * The hyphen is why that title does not match on its own, and why
-             * the unhyphenated spelling has to be here.
+             * The unhyphenated spelling was here because the hyphen used to
+             * make "wifi" a scattered subsequence against "Turn Wi-Fi Off".
+             * The matcher now reads through a mark that joins one word, so the
+             * title matches on its own; the keyword is kept because it costs a
+             * string and still answers for the other spellings.
              */
             &if radio.kind == "wifi" {
                 ["wifi", "wi-fi", "wireless", "wlan", "internet", "network", "radio", "system"]
@@ -1308,6 +1311,32 @@ fn begins_a_word(hay: &[char], at: usize) -> bool {
 }
 
 /// Where `needle` appears unbroken in `hay`, in character positions.
+/// The same characters with the marks that join one word taken out.
+///
+/// "Wi-Fi", "Node.js" and "don't" are each one word to the person typing them,
+/// and the mark in the middle is the only reason a plain comparison fails.
+/// Every kept character remembers where it came from, so a run found in the
+/// joined form can still be highlighted in the text it was found in.
+///
+/// Spaces are **not** in this set. Removing them would make every pair of
+/// words in a title one word, which is a much larger change to what counts as
+/// a name and not one this is trying to make.
+fn join_words(text: &[char]) -> (Vec<char>, Vec<usize>) {
+    let mut kept = Vec::with_capacity(text.len());
+    let mut from = Vec::with_capacity(text.len());
+
+    for (at, c) in text.iter().enumerate() {
+        if matches!(c, '-' | '.' | '\'' | '\u{2019}') {
+            continue;
+        }
+
+        kept.push(*c);
+        from.push(at);
+    }
+
+    (kept, from)
+}
+
 fn find_run(hay: &[char], needle: &[char]) -> Option<usize> {
     if needle.is_empty() || needle.len() > hay.len() {
         return None;
@@ -1401,6 +1430,39 @@ pub fn match_name(needle: &[char], text: &str) -> Option<(MatchClass, Vec<usize>
                 ));
             }
         }
+
+        /*
+         * The same again, with the marks that split one word taken out.
+         *
+         * "Wi-Fi" is the word people type as "wifi" and the hyphen is the only
+         * thing between them, so `Turn Wi-Fi Off` matched only as a scattered
+         * subsequence and lost to every settings page with the word in it.
+         * Both sides are joined, so it works in either direction: typing
+         * "e-mail" finds "Email" too.
+         *
+         * Second rather than first, so a title that matches outright is never
+         * beaten by one that needed the marks removed.
+         */
+        let (joined_hay, from) = join_words(&hay_lower);
+        let (joined_needle, _) = join_words(needle);
+
+        if joined_hay.len() != hay_lower.len() || joined_needle.len() != needle.len() {
+            if joined_hay == joined_needle {
+                return Some((MatchClass::ExactTitle, from));
+            }
+
+            if let Some(at) = find_run(&joined_hay, &joined_needle) {
+                // Asked of the original, because that is where the words are.
+                if begins_a_word(&hay, from[at]) {
+                    // The indices the run covers in the title it was found in,
+                    // which skip the mark rather than running through it.
+                    return Some((
+                        MatchClass::TitleWord,
+                        from[at..at + joined_needle.len()].to_vec(),
+                    ));
+                }
+            }
+        }
     }
 
     // Asked directly rather than hoped for. `fuzzy_with` takes the first
@@ -1460,6 +1522,40 @@ pub fn match_name(needle: &[char], text: &str) -> Option<(MatchClass, Vec<usize>
     None
 }
 
+/// Whether every word of a phrase lands somewhere on this command.
+///
+/// A match otherwise has to happen inside one field, and `audio output`
+/// reached nothing at all: both words are keywords of the audio switches, and
+/// no single field holds the phrase. The row was not ranked badly, it was not
+/// there.
+///
+/// Strict on purpose. Each word has to be a whole word of the title or a
+/// keyword of its own, never a subsequence, because a phrase matched loosely
+/// would find something for almost anything typed. Two words minimum: a single
+/// word has already been asked about everywhere this could ask.
+fn every_word_lands(needle: &[char], command: &CommandRecord) -> bool {
+    let typed: String = needle.iter().collect();
+    let words: Vec<&str> = typed.split_whitespace().collect();
+
+    if words.len() < 2 {
+        return false;
+    }
+
+    words.iter().all(|word| {
+        let word: Vec<char> = word.chars().collect();
+
+        let in_title = match_name(&word, &command.title).is_some_and(|(class, _)| {
+            matches!(class, MatchClass::ExactTitle | MatchClass::TitleWord)
+        });
+
+        in_title
+            || command
+                .keywords
+                .iter()
+                .any(|keyword| keyword.chars().map(lower_one).eq(word.iter().copied()))
+    })
+}
+
 fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass, Vec<usize>)> {
     if let Some(found) = match_name(needle, &command.title) {
         return Some(found);
@@ -1483,6 +1579,12 @@ fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass
             .iter()
             .any(|k| fuzzy_with(needle, k).is_some())
     {
+        return Some((MatchClass::Elsewhere, Vec::new()));
+    }
+
+    // A phrase whose words are spread across the fields rather than sitting
+    // together in one of them.
+    if every_word_lands(needle, command) {
         return Some((MatchClass::Elsewhere, Vec::new()));
     }
 
@@ -1642,6 +1744,13 @@ pub fn match_class_with_alias(
 /// typing more, and typing more re-runs the search over the whole corpus.
 pub const SEARCH_LIMIT: usize = 120;
 
+/// What a Windows switch is worth before anybody has ever pressed it.
+///
+/// Set just above a page opened **once earlier today**, which scores 77, and
+/// below one opened several times in the last hour. So a switch beats a page
+/// somebody happened to visit, and loses to one they actually rely on.
+const SWITCH_FLOOR: i64 = 80;
+
 /// Ranks commands for a query.
 ///
 /// An empty query is the root list, ordered purely by frecency, which is what
@@ -1745,6 +1854,34 @@ pub fn search_excluding<'a>(
         // A penalty rather than exclusion: they are still reachable by name.
         if command.mode == "exe" {
             weight -= 12;
+        }
+
+        /*
+         * A switch you have never pressed still ranks as a familiar one.
+         *
+         * `bluetooth` put three settings pages above "Turn Bluetooth Off". One
+         * of them opens a window where the thing can be done and the other
+         * does it, and somebody who typed the name of a switch asked for the
+         * switch.
+         *
+         * A floor rather than a bonus, and the difference is the whole reason
+         * this works. A bonus of a dozen points was swamped: a settings page
+         * opened **once, earlier today** scores 77, because recency dominates
+         * the frecency curve. The floor says a switch is never ranked as
+         * though it were unknown, which is the honest claim: these are twelve
+         * things Sill ships, not one of fifteen hundred scanned entries it
+         * knows nothing about.
+         *
+         * `max`, so a switch that really is used keeps its own larger score,
+         * and a page somebody opens *repeatedly* still wins. That is a
+         * preference worth honouring; one visit is not.
+         *
+         * Not applied to the empty query, where every row matches and this
+         * would push twelve switches to the top of a list that is supposed to
+         * be ordered by what you reach for.
+         */
+        if !query.is_empty() && command.mode == "system" {
+            weight = weight.max(SWITCH_FLOOR);
         }
 
         scored.push((class, weight, command, matched));
