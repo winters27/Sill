@@ -82,11 +82,25 @@ fn rank(corpus: &[CommandRecord], query: &str) -> u128 {
 /// index: every title is built from the same sixteen words, so a query matches
 /// nearly everything and the ranker does the most work it can. A real index of
 /// the same size answers in a fraction of this.
-const fn per_keystroke_us() -> u128 {
-    if cfg!(debug_assertions) {
+///
+/// Both numbers were measured on a development machine with sixteen cores and
+/// nothing else running. A shared build agent is neither: the same corpus took
+/// 91 ms there against the 60 ms debug budget, on four cores it does not have
+/// to itself. So the budget is multiplied where the machine is unknown, and
+/// what it catches there is a change in *kind*, which is what this budget is
+/// for. Something that grew a clone per candidate goes to seconds and still
+/// fails. `CI` is set by GitHub Actions for exactly this purpose.
+fn per_keystroke_us() -> u128 {
+    let measured_here = if cfg!(debug_assertions) {
         60_000
     } else {
         20_000
+    };
+
+    if std::env::var_os("CI").is_some() {
+        measured_here * 5
+    } else {
+        measured_here
     }
 }
 
