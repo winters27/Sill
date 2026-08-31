@@ -22,7 +22,7 @@
  *
  * Run: node scripts/fetch-fonts.mjs [--force]
  */
-import { existsSync, mkdirSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
@@ -54,7 +54,36 @@ function isWoff2(bytes) {
 
 const force = process.argv.includes("--force");
 
+/**
+ * Whether a missing font is fatal.
+ *
+ * `postinstall` runs without it, because somebody installing on a train should
+ * still get a working checkout, and `npm run dev` draws perfectly well in
+ * Segoe meanwhile. A build is the opposite case. `beforeBuildCommand` routes
+ * every packaged binary through `npm run build`, and nobody who downloads one
+ * of those is ever going to run this script, so the face has to be in the
+ * bundle by then or it is never coming.
+ *
+ * Nothing downstream would say so either. Vite answers a missing `url()` by
+ * leaving it as written, printing one line about it and exiting 0, so a failed
+ * fetch here reaches a shipped installer that reads in the wrong face with a
+ * green build behind it the whole way.
+ */
+const required = process.argv.includes("--required");
+
 if (existsSync(target) && !force) {
+  /*
+   * Present is not the same as usable. An interrupted write leaves a file that
+   * `existsSync` is satisfied by and a font stack is not, and on the path that
+   * may not ship without it, that has to be caught here rather than by whoever
+   * downloads the result.
+   */
+  if (required && !isWoff2(readFileSync(target))) {
+    console.error(`fail ${target} is not a woff2`);
+    console.error("     Run `npm run fonts -- --force` to fetch it again.");
+    process.exit(1);
+  }
+
   console.log(`ok   Satoshi present (${statSync(target).size} bytes)`);
   process.exit(0);
 }
@@ -80,6 +109,19 @@ try {
   console.log(`ok   Satoshi fetched from Fontshare (${bytes.length} bytes)`);
 } catch (err) {
   console.warn(`warn Satoshi was not fetched: ${err.message}`);
+
+  /*
+   * A build stops here. Everything else carries on, because the face is a
+   * setting and Segoe UI Variable stands behind it in `--font`: a fair answer
+   * for a checkout, and no answer at all for something being handed to
+   * somebody else.
+   */
+  if (required) {
+    console.error("     A build may not ship without it. Fix the network, or");
+    console.error("     run `npm run fonts` before building.");
+    process.exit(1);
+  }
+
   console.warn("     The interface will draw in Segoe UI Variable instead.");
   console.warn("     Run `npm run fonts` once there is a network to fix that.");
 }
