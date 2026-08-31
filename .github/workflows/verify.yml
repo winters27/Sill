@@ -38,6 +38,27 @@ jobs:
       # directory rather than on anything about the code.
       - run: npm run build
 
+      # gate:views draws two real Raycast extensions rather than fixtures, and
+      # they live in a tree that is gitignored here: it is somebody else's
+      # repository and far too big to vendor for two directories. So it is
+      # fetched, and only those two: a sparse blobless clone is 25 MB and four
+      # seconds against many gigabytes for the whole thing.
+      #
+      # Deliberately not pinned to a commit. The gate exists to answer whether
+      # the host still renders real extensions, and a frozen copy stops being
+      # able to answer that. The cost is that an upstream change can turn this
+      # red; pinning is one line here if it ever does.
+      #
+      # No npm install in either: `build-extension.mjs` reads the source and
+      # the manifest, and needs none of their dependencies. Verified.
+      - name: Fetch the real extensions gate:views builds against
+        shell: bash
+        run: |
+          git clone --filter=blob:none --sparse --depth 1 \
+            https://github.com/raycast/extensions.git extensions/raycast-src
+          git -C extensions/raycast-src sparse-checkout set \
+            extensions/uuid-generator extensions/password-generator
+
       # bash because gate:views is a shell script; it is git-bash on this image.
       - run: npm run verify
         shell: bash
