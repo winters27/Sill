@@ -145,6 +145,33 @@ struct Inner {
     /// Set while the replacement is being typed, so the synthetic keystrokes
     /// Sill sends are not read back in as more typing.
     replacing: AtomicBool,
+    /*
+     * The other thing watching the keyboard.
+     *
+     * The hook stopped being only about snippets when double-tapping a
+     * modifier arrived. There is one hook because there should only ever be
+     * one: it is called for every keystroke on the machine, in every
+     * application, and a second one for a second feature would double that
+     * for nothing. Two consumers, one path through it.
+     *
+     * A `Mutex` rather than an `ArcSwap` because this is written on every
+     * keystroke rather than read: it is a modifier and a timestamp, and the
+     * lock is held for the length of a comparison.
+     */
+    taps: Mutex<crate::taps::Taps>,
+    /// What double-tapping does, or nothing when it does nothing.
+    ///
+    /// Read inside the hook, so it is swapped rather than locked, and held as
+    /// one value so the modifier and what it opens cannot be read a moment
+    /// apart and disagree.
+    tap_binding: ArcSwap<Option<TapBinding>>,
+}
+
+/// Which modifier opens what, when it is tapped twice.
+#[derive(Debug, Clone)]
+pub struct TapBinding {
+    pub modifier: crate::taps::Modifier,
+    pub window_ms: u64,
 }
 
 impl Expander {
@@ -154,6 +181,32 @@ impl Expander {
 
     pub fn set_snippets(&self, snippets: Vec<Snippet>) {
         self.inner.snippets.store(Arc::new(snippets));
+    }
+
+    /// What double-tapping a modifier opens, or nothing.
+    pub fn set_tap_binding(&self, binding: Option<TapBinding>) {
+        self.inner.tap_binding.store(Arc::new(binding));
+
+        // What the machine did a moment ago is no guide once the gesture has
+        // changed underneath it.
+        if let Ok(mut taps) = self.inner.taps.lock() {
+            taps.reset();
+        }
+    }
+
+    fn tap_binding(&self) -> arc_swap::Guard<Arc<Option<TapBinding>>> {
+        self.inner.tap_binding.load()
+    }
+
+    /// Whether the hook is worth having installed at all.
+    ///
+    /// **One answer, asked in both places that decide.** Startup and the
+    /// settings window each choose whether to arm it, and a hook armed by one
+    /// rule and stopped by another is a hook that is on when it should be off
+    /// or the reverse. Every drift of this shape in this codebase has cost an
+    /// afternoon.
+    pub fn wanted(&self) -> bool {
+        self.is_enabled() || self.tap_binding().is_some()
     }
 
     pub fn set_enabled(&self, enabled: bool) {
@@ -194,7 +247,8 @@ mod windows_impl {
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, GetMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
-        KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_QUIT, WM_SYSKEYDOWN,
+        KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
+        WM_SYSKEYDOWN, WM_SYSKEYUP,
     };
 
     /// The one expander the hook callback can reach.
@@ -300,32 +354,108 @@ mod windows_impl {
         let Some(expander) = EXPANDER.get() else {
             return next();
         };
-        if !expander.is_enabled() || expander.inner.replacing.load(Ordering::SeqCst) {
+        // Sill typing a replacement is not the user typing, whichever
+        // consumer is looking.
+        if expander.inner.replacing.load(Ordering::SeqCst) {
             return next();
         }
 
         let message = wparam.0 as u32;
-        if message != WM_KEYDOWN && message != WM_SYSKEYDOWN {
+
+        let down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
+        let up = message == WM_KEYUP || message == WM_SYSKEYUP;
+
+        // Releases matter now. Without them a held modifier cannot be told
+        // from one pressed twice, because Windows repeats a held key.
+        if !down && !up {
             return next();
         }
 
         // SAFETY: for `code >= 0` lparam is a KBDLLHOOKSTRUCT.
         let event = unsafe { *(lparam.0 as *const KBDLLHOOKSTRUCT) };
 
-        // Sill's own synthetic keys must never feed the buffer, or the
-        // replacement would be read back as more typing.
-        if event.flags & LLKHF_INJECTED != KBDLLHOOKSTRUCT_FLAGS_NONE {
+        /*
+         * Sill's own synthetic keys must never feed the buffer, or the
+         * replacement would be read back as more typing.
+         *
+         * **Ours specifically, not everything injected.** This tested
+         * `LLKHF_INJECTED`, which means "not typed on a physical keyboard"
+         * and covers a great deal more than us: key remappers, macro keys,
+         * on-screen keyboards, Remote Desktop and every other remote session,
+         * and accessibility tools. Snippet expansion silently did nothing for
+         * anybody using any of them, with no error to explain why.
+         *
+         * `synthetic.rs` was written to say exactly this and the dictation
+         * hook already follows it. This one stamped its own keys correctly
+         * and then asked the wrong question about them.
+         */
+        if event.dwExtraInfo == crate::synthetic::SILL_SYNTHETIC {
             return next();
         }
 
         let vk = event.vkCode;
-        handle_key(expander, vk);
+
+        if up {
+            if let Ok(mut taps) = expander.inner.taps.lock() {
+                taps.release(vk);
+            }
+            return next();
+        }
+
+        handle_tap(expander, vk);
+
+        // The snippet buffer is the consumer that can be switched off on its
+        // own. The hook may be installed purely for the gesture above.
+        if expander.is_enabled() {
+            handle_key(expander, vk);
+        }
+
         next()
     }
 
-    const KBDLLHOOKSTRUCT_FLAGS_NONE:
-        windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS =
-        windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS(0);
+    /// Feeds one key to the double-tap watcher, and acts if it completed one.
+    fn handle_tap(expander: &Expander, vk: u32) {
+        let binding = expander.tap_binding();
+        let Some(binding) = binding.as_ref().as_ref() else {
+            return;
+        };
+
+        let fired = {
+            let Ok(mut taps) = expander.inner.taps.lock() else {
+                return;
+            };
+
+            // A monotonic millisecond count. `Instant` cannot be handed to a
+            // pure function and compared against a number in a test, and this
+            // is read once per keystroke.
+            taps.press(vk, now_ms(), binding.window_ms)
+        };
+
+        if fired != Some(binding.modifier) {
+            return;
+        }
+
+        // Handed to the app rather than done here: showing a window is not
+        // something a hook callback Windows expects to return promptly should
+        // sit and wait on.
+        if let Some(app) = APP.get() {
+            let app = app.clone();
+
+            std::thread::spawn(move || {
+                crate::summon::show_with(&app, None);
+            });
+        }
+    }
+
+    /// Milliseconds since the process started, monotonically.
+    fn now_ms() -> u64 {
+        use std::sync::OnceLock;
+        use std::time::Instant;
+
+        static START: OnceLock<Instant> = OnceLock::new();
+        START.get_or_init(Instant::now).elapsed().as_millis() as u64
+    }
+
 
     fn handle_key(expander: &Expander, vk: u32) {
         if vk == VK_BACK.0 as u32 {

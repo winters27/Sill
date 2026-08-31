@@ -53,12 +53,17 @@ pub(crate) async fn set_preferences(
 
     if let Some(expander) = app.try_state::<snippets::expander::Expander>() {
         expander.set_enabled(prefs.snippets.expand_keywords);
+        expander.set_tap_binding(crate::tap_binding(&prefs.taps));
 
         // Switched off means taken out, not told to ignore everything. A
         // low-level keyboard hook is called for every keystroke on the
         // machine, in every application; staying in that path in order to do
         // nothing is exactly the cost rule 23 refuses.
-        if prefs.snippets.expand_keywords {
+        //
+        // Two features share the hook now, so the question is whether either
+        // wants it. Asked of the expander, which is the one place that knows,
+        // rather than of the preferences here and again at startup.
+        if expander.wanted() {
             snippets::expander::watch(&app, &expander);
         } else {
             snippets::expander::stop(&expander);

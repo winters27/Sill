@@ -38,6 +38,7 @@ pub mod snippets;
 pub mod state;
 pub mod system;
 pub mod summon;
+pub mod taps;
 pub mod timing;
 pub mod synthetic;
 pub mod text;
@@ -140,6 +141,21 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
 
 /// Builds the whole index: extensions, settings, applications, executables.
 ///
+/// The double-tap gesture as the hook wants it, or nothing when it is off.
+///
+/// One translation, used by startup and by the settings window, so the two
+/// cannot disagree about what is bound.
+pub(crate) fn tap_binding(
+    taps: &preferences::Taps,
+) -> Option<snippets::expander::TapBinding> {
+    taps.modifier.map(|modifier| snippets::expander::TapBinding {
+        modifier,
+        // A window of nothing would mean the second tap has to arrive in the
+        // same instant, which is a gesture nobody can make.
+        window_ms: taps.window_ms.max(1),
+    })
+}
+
 /// Blocking on purpose. It is a PowerShell round trip plus a few thousand
 /// filesystem calls, so it runs on a blocking task rather than holding an
 /// async worker.
@@ -936,7 +952,12 @@ pub fn run() {
             // loaded before it is armed or the first keyword never fires.
             let expander = snippets::expander::Expander::new();
             expander.set_enabled(prefs.snippets.expand_keywords);
-            if prefs.snippets.expand_keywords {
+            expander.set_tap_binding(tap_binding(&prefs.taps));
+
+            // Asked of the expander rather than of the preferences, because
+            // two things want the hook now and only it knows whether either
+            // of them does.
+            if expander.wanted() {
                 snippets::expander::watch(&handle, &expander);
             }
             app.manage(expander);

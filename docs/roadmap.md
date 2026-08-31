@@ -53,7 +53,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.7 | Terminal execution, capability gated | Not started |
 | P2.8 | Scripting | Not started |
 | P2.9 | File actions | **Done.** Copy path, copy name, reveal, open a terminal, recycle bin, SHA-256, compress, rename, and move to a folder with a picker and an undo |
-| P2.10 | Hyperkey and double-tap modifiers | Not started in Sill. **Double-tap is written already in AuraKey**, see below |
+| P2.10 | Hyperkey and double-tap modifiers | **Double-tap done**, ported from AuraKey and off until asked for. Hyperkey, meaning a key that stands in for four modifiers at once, is not: it has to swallow a key and synthesise a chord, which is a different and riskier mechanism |
 | P2.11 | Browser history and bookmarks | **Done.** Chromium and Firefox families, read on demand and never indexed. Off by default |
 | P2.12 | Workspace profiles | Not started |
 | P2.13 | Live command results | Not started |
@@ -310,6 +310,33 @@ A minimized window has nothing on screen to photograph, so it shows no picture
 rather than a grey box. The strip keeps its width either way: a list that
 shuffles sideways as you arrow past one is worse than an empty strip, because
 the row being read moves.
+
+### Double-tapping a modifier
+
+The gesture every launcher eventually grows, because it needs no chord and no
+key anything else wants: the modifier keeps doing its own job, and doing it
+twice quickly is a thing nothing else listens for.
+
+The two-phase state machine is AuraKey's, which had the shape right. Three
+things are new, and all three are because a **modifier** is being watched
+rather than an ordinary key. **A held key is one press**, because Windows
+repeats a held key and a modifier leant on would otherwise confirm a tap
+nobody made. **Anything typed in between cancels it**, because Ctrl, C, Ctrl
+is somebody copying and reaching for another shortcut. **Either side of the
+pair counts**, because left and right Control are two keys to Windows and one
+key to a person.
+
+There is no tick. AuraKey expired a stale first press from a loop it already
+had; Sill has no such loop and is not growing one for this, so expiry is
+decided when the next press arrives, which is the only moment anything looks.
+
+**One hook, two consumers.** A low-level keyboard hook is called for every
+keystroke on the machine, in every application, and a second one for a second
+feature would double that for nothing. Whether it is installed is one
+question, asked in the one place that knows: startup and the settings window
+both ask the expander rather than each deciding for themselves.
+
+Off until asked for, like snippet expansion and for the same reason.
 
 ## Built since the audit, and not on it: web search
 

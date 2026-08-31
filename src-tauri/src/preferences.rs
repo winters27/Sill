@@ -217,6 +217,34 @@ pub struct Snippets {
     pub expand_keywords: bool,
 }
 
+/// Double-tapping a modifier to reach the launcher.
+///
+/// The gesture every launcher on every platform eventually grows, because it
+/// needs no chord and no key that anything else wants: the modifier keeps
+/// doing its own job, and doing it twice quickly is a thing nothing else
+/// listens for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Taps {
+    /// Which modifier, or none for the gesture being off.
+    ///
+    /// Off by default, and for the same reason snippet expansion is: a
+    /// launcher that installs a keyboard hook without being asked is not one
+    /// anybody asked for.
+    pub modifier: Option<crate::taps::Modifier>,
+    /// How long the second tap has to arrive.
+    pub window_ms: u64,
+}
+
+impl Default for Taps {
+    fn default() -> Self {
+        Self {
+            modifier: None,
+            window_ms: crate::taps::WINDOW_MS,
+        }
+    }
+}
+
 impl Default for Snippets {
     fn default() -> Self {
         Self {
@@ -313,11 +341,40 @@ pub struct Sources {
 /// are not secret: `shortcutKey`, `finishKey`, `cancelKey`. Matching on the
 /// word would have encrypted three keyboard settings and left the credential
 /// alone the day someone renamed it.
-const SEALED: &[&[&str]] = &[&["dictation", "provider", "apiKey"]];
+const SEALED: &[&[&str]] = &[
+    &["dictation", "provider", "apiKey"],
+    // Every provider in the list, which is what the star is for: a person can
+    // have a key for each of half a dozen services and there is no fixed path
+    // that names them all.
+    &["ai", "providers", "*", "apiKey"],
+];
 
-/// Follows a path into a document, if every step of it exists.
-fn at<'a>(root: &'a mut serde_json::Value, path: &[&str]) -> Option<&'a mut serde_json::Value> {
-    path.iter().try_fold(root, |node, step| node.get_mut(step))
+/// The step in a path that means "every element of this array".
+const EACH: &str = "*";
+
+/// Follows a path into a document, yielding every place it leads.
+///
+/// One place for an ordinary path, and one per element where the path crosses
+/// an array. It used to return a single slot, which was enough while the only
+/// secret lived at a fixed depth; a list of providers with a key each has no
+/// fixed path, and missing one would write that key to the file in plain text.
+fn at<'a>(root: &'a mut serde_json::Value, path: &[&str]) -> Vec<&'a mut serde_json::Value> {
+    let Some((step, rest)) = path.split_first() else {
+        return vec![root];
+    };
+
+    if *step == EACH {
+        let Some(items) = root.as_array_mut() else {
+            return Vec::new();
+        };
+
+        return items.iter_mut().flat_map(|item| at(item, rest)).collect();
+    }
+
+    match root.get_mut(step) {
+        Some(node) => at(node, rest),
+        None => Vec::new(),
+    }
 }
 
 /// Encrypts every secret in a document about to be written.
@@ -328,26 +385,24 @@ fn at<'a>(root: &'a mut serde_json::Value, path: &[&str]) -> Option<&'a mut serd
 /// the user having to paste the key again.
 fn seal_secrets(document: &mut serde_json::Value) {
     for path in SEALED {
-        let Some(slot) = at(document, path) else {
-            continue;
-        };
-        let Some(plaintext) = slot.as_str() else {
-            continue;
-        };
+        for slot in at(document, path) {
+            let Some(plaintext) = slot.as_str() else {
+                continue;
+            };
 
-        if plaintext.is_empty() || crate::secrets::is_sealed(plaintext) {
-            continue;
-        }
+            if plaintext.is_empty() || crate::secrets::is_sealed(plaintext) {
+                continue;
+            }
 
-        match crate::secrets::seal(plaintext) {
-            Some(sealed) => *slot = serde_json::Value::String(sealed),
-            None => {
-                crate::say!(
-                    "could not encrypt {}; it is left out of the file rather than \
-                     written in plain text. You will have to enter it again",
-                    path.join(".")
-                );
-                *slot = serde_json::Value::Null;
+            match crate::secrets::seal(plaintext) {
+                Some(sealed) => *slot = serde_json::Value::String(sealed),
+                None => {
+                    crate::say!(
+                        "could not encrypt {}; it is left out of the file rather than                          written in plain text. You will have to enter it again",
+                        path.join(".")
+                    );
+                    *slot = serde_json::Value::Null;
+                }
             }
         }
     }
@@ -360,28 +415,27 @@ fn seal_secrets(document: &mut serde_json::Value) {
 /// the next save seals it.
 fn unseal_secrets(document: &mut serde_json::Value) {
     for path in SEALED {
-        let Some(slot) = at(document, path) else {
-            continue;
-        };
-        let Some(stored) = slot.as_str() else {
-            continue;
-        };
+        for slot in at(document, path) {
+            let Some(stored) = slot.as_str() else {
+                continue;
+            };
 
-        if !crate::secrets::is_sealed(stored) {
-            continue;
-        }
+            if !crate::secrets::is_sealed(stored) {
+                continue;
+            }
 
-        match crate::secrets::unseal(stored) {
-            Some(plaintext) => *slot = serde_json::Value::String(plaintext),
-            None => {
-                // Sealed by a different Windows account, or copied from
-                // another machine. Nothing can recover it, and leaving the
-                // blob in place would send it to the provider as a key.
-                crate::say!(
-                    "{} could not be decrypted on this account and has been cleared",
-                    path.join(".")
-                );
-                *slot = serde_json::Value::Null;
+            match crate::secrets::unseal(stored) {
+                Some(plaintext) => *slot = serde_json::Value::String(plaintext),
+                None => {
+                    // Sealed by a different Windows account, or copied from
+                    // another machine. Nothing can recover it, and leaving the
+                    // blob in place would send it to the provider as a key.
+                    crate::say!(
+                        "{} could not be decrypted on this account and has been cleared",
+                        path.join(".")
+                    );
+                    *slot = serde_json::Value::Null;
+                }
             }
         }
     }
@@ -615,6 +669,9 @@ pub struct Preferences {
     pub hotkey: Hotkey,
     pub clipboard: ClipboardHistory,
     pub snippets: Snippets,
+    /// Double-tapping a modifier to reach the launcher.
+    #[serde(default)]
+    pub taps: Taps,
     pub appearance: Appearance,
     pub sources: Sources,
     pub files: FileSearch,

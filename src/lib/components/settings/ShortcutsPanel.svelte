@@ -14,7 +14,7 @@
   import Segmented from "./Segmented.svelte";
   import { actionsFor, searchCommands, type ActionInfo } from "$lib/exthost/commands";
   import { chordFrom, navigationKeys, type NavigationKey } from "$lib/settings";
-  import type { Binding, BindingSource, Preferences } from "$lib/settings";
+  import type { Binding, BindingSource, Preferences, TapModifier } from "$lib/settings";
 
   interface Props {
     prefs: Preferences;
@@ -40,6 +40,31 @@
    * for "what keys does Sill use", and the two answers being in two places
    * is the fragmentation the index list was built to undo.
    */
+  /**
+   * The modifiers a double-tap can be bound to, and off.
+   *
+   * Off first, because it is the default and because a gesture that installs
+   * a keyboard hook should be something somebody chooses rather than
+   * something they have to find and turn off.
+   */
+  const TAP_MODIFIERS = [
+    { value: "off", label: "Off" },
+    { value: "control", label: "Ctrl" },
+    { value: "alt", label: "Alt" },
+    { value: "shift", label: "Shift" },
+    { value: "win", label: "Win" },
+  ];
+
+  function setTap(next: string) {
+    commit({
+      ...prefs,
+      taps: {
+        ...prefs.taps,
+        modifier: next === "off" ? null : (next as TapModifier),
+      },
+    });
+  }
+
   const PRESETS = [
     { value: "standard", label: "Arrows only" },
     { value: "vim", label: "Vim" },
@@ -274,6 +299,24 @@
     <Button label="Add a shortcut" onclick={add} />
     {#if status}<span class="status">{status}</span>{/if}
   </div>
+</Section>
+
+<Section
+  label="Double-tap"
+  description="Tapping a modifier twice opens the launcher. It needs no chord and no key anything else wants: the modifier keeps doing its own job, and doing it twice quickly is a thing nothing else listens for."
+>
+  <Row
+    title="Open with a double-tap"
+    description="Anything typed between the two taps cancels it, so an ordinary shortcut never sets it off. Watching for this installs a keyboard hook, which is why it is off until you ask for it."
+  >
+    {#snippet control()}
+      <Segmented
+        value={prefs.taps?.modifier ?? "off"}
+        options={TAP_MODIFIERS}
+        onchange={setTap}
+      />
+    {/snippet}
+  </Row>
 </Section>
 
 <Section

@@ -160,6 +160,23 @@ export interface SnippetSettings {
   expandKeywords: boolean;
 }
 
+/** A modifier, as a person thinks of it rather than as Windows sends it. */
+export type TapModifier = "control" | "alt" | "shift" | "win";
+
+/**
+ * Double-tapping a modifier to reach the launcher.
+ *
+ * The gesture every launcher eventually grows, because it needs no chord and
+ * no key anything else wants: the modifier keeps doing its own job, and doing
+ * it twice quickly is a thing nothing else listens for.
+ */
+export interface TapSettings {
+  /** Which modifier, or null for the gesture being off. */
+  modifier: TapModifier | null;
+  /** How long the second tap has to arrive. */
+  windowMs: number;
+}
+
 /** Where a bound action gets the thing it acts on. */
 export type BindingSource =
   | { from: "selection" }
@@ -180,6 +197,7 @@ export interface Binding {
 export interface Preferences {
   general: General;
   snippets: SnippetSettings;
+  taps: TapSettings;
   dictation: DictationSettings;
   clipboard: ClipboardHistorySettings;
   hotkey: Hotkey;
