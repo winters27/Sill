@@ -85,11 +85,20 @@ fn rank(corpus: &[CommandRecord], query: &str) -> u128 {
 ///
 /// Both numbers were measured on a development machine with sixteen cores and
 /// nothing else running. A shared build agent is neither: the same corpus took
-/// 91 ms there against the 60 ms debug budget, on four cores it does not have
-/// to itself. So the budget is multiplied where the machine is unknown, and
-/// what it catches there is a change in *kind*, which is what this budget is
-/// for. Something that grew a clone per candidate goes to seconds and still
-/// fails. `CI` is set by GitHub Actions for exactly this purpose.
+/// 91 ms there against the 60 ms debug budget. So the budget is multiplied
+/// where the machine is unknown, the measurement is printed on every run
+/// whether it passes or not, and what the looser number catches is a change in
+/// *kind*, which is what this budget is for. Something that grew a clone per
+/// candidate goes to seconds and still fails. `CI` is set by GitHub Actions
+/// for exactly this purpose.
+///
+/// **This is not about how many cores the machine has.** Ranking is a single
+/// sequential pass and takes no thread pool, so it cannot go faster on a large
+/// machine or slower on a small one. Measured on the release build by pinning
+/// the process, best of five over 1,500 entries for `"visual"`: **4117 us on
+/// one core, 4204 on two, 3621 on four, 4710 on all sixteen.** The whole
+/// spread is noise, and the sixteen-core run is the slowest of them. What a
+/// build agent has less of is single-core speed and exclusive use of it.
 fn per_keystroke_us() -> u128 {
     let measured_here = if cfg!(debug_assertions) {
         60_000
@@ -112,6 +121,15 @@ fn ranking_a_whole_index_stays_within_one_keystroke() {
     // worst: one letter matches nearly everything.
     for query in ["v", "vi", "vis", "visu", "visual", "visual studio"] {
         let took = rank(&corpus, query);
+
+        // Said on every run rather than only when it breaks. A budget that
+        // speaks only on failure cannot show which way the number is moving,
+        // and this one is close enough to a real limit to be worth watching
+        // before it is crossed. Run with `-- --nocapture` to see them.
+        println!(
+            "  rank {query:>14?} -> {took:>6} us  (budget {})",
+            per_keystroke_us()
+        );
 
         assert!(
             took < per_keystroke_us(),

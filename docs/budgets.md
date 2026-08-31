@@ -28,6 +28,29 @@ index of the same size answers in a fraction of it. The budget is there to
 catch a change in *kind*, where something that ran in microseconds starts
 running in milliseconds because it grew a clone per candidate.
 
+### A small machine ranks as fast as a large one
+
+Worth stating plainly, because "fast launcher" usually means "fast on the
+machine it was written on". **Ranking is one sequential pass and takes no
+thread pool at all**, so there is no parallel speedup for a big machine to have
+or a small one to miss.
+
+Measured on the release build by pinning the process to a subset of the cores,
+best of five over 1,500 entries for `"visual"`:
+
+| Cores the process could use | Time |
+| --- | --- |
+| 1 | 4117 us |
+| 2 | 4204 us |
+| 4 | 3621 us |
+| All 16 | 4710 us |
+
+The whole spread is noise, and the sixteen-core run happens to be the slowest
+of the four. A dual-core laptop answers a keystroke in the time this machine
+does. What a shared build agent has less of is single-core speed and exclusive
+use of it, which is why the budget is multiplied there and the measurement is
+printed on every run instead.
+
 ## Measured, not yet enforced
 
 Recorded so a change is visible, without a test that would fail for reasons

@@ -41,3 +41,12 @@ jobs:
       # bash because gate:views is a shell script; it is git-bash on this image.
       - run: npm run verify
         shell: bash
+
+      # The ranking cost, in the log of every run rather than only the runs
+      # that break. The budget on an agent is loose on purpose, so the number
+      # underneath it is the thing worth watching: a build that starts
+      # answering a keystroke in twice what it did is worth seeing before it
+      # crosses anything. Already compiled by the step above, so it costs a
+      # second.
+      - name: Ranking cost, recorded every run
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test budgets ranking -- --nocapture
