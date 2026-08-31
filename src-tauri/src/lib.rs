@@ -838,9 +838,71 @@ pub(crate) fn dismiss_main(app: &AppHandle) {
     }
 }
 
+/// Everything the launcher's first question needs, in place before there is a
+/// window to ask it.
+///
+/// Tauri creates the windows declared in `tauri.conf.json` and *then* calls the
+/// `setup` hook, so by the time the first line of that hook runs the launcher's
+/// webview is already loading its page and can invoke. Preferences used to be
+/// managed near the end of `setup`, after the saved file index had been read
+/// back, and on a start that took 3.5 seconds rather than the usual 1.5 the
+/// page got its first `search_commands` in first. Tauri answered "state not
+/// managed for field prefs" and the root list stayed empty until the next
+/// keystroke. Nothing about that was the page's fault, and it gets worse as
+/// more is done during setup.
+///
+/// Called between `build` and `run`, which is the one place provably ahead of
+/// every window: `build` hands back an `App` and Tauri does not create a window
+/// until the event loop reports itself ready. Two other cures were available
+/// and neither is this one. Making the window wait for a signal leaves the same
+/// ordering to a listener that also has to be attached in time, and making the
+/// command answer an empty list while starting hides the race rather than
+/// removing it.
+///
+/// Only what a first paint actually resolves belongs here, which is two things.
+/// Everything else those commands reach is managed on the builder, earlier
+/// still, and everything the launcher holds that a first paint cannot reach is
+/// still built in `setup` where it belongs.
+fn manage_before_windows(app: &tauri::App) {
+    let data_dir = state::data_dir(app.handle());
+
+    // Before anything that might have something to report, which now includes
+    // reading the preferences file.
+    log::open(&data_dir);
+
+    // Preferences first: the hotkey and the backdrop both come from them, so
+    // reading them later would mean applying a default and then immediately
+    // replacing it.
+    let prefs_path = preferences::path(&data_dir);
+    app.manage(PrefsState {
+        inner: Arc::new(tokio::sync::Mutex::new(preferences::Preferences::load(
+            &prefs_path,
+        ))),
+        path: Arc::new(prefs_path),
+    });
+
+    /*
+     * The file index's container, empty, whether or not anything will fill it.
+     *
+     * It used to be managed only when there were folders to index, which made
+     * the same fault permanent rather than a race: turning the index off left
+     * `search_files` and `file_search_missing` failing outright instead of
+     * answering from a whole-volume indexer the way the setting's own note
+     * promises. Tauri resolves a command's state before the body can read a
+     * preference and decide, so a state managed on a condition is a state some
+     * command cannot be called at all.
+     *
+     * Empty costs nothing: a pointer to a catalog with no entries in it.
+     */
+    app.manage(state::CatalogState {
+        cache: Arc::new(Some(data_dir.join("file-index.bin"))),
+        ..Default::default()
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         // First, so a second launch is turned away before it installs a
         // keyboard hook or opens the clipboard database. Two of either is
         // worse than none: the hooks both fire, the shortcut registration
@@ -884,15 +946,7 @@ pub fn run() {
             let (tx, rx) = mpsc::unbounded_channel();
             forward_events(handle.clone(), rx);
 
-            // Preferences first: the hotkey and the backdrop both come from
-            // them, so reading them later would mean applying a default and
-            // then immediately replacing it.
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| PathBuf::from("."));
-            // Before anything that might have something to report.
-            log::open(&data_dir);
+            let data_dir = state::data_dir(&handle);
 
             // Before any shortcut is registered, so a refusal is recorded
             // rather than dropped.
@@ -934,8 +988,21 @@ pub fn run() {
                 last_used: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
             });
 
-            let prefs_path = preferences::path(&data_dir);
-            let prefs = preferences::Preferences::load(&prefs_path);
+            /*
+             * The preferences, taken from managed state rather than read
+             * again.
+             *
+             * They were loaded before this hook ran and before any window
+             * existed, which is the whole point of `manage_before_windows`.
+             * Reading the file a second time here would be a second source of
+             * truth for one set of settings, and the two copies could disagree
+             * the moment anything wrote between them.
+             *
+             * `blocking_lock` is what `load_registry` already does from this
+             * same hook. Nothing holds this lock across work on the main
+             * thread, so there is nothing here to wait behind.
+             */
+            let prefs = app.state::<PrefsState>().inner.blocking_lock().clone();
 
             apply_backdrops(
                 &handle,
@@ -1043,15 +1110,9 @@ pub fn run() {
             {
                 let roots = prefs.files.indexed_roots();
                 if !roots.is_empty() {
-                    // Managed here rather than as a default, because it needs
-                    // to know where this machine keeps application data.
-                    app.manage(state::CatalogState {
-                        cache: Arc::new(
-                            Some(state::data_dir(&handle).join("file-index.bin")),
-                        ),
-                        ..Default::default()
-                    });
-
+                    // The index's container is already managed, before any
+                    // window existed. Only the filling of it waits for a
+                    // preference to say there is something to fill it with.
                     let catalog = app.state::<state::CatalogState>();
 
                     // Last run's index first, so searching works immediately,
@@ -1066,11 +1127,6 @@ pub fn run() {
                     }
                 }
             }
-
-            app.manage(PrefsState {
-                inner: Arc::new(tokio::sync::Mutex::new(prefs)),
-                path: Arc::new(prefs_path),
-            });
 
             load_registry(app, &handle);
 
@@ -1238,6 +1294,13 @@ pub fn run() {
             snippets::commands::type_snippet,
             commands::system::dismiss
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // The gap between building and running is the point: the app exists and
+    // not one window does. `run` takes the app by value, so there is no
+    // afterwards in which this could accidentally be done late.
+    manage_before_windows(&app);
+
+    app.run(|_app, _event| {});
 }
