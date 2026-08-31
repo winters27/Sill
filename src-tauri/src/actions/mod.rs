@@ -63,6 +63,8 @@ pub fn builtins() -> ActionRegistry {
         Box::new(SessionQuieter),
         Box::new(SessionHalf),
         Box::new(SessionFull),
+        Box::new(ReadAloud),
+        Box::new(StopReading),
     ];
 
     ActionRegistry::new(
@@ -1224,6 +1226,75 @@ impl Action for Transform {
         // the original came from. Copying is what happens when there is
         // nowhere better to put it.
         Ok(copy_with_undo(ctx, &changed, self.title)?.producing(changed))
+    }
+}
+
+/// Reads text out loud. P2.4.
+///
+/// Accepts exactly what a transform accepts, because a clipboard row and a
+/// selection are the same thing to a voice as they are to a rewrite. Nothing
+/// about where the text came from matters once it is text.
+struct ReadAloud;
+
+#[async_trait]
+impl Action for ReadAloud {
+    fn id(&self) -> &'static str {
+        "text.readAloud"
+    }
+
+    fn title(&self) -> &'static str {
+        "Read Aloud"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        matches!(kind, ObjectKind::ClipboardEntry | ObjectKind::Text)
+    }
+
+    /// Nothing is read, written or launched. It makes a sound, which is the
+    /// one thing this list has no name for and does not need one: a sound is
+    /// not a capability anything has to be protected from.
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::Ui]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        ctx.app
+            .state::<crate::speech::Speech>()
+            .aloud(&object.target)?;
+
+        Ok(Outcome::done("Reading aloud"))
+    }
+}
+
+/// Stops mid-sentence.
+///
+/// Its own action rather than a second press of the first one, because the
+/// thing being read is usually no longer on screen by the time somebody wants
+/// silence: they have moved on, which is why they want it to stop. Bindable to
+/// a key for the same reason.
+struct StopReading;
+
+#[async_trait]
+impl Action for StopReading {
+    fn id(&self) -> &'static str {
+        "text.stopReading"
+    }
+
+    fn title(&self) -> &'static str {
+        "Stop Reading"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        matches!(kind, ObjectKind::ClipboardEntry | ObjectKind::Text)
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::Ui]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
+        ctx.app.state::<crate::speech::Speech>().stop()?;
+        Ok(Outcome::done("Stopped"))
     }
 }
 

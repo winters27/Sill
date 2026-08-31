@@ -37,6 +37,7 @@ pub mod selection;
 pub mod settings_catalog;
 pub mod settings_index;
 pub mod snippets;
+pub mod speech;
 pub mod state;
 pub mod system;
 pub mod summon;
@@ -930,6 +931,7 @@ pub fn run() {
         // to Claude Code, which on most days is never.
         .manage(ai::mcp::link::Link::new())
         .manage(commands::system::Marking::default())
+        .manage(speech::Speech::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
                 commands: Vec::new(),
