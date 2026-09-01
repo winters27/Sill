@@ -63,8 +63,6 @@ pub fn builtins() -> ActionRegistry {
         Box::new(SessionQuieter),
         Box::new(SessionHalf),
         Box::new(SessionFull),
-        Box::new(QuitProcess),
-        Box::new(ForceQuitProcess),
         Box::new(ReadAloud),
         Box::new(StopReading),
     ];
@@ -1241,88 +1239,6 @@ impl Action for Transform {
         // the original came from. Copying is what happens when there is
         // nowhere better to put it.
         Ok(copy_with_undo(ctx, &changed, self.title)?.producing(changed))
-    }
-}
-
-/// Asks a running program to close. P2.6.
-///
-/// The primary, and asking rather than ending is the whole reason it can be:
-/// a program told to close saves what it was doing. Pressing Enter on a row
-/// should never be the destructive one.
-struct QuitProcess;
-
-#[async_trait]
-impl Action for QuitProcess {
-    fn id(&self) -> &'static str {
-        "sill.process.quit"
-    }
-
-    fn title(&self) -> &'static str {
-        "Quit"
-    }
-
-    fn accepts(&self, kind: ObjectKind) -> bool {
-        kind == ObjectKind::Process
-    }
-
-    /// Closing somebody else's window is what this does, so it says so.
-    fn capabilities(&self) -> &'static [Capability] {
-        &[Capability::WindowControl]
-    }
-
-    fn is_primary(&self, kind: ObjectKind) -> bool {
-        self.accepts(kind)
-    }
-
-    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
-        let pid: u32 = object
-            .target
-            .parse()
-            .map_err(|_| format!("{} is not a process", object.target))?;
-
-        crate::processes::ask_to_close(pid)?;
-        Ok(Outcome::done(format!("Asked {} to close", object.title)))
-    }
-}
-
-/// Ends a running program outright. P2.6.
-///
-/// Listed after Quit and never primary. It is the one that loses unsaved work,
-/// so it is the one somebody has to choose on purpose.
-struct ForceQuitProcess;
-
-#[async_trait]
-impl Action for ForceQuitProcess {
-    fn id(&self) -> &'static str {
-        "sill.process.forceQuit"
-    }
-
-    fn title(&self) -> &'static str {
-        "Force Quit"
-    }
-
-    fn accepts(&self, kind: ObjectKind) -> bool {
-        kind == ObjectKind::Process
-    }
-
-    /// Not window control: this does not ask a window anything, it ends the
-    /// process. That is a change to the machine.
-    fn capabilities(&self) -> &'static [Capability] {
-        &[Capability::SystemControl]
-    }
-
-    fn is_primary(&self, _kind: ObjectKind) -> bool {
-        false
-    }
-
-    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
-        let pid: u32 = object
-            .target
-            .parse()
-            .map_err(|_| format!("{} is not a process", object.target))?;
-
-        crate::processes::force_quit(pid)?;
-        Ok(Outcome::done(format!("Ended {}", object.title)))
     }
 }
 

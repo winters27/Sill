@@ -25,6 +25,7 @@ pub mod icons;
 pub mod input;
 pub mod lnk;
 pub mod log;
+pub mod meter;
 pub mod navigation;
 pub mod ocr;
 pub mod object;
@@ -934,6 +935,7 @@ pub fn run() {
         .manage(ai::mcp::link::Link::new())
         .manage(commands::system::Marking::default())
         .manage(activity::Activity::default())
+        .manage(meter::Meter::default())
         .manage(tts::sapi::Sapi::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
@@ -1251,7 +1253,8 @@ pub fn run() {
             commands::system::remove_piper_voice,
             commands::system::speak_sample,
             commands::system::speak_piper_sample,
-            commands::search::search_processes,
+            commands::system::machine_reading,
+            commands::system::forget_machine_reading,
             commands::system::activity,
             commands::system::undo_activity,
             commands::system::clear_activity,

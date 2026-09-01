@@ -606,3 +606,30 @@ pub(crate) fn clear_activity(app: tauri::AppHandle) {
     use tauri::Manager;
     app.state::<crate::activity::Activity>().clear();
 }
+
+/// What the machine is doing, for the readout.
+///
+/// Blocking: it opens a handle to every process. Off the async runtime so a
+/// poll never holds up anything else the window asked for.
+#[tauri::command]
+pub(crate) async fn machine_reading(
+    app: tauri::AppHandle,
+) -> Result<crate::meter::Reading, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        app.state::<crate::meter::Meter>().read()
+    })
+    .await
+    .map_err(|err| format!("could not read the machine: {err}"))
+}
+
+/// Forgets the previous reading, when the readout closes.
+///
+/// Without this the next reading would be measured against a sample from
+/// whenever the view was last open, and an average over an hour would be shown
+/// as what is happening now.
+#[tauri::command]
+pub(crate) fn forget_machine_reading(app: tauri::AppHandle) {
+    use tauri::Manager;
+    app.state::<crate::meter::Meter>().forget();
+}

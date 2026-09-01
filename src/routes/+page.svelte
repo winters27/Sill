@@ -14,6 +14,7 @@
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import ClipboardView from "$lib/components/ClipboardView.svelte";
+  import MachineReadout from "$lib/components/MachineReadout.svelte";
   import { collectActions, isRunnable } from "$lib/exthost/actions";
   import { clipboardMerge } from "$lib/clipboard";
   import {
@@ -40,7 +41,6 @@
     aiTranscript,
     forgetPreviews,
     searchAppVolume,
-    searchProcesses,
     searchDestinations,
     summonPainted,
     windowPreview,
@@ -476,7 +476,7 @@
     // Whatever Rust says can be done to the selected result. This used to be
     // two entries written here by hand, which meant the panel and the Enter
     // key were two separate opinions about what a result supports.
-    if (mode === "root" || mode === "appVolume" || mode === "processes") {
+    if (mode === "root" || mode === "appVolume") {
       const chosen = commands[selected];
 
       // Naming a result is offered on the result, not buried in settings.
@@ -606,6 +606,7 @@
  */
 const DRAWS_ITS_OWN = new Set([
   "command",
+  "processes",
   "clipboard",
   "argument",
   "collection",
@@ -617,7 +618,7 @@ const DRAWS_ITS_OWN = new Set([
 
   $effect(() => {
     const command =
-      mode === "root" || mode === "appVolume" || mode === "processes"
+      mode === "root" || mode === "appVolume"
         ? commands[selected]
         : undefined;
     if (!command) {
@@ -724,18 +725,9 @@ const DRAWS_ITS_OWN = new Set([
       return;
     }
 
-    if (mode === "processes") {
-      try {
-        const found = await searchProcesses(current);
-        if (id !== searchId) return;
-
-        commands = found;
-        if (selected >= commands.length) selected = 0;
-      } catch (err) {
-        if (id === searchId) status = `could not read what is running: ${err}`;
-      }
-      return;
-    }
+    // Nothing to search. The readout is a picture of the machine rather than a
+    // list of rows, and it keeps itself up to date.
+    if (mode === "processes") return;
 
     if (mode === "appVolume") {
       try {
@@ -1665,7 +1657,7 @@ const DRAWS_ITS_OWN = new Set([
     // are ordinary results carrying an ordinary kind, and the registry already
     // knows what can be done to one. A second copy of this would be a second
     // opinion about what a row supports.
-    if (mode === "root" || mode === "appVolume" || mode === "processes") {
+    if (mode === "root" || mode === "appVolume") {
       const chosen = action.tag.startsWith("Sill.Action:")
         ? action.tag.slice("Sill.Action:".length)
         : "";
@@ -3137,6 +3129,13 @@ const DRAWS_ITS_OWN = new Set([
     by exactly that mode and sharing one would be wrong in one direction or the
     other. Written out, and this comment is why.
   -->
+  {:else if mode === "processes"}
+    <!-- A picture of the machine rather than a list of rows: it has nothing
+         to select and nothing to act on, so it draws itself. -->
+    <div class="listing">
+      <MachineReadout />
+    </div>
+
   {:else if mode === "conversations"}
     <div class="listing">
       <RootList

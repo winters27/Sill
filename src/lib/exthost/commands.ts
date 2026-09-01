@@ -223,11 +223,6 @@ export function movePath(path: string, folder: string): Promise<ActionOutcome> {
   return invoke<ActionOutcome>("move_path", { path, folder });
 }
 
-/** What is running, heaviest first. Enumerated on the spot, never cached. */
-export function searchProcesses(query: string): Promise<RankedCommand[]> {
-  return invoke<RankedCommand[]>("search_processes", { query });
-}
-
 export function searchAppVolume(query: string): Promise<RankedCommand[]> {
   return invoke<RankedCommand[]>("search_app_volume", { query });
 }
