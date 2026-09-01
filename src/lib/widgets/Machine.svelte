@@ -23,6 +23,7 @@
     count: number;
     top: Consumer[];
     sill: number;
+    sillProcesses: number;
   };
 
   let reading = $state<Reading | null>(null);
@@ -238,7 +239,10 @@
         <!-- Sill's own weight. The project's claim is that it idles at almost
              nothing, and the honest place to say so is on the same screen as
              everything else, measured the same way. -->
-        <p class="mine">Sill is using {mb(reading.sill)}</p>
+        <p class="mine">
+          Sill is using {mb(reading.sill)} across {reading.sillProcesses}
+          {reading.sillProcesses === 1 ? "process" : "processes"}
+        </p>
       </div>
     {/if}
   </div>

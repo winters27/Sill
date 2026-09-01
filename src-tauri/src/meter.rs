@@ -29,12 +29,17 @@ pub struct Reading {
     pub count: usize,
     /// The heaviest few, for the bars.
     pub top: Vec<Consumer>,
-    /// What Sill itself costs.
+    /// What Sill itself costs, across every process it is responsible for.
     ///
-    /// Shown because it is the claim the whole project makes. A launcher that
-    /// says it idles at almost nothing should be the easiest thing on the list
-    /// to check.
+    /// Shown because it is the claim the whole project makes, and counted as
+    /// the whole tree because that is the honest number: the renderers, the
+    /// GPU process and the crash handler are all running because Sill is, and
+    /// they go when it does. Reporting only the Rust core said 86 MB where the
+    /// truth was 827 across eleven processes, which is the sort of number a
+    /// person checks in Task Manager the first time they doubt it.
     pub sill: u64,
+    /// How many processes that is.
+    pub sill_processes: usize,
 }
 
 /// One program in the readout.
@@ -158,7 +163,7 @@ impl Meter {
         };
 
         let (used, total) = memory();
-        let mine = std::process::id();
+        let mine = crate::processes::tree_of(std::process::id());
 
         Reading {
             cpu,
@@ -177,9 +182,10 @@ impl Meter {
                 .collect(),
             sill: running
                 .iter()
-                .find(|p| p.pid == mine)
+                .filter(|p| mine.contains(&p.pid))
                 .map(|p| p.bytes)
-                .unwrap_or(0),
+                .sum(),
+            sill_processes: running.iter().filter(|p| mine.contains(&p.pid)).count(),
         }
     }
 

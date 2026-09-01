@@ -92,6 +92,10 @@
   </div>
 {:else}
   <div class="face">
+    <!-- The glyph sits beside the temperature rather than pushed to the far
+         corner, where it collided with the tile's pin. Two things fighting for
+         the same twenty pixels, and the one that can be moved is the one that
+         is only decoration. -->
     <div class="head">
       <span class="temperature">{degrees(sky.temperature)}</span>
       <span class="glyph big">{shown.glyph}</span>
@@ -118,9 +122,11 @@
 
   .head {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    align-items: baseline;
     gap: var(--space-2);
+    /* Room for the tile's pin, which lives in the top right corner of every
+       tile and does not move for anybody. */
+    padding-right: 26px;
   }
 
   .temperature {

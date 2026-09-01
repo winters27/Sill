@@ -190,6 +190,91 @@ fn describe(pid: u32) -> Option<(String, Option<String>, u64)> {
     Some((name, path, counters.WorkingSetSize as u64))
 }
 
+/// Who started whom, for every process on the machine.
+///
+/// `K32EnumProcesses` gives ids and nothing else, so the parent has to come
+/// from a ToolHelp snapshot. It is needed for one question and it is a question
+/// worth answering: **what a program costs is what its whole tree costs.**
+#[cfg(windows)]
+fn parents() -> std::collections::HashMap<u32, u32> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let mut out = std::collections::HashMap::new();
+
+    // SAFETY: the snapshot handle is closed on every path out, and the entry
+    // declares its own size, which is what the calls read.
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return out;
+        };
+
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                out.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+
+        let _ = CloseHandle(snapshot);
+    }
+
+    out
+}
+
+/// Every process descended from `root`, including it.
+///
+/// A launcher built on a webview is not one process and saying so would be a
+/// convenient lie: the renderers, the GPU process and the crash handler are
+/// all there because Sill is running, and they go when it does.
+#[cfg(windows)]
+pub fn tree_of(root: u32) -> std::collections::HashSet<u32> {
+    use std::collections::HashSet;
+
+    let parents = parents();
+    let mut found: HashSet<u32> = HashSet::new();
+    found.insert(root);
+
+    // Walked from every process up to its ancestors rather than down from the
+    // root, because the map is child to parent. Bounded by the chain's own
+    // length so a cycle, which a reused id can produce, cannot spin.
+    for &pid in parents.keys() {
+        let mut at = pid;
+
+        for _ in 0..64 {
+            let Some(&parent) = parents.get(&at) else { break };
+
+            if parent == root || found.contains(&parent) {
+                found.insert(pid);
+                break;
+            }
+
+            if parent == 0 || parent == at {
+                break;
+            }
+
+            at = parent;
+        }
+    }
+
+    found
+}
+
+#[cfg(not(windows))]
+pub fn tree_of(root: u32) -> std::collections::HashSet<u32> {
+    std::collections::HashSet::from([root])
+}
+
 /// The last segment of a Windows path.
 ///
 /// Its own function so it can be tested without a process: the interesting
