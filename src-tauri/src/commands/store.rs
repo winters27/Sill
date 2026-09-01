@@ -9,7 +9,7 @@
 //! The alternative is the window asking four questions per keystroke, which is
 //! the chatter rule 18 exists to stop.
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::state::PrefsState;
 use crate::store::{self, catalog, install, Browse, Query};
@@ -39,16 +39,62 @@ async fn catalog_of(
     app: &AppHandle,
     state: &store::StoreState,
     refresh: bool,
-) -> Result<catalog::Catalog, String> {
+) -> Result<std::sync::Arc<catalog::Catalog>, String> {
     if !refresh {
         if let Some(held) = state.held() {
             return Ok(held);
         }
     }
 
-    let fetched = catalog::load(&crate::state::data_dir(app), refresh).await?;
+    // Read once, shared from here on. The `Arc` is made before anything else
+    // sees it, so the catalogue is never copied: not to hold it, and not to
+    // answer with it.
+    let fetched = std::sync::Arc::new(catalog::load(&crate::state::data_dir(app), refresh).await?);
     state.hold(fetched.clone());
+    start_idle_watchdog(app.clone());
     Ok(fetched)
+}
+
+/// Drops the catalogue once nothing has reached for it in a while.
+///
+/// Started when a catalogue is first held and returns when it fires, so a
+/// machine that never opens the store never runs this timer at all. The same
+/// shape as [`crate::host::start_host_watchdog`], which is the pattern this
+/// codebase already settled on for "keep it warm, but not forever".
+///
+/// Guarded so two opens do not start two of them.
+fn start_idle_watchdog(app: AppHandle) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static WATCHING: AtomicBool = AtomicBool::new(false);
+
+    if WATCHING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(store::IDLE_CHECK).await;
+
+            let state = app.state::<store::StoreState>();
+
+            let Some(idle) = state.idle_for() else {
+                // Somebody let go of it already. Nothing left to watch.
+                WATCHING.store(false, Ordering::SeqCst);
+                return;
+            };
+
+            if idle < store::IDLE_TIMEOUT {
+                continue;
+            }
+
+            if state.forget() {
+                crate::say!("store catalogue idle for {}s; letting it go", idle.as_secs());
+            }
+
+            WATCHING.store(false, Ordering::SeqCst);
+            return;
+        }
+    });
 }
 
 /// Everything one screen of the store needs.
@@ -73,14 +119,18 @@ pub(crate) async fn store_browse(
     ))
 }
 
-/// Lets go of the catalogue, which is what closing the store does.
+/// Says the store has been left.
 ///
-/// Its own command because the window is the only thing that knows the store
-/// has been left. Two megabytes of somebody else's product listings must not
-/// outlive the view that asked for them.
+/// **It parks the catalogue rather than dropping it.** Dropping it here was
+/// the first version and it is what made reopening the store feel like opening
+/// it for the first time: leaving and coming back a few seconds later paid for
+/// a megabyte and a half of JSON to be read and parsed again.
+///
+/// The clock is what decides now. Closing stops it being touched, and the
+/// watchdog lets go five minutes later if nobody comes back, so a launcher
+/// sitting idle overnight is still holding nothing.
 #[tauri::command]
-pub(crate) async fn store_close(state: State<'_, store::StoreState>) -> Result<(), String> {
-    state.forget();
+pub(crate) async fn store_close(_state: State<'_, store::StoreState>) -> Result<(), String> {
     Ok(())
 }
 

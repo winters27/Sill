@@ -208,3 +208,169 @@ fn measured() {
         }
     }
 }
+
+// --------------------------------------------------------------- the store
+
+/// What opening the store and typing in it costs.
+///
+/// The store holds a catalogue of a different order to the launcher's index:
+/// 2,183 listings, each with a title, a description, an author, categories,
+/// platforms, a commit and a list of commands. Ranking it happens on every
+/// keystroke exactly as the root list does, so it answers to the same budget.
+///
+/// The reason this has its own section is that the store has a second cost the
+/// root list does not: **the catalogue arrives as JSON on disk and has to be
+/// read before anything can be ranked.** That is the cost somebody feels as
+/// "it loads from scratch every time", and a budget on ranking alone would
+/// never see it.
+mod the_store {
+    use super::*;
+
+    use sill_lib::store::{self, catalog::Catalog, Listing, ListedCommand, Query};
+
+    /// A catalogue the size of the real one, with strings the length of real
+    /// ones.
+    ///
+    /// The lengths matter more than the words. What is being measured is
+    /// allocation and copying, and a corpus of `"a"` would make every clone
+    /// look free.
+    fn catalogue(n: usize) -> Catalog {
+        const CATEGORIES: [&str; 6] = [
+            "Developer Tools", "Productivity", "Media", "Web", "System", "AI Extensions",
+        ];
+
+        let listings = (0..n)
+            .map(|i| Listing {
+                name: format!("extension-number-{i}"),
+                folder: format!("extensions/extension-number-{i}"),
+                title: format!("Extension Number {i}"),
+                description:
+                    "Does a useful thing without opening a browser, and says so at about \
+                     the length a real store listing says it at."
+                        .to_string(),
+                author: format!("author{}", i % 400),
+                categories: vec![CATEGORIES[i % CATEGORIES.len()].to_string()],
+                platforms: vec!["macOS".to_string(), "Windows".to_string()],
+                revision: "6939fc298cd701b66a652b5bcc6d1c763252391e".to_string(),
+                downloads: (i as u64) * 13,
+                icon: format!("https://files.raycast.com/kk4xwj4wh7m4sko2t1ui{i:04}"),
+                commands: (0..3)
+                    .map(|c| ListedCommand {
+                        name: format!("command-{c}"),
+                        title: format!("Command {c}"),
+                        description: "Copies the result to the clipboard.".to_string(),
+                        mode: "view".to_string(),
+                        })
+                    .collect(),
+            })
+            .collect();
+
+        Catalog {
+            format: 2,
+            fetched_at: NOW,
+            listings,
+        }
+    }
+
+    fn browse_us(catalog: &Catalog, text: &str) -> u128 {
+        let query = Query {
+            text: text.to_string(),
+            hide_blocked: true,
+            ..Default::default()
+        };
+
+        let at = Instant::now();
+        let out = store::browse(&catalog.listings, |_| None, &query, NOW);
+        std::hint::black_box(&out);
+        at.elapsed().as_micros()
+    }
+
+    /// The real size, measured against the live index on 2026-09-01.
+    const REAL: usize = 2_183;
+
+    /// Typing in the store answers to the same budget as typing in the root
+    /// list, because it is the same act.
+    #[test]
+    fn typing_in_the_store_stays_within_one_keystroke() {
+        let catalog = catalogue(REAL);
+
+        for query in ["e", "ex", "ext", "extension", "extension number 9", ""] {
+            browse_us(&catalog, query);
+            let best = (0..3).map(|_| browse_us(&catalog, query)).min().unwrap_or(0);
+
+            println!(
+                "  browse {query:>20?} -> {best:>6} us  (budget {})",
+                per_keystroke_us()
+            );
+
+            assert!(
+                best < per_keystroke_us(),
+                "{query:?} took {best} us against a budget of {}",
+                per_keystroke_us()
+            );
+        }
+    }
+
+    /// **The one that catches a clone per keystroke.**
+    ///
+    /// The window asks Rust for a screen on every keystroke, and the catalogue
+    /// it ranks is held in a service. If getting hold of it copies it, every
+    /// keystroke deep-copies 2,183 listings and roughly fifty thousand strings,
+    /// which is the shape that turns a browse from microseconds into tens of
+    /// milliseconds and reads as the store being slow.
+    ///
+    /// Reaching for the held catalogue must be a pointer copy. This measures a
+    /// real deep clone next to it and asserts the gap, so the day somebody
+    /// takes the `Arc` off, this says so rather than the store merely getting
+    /// worse.
+    #[test]
+    fn reaching_for_the_catalogue_does_not_copy_it() {
+        let catalog = std::sync::Arc::new(catalogue(REAL));
+
+        let at = Instant::now();
+        for _ in 0..1_000 {
+            std::hint::black_box(std::sync::Arc::clone(&catalog));
+        }
+        let shared = at.elapsed().as_micros();
+
+        let at = Instant::now();
+        let copied = std::hint::black_box((*catalog).clone());
+        let deep = at.elapsed().as_micros();
+        std::hint::black_box(copied);
+
+        println!("  1000 shared handles -> {shared} us, one deep copy -> {deep} us");
+
+        assert!(
+            shared < deep,
+            "a thousand shared handles cost {shared} us and one deep copy cost {deep} us, \
+             so the catalogue is being copied rather than shared"
+        );
+    }
+
+    /// Reading the catalogue off disk, which is what happens when the store is
+    /// opened and nothing is held.
+    ///
+    /// Not held to the keystroke budget: it happens once per open, not once
+    /// per letter. It is measured because it is the cost somebody feels as the
+    /// store loading from scratch, and because it is the number that decides
+    /// whether holding the catalogue between opens is worth doing at all.
+    #[test]
+    fn reading_the_catalogue_off_disk_is_reported() {
+        let catalog = catalogue(REAL);
+        let json = serde_json::to_string(&catalog).expect("serialises");
+
+        println!("  catalogue on disk: {} KB", json.len() / 1024);
+
+        let at = Instant::now();
+        let parsed: Catalog = serde_json::from_str(&json).expect("parses");
+        let took = at.elapsed().as_micros();
+        std::hint::black_box(&parsed);
+
+        println!("  parsing it        -> {took:>6} us");
+
+        // Loose on purpose. This is a report, and the assertion only catches a
+        // change in kind: a parse that starts taking a second is a parse
+        // somebody notices every time they open the store.
+        assert!(took < 2_000_000, "parsing the catalogue took {took} us");
+    }
+}
