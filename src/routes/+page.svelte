@@ -40,6 +40,7 @@
     aiTranscript,
     forgetPreviews,
     searchAppVolume,
+    searchProcesses,
     searchDestinations,
     summonPainted,
     windowPreview,
@@ -119,6 +120,14 @@
      * anything about sound was typed.
      */
     | "appVolume"
+    /**
+     * What is running, and what it costs.
+     *
+     * Its own view for the same reason the volume list has one: walking every
+     * process on the machine is not something to do because somebody typed the
+     * letter p.
+     */
+    | "processes"
     /**
      * A conversation with a model.
      *
@@ -467,7 +476,7 @@
     // Whatever Rust says can be done to the selected result. This used to be
     // two entries written here by hand, which meant the panel and the Enter
     // key were two separate opinions about what a result supports.
-    if (mode === "root" || mode === "appVolume") {
+    if (mode === "root" || mode === "appVolume" || mode === "processes") {
       const chosen = commands[selected];
 
       // Naming a result is offered on the result, not buried in settings.
@@ -589,7 +598,9 @@
 
   $effect(() => {
     const command =
-      mode === "root" || mode === "appVolume" ? commands[selected] : undefined;
+      mode === "root" || mode === "appVolume" || mode === "processes"
+        ? commands[selected]
+        : undefined;
     if (!command) {
       rootActions = [];
       return;
@@ -690,6 +701,19 @@
         if (selected >= commands.length) selected = 0;
       } catch (err) {
         if (id === searchId) status = `could not look for folders: ${err}`;
+      }
+      return;
+    }
+
+    if (mode === "processes") {
+      try {
+        const found = await searchProcesses(current);
+        if (id !== searchId) return;
+
+        commands = found;
+        if (selected >= commands.length) selected = 0;
+      } catch (err) {
+        if (id === searchId) status = `could not read what is running: ${err}`;
       }
       return;
     }
@@ -862,6 +886,14 @@
     if (id === "sill:appVolume") {
       void recordUse(id, typed);
       mode = "appVolume";
+      selected = 0;
+      query = "";
+      return true;
+    }
+
+    if (id === "sill:processes") {
+      void recordUse(id, typed);
+      mode = "processes";
       selected = 0;
       query = "";
       return true;
@@ -1614,7 +1646,7 @@
     // are ordinary results carrying an ordinary kind, and the registry already
     // knows what can be done to one. A second copy of this would be a second
     // opinion about what a row supports.
-    if (mode === "root" || mode === "appVolume") {
+    if (mode === "root" || mode === "appVolume" || mode === "processes") {
       const chosen = action.tag.startsWith("Sill.Action:")
         ? action.tag.slice("Sill.Action:".length)
         : "";

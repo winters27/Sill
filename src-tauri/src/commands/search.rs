@@ -202,6 +202,55 @@ pub(crate) fn timings(timings: State<'_, crate::timing::Timings>) -> crate::timi
     timings.report()
 }
 
+/// What is running, matching a query.
+///
+/// Its own command and its own row for the reason App Volume has one: walking
+/// every process on the machine is not something to do because somebody typed
+/// the letter p. Enumerated when asked and never cached, since the list is
+/// wrong the moment anything starts or stops.
+#[tauri::command]
+pub(crate) async fn search_processes(
+    state: State<'_, RegistryState>,
+    query: String,
+) -> Result<Vec<registry::SearchResult>, String> {
+    // Blocking: it opens a handle to every process on the machine.
+    let running = tokio::task::spawn_blocking(crate::processes::running)
+        .await
+        .unwrap_or_default();
+
+    let records: Vec<registry::CommandRecord> = running
+        .into_iter()
+        .map(|process| registry::process_record(&process))
+        .collect();
+
+    // An empty query is the whole list, already heaviest first, which is the
+    // order somebody opening this came to see.
+    if query.trim().is_empty() {
+        return Ok(records
+            .into_iter()
+            .map(registry::SearchResult::from_record)
+            .collect());
+    }
+
+    let registry = state.inner.lock().await;
+
+    let results = registry::search_excluding(
+        records.iter(),
+        &query,
+        &registry.frecency,
+        // A process is not in the index, so nothing can have been named for
+        // one: an alias points at an id that survives a restart, and a pid
+        // does not survive the program.
+        &registry::Aliases::default(),
+        now_seconds(),
+        registry::SEARCH_LIMIT,
+        // What is running is a fact rather than a preference.
+        registry::Excluded::none(),
+    );
+
+    Ok(results.into_iter().map(Into::into).collect())
+}
+
 /// The programs playing sound, matching a query.
 ///
 /// Its own command for the reason the window switcher has one: a different

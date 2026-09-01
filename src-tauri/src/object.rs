@@ -78,6 +78,12 @@ pub enum ObjectKind {
     /// for and a row's identity stops meaning anything when the program goes
     /// quiet.
     AudioSession,
+    /// A running program.
+    ///
+    /// Like a window and an audio session: enumerated the moment it is asked
+    /// for and never in the index, because what is running changes constantly
+    /// and a process id stops meaning anything the moment it exits.
+    Process,
 }
 
 impl ObjectKind {
@@ -111,6 +117,7 @@ impl ObjectKind {
         Self::Search,
         Self::Url,
         Self::AudioSession,
+        Self::Process,
     ];
 
     /// The kind behind an index entry's `mode`.
@@ -149,6 +156,7 @@ impl ObjectKind {
             "emoji" => Self::Emoji,
             "window" => Self::Window,
             "audio-session" => Self::AudioSession,
+            "process" => Self::Process,
             _ => return None,
         })
     }
@@ -396,12 +404,13 @@ mod tests {
                 ObjectKind::Search => 15,
                 ObjectKind::Url => 16,
                 ObjectKind::AudioSession => 17,
+                ObjectKind::Process => 18,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            18,
+            19,
             "a kind was added or removed without `ALL` being told",
         );
 

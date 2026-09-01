@@ -368,6 +368,13 @@ pub fn builtins() -> Vec<CommandRecord> {
             &["snippet", "template", "expand", "abbreviation", "text"],
         ),
         builtin(
+            "processes",
+            "advanced",
+            "Processes",
+            "What is running, and what it is costing",
+            &["process", "memory", "ram", "task", "manager", "quit", "kill", "running"],
+        ),
+        builtin(
             "undo-last",
             "advanced",
             "Undo Last Action",
@@ -862,6 +869,41 @@ pub fn destination_record(folder: &str) -> CommandRecord {
 /// **the switch answers the row's title**. The system row is called "Toggle
 /// Mute" so its switch says whether mute is on; this row is called by the
 /// program's name, so its switch says whether the program is.
+/// One running program, shaped as a row.
+///
+/// The subtitle carries what it costs, because that is the column somebody
+/// came to read. Sizes in whole units: a process list is scanned, not
+/// audited, and "412 MB" is read faster than "412.7 MB".
+pub fn process_record(process: &crate::processes::Process) -> CommandRecord {
+    let mb = process.bytes / 1_048_576;
+
+    let subtitle = if process.visible {
+        format!("{mb} MB, has a window")
+    } else {
+        format!("{mb} MB")
+    };
+
+    CommandRecord {
+        id: format!("process:{}", process.pid),
+        extension: "process".to_string(),
+        extension_title: "Processes".to_string(),
+        command: process.name.clone(),
+        title: process.name.clone(),
+        subtitle,
+        description: String::new(),
+        mode: "process".to_string(),
+        // The pid, which is what every action here needs and what stops
+        // meaning anything the moment it exits.
+        entrypoint: process.pid.to_string(),
+        keywords: vec!["process".to_string(), "memory".to_string(), "quit".to_string()],
+        // The program's own mark, the rule every other row follows.
+        icon: process.path.clone(),
+        toggle: None,
+        panel: None,
+        preferences: serde_json::Value::Null,
+    }
+}
+
 pub fn audio_session_record(session: &crate::app_volume::Session) -> CommandRecord {
     let percent = (session.volume * 100.0).round() as i32;
 

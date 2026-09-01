@@ -30,6 +30,7 @@ pub mod ocr;
 pub mod object;
 pub mod preferences;
 pub mod previews;
+pub mod processes;
 pub mod quicklinks;
 pub mod radios;
 pub mod registry;
@@ -1250,6 +1251,7 @@ pub fn run() {
             commands::system::remove_piper_voice,
             commands::system::speak_sample,
             commands::system::speak_piper_sample,
+            commands::search::search_processes,
             commands::system::activity,
             commands::system::undo_activity,
             commands::system::clear_activity,
