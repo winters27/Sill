@@ -28,6 +28,7 @@
   import QuicklinksPanel from "$lib/components/settings/QuicklinksPanel.svelte";
   import ShortcutsPanel from "$lib/components/settings/ShortcutsPanel.svelte";
   import ThemeCards from "$lib/components/settings/ThemeCards.svelte";
+  import { shortRevision, storePins, type Pin } from "$lib/store";
   import {
     acceleratorFrom,
     applyAppearance,
@@ -237,6 +238,23 @@
 
   let prefs = $state<Preferences | null>(null);
   let info = $state<Diagnostics | null>(null);
+  /** Where each installed extension came from, read off disk. */
+  let pins = $state<Pin[]>([]);
+
+  /**
+   * The provenance line for one installed extension.
+   *
+   * Empty when nothing recorded it, which is true of anything installed before
+   * origins existed. Saying nothing is right there: inventing "from a folder"
+   * for something nobody wrote a note about would be a guess presented as a
+   * fact.
+   */
+  function provenance(extension: string): string {
+    const pin = pins.find((it) => it.extension === extension);
+    if (!pin) return "";
+    if (pin.source === "store") return ` · store, ${shortRevision(pin.revision)}`;
+    return ` · ${pin.path}`;
+  }
 
   /**
    * What reaching the launcher has cost this session.
@@ -457,6 +475,10 @@
         applyAppearance(prefs);
         index = await listOwnSettings();
         info = await getDiagnostics();
+        // Small files beside the bundles, so this is a directory listing
+        // rather than anything that reaches the network. Opening settings
+        // must not fetch a catalogue.
+        pins = await storePins();
         timings = await getTimings();
         browsers = await browserProfiles();
         engines = await searchEngines();
@@ -1262,6 +1284,45 @@
           </Section>
 
           <Section
+            label="Store"
+            description="Where Sill looks for extensions, and how much of the catalogue it offers."
+          >
+            <Row
+              title="Only Windows extensions"
+              description="Raycast ships for macOS and for Windows, and its store is one catalogue for both. The ones that say macOS and not Windows are never offered here at all. This decides what happens to the ones published before extensions declared a platform: hidden, or shown and marked."
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.store.windowsOnly}
+                  onchange={commit}
+                  label="Only Windows extensions"
+                />
+              {/snippet}
+            </Row>
+
+            <Row
+              title="GitHub token"
+              description="Optional. Extension source is fetched from github.com/raycast/extensions, and GitHub answers sixty requests an hour to a machine that does not identify itself. One install spends about three. A token raises that to five thousand, and is encrypted rather than kept in the settings file."
+            >
+              {#snippet children()}
+                <TextField
+                  value={p.store.githubToken ?? ""}
+                  oninput={(next) => {
+                    if (!prefs) return;
+                    p.store.githubToken = next.trim() === "" ? null : next;
+                    void commit();
+                  }}
+                  placeholder="ghp_…"
+                  ariaLabel="GitHub token"
+                  full
+                  secret
+                  mono
+                />
+              {/snippet}
+            </Row>
+          </Section>
+
+          <Section
             label="Installed"
             description="Extensions running in Sill's host. Each contributes its commands to the root list."
             bare={!info?.extensions.length}
@@ -1272,13 +1333,13 @@
                   title={extension.title}
                   description="{extension.commands} {extension.commands === 1
                     ? 'command'
-                    : 'commands'} · {extension.id}"
+                    : 'commands'} · {extension.id}{provenance(extension.id)}"
                 />
               {/each}
             {:else}
               <p class="empty">
-                No extensions are installed yet. Sill runs unmodified Raycast extensions through its
-                own host, but installing them from a repository is not built.
+                No extensions are installed yet. Open the launcher and search for Extension Store to
+                browse them, or Install Extension to build one from a folder.
               </p>
             {/if}
           </Section>

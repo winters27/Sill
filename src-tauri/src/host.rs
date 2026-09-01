@@ -33,7 +33,11 @@ pub(crate) fn dev_root() -> PathBuf {
 /// from the repository live in the working tree. A developer has both, and
 /// preferring one would make the other invisible for no reason.
 pub(crate) fn index_paths(app: &AppHandle) -> Vec<PathBuf> {
-    let mut paths = vec![data_dir(app).join("extensions").join("index.json")];
+    // Named rather than assembled, because the installer writes to the same
+    // place and two spellings of one path is the shape that disagrees.
+    let mut paths = vec![crate::store::index_file(&crate::store::extensions_home(
+        &data_dir(app),
+    ))];
 
     let dev = dev_root()
         .join("extensions")

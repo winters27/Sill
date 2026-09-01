@@ -72,7 +72,8 @@ pub(crate) async fn install_extension(
 
     // Off the UI thread: esbuild is a subprocess and the index is a file.
     tauri::async_runtime::spawn_blocking(move || {
-        crate::extension_install::install(&app, &source)
+        let origin = crate::store::Origin::folder(&source, crate::state::now_seconds());
+        crate::extension_install::install(&app, &source, &origin)
     })
     .await
     .map_err(|err| format!("the install did not finish: {err}"))?

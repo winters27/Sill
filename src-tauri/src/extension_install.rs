@@ -158,6 +158,20 @@ pub fn merged_index(existing: Vec<CommandRecord>, installing: Vec<CommandRecord>
     by_id.into_values().collect()
 }
 
+/// The index with one extension's commands taken out.
+///
+/// The inverse of [`merged_index`] and the other half of being able to trust a
+/// store: code that can arrive has to be able to leave. Matched on the
+/// `extension` field rather than on the id prefix, because an extension named
+/// `git` and one named `github` share a prefix and removing the first would
+/// take half of the second with it.
+pub fn without_extension(existing: Vec<CommandRecord>, extension: &str) -> Vec<CommandRecord> {
+    existing
+        .into_iter()
+        .filter(|record| record.extension != extension)
+        .collect()
+}
+
 /// The path aliases an extension declares, as esbuild wants them.
 ///
 /// Extensions commonly alias `@/...` to their own `src`. esbuild does not read
@@ -312,12 +326,43 @@ pub const NO_ESBUILD: &str =
 /// manifest, bundling and writing the index are steps of a single operation
 /// that is either done or not. Splitting them across commands would let a
 /// window get half of it right.
+///
+/// `origin` says where the folder came from and is written beside the build.
+/// **The store goes through this function rather than around it.** Acquiring
+/// an extension and building one are separate problems, and having a second
+/// installer for the store would be two answers to "what does installed mean"
+/// with nothing keeping them in step.
 #[cfg(windows)]
-pub fn install(app: &tauri::AppHandle, source: &Path) -> Result<Installed, String> {
+pub fn install(
+    app: &tauri::AppHandle,
+    source: &Path,
+    origin: &crate::store::Origin,
+) -> Result<Installed, String> {
     let Some(esbuild) = esbuild_exe(app) else {
         return Err(NO_ESBUILD.to_string());
     };
 
+    install_into(
+        &esbuild,
+        &crate::store::extensions_home(&crate::state::data_dir(app)),
+        source,
+        origin,
+    )
+}
+
+/// The same, told where everything is rather than asking a window.
+///
+/// The split exists so the install path can be exercised without a running
+/// application, which is rule 20: the interesting behaviour here is fetching,
+/// resolving, bundling and merging an index, and none of it is about a window.
+/// [`install`] is the two lookups this cannot do for itself.
+#[cfg(windows)]
+pub fn install_into(
+    esbuild: &Path,
+    home: &Path,
+    source: &Path,
+    origin: &crate::store::Origin,
+) -> Result<Installed, String> {
     let manifest_path = source.join("package.json");
     let text = std::fs::read_to_string(&manifest_path)
         .map_err(|_| format!("No package.json in {}, so this is not an extension.", source.display()))?;
@@ -340,7 +385,6 @@ pub fn install(app: &tauri::AppHandle, source: &Path) -> Result<Installed, Strin
         .map(|(from, to)| (from, source.join(to).to_string_lossy().into_owned()))
         .collect();
 
-    let home = crate::state::data_dir(app).join("extensions");
     let dest = home.join(&manifest.name);
     std::fs::create_dir_all(&dest)
         .map_err(|err| format!("could not make {}: {err}", dest.display()))?;
@@ -359,11 +403,16 @@ pub fn install(app: &tauri::AppHandle, source: &Path) -> Result<Installed, Strin
         };
 
         let outfile = dest.join(format!("{}.js", command.name));
-        bundle(&esbuild, &source.join(relative), &outfile, &aliases)?;
+        bundle(esbuild, &source.join(relative), &outfile, &aliases)?;
         records.push(record_for(&manifest, command, &outfile));
     }
 
-    let index_path = home.join("index.json");
+    // Written before the index, so an extension that is listed is always one
+    // whose provenance is recorded. The other order leaves a command in the
+    // index that nothing can say where it came from.
+    crate::store::write_origin(home, &manifest.name, origin)?;
+
+    let index_path = crate::store::index_file(home);
     let merged = merged_index(crate::registry::load_index(&index_path), records);
 
     let written = serde_json::to_string_pretty(&merged)
@@ -529,6 +578,24 @@ mod tests {
 
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].title, "new");
+    }
+
+    /// An extension whose name begins another's must not take it with it.
+    #[test]
+    fn removing_one_extension_matches_the_whole_name_not_a_prefix() {
+        let kept = without_extension(
+            vec![record("git:log", "a"), record("github:issues", "b")],
+            "git",
+        );
+
+        let ids: Vec<&str> = kept.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, ["github:issues"]);
+    }
+
+    #[test]
+    fn removing_something_that_is_not_there_changes_nothing() {
+        let kept = without_extension(vec![record("demo:run", "a")], "absent");
+        assert_eq!(kept.len(), 1);
     }
 
     /// The rule the snippet and quicklink imports follow: adding never removes.

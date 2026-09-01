@@ -394,6 +394,10 @@ const SEALED: &[&[&str]] = &[
     // that names them all.
     &["ai", "providers", "*", "apiKey"],
     &["tts", "provider", "apiKey"],
+    // The extension store's GitHub token. Not a key to a service that costs
+    // money, and still a credential that can read whatever the account it
+    // belongs to can read.
+    &["store", "githubToken"],
 ];
 
 /// The step in a path that means "every element of this array".
@@ -690,6 +694,44 @@ impl Default for Browsers {
     }
 }
 
+/// The extension store.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Store {
+    /// Only offer extensions that say they run on Windows.
+    ///
+    /// Raycast ships for macOS and for Windows, and its store is one index for
+    /// both. The ones that name macOS and not Windows never reach the
+    /// catalogue at all. This decides what happens to the third group: the
+    /// 1,300 that name nothing because they were published before the field
+    /// existed. On, they are hidden and counted; off, they are shown and
+    /// marked.
+    pub windows_only: bool,
+    /// A GitHub token, to be allowed more requests per hour.
+    ///
+    /// Optional and empty by default. GitHub answers sixty requests an hour to
+    /// an address that does not identify itself, and one install spends about
+    /// three of them. That is enough for anybody installing extensions one at
+    /// a time and not enough on a shared address where something else has
+    /// already spent them.
+    ///
+    /// **Sealed**, so it is encrypted on its way to disk rather than sitting in
+    /// the settings file in plain text. Its path is in `SEALED` and a test
+    /// refuses a sealed path that names no real field.
+    pub github_token: Option<String>,
+}
+
+impl Default for Store {
+    fn default() -> Self {
+        Self {
+            // On, because a store mostly full of things that will not run here
+            // is a worse store than a smaller one that works.
+            windows_only: true,
+            github_token: None,
+        }
+    }
+}
+
 impl Default for FileSearch {
     fn default() -> Self {
         Self {
@@ -732,6 +774,9 @@ pub struct Preferences {
     pub sources: Sources,
     pub files: FileSearch,
     pub browsers: Browsers,
+    /// Browsing and installing extensions.
+    #[serde(default)]
+    pub store: Store,
     pub web_search: WebSearch,
     pub screenshot: Screenshot,
     /// Global shortcuts that run an action without showing the launcher.
@@ -1034,6 +1079,7 @@ mod sealed_paths {
         let mut prefs = Preferences::default();
         prefs.dictation.provider.api_key = Some(PLAIN.to_string());
         prefs.tts.provider.api_key = Some(PLAIN.to_string());
+        prefs.store.github_token = Some(PLAIN.to_string());
         prefs.ai.providers.push(crate::ai::provider::Provider {
             api_key: PLAIN.to_string(),
             ..Default::default()
@@ -1049,5 +1095,39 @@ mod sealed_paths {
             "an API key reached the file in plain text. Every place one can be \
              stored needs a path in SEALED"
         );
+    }
+
+    /// Every sealed path names a field that exists.
+    ///
+    /// The test above catches a credential with no path. This catches the
+    /// opposite and quieter mistake: a path with a typo in it, or one left
+    /// behind after the field it named was renamed. `at` walks a document and
+    /// returns nothing for a path that leads nowhere, so a misspelled path
+    /// seals nothing, reports nothing, and writes the credential in plain
+    /// text, which is exactly the failure sealing exists to stop.
+    ///
+    /// Filled first, because `at` cannot walk into an absent field and an
+    /// unset `Option` serialises to null.
+    #[test]
+    fn every_sealed_path_leads_somewhere_real() {
+        let mut prefs = Preferences::default();
+        prefs.dictation.provider.api_key = Some("x".to_string());
+        prefs.tts.provider.api_key = Some("x".to_string());
+        prefs.store.github_token = Some("x".to_string());
+        prefs.ai.providers.push(crate::ai::provider::Provider {
+            api_key: "x".to_string(),
+            ..Default::default()
+        });
+
+        let mut document = serde_json::to_value(&prefs).expect("preferences serialise");
+
+        for path in SEALED {
+            assert!(
+                !at(&mut document, path).is_empty(),
+                "SEALED names {}, which is not a field in Preferences, so it seals \
+                 nothing and says nothing",
+                path.join(".")
+            );
+        }
     }
 }

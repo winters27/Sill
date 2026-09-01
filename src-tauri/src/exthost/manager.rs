@@ -15,6 +15,29 @@ pub enum CommandMode {
     NoView,
 }
 
+impl CommandMode {
+    /// The mode a manifest's `mode` string means, or nothing when Sill has no
+    /// way to run it.
+    ///
+    /// **This type is the answer to "can Sill run this command", and this is
+    /// the only place that question is decided.** Raycast also has `menu-bar`,
+    /// which is a status item next to the clock and has nowhere to live in a
+    /// launcher. The store asks this before offering an extension, so a mode
+    /// Raycast invents later is reported as unrunnable in the store instead of
+    /// installing and then quietly doing nothing.
+    ///
+    /// `None` rather than a default, deliberately. A match over modes that
+    /// falls through to `View` for anything it does not recognise is the shape
+    /// that has silently swallowed a new case five times in this codebase.
+    pub fn from_manifest(mode: &str) -> Option<Self> {
+        match mode {
+            "view" => Some(Self::View),
+            "no-view" => Some(Self::NoView),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CommandEnv {
     Development,

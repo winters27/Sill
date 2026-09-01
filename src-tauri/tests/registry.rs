@@ -2688,6 +2688,142 @@ mod one_id_per_row {
     }
 }
 
+/// The store is reachable by typing the words somebody would type.
+///
+/// The same rule as text recognition below, and it needs its own guard for a
+/// harder reason: **the store competes with the Microsoft Store.** Typing
+/// "store" on any Windows machine returns a screenful of real applications
+/// with that word in their name, and a row that ranks below them is a row
+/// nobody finds. The word is in the title, so it has to place, and a keyword
+/// bag alone would not have been enough to notice if it stopped.
+mod the_store_is_findable {
+    use super::*;
+
+    fn found(query: &str) -> Vec<String> {
+        let commands = registry::builtins();
+        search(&commands, query, &Frecency::default(), NOW, 60)
+            .into_iter()
+            .map(|hit| hit.command.title.clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_words_somebody_would_actually_type_find_it() {
+        for query in [
+            "store", "extension", "extensions", "extension store", "browse",
+            "install", "marketplace", "raycast", "plugin", "discover",
+        ] {
+            let titles = found(query);
+            assert!(
+                titles.iter().any(|t| t == "Extension Store"),
+                "{query:?} did not find the store, found {titles:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn updating_is_findable_by_the_words_that_mean_updating() {
+        for query in ["update", "updates", "upgrade", "outdated", "update extensions"] {
+            let titles = found(query);
+            assert!(
+                titles.iter().any(|t| t == "Update Extensions"),
+                "{query:?} did not find it, found {titles:?}",
+            );
+        }
+    }
+
+    /// Both extension rows and the folder install are three different jobs.
+    ///
+    /// They share every keyword, so the risk is not that one is missing but
+    /// that one buries the others. Typing the bare word has to offer all three.
+    #[test]
+    fn the_three_extension_rows_all_place_for_the_bare_word() {
+        let titles = found("extension");
+
+        for wanted in ["Extension Store", "Update Extensions", "Install Extension"] {
+            assert!(
+                titles.iter().any(|t| t == wanted),
+                "{wanted} is missing from {titles:?}",
+            );
+        }
+    }
+
+    /// **Against the machine, not against an empty index.**
+    ///
+    /// Searching `builtins()` alone proves the row exists and proves nothing
+    /// about whether anybody sees it. On a real Windows machine "store" is a
+    /// crowded word: the Microsoft Store, three SDK documentation entries, and
+    /// every packaged application in the index reports itself as a Store App.
+    /// The observed list on this machine had the store nowhere on the first
+    /// screen, and the row existing was never the question.
+    ///
+    /// These are the actual competing titles, taken from a screenshot of the
+    /// running launcher rather than invented.
+    fn against_the_real_index(query: &str) -> Vec<String> {
+        const COMPETITORS: &[(&str, &str)] = &[
+            ("store", "Application"),
+            ("Microsoft Store", "Store App"),
+            ("Tools for Windows Store Apps", "Application"),
+            ("Samples for Windows Store Apps", "Application"),
+            ("Documentation for Windows Store Apps", "Documentation"),
+            ("Notepad", "Store App"),
+            ("Calculator", "Store App"),
+            ("Settings", "Store App"),
+            ("Microsoft Store Install Service", "Application"),
+            ("Windows Store Restore", "Application"),
+        ];
+
+        let mut corpus = registry::builtins();
+        for (name, kind) in COMPETITORS {
+            corpus.push(sill_lib::registry::app_record(
+                name,
+                &format!(r"C:\Program Files\{name}.exe"),
+                None,
+                kind,
+            ));
+        }
+
+        search(&corpus, query, &Frecency::default(), NOW, 60)
+            .into_iter()
+            .map(|hit| hit.command.title.clone())
+            .collect()
+    }
+
+    /// How far down the list somebody has to look before giving up.
+    ///
+    /// Eight, because that is roughly what the launcher shows without
+    /// scrolling at its default height. A row below the fold for the most
+    /// obvious query is a row nobody finds, which is the same standard the
+    /// text recognition rows are held to.
+    const FIRST_SCREEN: usize = 8;
+
+    #[test]
+    fn the_store_is_on_the_first_screen_for_the_word_store() {
+        let titles = against_the_real_index("store");
+        let at = titles.iter().position(|t| t == "Extension Store");
+
+        assert!(
+            at.is_some_and(|at| at < FIRST_SCREEN),
+            "Extension Store placed at {at:?} against the Microsoft Store and \
+             friends, so nobody typing \"store\" would see it. Got {titles:?}",
+        );
+    }
+
+    /// The narrower word must be decisive.
+    ///
+    /// Nothing Windows ships is called an extension, so if this one is not
+    /// first something is very wrong with the keywords.
+    #[test]
+    fn the_word_extension_reaches_it_first() {
+        let titles = against_the_real_index("extension");
+        assert_eq!(
+            titles.first().map(String::as_str),
+            Some("Extension Store"),
+            "got {titles:?}",
+        );
+    }
+}
+
 /// A capability nobody can find is a capability nobody has.
 ///
 /// Text recognition is reachable three ways on purpose: as an action on a

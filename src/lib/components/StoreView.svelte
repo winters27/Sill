@@ -1,0 +1,864 @@
+<script lang="ts">
+  /**
+   * Browsing the extension store, and deciding whether to install one.
+   *
+   * Two screens in one component. The list is what somebody browses; the
+   * confirmation is what they read before code they did not write arrives on
+   * their machine. They are one component because the second is a step of the
+   * first rather than a place of its own: there is no route to it, no way to
+   * reach it except by asking to install something, and no state in it that
+   * outlives the answer.
+   *
+   * Nothing here filters or ranks. A keystroke sends a query to Rust and draws
+   * what comes back, which is the same division the root list already keeps.
+   */
+  import { onMount, untrack } from "svelte";
+  import {
+    ago,
+    installs,
+    shortRevision,
+    storeBrowse,
+    storeDiscard,
+    storeInstall,
+    storePrepare,
+    storeReady,
+    storeUninstall,
+    weight,
+    type Browse,
+    type Preparation,
+    type StoreRow,
+  } from "$lib/store";
+  import StoreIcon from "./StoreIcon.svelte";
+  import type { Preferences } from "$lib/settings";
+
+  interface Props {
+    /** The launcher's query field drives the search. */
+    query: string;
+    selected: number;
+    onselect: (index: number) => void;
+    oncount: (count: number) => void;
+    /** Said in the launcher's status line, where every other view says things. */
+    onstatus: (said: string) => void;
+    /** Refreshes the launcher's own list after an install or a removal. */
+    onchanged: () => void;
+    prefs: Preferences | null;
+    /** Opens straight onto what has an update, from the launcher's own row. */
+    startOnUpdates?: boolean;
+  }
+
+  let {
+    query,
+    selected,
+    onselect,
+    oncount,
+    onstatus,
+    onchanged,
+    prefs,
+    startOnUpdates = false,
+  }: Props = $props();
+
+  /** What the list is narrowed to. Derived scopes, not a hand-written set. */
+  type Scope = "all" | "installed" | "updates";
+
+  let browse = $state<Browse | null>(null);
+  /*
+   * Where the store opens, not what it stays on.
+   *
+   * The initial value is the whole meaning of the prop: "Update Extensions"
+   * opens here on the updates scope and the person looking is then free to
+   * change it. Reading it once is deliberate, and `untrack` says so rather
+   * than leaving a warning that reads like an oversight.
+   */
+  let scope = $state<Scope>(untrack(() => startOnUpdates) ? "updates" : "all");
+  let category = $state<string | null>(null);
+  let loading = $state(true);
+  let failed = $state<string | null>(null);
+
+  /**
+   * Whether this machine has the Node an extension needs.
+   *
+   * Browsing works without it and installing does not, so it is a line at the
+   * top rather than a refusal to open the store. Asked once on the way in:
+   * somebody can install Node while Sill is open, and the answer is only wrong
+   * in the direction of saying so when it is no longer true.
+   */
+  let ready = $state(true);
+
+  /** The install being decided, if one is. */
+  let deciding = $state<Preparation | null>(null);
+  /** What the confirmation screen is doing, so its button can say so. */
+  let working = $state<string | null>(null);
+
+  const rows = $derived(browse?.rows ?? []);
+  const current = $derived(rows[selected] ?? null);
+
+  /**
+   * Whether the compatibility switch is on.
+   *
+   * Read from preferences rather than held here, so the store and the settings
+   * panel are one value and not two that drift. Rust owns it; this reflects it.
+   */
+  const windowsOnly = $derived(prefs?.store.windowsOnly ?? true);
+
+  /**
+   * Which browse the rows on screen belong to.
+   *
+   * Two can be in flight at once and they can come back in either order, so
+   * without this an older one lands last and puts results for a shorter query
+   * under a longer one, which reads as the store ignoring what was typed. The
+   * launcher's own search carries the same counter for the same reason.
+   */
+  let generation = 0;
+
+  /**
+   * Asks Rust for a screen.
+   *
+   * Every input to the query is read here, so changing the scope, the
+   * category, the switch or the text all go through one path. A second "and
+   * also re-run the search" call site is how two of these end up disagreeing
+   * about what is on screen.
+   */
+  async function load(refresh = false) {
+    const asked = ++generation;
+    loading = true;
+
+    try {
+      const answer = await storeBrowse(
+        {
+          text: query,
+          category,
+          installedOnly: scope === "installed",
+          updatesOnly: scope === "updates",
+          hideBlocked: windowsOnly,
+        },
+        refresh,
+      );
+
+      if (asked !== generation) return;
+      browse = answer;
+      failed = null;
+    } catch (err) {
+      if (asked !== generation) return;
+      failed = `${err}`;
+      browse = null;
+    } finally {
+      if (asked === generation) loading = false;
+    }
+  }
+
+  /*
+   * One effect for every input, rather than a handler per control.
+   *
+   * Reading them all here is what makes the list impossible to leave stale:
+   * anything that changes what should be on screen re-runs the query by
+   * existing, and there is no second place to remember to call.
+   */
+  $effect(() => {
+    // Named so each dependency is deliberate rather than incidental.
+    void query;
+    void scope;
+    void category;
+    void windowsOnly;
+
+    // Nothing to reload behind a screen nobody can see past. Reading this is
+    // also what refreshes the list on the way back, which is how a row that
+    // was just installed learns that it is.
+    if (deciding) return;
+
+    void load();
+  });
+
+  $effect(() => {
+    oncount(rows.length);
+  });
+
+  onMount(() => {
+    void storeReady().then((answer) => (ready = answer));
+  });
+
+  /** Enter on the highlighted row. */
+  export async function activate() {
+    if (deciding) {
+      await accept();
+      return;
+    }
+    if (current) await decide(current);
+  }
+
+  /**
+   * Escape.
+   *
+   * Answered here when there is something to back out of, so the launcher can
+   * treat the store like every other view that owns its own Escape: the
+   * confirmation goes back to the list, and the list goes back to the root.
+   */
+  export function back(): boolean {
+    if (deciding) {
+      cancel();
+      return true;
+    }
+    return false;
+  }
+
+  /** Fetches the catalogue again rather than reading the copy on disk. */
+  export async function refresh() {
+    onstatus("Fetching the extension store");
+    await load(true);
+    onstatus(failed ?? `${browse?.total ?? 0} extensions`);
+  }
+
+  /** Moves through All, Installed and Updates. */
+  export function cycleScope(by: number) {
+    const order: Scope[] = ["all", "installed", "updates"];
+    const at = order.indexOf(scope);
+    scope = order[(at + by + order.length) % order.length];
+    onselect(0);
+  }
+
+  /** Removes the highlighted extension. */
+  export async function remove() {
+    const row = current;
+    if (!row?.installed) return;
+
+    try {
+      await storeUninstall(row.name);
+      onstatus(`Removed ${row.title}`);
+      onchanged();
+      await load();
+    } catch (err) {
+      onstatus(`${err}`);
+    }
+  }
+
+  /** Whether the highlighted row has something to take back. */
+  export function isInstalled(): boolean {
+    return current?.installed != null;
+  }
+
+  /** Step one. Fetches the source and reads it; installs nothing. */
+  async function decide(row: StoreRow) {
+    working = "Fetching";
+    onstatus(`Fetching ${row.title}`);
+    try {
+      deciding = await storePrepare(row.name);
+      onstatus("");
+    } catch (err) {
+      onstatus(`${err}`);
+    } finally {
+      working = null;
+    }
+  }
+
+  /** Step two. */
+  async function accept() {
+    const asked = deciding;
+    if (!asked || working) return;
+
+    working = "Installing";
+    try {
+      const done = await storeInstall(asked.name);
+      onstatus(`Installed ${done.title} (${done.commands.join(", ")})`);
+      onchanged();
+      // Clearing this is what puts the list back and reloads it, so the row
+      // that was just installed says so. Reloading here as well would run the
+      // same query twice for one install.
+      deciding = null;
+    } catch (err) {
+      onstatus(`${err}`);
+    } finally {
+      working = null;
+    }
+  }
+
+  /** Leaves the screen and throws away what was fetched for it. */
+  function cancel() {
+    deciding = null;
+    void storeDiscard();
+    onstatus("");
+  }
+
+  /** What the button on a row says, which is also what Enter will do. */
+  function verb(row: StoreRow): string {
+    if (row.installed?.outdated) return "Update";
+    if (row.installed) return "Installed";
+    return "Install";
+  }
+</script>
+
+<div class="store">
+  {#if deciding}
+    <!--
+      What it will be able to do, before it can do any of it.
+
+      Deliberately not styled as a permission dialog. Nothing here grants or
+      withholds anything, and a screen that looks like it does would earn a
+      trust that is not on offer. It is a description, and the sentence at the
+      bottom says exactly that.
+    -->
+    <div class="decide sill-scrolls">
+      <header class="head">
+        <StoreIcon src={deciding.icon} label={deciding.title} size={40} />
+        <div>
+        <h2>{deciding.title}</h2>
+        <p class="sub">
+          {deciding.files} files, {weight(deciding.bytes)}, at
+          <code>{shortRevision(deciding.revision)}</code>
+        </p>
+        </div>
+      </header>
+
+      <section>
+        <h3>What this code appears to be able to do</h3>
+        {#if deciding.capabilities.length}
+          <ul class="reaches">
+            {#each deciding.capabilities as reach (reach.id)}
+              <li>
+                <span class="what">
+                  {reach.title}
+                  {#if !reach.mediated}
+                    <span class="unseen" title="Sill is not in the way of this one"
+                      >Sill never sees this</span
+                    >
+                  {/if}
+                </span>
+                <span class="why">{reach.detail}</span>
+                <span class="where">{reach.seenIn.join(", ")}</span>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="quiet">Nothing in its own source reaches outside itself.</p>
+        {/if}
+      </section>
+
+      {#if deciding.secrets.length}
+        <section>
+          <h3>It will ask you for</h3>
+          <p class="quiet">{deciding.secrets.join(", ")}</p>
+        </section>
+      {/if}
+
+      {#if deciding.packages.length}
+        <section>
+          <h3>It will fetch {deciding.packages.length} packages from npm</h3>
+          <p class="quiet">{deciding.packages.join(", ")}</p>
+        </section>
+      {/if}
+
+      <section>
+        <h3>Commands it adds</h3>
+        <ul class="commands">
+          {#each deciding.commands as command (command.name)}
+            <li class:unrunnable={!command.runnable}>
+              <span>{command.title}</span>
+              {#if !command.runnable}
+                <span class="tag">{command.mode}, which Sill cannot run</span>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      </section>
+
+      <p class="warning">{deciding.notEnforced}</p>
+
+      <p class="quiet">
+        Source: <code>{deciding.sourceUrl}</code>
+      </p>
+
+      <div class="decide-actions">
+        <button class="primary" onclick={accept} disabled={working !== null}>
+          {working ?? "Install"}
+        </button>
+        <button onclick={cancel} disabled={working !== null}>Cancel</button>
+      </div>
+    </div>
+  {:else}
+    {#if !ready}
+      <!-- Said here rather than at the moment an install fails. Browsing works
+           without Node and installing does not, and finding that out after
+           choosing something is finding it out too late. -->
+      <p class="missing">
+        Extensions need Node.js, which is not installed, so nothing here can be
+        installed yet. Get it from nodejs.org, or run: winget install OpenJS.NodeJS.LTS
+      </p>
+    {/if}
+
+    <div class="bar">
+      <!--
+        Scopes, then categories. The scopes are computed from what is
+        installed; the categories are read out of the catalogue, so a category
+        Raycast adds appears here without anybody adding it.
+      -->
+      <div class="chips sill-scrolls">
+        <button class:on={scope === "all"} onclick={() => (scope = "all")}>All</button>
+        <button class:on={scope === "installed"} onclick={() => (scope = "installed")}>
+          Installed
+        </button>
+        <button class:on={scope === "updates"} onclick={() => (scope = "updates")}>
+          Updates{browse?.updates ? ` ${browse.updates}` : ""}
+        </button>
+
+        <span class="divider"></span>
+
+        <button class:on={category === null} onclick={() => (category = null)}>Any</button>
+        {#each browse?.categories ?? [] as one (one.name)}
+          <button
+            class:on={category === one.name}
+            onclick={() => (category = category === one.name ? null : one.name)}
+          >
+            {one.name}
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="pane">
+      <div class="list sill-scrolls" role="presentation">
+        {#if failed}
+          <p class="quiet pad">{failed}</p>
+        {:else if loading && !rows.length}
+          <p class="quiet pad">Loading the extension store</p>
+        {:else if !rows.length}
+          <p class="quiet pad">
+            Nothing here.
+            {#if browse?.hidden && windowsOnly}
+              {browse.hidden} are hidden because they do not say they run on Windows.
+            {/if}
+          </p>
+        {/if}
+
+        {#each rows as row, index (row.name)}
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="row"
+            class:selected={index === selected}
+            onmouseenter={() => onselect(index)}
+            onclick={() => {
+              onselect(index);
+              void activate();
+            }}
+          >
+            <StoreIcon src={row.icon} label={row.title} size={32} />
+
+            <div class="body">
+              <div class="line">
+                <span class="title">{row.title}</span>
+                <span class="author">{row.author}</span>
+              </div>
+              <div class="line">
+                <span class="desc">{row.description}</span>
+              </div>
+              <div class="line meta">
+                <span>{installs(row.downloads)} installs</span>
+                {#if row.installed?.outdated}
+                  <span class="update">Update</span>
+                {:else if row.installed}
+                  <span class="have">Installed</span>
+                {/if}
+                {#if row.blocked}
+                  <span class="blocked">{row.blocked}</span>
+                {/if}
+              </div>
+            </div>
+          </div>
+        {/each}
+      </div>
+
+      <div class="detail sill-scrolls">
+        {#if current}
+          <div class="head">
+            <StoreIcon src={current.icon} label={current.title} size={40} />
+            <div>
+              <h2>{current.title}</h2>
+              <p class="sub">by {current.author}</p>
+            </div>
+          </div>
+          <p class="desc">{current.description}</p>
+
+          <h3>Commands</h3>
+          <ul class="commands">
+            {#each current.commands as command (command.name)}
+              <li class:unrunnable={!command.runnable}>
+                <span>{command.title}</span>
+                {#if !command.runnable}
+                  <span class="tag">{command.mode}</span>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+
+          {#if current.categories.length}
+            <h3>Categories</h3>
+            <p class="quiet">{current.categories.join(", ")}</p>
+          {/if}
+
+          <h3>Version</h3>
+          <p class="quiet">
+            <code>{shortRevision(current.revision)}</code>
+            {#if current.installed}
+              {current.installed.outdated
+                ? ` published, you have ${shortRevision(current.installed.revision) || "an unrecorded version"}`
+                : " published, which is what you have"}
+            {/if}
+          </p>
+
+          <p class="cta">{verb(current)} with Enter</p>
+        {/if}
+      </div>
+    </div>
+
+    <div class="foot">
+      <span>
+        {browse ? `${browse.matched} of ${browse.total}` : ""}
+        {#if browse?.hidden && windowsOnly}
+          · {browse.hidden} hidden
+        {/if}
+      </span>
+      <span>{browse ? `Catalogue fetched ${ago(browse.fetchedAt)}` : ""}</span>
+    </div>
+  {/if}
+</div>
+
+<style>
+  .store {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  /* Scopes and categories on one scrolling strip. There are sixteen
+     categories and the window is 750px, so they scroll sideways rather than
+     wrapping into a block that eats the list. */
+  .bar {
+    flex: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .missing {
+    flex: none;
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--line);
+    color: var(--text-2);
+    font-size: var(--text-meta);
+    line-height: var(--line-meta);
+  }
+
+  .chips {
+    display: flex;
+    gap: var(--space-1);
+    align-items: center;
+    padding: var(--space-2) var(--space-3);
+    overflow-x: auto;
+  }
+
+  .chips button {
+    flex: none;
+    padding: 3px var(--space-2);
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--text-meta);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .chips button:hover {
+    background: var(--fill-1);
+    color: var(--text-2);
+  }
+
+  .chips button.on {
+    background: var(--accent-fill);
+    color: var(--text-1);
+  }
+
+  .divider {
+    flex: none;
+    width: 1px;
+    height: 14px;
+    margin: 0 var(--space-1);
+    background: var(--line);
+  }
+
+  .pane {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .list {
+    flex: 1 1 58%;
+    min-width: 0;
+    padding: var(--space-1);
+    overflow-y: auto;
+  }
+
+  .detail {
+    flex: 1 1 42%;
+    min-width: 0;
+    padding: var(--space-3);
+    border-left: 1px solid var(--line);
+    overflow-y: auto;
+  }
+
+  /* Three lines rather than the launcher's one, so this cannot use
+     `--row-height`: a store row carries a title, a description and its
+     numbers, and squeezing that into 40px is what makes a store unreadable. */
+  .row {
+    display: flex;
+    gap: var(--space-3);
+    align-items: flex-start;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    cursor: default;
+    transition: background-color 0.22s var(--ease);
+  }
+
+  .row:hover:not(.selected) {
+    background-color: var(--fill-1);
+  }
+
+  .row.selected {
+    background-color: var(--accent-fill);
+    box-shadow: var(--catch);
+  }
+
+  /* The icon keeps its width; everything else shares what is left, and
+     `min-width: 0` is what lets the title and description truncate rather
+     than pushing the row wider than the column. */
+  .body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .line {
+    display: flex;
+    gap: var(--space-2);
+    align-items: baseline;
+    min-width: 0;
+  }
+
+  .title {
+    color: var(--text-1);
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
+  }
+
+  .author,
+  .desc,
+  .meta {
+    color: var(--text-3);
+    font-size: var(--text-meta);
+  }
+
+  .desc,
+  .title,
+  .author {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .meta {
+    gap: var(--space-3);
+    margin-top: 2px;
+  }
+
+  .have {
+    color: var(--text-2);
+  }
+
+  .update {
+    color: var(--accent);
+  }
+
+  .blocked {
+    color: var(--text-4);
+  }
+
+  .head {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    margin-bottom: var(--space-3);
+  }
+
+  h2 {
+    margin: 0;
+    color: var(--text-1);
+    font-size: var(--text-heading);
+    font-weight: var(--weight-medium);
+  }
+
+  h3 {
+    margin: var(--space-4) 0 var(--space-1);
+    color: var(--text-3);
+    font-size: var(--text-label);
+    font-weight: var(--weight-medium);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .sub {
+    margin: 2px 0 0;
+    color: var(--text-3);
+    font-size: var(--text-meta);
+  }
+
+  .detail .desc {
+    display: block;
+    white-space: normal;
+    line-height: var(--line-body);
+  }
+
+  .quiet {
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--text-meta);
+    line-height: var(--line-meta);
+  }
+
+  .pad {
+    padding: var(--space-3);
+  }
+
+  .cta {
+    margin: var(--space-4) 0 0;
+    color: var(--text-2);
+    font-size: var(--text-meta);
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .commands li {
+    display: flex;
+    gap: var(--space-2);
+    align-items: baseline;
+    padding: 2px 0;
+    color: var(--text-2);
+    font-size: var(--text-meta);
+  }
+
+  .commands li.unrunnable {
+    color: var(--text-4);
+  }
+
+  .tag {
+    color: var(--text-4);
+    font-size: var(--text-micro);
+  }
+
+  code {
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+  }
+
+  .foot {
+    display: flex;
+    flex: none;
+    justify-content: space-between;
+    padding: var(--space-1) var(--space-3);
+    border-top: 1px solid var(--line);
+    color: var(--text-4);
+    font-size: var(--text-micro);
+  }
+
+  /* ------------------------------------------------------------- deciding */
+
+  .decide {
+    flex: 1;
+    min-height: 0;
+    padding: var(--space-4);
+    overflow-y: auto;
+  }
+
+  .decide header {
+    margin-bottom: var(--space-2);
+  }
+
+  .decide section {
+    margin-bottom: var(--space-2);
+  }
+
+  .reaches li {
+    display: grid;
+    gap: 1px;
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .reaches li:last-child {
+    border-bottom: 0;
+  }
+
+  .what {
+    color: var(--text-1);
+    font-size: var(--text-body);
+  }
+
+  .why {
+    color: var(--text-3);
+    font-size: var(--text-meta);
+  }
+
+  .where {
+    color: var(--text-4);
+    font-size: var(--text-micro);
+  }
+
+  /* The one thing on this screen that is a fact about Sill rather than about
+     the extension: whether Sill is in the way of it at all. */
+  .unseen {
+    margin-left: var(--space-2);
+    color: var(--text-4);
+    font-size: var(--text-micro);
+  }
+
+  .warning {
+    margin: var(--space-3) 0;
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--fill-1);
+    color: var(--text-2);
+    font-size: var(--text-meta);
+    line-height: var(--line-meta);
+  }
+
+  .decide-actions {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+  }
+
+  .decide-actions button {
+    padding: var(--space-2) var(--space-4);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--fill-2);
+    color: var(--text-1);
+    font-size: var(--text-meta);
+    cursor: pointer;
+  }
+
+  .decide-actions button:hover:not(:disabled) {
+    background: var(--fill-3);
+  }
+
+  .decide-actions button.primary {
+    background: var(--accent-fill-strong);
+  }
+
+  .decide-actions button:disabled {
+    color: var(--text-4);
+    cursor: default;
+  }
+</style>

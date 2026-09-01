@@ -600,7 +600,19 @@ pub const SETTINGS: &[Setting] = &[
         "extensions",
         "Extensions",
         "Installed extensions",
-        "raycast host node commands",
+        "raycast host node commands version revision update outdated remove uninstall",
+    ),
+    s(
+        "extensions",
+        "Extensions",
+        "Only Windows extensions",
+        "store platform macos compatible filter browse hide",
+    ),
+    s(
+        "extensions",
+        "Extensions",
+        "GitHub token",
+        "store rate limit api requests hour credential browse install",
     ),
     // ------------------------------------------------------------ advanced
     s(

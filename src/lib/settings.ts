@@ -98,6 +98,27 @@ export interface Browsers {
   maxResults: number;
 }
 
+/** The extension store. */
+export interface StoreSettings {
+  /**
+   * Only offer extensions that say they run on Windows.
+   *
+   * Raycast ships for macOS and for Windows and its store is one index for
+   * both. The ones that name macOS and not Windows never reach Sill at all.
+   * This decides what happens to the ones that name nothing because they were
+   * published before the field existed: hidden and counted, or shown and
+   * marked.
+   */
+  windowsOnly: boolean;
+  /**
+   * A GitHub token, so more requests an hour are allowed.
+   *
+   * Sealed on its way to disk, so what comes back from Rust is the real value
+   * and what is on disk is not. Null when unset.
+   */
+  githubToken: string | null;
+}
+
 /**
  * Looking something up on the web.
  *
@@ -251,6 +272,7 @@ export interface Preferences {
   sources: Sources;
   files: FileSearch;
   browsers: Browsers;
+  store: StoreSettings;
   webSearch: WebSearch;
   screenshot: Screenshot;
   bindings: Binding[];

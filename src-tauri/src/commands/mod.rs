@@ -16,4 +16,5 @@ pub mod extensions;
 pub mod launch;
 pub mod search;
 pub mod settings;
+pub mod store;
 pub mod system;

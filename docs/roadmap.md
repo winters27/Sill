@@ -34,7 +34,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P1.8 | Navigation bindings | **Done.** Vim and Emacs presets |
 | P1.9 | Command history | **Done.** Up recalls what was searched |
 | P1.10 | Application and command hotkeys | **Done** |
-| P1.11 | Extension install path | **Done.** Point at a folder and its commands are built and listed. esbuild ships beside the host; the build is Rust, not a repository script |
+| P1.11 | Extension install path | **Done.** Point at a folder and its commands are built and listed, or browse the store and install from there. esbuild ships beside the host; the build is Rust, not a repository script |
 | P1.12 | Emoji and symbols | **Done.** In the picker and in ordinary searches |
 | P1.13 | Snippets: collections, rich text, app-specific, forms | **Done, except forms.** Placeholders, import and export, collections, formatting, and limiting one to the programs it belongs in. Multi-field forms need a surface that does not exist yet |
 | P1.14 | Native dictation panel | **Dropped 2026-08-31.** Its justification, removing a second renderer, was measured false; both windows share one. Reconsider only on a recording-time processor measurement |
@@ -427,6 +427,98 @@ Search had no rule at all and drew a white control on dark glass. One `Select`
 and one `TextField` decide it once now, and `verify:source` refuses a
 hand-rolled picker in settings.
 
+### P3.12, the extension store
+
+Deferred since P1.11 with a note saying a registry is "a different problem,
+made of trust and updates rather than of transpiling". Both halves of that
+turned out to be the design, so this is what each one answered.
+
+**Two sources, and the split is the point.** The catalogue comes from Raycast's
+public store index, because nothing else aggregates it: the repository holds one
+`package.json` per extension and no summary of itself, so the alternative is
+three thousand requests to build a list of titles. **The code comes from
+`github.com/raycast/extensions`, which is MIT, at the exact commit the
+catalogue names.** Sill never downloads a built bundle from anybody. What lands
+on the machine is source, at a revision that is written down, transpiled by the
+same esbuild call a folder install uses. If the index changes shape or goes
+away, browsing stops and installing from a folder does not.
+
+**Not git.** `.github/workflows/verify.yml` does a sparse blobless clone for the
+two extensions the view gate builds, and it works. It also needs git, which
+would be a third program somebody has to have for one feature. Plain HTTP
+reaches the same bytes: measured on `uuid-generator`, **three API calls, 19
+files, 158 KB, 2.1 seconds**. Only the calls to `api.github.com` are rate
+limited, at sixty an hour unauthenticated, so about twenty installs an hour; the
+file bytes come from `raw.githubusercontent.com`, which is not counted. A token
+in settings raises it to five thousand, and it is sealed rather than written to
+the settings file.
+
+**Dependencies are not optional.** `uuid-generator` imports `uuid`, `typeid-js`
+and `ulidx`, and esbuild bundles what it is pointed at, so an unresolved import
+is a build failure rather than a warning. Every store install runs npm. Node was
+already required to run any extension at all and npm arrives with it, so this
+adds no requirement that was not already there. **The staged source does not
+stay**: `node_modules` measured 45 MB for that one extension, and what is kept
+is the bundles.
+
+**`--ignore-scripts`, which is the one real limit.** A package's `postinstall`
+hook is arbitrary code that runs at install time, before anybody has agreed to
+anything and before the extension has ever been launched. Turning it off costs
+the rare native package that needs a build step, and that one now fails loudly.
+
+**Installing is two steps because the first one has to be readable.** Step one
+fetches the source and reads it; step two runs npm and builds. Between them the
+window shows what the code appears to reach, derived from the source that is
+about to be built rather than from a description somebody typed. Nothing
+executes before the answer.
+
+**What that screen does not claim.** There is no sandbox, and the screen says
+so rather than looking like a permission dialog that grants everything anyway.
+It over-reports on purpose: the scan is substring matching over the extension's
+own source, it cannot see through a dependency, and a parser would be more
+precise and still wrong the moment a module name is built at runtime. The one
+thing on it that is a fact about Sill rather than about the extension is
+**whether Sill is even in the way**: a capability that goes through
+`host_bridge.rs` can be logged and could one day be refused, and one that is
+Node reaching the disk directly cannot. A test reads that trait's source and
+refuses a method no capability names.
+
+**Updates are a comparison, not a poll.** Every install writes an `origin.json`
+beside its bundles recording the commit, the way `tts::piper` pins its model
+revision. Out of date is that commit against the one the catalogue publishes,
+computed when somebody opens the store. Updating is the same two steps at the
+newer commit, including the screen, because an extension can gain the ability
+to run programs in a version somebody would otherwise have accepted without
+looking. Raycast's own client updates extensions in the background; Sill cannot,
+because nothing here runs at rest, so "Update Extensions" is a row in the
+launcher.
+
+**Raycast ships for two platforms and its store is one index for both.** Of
+3,234 listings, 886 name Windows, 1,048 name macOS and not Windows, and 1,300
+name nothing because they predate the field. The middle group is dropped at the
+point of parsing and never reaches disk. The last group is kept, marked, and
+hidden behind a switch that says how many there are, because treating silence as
+refusal would throw away two fifths of the store.
+
+**Nothing runs at rest.** No timer, no warm-up, no revalidation. The catalogue
+is fetched when the store is opened and the copy on disk is over six hours old,
+and at no other time. It is held while the store is open and dropped when it
+closes, which is the bargain `meter.rs` already makes with its previous reading.
+
+Verified end to end rather than compiled: the catalogue was fetched, 2,183
+listings survived the platform filter, `uuid-generator` was installed from it at
+`6939fc2`, and both a `no-view` and a `view` command were run through
+`scripts/run-extension.mjs`, the same runner the view gate uses. Three items,
+four actions, zero unimplemented APIs. That test lives in
+`src-tauri/tests/store_install.rs` and is `#[ignore]`d, because it reaches two
+services and runs npm.
+
+**Still open.** Nothing enforces anything, which is stated rather than solved:
+capability gating would mean the host refusing a bridge call an extension did
+not declare, and that is a larger piece of work than a store. There is no
+progress bar during an install, so a slow npm looks like a stall. And a hung npm
+has no timeout, the same as esbuild in `extension_install.rs`.
+
 ### P3.11, the tools reach Claude Code
 
 The chat window's eleven tools worked over HTTP and nowhere else, because a
@@ -694,6 +786,11 @@ functions touch the machine, which is what makes a manifest whose command
 redeclares one of the extension's preferences a value in a test rather than a
 directory somebody has to make. Installing merges, so installing one extension
 never uninstalls another, and installing the same one twice updates it.
+
+The store, which that note deferred, is **P3.12 above and built**. It goes
+through this same function rather than around it: acquiring an extension and
+building one are separate problems, and a second installer would be two answers
+to what installed means with nothing keeping them in step.
 
 **Re-indexing cost.** About a tenth of one core while files are changing in an
 indexed folder, and zero at rest. The real answer is patching the index for the

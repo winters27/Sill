@@ -15,6 +15,8 @@
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import ClipboardView from "$lib/components/ClipboardView.svelte";
+  import StoreView from "$lib/components/StoreView.svelte";
+  import { storeClose } from "$lib/store";
   import WidgetBoard from "$lib/widgets/Board.svelte";
   import WidgetChin from "$lib/widgets/Chin.svelte";
   import { collectActions, isRunnable } from "$lib/exthost/actions";
@@ -139,6 +141,16 @@
      * window nobody wanted.
      */
     | "namingWorkspace"
+    /**
+     * Browsing extensions that are not installed yet.
+     *
+     * Its own mode rather than rows in the root list, and for the same reason
+     * the process view has one: the catalogue is three thousand listings that
+     * have to be fetched, and nothing about typing a letter should reach the
+     * network. It is entered deliberately and left completely, which is what
+     * lets the catalogue be dropped on the way out.
+     */
+    | "store"
     /**
      * A conversation with a model.
      *
@@ -277,6 +289,10 @@
   let browser = $state<string | null>(null);
   let clipboardView = $state<ReturnType<typeof ClipboardView> | null>(null);
   let clipboardCount = $state(0);
+  let storeView = $state<ReturnType<typeof StoreView> | null>(null);
+  let storeCount = $state(0);
+  /** Whether the store was opened on what has an update rather than on all. */
+  let storeOnUpdates = $state(false);
 
   const view = $derived.by(() => {
     version;
@@ -362,6 +378,10 @@
      * already in hand. The clipboard is here for the same reason.
      */
     if (mode === "conversations") return conversationRows.length;
+    // The store counts its own rows for the same reason: the query goes to
+    // Rust, which answers with a page already narrowed and capped, so what is
+    // arrowed through is whatever came back rather than anything measured here.
+    if (mode === "store") return storeCount;
     return items.length;
   });
 
@@ -651,6 +671,10 @@ const HANDLES_ITS_OWN_ESCAPE = new Set([
   "collection",
   "switcher",
   "command",
+  // Escape backs out of the screen that asks whether to install something
+  // before it backs out of the store, and leaving the store lets go of the
+  // catalogue rather than only changing the mode.
+  "store",
 ]);
 
 const DRAWS_ITS_OWN = new Set([
@@ -661,6 +685,7 @@ const DRAWS_ITS_OWN = new Set([
   "collection",
   "ai",
   "conversations",
+  "store",
 ]);
 
   let lastUndo = $state<UndoToken | null>(null);
@@ -777,6 +802,11 @@ const DRAWS_ITS_OWN = new Set([
     // Nothing to search. The readout is a picture of the machine rather than a
     // list of rows, and it keeps itself up to date.
     if (mode === "widgets" || mode === "namingWorkspace") return;
+
+    // The store searches a catalogue rather than the index, and does it in
+    // Rust. Running the index search here as well would put applications
+    // underneath extensions in a view about extensions.
+    if (mode === "store") return;
 
     if (mode === "appVolume") {
       try {
@@ -1053,7 +1083,42 @@ const DRAWS_ITS_OWN = new Set([
       return true;
     }
 
+    /*
+     * Two rows into one view.
+     *
+     * "Update Extensions" is the store opened on what has a newer version
+     * published, not a second surface. Updating is installing at a newer
+     * commit, including the screen that says what the new version reaches, so
+     * a separate path would be the same code with a different name and one
+     * fewer thing read.
+     */
+    if (id === "sill:store" || id === "sill:store-updates") {
+      void recordUse(id, typed);
+      storeOnUpdates = id === "sill:store-updates";
+      mode = "store";
+      selected = 0;
+      query = "";
+      return true;
+    }
+
     return false;
+  }
+
+  /**
+   * Leaves the store, and lets go of what it was holding.
+   *
+   * Every way out goes through here. The catalogue is two megabytes of
+   * somebody else's product listings and there is no version of "at rest, do
+   * almost nothing" where it outlives the view: a path out that only changed
+   * the mode would leave it resident until the launcher was restarted.
+   */
+  async function leaveStore() {
+    mode = "root";
+    selected = 0;
+    query = "";
+    storeOnUpdates = false;
+    await storeClose();
+    await refreshRoot();
   }
 
   async function openSelected() {
@@ -1065,6 +1130,11 @@ const DRAWS_ITS_OWN = new Set([
 
     if (mode === "clipboard") {
       await clipboardView?.paste(true);
+      return;
+    }
+
+    if (mode === "store") {
+      await storeView?.activate();
       return;
     }
 
@@ -2360,6 +2430,15 @@ const DRAWS_ITS_OWN = new Set([
       return;
     }
 
+    // A step back rather than a way out, when there is something to step back
+    // from: Escape on the screen asking whether to install returns to the
+    // list, and throws away what was fetched.
+    if (mode === "store") {
+      if (storeView?.back()) return;
+      await leaveStore();
+      return;
+    }
+
     if (mode === "clipboard") {
       // A step back rather than a way out. Escape with entries picked means
       // "not those", and closing the whole view would throw away the search
@@ -2579,6 +2658,35 @@ const DRAWS_ITS_OWN = new Set([
       // Everything else falls through to the panel's own field, which has
       // focus while it is open.
       return;
+    }
+
+    /*
+     * The store's own keys, which only exist while it is open.
+     *
+     * Ctrl rather than bare letters throughout, because the launcher's search
+     * field has focus and a bare letter is somebody searching the catalogue.
+     * The same reason the clipboard's keys below are all chords.
+     */
+    if (mode === "store") {
+      const ctrl = event.ctrlKey || event.metaKey;
+
+      if (ctrl && event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        void storeView?.refresh();
+        return;
+      }
+      if (ctrl && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        storeView?.cycleScope(event.shiftKey ? -1 : 1);
+        return;
+      }
+      // Removing is the one destructive thing in here, so it is the awkward
+      // chord rather than a single key next to the arrows.
+      if (ctrl && event.shiftKey && event.key.toLowerCase() === "x") {
+        event.preventDefault();
+        void storeView?.remove();
+        return;
+      }
     }
 
     // The clipboard's own keys, which only exist while it is open. Not while
@@ -2986,6 +3094,8 @@ const DRAWS_ITS_OWN = new Set([
       <span class="crumb">Widgets</span>
     {:else if mode === "namingWorkspace"}
       <span class="crumb">Save workspace</span>
+    {:else if mode === "store"}
+      <span class="crumb">Extension Store</span>
     {:else if mode === "destination" && moving}
       <span class="crumb">Move {moving.title}</span>
     {:else if mode === "collection"}
@@ -3032,6 +3142,8 @@ const DRAWS_ITS_OWN = new Set([
           ? "Esc to go back…"
         : mode === "namingWorkspace"
           ? "Name this arrangement, then Enter…"
+        : mode === "store"
+          ? "Search the extension store…"
         : mode === "destination"
           ? "Search for a folder, then Enter…"
           : mode === "alias"
@@ -3234,6 +3346,24 @@ const DRAWS_ITS_OWN = new Set([
       <WidgetBoard
         prefs={prefs ?? null}
         onpin={(id, pinned) => void setPinned(id, pinned)}
+      />
+    </div>
+
+  {:else if mode === "store"}
+    <!-- The launcher's own field is the store's search box, the same way it
+         is the clipboard's filter. A view with a second search field would be
+         two places to type in one window. -->
+    <div class="listing">
+      <StoreView
+        bind:this={storeView}
+        {query}
+        {selected}
+        prefs={prefs ?? null}
+        startOnUpdates={storeOnUpdates}
+        onselect={(i) => (selected = i)}
+        oncount={(n) => (storeCount = n)}
+        onstatus={(said) => (status = said)}
+        onchanged={() => void refreshRoot()}
       />
     </div>
 

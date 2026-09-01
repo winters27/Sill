@@ -189,11 +189,13 @@ impl Action for RunExtensionCommand {
         // The manifest decides. A no-view command runs and exits without ever
         // rendering, so loading it as a view leaves the window waiting for a
         // tree that never arrives.
-        let mode = if record.mode == "no-view" {
-            crate::exthost::CommandMode::NoView
-        } else {
-            crate::exthost::CommandMode::View
-        };
+        //
+        // A mode the type does not know is loaded as a view, which is the same
+        // thing this did when the test was written by hand here. What changed
+        // is that the store asks the same function and reports an unknown mode
+        // as unrunnable rather than installing it.
+        let mode = crate::exthost::CommandMode::from_manifest(&record.mode)
+            .unwrap_or(crate::exthost::CommandMode::View);
 
         let hosts = ctx.app.state::<crate::state::HostState>();
         let host = crate::host::host_of(&hosts).await?;
@@ -359,7 +361,13 @@ impl Action for RunBuiltin {
                     .into_path()
                     .map_err(|err| format!("that folder cannot be read: {err}"))?;
 
-                let installed = crate::extension_install::install(app, &source)?;
+                // Recorded even for a folder, so "where did this come from"
+                // has an answer for every installed extension rather than
+                // only for the ones the store fetched.
+                let origin =
+                    crate::store::Origin::folder(&source, crate::state::now_seconds());
+
+                let installed = crate::extension_install::install(app, &source, &origin)?;
 
                 return Ok(Outcome::done(format!(
                     "Installed {} ({})",

@@ -392,11 +392,31 @@ pub fn builtins() -> Vec<CommandRecord> {
             &["undo", "revert", "back", "mistake", "reverse"],
         ),
         builtin(
+            "store",
+            "extensions",
+            "Extension Store",
+            "Browse Raycast extensions and install them",
+            &[
+                "extension", "store", "raycast", "browse", "install", "add",
+                "plugin", "marketplace", "catalog", "discover", "search",
+            ],
+        ),
+        builtin(
+            "store-updates",
+            "extensions",
+            "Update Extensions",
+            "Check which installed extensions have a newer version",
+            &[
+                "extension", "update", "upgrade", "outdated", "newer",
+                "version", "store", "refresh",
+            ],
+        ),
+        builtin(
             "install-extension",
             "advanced",
             "Install Extension",
             "Build a Raycast extension from a folder and add its commands",
-            &["extension", "raycast", "add", "plugin", "import", "build"],
+            &["extension", "raycast", "add", "plugin", "import", "build", "folder"],
         ),
         builtin(
             "quicklinks",

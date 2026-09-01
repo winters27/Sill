@@ -44,6 +44,7 @@ pub mod settings_catalog;
 pub mod settings_index;
 pub mod sleep;
 pub mod snippets;
+pub mod store;
 pub mod tts;
 pub mod state;
 pub mod system;
@@ -955,6 +956,9 @@ pub fn run() {
         .manage(commands::system::Marking::default())
         .manage(activity::Activity::default())
         .manage(meter::Meter::default())
+        // Empty until somebody opens the store, and empty again the moment
+        // they leave it. Nothing here fetches, warms up or refreshes.
+        .manage(store::StoreState::default())
         .manage(tts::sapi::Sapi::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
@@ -1265,6 +1269,14 @@ pub fn run() {
             commands::extensions::activate_handler,
             commands::extensions::unload_extension,
             commands::extensions::install_extension,
+            commands::store::store_browse,
+            commands::store::store_close,
+            commands::store::store_prepare,
+            commands::store::store_install,
+            commands::store::store_discard,
+            commands::store::store_uninstall,
+            commands::store::store_pins,
+            commands::store::store_ready,
             commands::launch::perform_builtin,
             commands::system::app_icon,
             commands::system::piper_voices,
