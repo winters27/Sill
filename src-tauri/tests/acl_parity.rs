@@ -94,10 +94,41 @@ fn every_declared_window_can_invoke() {
 /// window are both built the first time somebody opens one, because a window
 /// declared up front costs a renderer whether or not it is ever shown. This
 /// reads them out of the code rather than keeping a list beside it.
+/// The windows `lazy_windows` builds on demand, read from its own list.
+///
+/// These are created through a `builder(label)` helper rather than by naming a
+/// label at a `WebviewWindowBuilder::new(` call, so scanning for that marker
+/// cannot see them and reported `capture` and `dictation` as windows that do
+/// not exist. They do exist; they are made the moment something asks.
+///
+/// Read out of `DEFERRED` rather than listed here, because that constant is
+/// what `ensure` dispatches on, so the two cannot drift apart. Repeating the
+/// labels here would be the third list this test's own comment warns about.
+fn deferred(dir: &Path) -> BTreeSet<String> {
+    const MARKER: &str = "DEFERRED: &[&str] = &[";
+
+    let Ok(text) = std::fs::read_to_string(dir.join("lazy_windows.rs")) else {
+        return BTreeSet::new();
+    };
+
+    let Some(at) = text.find(MARKER) else {
+        return BTreeSet::new();
+    };
+
+    let rest = &text[at + MARKER.len()..];
+    let list = rest.split(']').next().unwrap_or_default();
+
+    list.split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect()
+}
+
 fn built_at_runtime(dir: &Path) -> BTreeSet<String> {
     const MARKER: &str = "WebviewWindowBuilder::new(";
 
-    let mut found = BTreeSet::new();
+    let mut found = deferred(dir);
 
     for file in rust_files(dir) {
         let Ok(text) = std::fs::read_to_string(&file) else {
