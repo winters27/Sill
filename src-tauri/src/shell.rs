@@ -233,11 +233,9 @@ pub async fn run(
         command.current_dir(dir);
     }
 
+    // tokio's Command carries this itself on Windows, so no trait is needed.
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(NO_WINDOW);
-    }
+    command.creation_flags(NO_WINDOW);
 
     let mut child = command.spawn().map_err(|err| {
         // Naming the program matters: "the system cannot find the file" about
