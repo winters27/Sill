@@ -594,6 +594,25 @@
    * stack that goes back through a morning of copies would mostly be a way to
    * put back something nobody wanted.
    */
+/**
+ * The modes that draw something other than the ordinary result list.
+ *
+ * Written as the exceptions rather than as a list of members, and that is the
+ * whole point. This was a hand-written list of the modes that *do* draw a
+ * list, and it is the fourth such list in this codebase: every one of them
+ * silently drew nothing for a mode somebody forgot to add, and this one did it
+ * again the day the process view arrived. A new view is an ordinary list until
+ * it says otherwise, so forgetting now costs nothing.
+ */
+const DRAWS_ITS_OWN = new Set([
+  "command",
+  "clipboard",
+  "argument",
+  "collection",
+  "ai",
+  "conversations",
+]);
+
   let lastUndo = $state<UndoToken | null>(null);
 
   $effect(() => {
@@ -3133,7 +3152,7 @@
       />
     </div>
 
-  {:else if mode === "root" || mode === "switcher" || mode === "alias" || mode === "emoji" || mode === "appVolume" || mode === "destination"}
+  {:else if !DRAWS_ITS_OWN.has(mode)}
     <!-- Kept on screen while a name is typed, so what is being named stays
          visible. -->
     <div class="listing">
