@@ -1007,13 +1007,24 @@ pub fn run() {
                 }
             };
 
+            /*
+             * One grant store, held twice.
+             *
+             * The API layer consults it before every call, and the settings
+             * window lists and revokes through it. Two instances would mean a
+             * permission revoked on screen still granted to the extension
+             * running, which is the worst possible way for this to be wrong.
+             */
+            let grants = Arc::new(exthost::grants::Granted::new(handle.clone()));
+            app.manage(grants.clone());
+
             app.manage(HostState {
                 inner: Arc::new(tokio::sync::Mutex::new(None)),
                 api: Arc::new(exthost::ApiLayer::new(
                     tx,
                     host_bridge::SillBridge::new(handle.clone()),
                     Arc::new(storage),
-                    Arc::new(exthost::grants::Granted::new(handle.clone())),
+                    grants,
                 )),
                 host_js: Arc::new(host_js(&handle)),
                 last_used: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
@@ -1270,6 +1281,8 @@ pub fn run() {
             commands::extensions::activate_handler,
             commands::extensions::unload_extension,
             commands::extensions::install_extension,
+            commands::extensions::extension_grants,
+            commands::extensions::revoke_extension_grant,
             commands::store::store_browse,
             commands::store::store_close,
             commands::store::store_prepare,

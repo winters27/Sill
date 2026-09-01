@@ -78,3 +78,58 @@ pub(crate) async fn install_extension(
     .await
     .map_err(|err| format!("the install did not finish: {err}"))?
 }
+
+/// One permission, and how it reads to somebody deciding about it.
+///
+/// The words come from `permission::plainly` rather than from a table in the
+/// settings window, so the screen that lists a permission and the card that
+/// asked for it cannot describe the same thing differently.
+#[derive(serde::Serialize)]
+pub(crate) struct Permission {
+    capability: crate::action::Capability,
+    plainly: &'static str,
+}
+
+/// What one extension has been allowed to reach.
+#[derive(serde::Serialize)]
+pub(crate) struct GrantedTo {
+    extension: String,
+    permissions: Vec<Permission>,
+}
+
+/// What every extension has been allowed to reach.
+///
+/// The screen this feeds is the one the audit said nobody in this category
+/// has: not a list of what is installed, but of what each one can touch.
+#[tauri::command]
+pub(crate) fn extension_grants(
+    grants: State<'_, std::sync::Arc<crate::exthost::grants::Granted>>,
+) -> Vec<GrantedTo> {
+    grants
+        .everything()
+        .into_iter()
+        .map(|(extension, held)| GrantedTo {
+            extension,
+            permissions: held
+                .into_iter()
+                .map(|capability| Permission {
+                    capability,
+                    plainly: crate::exthost::permission::plainly(&capability),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// Takes one permission back.
+///
+/// The extension is asked again the next time it tries, rather than being
+/// refused from then on: revoking is "ask me about this again", not "never".
+#[tauri::command]
+pub(crate) fn revoke_extension_grant(
+    grants: State<'_, std::sync::Arc<crate::exthost::grants::Granted>>,
+    extension: String,
+    capability: crate::action::Capability,
+) {
+    grants.revoke(&extension, &capability);
+}

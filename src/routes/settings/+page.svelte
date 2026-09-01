@@ -7,6 +7,7 @@
   import TitleBar from "$lib/components/TitleBar.svelte";
   import Toggle from "$lib/components/Toggle.svelte";
   import Section from "$lib/components/settings/Section.svelte";
+  import ExtensionPermissions from "$lib/components/settings/ExtensionPermissions.svelte";
   import Row from "$lib/components/settings/Row.svelte";
   import Segmented from "$lib/components/settings/Segmented.svelte";
   import Slider from "$lib/components/settings/Slider.svelte";
@@ -1282,6 +1283,8 @@
                 : "Not found, so no extension can start. Get it from nodejs.org, or run: winget install OpenJS.NodeJS.LTS"}
             />
           </Section>
+
+          <ExtensionPermissions />
 
           <Section
             label="Store"
