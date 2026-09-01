@@ -65,7 +65,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | | Item | State |
 | --- | --- | --- |
 | P3.1 | Capability model: declared permissions, consent, an inspector | **Done.** Extensions speak the same `Capability` an action speaks, every one of the twenty-two host methods is gated, and Settings, Extensions, Permissions lists what each one holds with a Revoke beside it. Asked on first real attempt rather than at install, because a Raycast manifest declares nothing and a consent screen that says "this could reach anything" teaches people to agree without reading |
-| P3.2 | Extension sandboxing: deny `fs`, `net` and `child_process` unless declared | Not started. P3.1 is the declaration layer it needs |
+| P3.2 | Extension sandboxing: deny `fs`, `net` and `child_process` unless declared | **Module gate done.** Ten Node built-ins are refused in `patch-require` unless the permission is held, and the refusal names it. Not containment, and the code says so: `process.binding`, `eval` and `module.createRequire` remain. Per-extension processor and memory budgets, idle suspension and activation events are still open |
 | P3.3 | Extension store | **Done**, separately |
 | P3.4 | `@raycast/utils` | Not started |
 | P3.6 | AI provider abstraction | **Done.** Eight providers, keys under DPAPI |
