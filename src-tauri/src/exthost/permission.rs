@@ -161,3 +161,120 @@ mod tests {
         }
     }
 }
+
+/// Whether an extension has to be granted this before it gets it.
+///
+/// Wider than [`crate::ai::acting::needs_asking`], which decides the same
+/// question for Sill's own AI, and deliberately so. Those two thresholds are
+/// different because the trust is different, not because nobody joined them
+/// up: the AI reads the clipboard because somebody asked it a question and
+/// expects it to look at what is in front of them, while an extension is
+/// somebody else's code that happens to be installed. The same word for the
+/// permission, a different bar for handing it over.
+///
+/// Only [`Capability::Ui`] is free, because it is Sill's own surface and an
+/// extension drawing a toast in the window it was opened in has reached
+/// nothing. Everything else is asked about once and then remembered.
+pub fn needs_granting(capability: &Capability) -> bool {
+    !matches!(capability, Capability::Ui)
+}
+
+/// The permission in the words somebody deciding would use.
+///
+/// Exhaustive with no `_` arm, for the same reason `touching` is: a capability
+/// added later must not quietly become "something" on a card somebody is being
+/// asked to agree to.
+pub fn plainly(capability: &Capability) -> &'static str {
+    match capability {
+        Capability::ClipboardRead => "read your clipboard, including its history",
+        Capability::ClipboardWrite => "change what is on your clipboard",
+        Capability::SelectionRead => "read whatever you have selected",
+        Capability::FileRead => "read files and see what is installed",
+        Capability::FileWrite => "change files on disk",
+        Capability::ProcessLaunch => "open programs and links",
+        Capability::InputInjection => "type into whatever window is in front",
+        Capability::Network => "send things over the network",
+        Capability::SystemControl => "change this machine's settings",
+        Capability::WindowControl => "move and close other programs' windows",
+        Capability::Ui => "draw in Sill's own window",
+    }
+}
+
+/// Whether this extension may do a thing, asked once and then remembered.
+///
+/// A trait so the API layer can be tested without a window to answer a card,
+/// and so that what an extension is allowed to do is decided in one place
+/// rather than at each of the twenty-two call sites.
+#[async_trait::async_trait]
+pub trait Permits: Send + Sync {
+    /// `Ok(())` if every capability is granted, `Err(why)` if any is not.
+    ///
+    /// `why` is shown to the extension, so it says which permission was
+    /// refused. An extension that gets a flat "denied" cannot tell somebody
+    /// what to turn on.
+    async fn allow(&self, extension: &str, needs: &[Capability]) -> Result<(), String>;
+}
+
+/// Everything is allowed and nothing is recorded.
+///
+/// For tests that are about what a method does rather than about whether it
+/// was permitted, and for nothing else.
+pub struct AllowAll;
+
+#[async_trait::async_trait]
+impl Permits for AllowAll {
+    async fn allow(&self, _extension: &str, _needs: &[Capability]) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod granting {
+    use super::*;
+
+    /// Drawing in Sill's own window is not a permission. If it became one,
+    /// every extension would ask on startup for nothing, and the asking that
+    /// matters would be trained through.
+    #[test]
+    fn only_sills_own_surface_is_free() {
+        assert!(!needs_granting(&Capability::Ui));
+
+        for capability in [
+            Capability::ClipboardRead,
+            Capability::ClipboardWrite,
+            Capability::FileRead,
+            Capability::FileWrite,
+            Capability::SelectionRead,
+            Capability::ProcessLaunch,
+            Capability::InputInjection,
+            Capability::Network,
+            Capability::SystemControl,
+            Capability::WindowControl,
+        ] {
+            assert!(needs_granting(&capability), "{capability:?} is free");
+        }
+    }
+
+    /// The bar for an extension is at least as high as the bar for Sill's own
+    /// AI. It may be higher, and is; it must never be lower, because that
+    /// would mean somebody else's code reaching something Sill's own model has
+    /// to ask about.
+    #[test]
+    fn nothing_the_ai_must_ask_about_is_free_to_an_extension() {
+        for capability in [
+            Capability::FileWrite,
+            Capability::ProcessLaunch,
+            Capability::InputInjection,
+            Capability::SystemControl,
+            Capability::WindowControl,
+            Capability::Network,
+            Capability::SelectionRead,
+        ] {
+            assert!(
+                crate::ai::acting::needs_asking(&[capability]),
+                "{capability:?} no longer needs asking, so this test is stale",
+            );
+            assert!(needs_granting(&capability), "{capability:?} is free");
+        }
+    }
+}

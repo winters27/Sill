@@ -1013,6 +1013,7 @@ pub fn run() {
                     tx,
                     host_bridge::SillBridge::new(handle.clone()),
                     Arc::new(storage),
+                    Arc::new(exthost::grants::Granted::new(handle.clone())),
                 )),
                 host_js: Arc::new(host_js(&handle)),
                 last_used: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),

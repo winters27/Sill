@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 
 use super::bridge::{Alert, Bridge, Clip};
 use super::rpc::RpcError;
+use super::permission::{self, Permits};
 use super::storage::Storage;
 
 /// Something the extension wants the UI to do.
@@ -77,6 +78,10 @@ pub struct ApiLayer {
     /// Everything an extension can reach outside its own process.
     bridge: Arc<dyn Bridge>,
     storage: Arc<Storage>,
+    /// Whether it is allowed to. Separate from `bridge`, which is how a thing
+    /// gets done rather than whether it may be: one of them would otherwise
+    /// have to refuse in the middle of doing.
+    permits: Arc<dyn Permits>,
 }
 
 impl ApiLayer {
@@ -84,11 +89,13 @@ impl ApiLayer {
         events: mpsc::UnboundedSender<UiEvent>,
         bridge: Arc<dyn Bridge>,
         storage: Arc<Storage>,
+        permits: Arc<dyn Permits>,
     ) -> Self {
         Self {
             events,
             bridge,
             storage,
+            permits,
         }
     }
 
@@ -104,6 +111,26 @@ impl ApiLayer {
         method: &str,
         params: &Value,
     ) -> Result<Value, RpcError> {
+        /*
+         * Nothing runs before it is allowed to.
+         *
+         * At the top rather than inside each arm, because a check written
+         * twenty-two times is a check that will be missed once, and the one it
+         * is missed on is a new method somebody added in a hurry.
+         *
+         * A method with no row in `permission::NEEDED` is refused rather than
+         * run. It is the same answer an unknown method already got, and it
+         * means the failure of forgetting a row is an extension that cannot
+         * call the thing, never an extension that calls it unpermitted.
+         */
+        let Some(needs) = permission::needed(method) else {
+            return Err(RpcError::method_not_found(method));
+        };
+
+        if let Err(why) = self.permits.allow(extension, needs).await {
+            return Err(RpcError::internal(why));
+        }
+
         let string = |key: &str| -> String {
             params
                 .get(key)

@@ -14,7 +14,7 @@
 //! to take it back.
 
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use crate::object::{Object, ObjectKind};
@@ -26,7 +26,7 @@ use crate::object::{Object, ObjectKind};
 /// enforces these yet; they are here now because retrofitting a permission
 /// model onto actions that never declared anything means auditing every one
 /// of them at the point it is most expensive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Capability {
     ClipboardRead,

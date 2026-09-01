@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{json, Value};
+use sill_lib::action::Capability;
+use sill_lib::exthost::permission::{needs_granting, plainly, AllowAll, Permits, NEEDED};
 use sill_lib::exthost::{
     Alert, ApiLayer, AppInfo, Bridge, Clip, ExtHost, LoadOptions, Storage, UiEvent,
 };
@@ -260,7 +262,15 @@ impl Bridge for StubBridge {
 fn layer(tx: mpsc::UnboundedSender<UiEvent>) -> (Arc<ApiLayer>, Arc<StubBridge>) {
     let bridge = StubBridge::new();
     let storage = Arc::new(Storage::memory().expect("in-memory store"));
-    (Arc::new(ApiLayer::new(tx, bridge.clone(), storage)), bridge)
+    (
+        Arc::new(ApiLayer::new(
+            tx,
+            bridge.clone(),
+            storage,
+            Arc::new(AllowAll),
+        )),
+        bridge,
+    )
 }
 
 #[tokio::test]
@@ -634,7 +644,7 @@ async fn nothing_selected_reads_as_empty_rather_than_as_a_failure() {
         selection: None,
     });
     let storage = Arc::new(Storage::memory().expect("in-memory store"));
-    let layer = Arc::new(ApiLayer::new(tx, bridge.clone(), storage));
+    let layer = Arc::new(ApiLayer::new(tx, bridge.clone(), storage, Arc::new(AllowAll)));
 
     let answered = layer
         .dispatch("s1", "ext", "UI/getSelectedText", &json!({}))
@@ -693,4 +703,133 @@ async fn getting_a_default_for_nothing_is_refused() {
         .await;
 
     assert!(refused.is_err(), "an empty target was accepted");
+}
+
+// --------------------------------------------------------------------------
+// Permission, which is the part that has to hold when somebody says no.
+// --------------------------------------------------------------------------
+
+/// Refuses everything it is asked about, and records what it was asked.
+struct RefuseAll {
+    asked: Mutex<Vec<Vec<Capability>>>,
+}
+
+impl RefuseAll {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            asked: Mutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl Permits for RefuseAll {
+    async fn allow(&self, _extension: &str, needs: &[Capability]) -> Result<(), String> {
+        self.asked.lock().unwrap().push(needs.to_vec());
+
+        match needs.iter().find(|c| needs_granting(c)) {
+            Some(capability) => Err(format!("not allowed to {}", plainly(capability))),
+            None => Ok(()),
+        }
+    }
+}
+
+fn refusing(
+    tx: mpsc::UnboundedSender<UiEvent>,
+) -> (Arc<ApiLayer>, Arc<StubBridge>, Arc<RefuseAll>) {
+    let bridge = StubBridge::new();
+    let permits = RefuseAll::new();
+    let storage = Arc::new(Storage::memory().expect("in-memory store"));
+
+    (
+        Arc::new(ApiLayer::new(
+            tx,
+            bridge.clone(),
+            storage,
+            permits.clone(),
+        )),
+        bridge,
+        permits,
+    )
+}
+
+/// The property the whole permission layer exists for.
+///
+/// Not "the call returns an error", which a check written after the work would
+/// also satisfy while the clipboard had already been read. The bridge must
+/// never have been touched, because by the time it is, the thing somebody said
+/// no to has happened.
+#[tokio::test]
+async fn a_refused_call_never_reaches_the_machine() {
+    let (tx, _events) = mpsc::unbounded_channel();
+    let (layer, bridge, _permits) = refusing(tx);
+
+    let refused = layer
+        .dispatch("s1", "ext", "Clipboard/copy", &json!({ "text": "taken" }))
+        .await;
+
+    assert!(refused.is_err(), "a refused copy reported success");
+    assert!(
+        bridge.asked.lock().unwrap().written.is_empty(),
+        "the clipboard was written despite the refusal",
+    );
+}
+
+/// Refusing has to say which permission, or nobody can turn it on.
+#[tokio::test]
+async fn a_refusal_names_the_permission_it_refused() {
+    let (tx, _events) = mpsc::unbounded_channel();
+    let (layer, _bridge, _permits) = refusing(tx);
+
+    let refused = layer
+        .dispatch("s1", "ext", "Application/open", &json!({ "target": "https://x" }))
+        .await
+        .expect_err("should refuse");
+
+    assert!(
+        format!("{refused:?}").contains("open programs"),
+        "a refusal that does not name the permission: {refused:?}",
+    );
+}
+
+/// An extension drawing its own view and using its own storage asks nobody.
+///
+/// If these ever start needing permission, every extension prompts on startup
+/// for things that reach nothing, and people learn to agree without reading.
+#[tokio::test]
+async fn drawing_and_own_storage_are_never_refused() {
+    let (tx, _events) = mpsc::unbounded_channel();
+    let (layer, _bridge, _permits) = refusing(tx);
+
+    for (method, params) in [
+        ("UI/render", json!({ "ops": [] })),
+        ("Storage/set", json!({ "key": "k", "value": "v" })),
+        ("Storage/get", json!({ "key": "k" })),
+    ] {
+        assert!(
+            layer.dispatch("s1", "ext", method, &params).await.is_ok(),
+            "{method} was refused",
+        );
+    }
+}
+
+/// Every method is checked, not only the ones somebody remembered.
+///
+/// Walks what the API answers and asserts the permission layer was consulted
+/// for each. A method added later that skips the gate fails here rather than
+/// in somebody's clipboard history.
+#[tokio::test]
+async fn every_method_passes_through_the_gate() {
+    let (tx, _events) = mpsc::unbounded_channel();
+    let (layer, _bridge, permits) = refusing(tx);
+
+    for (method, _needs) in NEEDED {
+        let _ = layer.dispatch("s1", "ext", method, &json!({})).await;
+    }
+
+    assert_eq!(
+        permits.asked.lock().unwrap().len(),
+        NEEDED.len(),
+        "some methods reached the machine without being checked",
+    );
 }
