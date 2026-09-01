@@ -54,6 +54,7 @@ pub(crate) async fn set_preferences(
     if let Some(expander) = app.try_state::<snippets::expander::Expander>() {
         expander.set_enabled(prefs.snippets.expand_keywords);
         expander.set_tap_binding(crate::tap_binding(&prefs.taps));
+        expander.set_hyper(prefs.hyper.key);
 
         // Switched off means taken out, not told to ignore everything. A
         // low-level keyboard hook is called for every keystroke on the

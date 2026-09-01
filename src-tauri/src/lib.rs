@@ -40,6 +40,7 @@ pub mod radios;
 pub mod registry;
 pub mod secrets;
 pub mod live;
+pub mod hyper;
 pub mod job;
 pub mod scripts;
 pub mod shell;
@@ -1124,6 +1125,7 @@ pub fn run() {
             let expander = snippets::expander::Expander::new();
             expander.set_enabled(prefs.snippets.expand_keywords);
             expander.set_tap_binding(tap_binding(&prefs.taps));
+            expander.set_hyper(prefs.hyper.key);
 
             // Asked of the expander rather than of the preferences, because
             // two things want the hook now and only it knows whether either

@@ -59,6 +59,53 @@ fn release_held_modifiers() {
     unsafe { SendInput(&held, std::mem::size_of::<INPUT>() as i32) };
 }
 
+/// Taps `key` with every modifier a hyper key stands for.
+///
+/// One `SendInput` for all ten events, so nothing can interleave and nothing
+/// is left held. **Every release is in the same batch as its press**, which is
+/// the property that makes a hyper key safe: there is no window in which the
+/// process could end and leave four modifiers down, because holding them is
+/// never a state this is in.
+///
+/// Sent straight from the hook thread rather than handed to another one. A
+/// thread per chord would be free to run after the next keystroke had already
+/// gone through, so Hyper+T followed by a letter could arrive as the letter
+/// followed by Hyper+T. Ten events is microseconds, and order is the whole
+/// point of the feature.
+///
+/// No `release_held_modifiers` here, unlike `ctrl`. That exists because a
+/// global shortcut fires while its own keys are still down; a hyper chord is
+/// sent because a key went down, and whatever else is held is what the person
+/// is deliberately holding.
+#[cfg(windows)]
+pub fn hyper(key: u16) -> bool {
+    let vk = VIRTUAL_KEY(key);
+
+    let events = [
+        stroke(VK_CONTROL, false),
+        stroke(VK_MENU, false),
+        stroke(VK_SHIFT, false),
+        stroke(VK_LWIN, false),
+        stroke(vk, false),
+        stroke(vk, true),
+        stroke(VK_LWIN, true),
+        stroke(VK_SHIFT, true),
+        stroke(VK_MENU, true),
+        stroke(VK_CONTROL, true),
+    ];
+
+    // SAFETY: a live array of correctly sized INPUT records, size taken from
+    // the type rather than assumed.
+    let sent = unsafe { SendInput(&events, std::mem::size_of::<INPUT>() as i32) };
+
+    sent as usize == events.len()
+}
+
+#[cfg(not(windows))]
+pub fn hyper(_key: u16) -> bool {
+    false
+}
+
 #[cfg(windows)]
 pub fn ctrl(key: VIRTUAL_KEY) -> bool {
     // The shortcut that got us here is probably still held down.

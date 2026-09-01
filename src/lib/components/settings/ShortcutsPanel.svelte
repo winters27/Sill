@@ -24,6 +24,23 @@
 
   let { prefs, commit }: Props = $props();
 
+  /**
+   * The keys worth offering as a hyper key.
+   *
+   * A short list rather than a capture field, and deliberately. A hyper key
+   * stops doing what is printed on it, so the ones worth offering are the ones
+   * almost nobody uses for anything: a free capture invites somebody to bind
+   * `A` and then wonder why they cannot type.
+   */
+  const HYPER_KEYS = [
+    { value: "0", label: "Off" },
+    { value: "20", label: "Caps Lock" },
+    { value: "145", label: "Scroll Lock" },
+    { value: "165", label: "Right Alt" },
+    { value: "163", label: "Right Ctrl" },
+  ];
+
+
   const bindings = $derived(prefs.bindings ?? []);
 
   /** Everything that can be done to text, which is what a key can bind to. */
@@ -366,6 +383,25 @@
       {/snippet}
     </Row>
   {/each}
+</Section>
+
+<Section
+  label="Hyper key"
+  description="One key that stands in for Ctrl, Alt, Shift and Windows together, so every letter becomes a shortcut nothing else has claimed. The key stops doing what is printed on it while this is on."
+>
+  <Row
+    title="Key"
+    description="Off by default. Each keystroke sends the whole chord and releases it in the same breath, so nothing can be left held down if Sill stops."
+  >
+    <Select
+      value={String(prefs.hyper?.key ?? 0)}
+      options={HYPER_KEYS}
+      onchange={(value) => {
+        const key = Number(value);
+        commit({ ...prefs, hyper: { key: key === 0 ? null : key } });
+      }}
+    />
+  </Row>
 </Section>
 
 <style>

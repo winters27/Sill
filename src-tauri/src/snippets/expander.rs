@@ -159,6 +159,8 @@ struct Inner {
      * lock is held for the length of a comparison.
      */
     taps: Mutex<crate::taps::Taps>,
+    /// The key that stands in for four modifiers, if one has been chosen.
+    hyper: Mutex<crate::hyper::Hyper>,
     /// What double-tapping does, or nothing when it does nothing.
     ///
     /// Read inside the hook, so it is swapped rather than locked, and held as
@@ -206,7 +208,26 @@ impl Expander {
     /// or the reverse. Every drift of this shape in this codebase has cost an
     /// afternoon.
     pub fn wanted(&self) -> bool {
-        self.is_enabled() || self.tap_binding().is_some()
+        self.is_enabled() || self.tap_binding().is_some() || self.hyper_on()
+    }
+
+    /// Which key stands in for four modifiers, or none.
+    ///
+    /// Setting it forgets whatever was held, because a hyper key changed while
+    /// it was down leaves nothing to send the release that would clear it, and
+    /// every keystroke afterwards would become a chord nobody asked for.
+    pub fn set_hyper(&self, key: Option<u32>) {
+        if let Ok(mut hyper) = self.inner.hyper.lock() {
+            hyper.set(key);
+        }
+    }
+
+    pub fn hyper_on(&self) -> bool {
+        self.inner
+            .hyper
+            .lock()
+            .map(|hyper| hyper.on())
+            .unwrap_or(false)
     }
 
     pub fn set_enabled(&self, enabled: bool) {
@@ -394,6 +415,30 @@ mod windows_impl {
         }
 
         let vk = event.vkCode;
+
+        /*
+         * The hyper key, before anything else looks at the keystroke.
+         *
+         * First because it decides whether this key exists at all for
+         * everything downstream. A key turned into a chord must not also feed
+         * the snippet buffer or the double-tap watcher: it was never typed,
+         * and counting it would let Hyper+S complete a keyword or a gesture
+         * nobody made.
+         */
+        match expander
+            .inner
+            .hyper
+            .lock()
+            .map(|mut hyper| hyper.saw(vk, !up))
+            .unwrap_or(crate::hyper::Verdict::Pass)
+        {
+            crate::hyper::Verdict::Pass => {}
+            crate::hyper::Verdict::Swallow => return LRESULT(1),
+            crate::hyper::Verdict::Chord(key) => {
+                crate::input::hyper(key as u16);
+                return LRESULT(1);
+            }
+        }
 
         if up {
             if let Ok(mut taps) = expander.inner.taps.lock() {

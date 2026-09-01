@@ -265,6 +265,12 @@ export interface Scripts {
   timeoutSeconds: number;
 }
 
+/** One key standing in for four modifiers. */
+export interface HyperKey {
+  /** Virtual key code, or null for off. */
+  key: number | null;
+}
+
 export interface Preferences {
   general: General;
   snippets: SnippetSettings;
@@ -283,6 +289,7 @@ export interface Preferences {
   webSearch: WebSearch;
   screenshot: Screenshot;
   scripts: Scripts;
+  hyper: HyperKey;
   bindings: Binding[];
   aliases: Alias[];
   navigation: NavigationSettings;

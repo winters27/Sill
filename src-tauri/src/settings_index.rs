@@ -61,6 +61,12 @@ pub const PANELS: &[&str] = &[
 /// dictation and not a peer of it. The same reasoning would fold any future
 /// sub-view into its parent rather than adding a row to the sidebar.
 pub const SETTINGS: &[Setting] = &[
+    s(
+        "shortcuts",
+        "Shortcuts",
+        "Hyper key",
+        "hyper caps lock modifier chord shortcut everything",
+    ),
     // ------------------------------------------------------------- scripts
     s(
         "scripts",
@@ -621,6 +627,13 @@ pub const SETTINGS: &[Setting] = &[
         "Extensions",
         "Installed extensions",
         "raycast host node commands version revision update outdated remove uninstall",
+    ),
+    s(
+        "extensions",
+        "Extensions",
+        "What an extension is allowed to reach",
+        "permission grant revoke allow deny files clipboard network programs \
+         selection not allowed unavailable capability",
     ),
     s(
         "extensions",

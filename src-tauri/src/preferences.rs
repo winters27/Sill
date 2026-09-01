@@ -628,6 +628,18 @@ pub enum AfterCapture {
     Edit,
 }
 
+/// One key standing in for four modifiers.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HyperKey {
+    /// The virtual key code, or `None` for off.
+    ///
+    /// Off by default and never guessed at. This takes a key away from the
+    /// system entirely, and choosing which one on somebody's behalf is
+    /// choosing which key stops doing what it says on it.
+    pub key: Option<u32>,
+}
+
 /// Script commands: files somebody keeps that the launcher can run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -809,6 +821,7 @@ pub struct Preferences {
     pub web_search: WebSearch,
     pub screenshot: Screenshot,
     pub scripts: Scripts,
+    pub hyper: HyperKey,
     /// Global shortcuts that run an action without showing the launcher.
     #[serde(default)]
     pub bindings: Vec<crate::bindings::Binding>,
