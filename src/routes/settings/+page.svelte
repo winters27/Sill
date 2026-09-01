@@ -165,6 +165,7 @@
       id: "widgets",
       name: "Widgets",
       blurb: "The clock, the weather, and what rides along in the launcher",
+      group: "Widgets",
     },
     {
       id: "advanced",
