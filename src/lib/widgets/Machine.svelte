@@ -60,15 +60,22 @@
   const SPAN = 60;
   let trace = $state<number[]>([]);
 
-  /** The trace as a filled path, in a 100 by 30 box. */
+  /**
+   * The trace as a path, in a 100 by 30 box.
+   *
+   * Spread across the full width whatever the sample count, so the line spans
+   * the box from the first second and grows denser rather than longer. The
+   * first version anchored the newest reading to the right edge and let the
+   * line reach leftwards as samples arrived, which is defensible and looks
+   * exactly like a rendering fault: a short green scribble in the top corner
+   * of an otherwise empty box.
+   */
   const line = $derived.by(() => {
     if (trace.length < 2) return "";
 
-    const step = 100 / (SPAN - 1);
-    // Drawn from the right, so the newest reading is at the leading edge and
-    // the line grows leftwards into the past rather than sliding.
+    const step = 100 / (trace.length - 1);
     const points = trace.map((value, at) => {
-      const x = 100 - (trace.length - 1 - at) * step;
+      const x = at * step;
       const y = 30 - (Math.min(value, 100) / 100) * 28 - 1;
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     });
@@ -181,57 +188,92 @@
     {:else if !reading}
       <p class="quiet">Reading the machine…</p>
     {:else}
-      <div class="gauges">
-        {@render ring(reading.cpu, "Processor", `${reading.count} programs`)}
-        {@render ring(
-          memoryPercent,
-          "Memory",
-          `${gb(reading.memoryUsed)} of ${gb(reading.memoryTotal)} GB`,
-        )}
+      <!--
+        Two columns, because this tile is two columns wide.
+        Stacked, everything stretched to seven hundred pixels: bars long enough
+        to lose the eye between the name and the number, and a tile too tall
+        for the window it lives in. The width was already there.
+      -->
+      <div class="left">
+        <div class="gauges">
+          {@render ring(reading.cpu, "Processor", `${reading.count} programs`)}
+          {@render ring(
+            memoryPercent,
+            "Memory",
+            `${gb(reading.memoryUsed)} of ${gb(reading.memoryTotal)} GB`,
+          )}
+        </div>
+
+        {#if line}
+          <svg class="trace" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
+            <path class="stroke" d={line} stroke={tone(reading.cpu)} />
+          </svg>
+        {/if}
       </div>
 
-      {#if line}
-        <svg class="trace" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
-          <path class="stroke" d={line} stroke={tone(reading.cpu)} />
-        </svg>
-      {/if}
+      <div class="right">
+        <span class="heading">Heaviest right now</span>
 
-      <ul class="programs">
-        {#each reading.top.slice(0, NAMED) as one (one.name + one.bytes)}
-          <li class="program">
-            <span class="name">{one.name}</span>
+        <ul class="programs">
+          {#each reading.top.slice(0, NAMED) as one (one.name + one.bytes)}
+            <li class="program">
+              <span class="name">{one.name}</span>
 
-            <!-- Against the heaviest rather than against the machine's memory:
-                 three programs at four percent of thirty-two gigabytes each is
-                 three bars too short to compare, and comparing them is why they
-                 are here. -->
-            <span class="meter" aria-hidden="true">
-              <span
-                class="level"
-                style:width={`${heaviest > 0 ? (one.bytes / heaviest) * 100 : 0}%`}
-              ></span>
-            </span>
+              <!-- Against the heaviest rather than against the machine's
+                   memory: three programs at four percent of thirty-two
+                   gigabytes each is three bars too short to compare, and
+                   comparing them is why they are here. -->
+              <span class="meter" aria-hidden="true">
+                <span
+                  class="level"
+                  style:width={`${heaviest > 0 ? (one.bytes / heaviest) * 100 : 0}%`}
+                ></span>
+              </span>
 
-            <span class="cost">{mb(one.bytes)}</span>
-          </li>
-        {/each}
-      </ul>
+              <span class="cost">{mb(one.bytes)}</span>
+            </li>
+          {/each}
+        </ul>
 
-      <!-- Sill's own weight. The project's claim is that it idles at almost
-           nothing, and the honest place to say so is beneath everything else
-           on the same screen, measured the same way. -->
-      <p class="mine">Sill is using {mb(reading.sill)}</p>
+        <!-- Sill's own weight. The project's claim is that it idles at almost
+             nothing, and the honest place to say so is on the same screen as
+             everything else, measured the same way. -->
+        <p class="mine">Sill is using {mb(reading.sill)}</p>
+      </div>
     {/if}
   </div>
 {/if}
 
 <style>
   .readout {
+    display: grid;
+    /* The gauges need what they need; the list takes the rest. */
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-4);
+    align-items: start;
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .left {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
-    width: 100%;
-    padding: var(--space-3) var(--space-4) var(--space-4);
+    gap: var(--space-2);
+  }
+
+  .right {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 0;
+    /* Lines the list up with the tops of the rings rather than with the tile,
+       so the two columns read as one row of content. */
+    padding-top: 2px;
+  }
+
+  .heading {
+    color: var(--text-3);
+    font-size: var(--text-label);
   }
 
   .gauges {
@@ -320,7 +362,7 @@
    */
   .trace {
     width: 100%;
-    height: 30px;
+    height: 26px;
     /* Non-uniform scaling means a stroke width in user units would come out
        stretched, so it is given in pixels instead. */
     vector-effect: non-scaling-stroke;
@@ -349,7 +391,7 @@
      down them and the bar takes whatever is left. */
   .program {
     display: grid;
-    grid-template-columns: minmax(0, 8.5rem) 1fr 4.5rem;
+    grid-template-columns: minmax(0, 1fr) 5rem 4.5rem;
     align-items: center;
     gap: var(--space-3);
   }
@@ -387,11 +429,10 @@
 
   .mine {
     margin: 0;
+    margin-top: auto;
     padding-top: var(--space-2);
     color: var(--text-4);
     font-size: var(--text-label);
-    box-shadow: inset 0 1px 0 var(--hairline);
-    padding-top: var(--space-3);
   }
 
   .quiet {
