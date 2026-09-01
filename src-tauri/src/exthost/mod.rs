@@ -299,6 +299,16 @@ impl ExtHost {
     /// The idle watchdog's "is anyone using this?" test. A loaded command is
     /// a view the user is looking at, so the host stays up for it however
     /// long it has been since anything was launched.
+    /// Every session still loaded, so a watchdog can let them go.
+    pub fn session_ids(&self) -> Vec<String> {
+        self.sessions
+            .lock()
+            .expect("sessions poisoned")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
     pub fn session_count(&self) -> usize {
         self.sessions.lock().expect("sessions poisoned").len()
     }

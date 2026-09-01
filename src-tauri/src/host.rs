@@ -239,10 +239,34 @@ pub(crate) fn start_host_watchdog(state: HostState) {
             // Somebody else already shut it down. Nothing left to watch.
             let Some(host) = slot.as_ref() else { return };
 
-            // A loaded command is a reason to stay up however long it has sat
-            // there: the user is looking at it.
-            if idle < HOST_IDLE_TIMEOUT || host.session_count() > 0 {
+            if idle < HOST_IDLE_TIMEOUT {
                 continue;
+            }
+
+            /*
+             * A session that sat through the whole timeout is let go.
+             *
+             * This used to read "a loaded command is a reason to stay up
+             * however long it has sat there: the user is looking at it". They
+             * are not. The launcher dismisses itself when it loses focus, so
+             * nobody is watching an extension view through five minutes of
+             * touching nothing, and the only way a session lives that long is
+             * that whoever loaded it never unloaded it.
+             *
+             * The window did that: `unloadExtension` is called when Escape
+             * goes back to the root list and on no other path out. Every other
+             * way of leaving left a worker running and, because a live session
+             * vetoed the shutdown, kept the whole Node host resident for the
+             * rest of the session. An idle pass that any window can veto by
+             * forgetting one call is not an idle pass.
+             *
+             * Unloaded here rather than fixed only in the window, because this
+             * is the layer that can see the truth: the window knows what it
+             * meant to do, and this knows what is actually still running.
+             */
+            for session in host.session_ids() {
+                crate::say!("unloading extension session {session}: idle {}s", idle.as_secs());
+                let _ = host.unload(&session).await;
             }
 
             crate::say!(

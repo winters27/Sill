@@ -42,6 +42,31 @@ const WORKER_MAX_HEAP_MB = 1000;
 /** How long a worker gets to unmount cleanly before it is terminated. */
 const SHUTDOWN_GRACE_MS = 5000;
 
+/**
+ * How busy a worker has to be before it counts as running away.
+ *
+ * Event loop utilisation, not processor time: a thread pinned at 0.95 is one
+ * that never yields, which in a launcher extension means a loop rather than
+ * work. Real extensions are almost entirely idle, waking to render and to
+ * answer a request.
+ */
+const RUNAWAY_UTILISATION = 0.95;
+
+/**
+ * How long it has to stay there before it is stopped, and how often that is
+ * looked at.
+ *
+ * Thirty seconds is deliberately far past anything legitimate. The cost of
+ * being wrong is somebody's working extension killed under them, so the bar is
+ * set where a false positive is close to impossible rather than where a
+ * runaway is caught soonest.
+ *
+ * Both are overridable so a test can use a budget it can actually wait for.
+ * The alternative is a thirty second test, which is a test nobody runs.
+ */
+const RUNAWAY_MS = Number(process.env.SILL_RUNAWAY_MS ?? 30_000);
+const RUNAWAY_CHECK_MS = Number(process.env.SILL_RUNAWAY_CHECK_MS ?? 5_000);
+
 interface Session {
   id: string;
   worker: Worker;
@@ -49,6 +74,10 @@ interface Session {
   ready: boolean;
   /** Buffered until Rust says it is ready, so nothing is dropped on startup. */
   queued: string[];
+  /** The last utilisation reading, to take the next one against. */
+  elu?: ReturnType<Worker["performance"]["eventLoopUtilization"]>;
+  /** How long it has been pinned. Reset by a single quiet sample. */
+  hotMs: number;
 }
 
 class ExtensionHost {
@@ -97,14 +126,92 @@ class ExtensionHost {
     return worker;
   }
 
+  /** Ticks only while something is loaded. */
+  private runaway?: NodeJS.Timeout;
+
+  /**
+   * Starts watching, if it is not already and there is anything to watch.
+   *
+   * Started and stopped with the sessions rather than left running, because a
+   * timer waking every few seconds to look at an empty map is exactly the idle
+   * cost Sill refuses to pay elsewhere. `unref` on top of that, so it can
+   * never be the reason the host process stays alive.
+   */
+  private watchForRunaways(): void {
+    if (this.runaway || this.sessions.size === 0) return;
+
+    this.runaway = setInterval(() => this.stopRunaways(), RUNAWAY_CHECK_MS);
+    this.runaway.unref();
+  }
+
+  /** Stops watching once the last session has gone. */
+  private stopWatchingRunaways(): void {
+    if (this.sessions.size > 0 || !this.runaway) return;
+
+    clearInterval(this.runaway);
+    this.runaway = undefined;
+  }
+
+  /**
+   * Ends a worker that has done nothing but spin.
+   *
+   * An extension in a loop pins a core for as long as Sill runs and nothing
+   * notices: it never crashes, never finishes, and the launcher it is
+   * attached to is a program whose whole claim is that it costs nothing while
+   * idle. This is the one thing in the extension host that stops that.
+   *
+   * The first sample of a session is a baseline and never a verdict, and one
+   * quiet sample clears the count, so a burst of real work has to be sustained
+   * past the whole budget to be treated as a runaway.
+   */
+  private stopRunaways(): void {
+    for (const session of [...this.sessions.values()]) {
+      const previous = session.elu;
+      const current = session.worker.performance.eventLoopUtilization();
+      session.elu = current;
+
+      if (!previous) continue;
+
+      const since = session.worker.performance.eventLoopUtilization(current, previous);
+
+      session.hotMs = since.utilization >= RUNAWAY_UTILISATION ? session.hotMs + RUNAWAY_CHECK_MS : 0;
+
+      if (session.hotMs < RUNAWAY_MS) continue;
+
+      // Removed first, so the `exit` handler's "did anyone still want this?"
+      // check stays false and the crash is reported once, with the reason that
+      // is actually true, rather than twice with the second saying only that a
+      // worker exited.
+      this.sessions.delete(session.id);
+      void session.worker.terminate();
+
+      this.rpc.emit("Manager/extensionCrash", {
+        session_id: session.id,
+        reason:
+          `stopped after using a whole processor core for ${Math.round(RUNAWAY_MS / 1000)}s ` +
+          `without pausing. An extension that does this is looping rather than working.`,
+      });
+    }
+
+    this.stopWatchingRunaways();
+  }
+
   private async load(params: RpcParams): Promise<{ session_id: string }> {
     const opts = (params.opts ?? {}) as Record<string, unknown>;
     const sessionId = randomUUID();
     const worker = this.acquireWorker();
 
     const control = new RpcPeer((data) => worker.postMessage(data));
-    const session: Session = { id: sessionId, worker, control, ready: false, queued: [] };
+    const session: Session = {
+      id: sessionId,
+      worker,
+      control,
+      ready: false,
+      queued: [],
+      hotMs: 0,
+    };
     this.sessions.set(sessionId, session);
+    this.watchForRunaways();
 
     worker.on("message", (data: string) => control.receive(data));
 
@@ -123,6 +230,7 @@ class ExtensionHost {
         });
       }
       this.sessions.delete(sessionId);
+      this.stopWatchingRunaways();
     });
 
     // Everything the extension says is relayed up, or held until ready.
@@ -198,7 +306,8 @@ class ExtensionHost {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
 
-    this.sessions.delete(sessionId);
+this.sessions.delete(sessionId);
+    this.stopWatchingRunaways();
 
     try {
       await Promise.race([
