@@ -55,8 +55,8 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.9 | File actions | **Done.** Copy path, copy name, reveal, open a terminal, recycle bin, SHA-256, compress, rename, and move to a folder with a picker and an undo |
 | P2.10 | Hyperkey and double-tap modifiers | **Double-tap done**, ported from AuraKey and off until asked for. Hyperkey, meaning a key that stands in for four modifiers at once, is not: it has to swallow a key and synthesise a chord, which is a different and riskier mechanism |
 | P2.11 | Browser history and bookmarks | **Done.** Chromium and Firefox families, read on demand and never indexed. Off by default |
-| P2.12 | Workspace profiles | Not started |
-| P2.13 | Live command results | Not started |
+| P2.12 | Workspace profiles | **Done.** Name an arrangement, and restoring it starts the programs that are closed before putting every window back where it was, rescaled onto whatever displays are attached now. One start per program rather than one per window, and a program already open is left alone |
+| P2.13 | Live command results | **Done.** The Widgets row shows what the machine is doing and changes while the launcher is open. **Rust refuses to measure when the window is not visible** and answers with nothing, which is what stops the timer, so no route out of the launcher can leave it running |
 | P2.14 | Migration import | **Done.** Snippets and quicklinks both read a file written by other tools, and both write one another tool has a chance of reading. Importing only ever adds |
 | P2.15 | Dictation retention policy | **Done.** Days a transcript is kept, set beside "Keep a history" in Dictation settings. Zero keeps everything, and it is the default here on purpose |
 
