@@ -12,7 +12,7 @@ import { createElement, type ReactElement } from "react";
 import { RpcPeer, type RpcParams } from "../proto/rpc";
 import { createRenderer } from "../render/renderer";
 import { setBridge, type Environment } from "../api/bridge";
-import { patchRequire } from "./patch-require";
+import { gateGlobals, patchRequire } from "./patch-require";
 
 export interface LaunchData {
   entrypoint: string;
@@ -67,6 +67,7 @@ export function workerMain(): void {
     const data = params.data as unknown as LaunchData;
 
     patchRequire(data.capabilities ?? []);
+    gateGlobals(data.capabilities ?? []);
 
     renderer = createRenderer({
       onCommit: (ops) => {

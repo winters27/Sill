@@ -219,6 +219,124 @@ try {
     JSON.stringify(JSON.parse(drew.params.payload).params.ops).includes("reached the disk"),
     "and it really did reach the disk",
   );
+  // ---- @raycast/utils ----
+  //
+  // The package the store is written against. Loading an extension that uses
+  // its hooks is the only check that means anything: the hooks have to resolve,
+  // run inside the real React reconciler, and produce a tree.
+  const utilsLoad = await request("Manager/load", {
+    opts: {
+      mode: "View",
+      env: "Development",
+      entrypoint: resolve(root, "test/fixture/uses-utils.js"),
+      extension_name: "utils-user",
+      command_name: "fruit",
+      is_raycast: true,
+      preferences: {},
+      arguments: {},
+      launch_type: "User",
+      capabilities: [],
+    },
+  });
+
+  const utilsSession = utilsLoad.result?.session_id;
+
+  send({
+    jsonrpc: "2.0",
+    id: 9200,
+    method: "Manager/ready",
+    params: { session_id: utilsSession },
+  });
+
+  const utilsDrew = await waitFor(
+    (m) =>
+      m.method === "Manager/extensionMessage" &&
+      m.params.session_id === utilsSession &&
+      JSON.parse(m.params.payload).method === "UI/render" &&
+      JSON.stringify(JSON.parse(m.params.payload).params.ops).includes("Apple"),
+    "an extension using usePromise drew its rows",
+  );
+
+  const utilsOps = JSON.stringify(JSON.parse(utilsDrew.params.payload).params.ops);
+  assert(utilsOps.includes("Pear"), "usePromise resolved and both rows arrived");
+  assert(utilsOps.includes("avatar-ok"), "getAvatarIcon produced an inline SVG");
+  assert(utilsOps.includes("never"), "useCachedState fell back to its initial value");
+
+  // ---- something utils does not have here ----
+  const missing = await request("Manager/load", {
+    opts: {
+      mode: "View",
+      env: "Development",
+      entrypoint: resolve(root, "test/fixture/utils-missing.js"),
+      extension_name: "utils-missing",
+      command_name: "apple",
+      is_raycast: true,
+      preferences: {},
+      arguments: {},
+      launch_type: "User",
+      capabilities: [],
+    },
+  });
+
+  const missingCrash = await waitFor(
+    (m) =>
+      m.method === "Manager/extensionCrash" &&
+      m.params.session_id === missing.result?.session_id,
+    "an extension reaching for AppleScript failed",
+  );
+
+  assert(
+    /runAppleScript/.test(missingCrash.params.reason),
+    `and the error names what it wanted (${missingCrash.params.reason})`,
+  );
+  assert(
+    /macOS only/.test(missingCrash.params.reason),
+    "and says why it cannot work here",
+  );
+  // ---- the network, which no require ever mentions ----
+  //
+  // `fetch` is a global, so the module gate never sees it. Without this an
+  // extension reaches the internet with no permission at all, which would have
+  // made the whole gate a fig leaf.
+  const netLoad = async (capabilities, name) => {
+    const loaded = await request("Manager/load", {
+      opts: {
+        mode: "View",
+        env: "Development",
+        entrypoint: resolve(root, "test/fixture/wants-network.js"),
+        extension_name: name,
+        command_name: "get",
+        is_raycast: true,
+        preferences: {},
+        arguments: {},
+        launch_type: "User",
+        capabilities,
+      },
+    });
+
+    const id = loaded.result?.session_id;
+    send({ jsonrpc: "2.0", id: 9300, method: "Manager/ready", params: { session_id: id } });
+
+    const drew = await waitFor(
+      (m) =>
+        m.method === "Manager/extensionMessage" &&
+        m.params.session_id === id &&
+        JSON.parse(m.params.payload).method === "UI/render" &&
+        !JSON.stringify(JSON.parse(m.params.payload).params.ops).includes("waiting"),
+      `${name} reported what happened to its request`,
+    );
+
+    return JSON.stringify(JSON.parse(drew.params.payload).params.ops);
+  };
+
+  assert(
+    (await netLoad([], "no-net")).includes("gated"),
+    "fetch is refused when the network was not granted",
+  );
+  assert(
+    (await netLoad(["network"], "yes-net")).includes("reachable"),
+    "and is the real one once it is",
+  );
 } catch (err) {
   console.error(`FAIL ${err.message}`);
   failures++;

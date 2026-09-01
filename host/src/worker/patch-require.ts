@@ -13,6 +13,7 @@ import * as jsxRuntime from "react/jsx-runtime";
 import * as jsxDevRuntime from "react/jsx-dev-runtime";
 import ReactReconciler from "react-reconciler";
 import * as api from "../api";
+import * as utils from "../utils";
 
 /** Keys a bundler probes for module interop. They must stay undefined. */
 const INTEROP_KEYS = new Set(["__esModule", "default", "then", "module.exports"]);
@@ -30,20 +31,32 @@ function unsupported(name: string): never {
   );
 }
 
-const raycastApi = new Proxy(api as Record<string, unknown>, {
-  get(target, prop, receiver) {
-    if (typeof prop === "symbol" || prop in target) {
-      return Reflect.get(target, prop, receiver);
-    }
-    if (INTEROP_KEYS.has(prop)) return undefined;
-    return unsupported(prop);
-  },
-  has() {
-    // Report every key as present so `"x" in api` guards do not silently pick
-    // a fallback path; the throwing getter is what reports a real gap.
-    return true;
-  },
-});
+/**
+ * The same treatment for both packages: anything present is handed over,
+ * anything absent throws its own name.
+ *
+ * Written once rather than twice because the second copy is the one that stops
+ * matching when the first is changed.
+ */
+function throwingProxy(module: Record<string, unknown>): Record<string, unknown> {
+  return new Proxy(module, {
+    get(target, prop, receiver) {
+      if (typeof prop === "symbol" || prop in target) {
+        return Reflect.get(target, prop, receiver);
+      }
+      if (INTEROP_KEYS.has(prop)) return undefined;
+      return unsupported(prop);
+    },
+    has() {
+      // Report every key as present so `"x" in api` guards do not silently
+      // pick a fallback path; the throwing getter reports the real gap.
+      return true;
+    },
+  });
+}
+
+const raycastApi = throwingProxy(api as Record<string, unknown>);
+const raycastUtils = throwingProxy(utils as unknown as Record<string, unknown>);
 
 /**
  * Node built-ins that hand an extension something outside its own process.
@@ -102,9 +115,7 @@ export function patchRequire(granted: readonly string[] = []): void {
     "react/jsx-dev-runtime": () => jsxDevRuntime,
     "react-reconciler": () => ReactReconciler,
     "@raycast/api": () => raycastApi,
-    // Extensions built against Raycast's utils package are common enough that
-    // resolving it to a clear error beats a module-not-found stack.
-    "@raycast/utils": () => unsupported("@raycast/utils"),
+    "@raycast/utils": () => raycastUtils,
   };
 
   const originalRequire = Module.prototype.require;
@@ -131,4 +142,57 @@ export function patchRequire(granted: readonly string[] = []): void {
 
     return originalRequire.call(this as never, id);
   };
+}
+
+/**
+ * Refuses the network to a worker that was not granted it.
+ *
+ * `patchRequire` gates `require("http")` and its neighbours, and would have
+ * been a fig leaf on its own: `fetch` is a global in modern Node, so an
+ * extension could reach the network without requiring anything at all. The
+ * module gate stopped the older way of doing it and left the current one open.
+ *
+ * Replaced rather than deleted, so an extension that tries gets the same
+ * sentence naming the permission that a refused `require` gets, instead of
+ * "fetch is not a function" from somewhere in a bundled dependency.
+ */
+export function gateGlobals(granted: readonly string[] = []): void {
+  if (granted.includes("network")) return;
+
+  const why = (what: string) =>
+    new Error(
+      `sill: this extension is not allowed to open network connections, so ${what} is unavailable. ` +
+        `Grant it in Settings, under Extensions, then run the command again.`,
+    );
+
+  const globals = globalThis as unknown as Record<string, unknown>;
+
+  /*
+   * `fetch` rejects; the rest throw.
+   *
+   * Real `fetch` returns a promise and reports a failure by rejecting it, so a
+   * stub that throws synchronously fails in a shape no caller is written for:
+   * code that only attaches `.catch` never sees it, and the error escapes as
+   * an unhandled throw from module scope instead. The constructors are the
+   * other way round, since `new WebSocket(...)` can only fail by throwing.
+   */
+  if ("fetch" in globals) {
+    Object.defineProperty(globals, "fetch", {
+      configurable: true,
+      writable: true,
+      value: () => Promise.reject(why("fetch")),
+    });
+  }
+
+  for (const name of ["WebSocket", "XMLHttpRequest", "EventSource"]) {
+    if (!(name in globals)) continue;
+
+    Object.defineProperty(globals, name, {
+      configurable: true,
+      writable: true,
+      value: function refused(): never {
+        throw why(name);
+      },
+    });
+  }
 }
