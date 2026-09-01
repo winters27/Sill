@@ -10,7 +10,7 @@ A line is done when something checks it. Where that is a test, it is named.
 
 | | Item | State |
 | --- | --- | --- |
-| P0.1 | Version control, MIT headers, CI running verify | **Repo exists** with full history. CI has no remote to run on yet |
+| P0.1 | Version control, MIT headers, CI running verify | **Done.** Public at github.com/winters27/Sill, MIT, with `verify` running on every push. Third-party work is named in `resources/NOTICE`, and the one font that may not be redistributed is fetched rather than committed |
 | P0.2 | Idle pass: cap results, debounce, bound the icon cache, drop PATH executables, checkpoint the log | **Done.** Result cap is 120, icon cache evicts, PATH executables default off, the clipboard log is bounded and checkpointed |
 | P0.3 | Instrument before promising | **Done.** Ranking, idle memory, idle processor, summon latency and cold start are all measured and held to a budget. Release build: **25 ms to summon, 846 ms to start** |
 | P0.4 | Extension correctness | **Done.** Every method the host can call is answered, storage persists, crashes reach the window |
@@ -59,6 +59,20 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.13 | Live command results | Not started |
 | P2.14 | Migration import | **Done.** Snippets and quicklinks both read a file written by other tools, and both write one another tool has a chance of reading. Importing only ever adds |
 | P2.15 | Dictation retention policy | **Done.** Days a transcript is kept, set beside "Keep a history" in Dictation settings. Zero keeps everything, and it is the default here on purpose |
+
+## P3, ecosystem
+
+| | Item | State |
+| --- | --- | --- |
+| P3.1 | Capability model: declared permissions, consent, an inspector | **Done.** Extensions speak the same `Capability` an action speaks, every one of the twenty-two host methods is gated, and Settings, Extensions, Permissions lists what each one holds with a Revoke beside it. Asked on first real attempt rather than at install, because a Raycast manifest declares nothing and a consent screen that says "this could reach anything" teaches people to agree without reading |
+| P3.2 | Extension sandboxing: deny `fs`, `net` and `child_process` unless declared | Not started. P3.1 is the declaration layer it needs |
+| P3.3 | Extension store | **Done**, separately |
+| P3.4 | `@raycast/utils` | Not started |
+| P3.6 | AI provider abstraction | **Done.** Eight providers, keys under DPAPI |
+| P3.7 | Quick AI and selected-text AI | **Done.** From the launcher and in its own window |
+| P3.8 | AI tool calling bound to the action registry | **Done.** The same registry, the same capabilities, the same approval card |
+| P3.9, P3.10 | Automation and workflows | Not started |
+| P3.11 | MCP server | **Done.** The same tools over MCP, through the same gate |
 
 ## Built since the audit, and not on it
 
