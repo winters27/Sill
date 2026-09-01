@@ -16,12 +16,12 @@ use serde::Serialize;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager};
 
-/// Window label, matching `tauri.conf.json`.
+/// Window label. Built on demand by `lazy_windows`, not declared.
 pub const PANEL_WINDOW_LABEL: &str = "dictation";
 
-/// Declared size, repeated here because `outer_size()` reports 0x0 for a
-/// window that has never been shown, and this one is declared `visible:
-/// false`. The HUD hardcodes its own dimensions for exactly this reason.
+/// Its size, repeated here because `outer_size()` reports 0x0 for a window
+/// that has never been shown, and this one is built hidden. The HUD hardcodes
+/// its own dimensions for exactly this reason.
 const PANEL_WIDTH: f64 = 240.0;
 const PANEL_HEIGHT: f64 = 84.0;
 
@@ -53,10 +53,11 @@ pub struct PanelState(pub Mutex<Option<PanelStatus>>);
 
 /// Shows the panel, or updates it if it is already up.
 pub fn show(app: &AppHandle, status: PanelStatus) -> Result<()> {
-    let window = app.get_webview_window(PANEL_WINDOW_LABEL).ok_or_else(|| {
-        // A missing window here means tauri.conf.json and this constant have
-        // drifted apart, which is silent otherwise.
-        crate::say!("no window labelled '{PANEL_WINDOW_LABEL}'");
+    // Built on the first dictation rather than declared. A window costs a
+    // renderer whether or not it is ever shown, and most sessions never
+    // dictate.
+    let window = crate::lazy_windows::ensure(app, PANEL_WINDOW_LABEL).map_err(|err| {
+        crate::say!("{err}");
         DictationError::NotFound("dictation panel window".to_string())
     })?;
 

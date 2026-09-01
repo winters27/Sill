@@ -23,6 +23,7 @@ pub mod host;
 pub mod host_bridge;
 pub mod icons;
 pub mod input;
+pub mod lazy_windows;
 pub mod lnk;
 pub mod log;
 pub mod meter;

@@ -90,9 +90,9 @@ pub(crate) fn dismiss(window: tauri::WebviewWindow) {
 /// no single scale that would work.
 #[tauri::command]
 pub(crate) async fn begin_capture(app: AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("capture")
-        .ok_or_else(|| "the capture overlay is missing".to_string())?;
+    // Built on the first capture rather than declared, so an overlay nobody
+    // uses this session costs nothing.
+    let window = crate::lazy_windows::ensure(&app, "capture")?;
 
     let (left, top, width, height) = crate::capture::virtual_screen();
     if width <= 0 || height <= 0 {
@@ -173,7 +173,7 @@ pub(crate) struct CaptureTarget {
 /// Copies one window, whole, even where something is sitting on top of it.
 #[tauri::command]
 pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, String> {
-    if let Some(window) = app.get_webview_window("capture") {
+    if let Ok(window) = crate::lazy_windows::ensure(&app, "capture") {
         let _ = window.hide();
     }
     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
@@ -199,7 +199,7 @@ pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, 
 /// Copies one whole display.
 #[tauri::command]
 pub(crate) async fn capture_display(app: AppHandle, index: usize) -> Result<String, String> {
-    if let Some(window) = app.get_webview_window("capture") {
+    if let Ok(window) = crate::lazy_windows::ensure(&app, "capture") {
         let _ = window.hide();
     }
     crate::dismiss_main(&app);
@@ -226,7 +226,7 @@ pub(crate) async fn capture_display(app: AppHandle, index: usize) -> Result<Stri
 /// Takes the overlay away without capturing anything.
 #[tauri::command]
 pub(crate) async fn cancel_capture(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("capture") {
+    if let Ok(window) = crate::lazy_windows::ensure(&app, "capture") {
         let _ = window.hide();
     }
 
@@ -246,7 +246,7 @@ pub(crate) async fn capture_area(
     width: i32,
     height: i32,
 ) -> Result<String, String> {
-    if let Some(window) = app.get_webview_window("capture") {
+    if let Ok(window) = crate::lazy_windows::ensure(&app, "capture") {
         let _ = window.hide();
     }
 
@@ -312,7 +312,7 @@ async fn after_capture(app: &AppHandle, shot: crate::capture::Shot) -> Result<()
             *held = Some(png);
         }
 
-        if let Some(window) = app.get_webview_window("markup") {
+        if let Ok(window) = crate::lazy_windows::ensure(&app, "markup") {
             let _ = window.emit("sill://markup", ());
             let _ = window.show();
             let _ = window.set_focus();
@@ -397,9 +397,7 @@ pub(crate) async fn open_markup(app: AppHandle, entry: i64) -> Result<(), String
         *held = Some(png);
     }
 
-    let window = app
-        .get_webview_window("markup")
-        .ok_or_else(|| "the markup window is missing".to_string())?;
+    let window = crate::lazy_windows::ensure(&app, "markup")?;
 
     crate::dismiss_main(&app);
 
@@ -467,7 +465,7 @@ pub(crate) async fn finish_markup(app: AppHandle, png: String) -> Result<String,
 
     put_image_on_clipboard(&app, shot)?;
 
-    if let Some(window) = app.get_webview_window("markup") {
+    if let Ok(window) = crate::lazy_windows::ensure(&app, "markup") {
         let _ = window.hide();
     }
 
@@ -477,7 +475,7 @@ pub(crate) async fn finish_markup(app: AppHandle, png: String) -> Result<String,
 /// Closes the markup window without keeping anything.
 #[tauri::command]
 pub(crate) async fn cancel_markup(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("markup") {
+    if let Ok(window) = crate::lazy_windows::ensure(&app, "markup") {
         let _ = window.hide();
     }
 
