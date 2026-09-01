@@ -29,6 +29,30 @@
     commit();
   }
 
+  /**
+   * Takes a typed coordinate, if it is one.
+   *
+   * A half-typed number is not an error to report, it is somebody in the
+   * middle of typing: "-" and "45." both parse to nothing and are simply not
+   * saved yet. What is refused is a value outside the world, because a
+   * latitude of 200 is not a place and the forecast for it is a confusing
+   * failure rather than an obvious one.
+   */
+  function setCoordinate(which: "latitude" | "longitude", typed: string) {
+    const value = Number(typed.trim());
+    if (typed.trim() === "" || Number.isNaN(value)) return;
+
+    const limit = which === "latitude" ? 90 : 180;
+    if (Math.abs(value) > limit) {
+      said = `A ${which} runs from -${limit} to ${limit}.`;
+      return;
+    }
+
+    said = "";
+    prefs.widgets.place[which] = value;
+    commit();
+  }
+
   async function findPlace() {
     if (!typed.trim()) return;
 
@@ -91,6 +115,50 @@
     {/snippet}
   </Row>
 
+  <!--
+    Editable, because a search box is a guess and coordinates are not. Somebody
+    who lives between two towns, or wants the weather where they are going, or
+    was handed the wrong Portland, needs to be able to say exactly where rather
+    than keep retyping a name at a geocoder until it agrees with them.
+  -->
+  <Row
+    title="Coordinates"
+    description="Set directly if the search found the wrong place. Positive is north and east."
+  >
+    {#snippet control()}
+      <div class="pair">
+        <TextField
+          value={place.latitude ? String(place.latitude) : ""}
+          oninput={(next) => setCoordinate("latitude", next)}
+          placeholder="45.5235"
+          ariaLabel="Latitude"
+          mono
+        />
+        <TextField
+          value={place.longitude ? String(place.longitude) : ""}
+          oninput={(next) => setCoordinate("longitude", next)}
+          placeholder="-122.6762"
+          ariaLabel="Longitude"
+          mono
+        />
+      </div>
+    {/snippet}
+  </Row>
+
+  <Row title="Called" description="What the widget shows underneath the temperature.">
+    {#snippet control()}
+      <TextField
+        value={place.name}
+        oninput={(next) => {
+          prefs.widgets.place.name = next;
+          commit();
+        }}
+        placeholder="Anywhere"
+        ariaLabel="Called"
+      />
+    {/snippet}
+  </Row>
+
   <Row title="Degrees">
     {#snippet control()}
       <Segmented
@@ -128,6 +196,12 @@
 </Section>
 
 <style>
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+  }
+
   .finder {
     display: flex;
     align-items: center;

@@ -45,6 +45,37 @@
   /** How many programs are named. Three fits; five did not. */
   const NAMED = 3;
 
+  /**
+   * The last minute of processor load, for the trace under the gauges.
+   *
+   * A number on its own says what is happening; a line says whether it is
+   * unusual, which is the question somebody actually opened this to answer.
+   * Sixty readings at one a second is a minute, which is long enough to show a
+   * spike and short enough that it is still about now.
+   *
+   * Kept here rather than in Rust deliberately. It exists only while the
+   * widget is on screen and goes when it closes, so nothing accumulates a
+   * history of the machine behind anybody's back.
+   */
+  const SPAN = 60;
+  let trace = $state<number[]>([]);
+
+  /** The trace as a filled path, in a 100 by 30 box. */
+  const line = $derived.by(() => {
+    if (trace.length < 2) return "";
+
+    const step = 100 / (SPAN - 1);
+    // Drawn from the right, so the newest reading is at the leading edge and
+    // the line grows leftwards into the past rather than sliding.
+    const points = trace.map((value, at) => {
+      const x = 100 - (trace.length - 1 - at) * step;
+      const y = 30 - (Math.min(value, 100) / 100) * 28 - 1;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    });
+
+    return `M${points.join(" L")}`;
+  });
+
   const memoryPercent = $derived(
     reading && reading.memoryTotal > 0
       ? (reading.memoryUsed / reading.memoryTotal) * 100
@@ -77,8 +108,15 @@
 
   async function take() {
     try {
-      reading = await invoke<Reading>("machine_reading");
+      const next = await invoke<Reading>("machine_reading");
+      reading = next;
       failed = "";
+
+      // The first reading after opening has no interval behind it and is
+      // always zero, so it would draw a dip that never happened.
+      if (trace.length > 0 || next.cpu > 0) {
+        trace = [...trace, next.cpu].slice(-SPAN);
+      }
     } catch (err) {
       failed = `${err}`;
     }
@@ -151,6 +189,12 @@
           `${gb(reading.memoryUsed)} of ${gb(reading.memoryTotal)} GB`,
         )}
       </div>
+
+      {#if line}
+        <svg class="trace" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
+          <path class="stroke" d={line} stroke={tone(reading.cpu)} />
+        </svg>
+      {/if}
 
       <ul class="programs">
         {#each reading.top.slice(0, NAMED) as one (one.name + one.bytes)}
@@ -265,6 +309,31 @@
     color: var(--text-4);
     font-size: var(--text-label);
     font-variant-numeric: tabular-nums;
+  }
+
+  /*
+   * The last minute, drawn edge to edge.
+   *
+   * No axes and no grid: it is not a chart anybody reads values off, it is the
+   * shape of the last minute, and every line drawn around it would be more ink
+   * than the thing it frames.
+   */
+  .trace {
+    width: 100%;
+    height: 30px;
+    /* Non-uniform scaling means a stroke width in user units would come out
+       stretched, so it is given in pixels instead. */
+    vector-effect: non-scaling-stroke;
+  }
+
+  .stroke {
+    fill: none;
+    stroke-width: 1.5px;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+    opacity: 0.85;
+    transition: stroke var(--motion-enter) ease;
   }
 
   .programs {

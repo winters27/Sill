@@ -627,6 +627,23 @@
  * again the day the process view arrived. A new view is an ordinary list until
  * it says otherwise, so forgetting now costs nothing.
  */
+/**
+ * The modes that answer Escape themselves.
+ *
+ * Everything else goes back to the root, and the root closes the launcher.
+ * Written as the exceptions for the same reason `DRAWS_ITS_OWN` is: the list
+ * of views that *can* be backed out of had the widget board missing from it,
+ * so the board opened and Escape did nothing at all.
+ */
+const HANDLES_ITS_OWN_ESCAPE = new Set([
+  "conversations",
+  "clipboard",
+  "alias",
+  "collection",
+  "switcher",
+  "command",
+]);
+
 const DRAWS_ITS_OWN = new Set([
   "command",
   "widgets",
@@ -2276,7 +2293,17 @@ const DRAWS_ITS_OWN = new Set([
       return;
     }
 
-    if (mode === "emoji" || mode === "appVolume" || mode === "destination") {
+    /*
+     * Anything browsed goes back to the root.
+     *
+     * Written as "not the root and not a mode that handles Escape itself",
+     * rather than as a list of the views that can be backed out of. The list
+     * version stranded the widget board: it opened, and Escape did nothing,
+     * because nobody had added it to a list that had no reason to be a list.
+     * A view you can get into is one you can get out of, and that should be
+     * true by default rather than by being remembered.
+     */
+    if (mode !== "root" && !HANDLES_ITS_OWN_ESCAPE.has(mode)) {
       // Whatever was being moved is no longer being moved.
       moving = null;
       mode = "root";
@@ -2915,6 +2942,8 @@ const DRAWS_ITS_OWN = new Set([
       <span class="crumb">Conversations</span>
     {:else if mode === "appVolume"}
       <span class="crumb">App Volume</span>
+    {:else if mode === "widgets"}
+      <span class="crumb">Widgets</span>
     {:else if mode === "destination" && moving}
       <span class="crumb">Move {moving.title}</span>
     {:else if mode === "collection"}
@@ -2957,6 +2986,8 @@ const DRAWS_ITS_OWN = new Set([
           ? "Filter what you have asked…"
         : mode === "appVolume"
           ? "Filter by program name…"
+        : mode === "widgets"
+          ? "Esc to go back…"
         : mode === "destination"
           ? "Search for a folder, then Enter…"
           : mode === "alias"
