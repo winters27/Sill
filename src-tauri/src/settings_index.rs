@@ -36,7 +36,7 @@ pub const PANELS: &[&str] = &[
     "appearance",
     "ai",
     "dictation",
-    "speech",
+    "tts",
     "snippets",
     "emoji",
     "shortcuts",
@@ -170,24 +170,24 @@ pub const SETTINGS: &[Setting] = &[
         "Key",
         "ai api key token secret credential paste anthropic openrouter",
     ),
-    // -------------------------------------------------------------- speech
+    // ----------------------------------------------------------------- tts
     s(
-        "speech",
-        "Speech",
+        "tts",
+        "Text to Speech",
         "Read aloud",
-        "voice speak talk text to speech tts narrate out loud",
+        "voice speak talk text to speech tts narrate out loud say",
     ),
     s(
-        "speech",
-        "Speech",
+        "tts",
+        "Text to Speech",
         "Which voice reads",
-        "engine provider openai piper system sapi natural neural",
+        "engine provider openai piper system sapi natural neural elevenlabs kokoro",
     ),
     s(
-        "speech",
-        "Speech",
-        "Download a better voice",
-        "piper neural offline local model amy ryan alba lessac",
+        "tts",
+        "Text to Speech",
+        "Download an offline voice",
+        "piper neural offline local model amy ryan alba lessac free no key",
     ),
     // ----------------------------------------------------------- dictation
     s(

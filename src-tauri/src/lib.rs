@@ -37,7 +37,7 @@ pub mod selection;
 pub mod settings_catalog;
 pub mod settings_index;
 pub mod snippets;
-pub mod speech;
+pub mod tts;
 pub mod state;
 pub mod system;
 pub mod summon;
@@ -931,7 +931,7 @@ pub fn run() {
         // to Claude Code, which on most days is never.
         .manage(ai::mcp::link::Link::new())
         .manage(commands::system::Marking::default())
-        .manage(speech::sapi::Sapi::default())
+        .manage(tts::sapi::Sapi::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
                 commands: Vec::new(),
@@ -1247,6 +1247,7 @@ pub fn run() {
             commands::system::install_piper_voice,
             commands::system::remove_piper_voice,
             commands::system::speak_sample,
+            commands::system::speak_piper_sample,
             commands::diagnostics::diagnostics,
             commands::system::rebuild_index,
             commands::system::summon_with,

@@ -499,18 +499,31 @@ pub(crate) struct VoiceStatus {
     pub id: String,
     pub label: String,
     pub locale: String,
+    pub note: String,
     pub installed: bool,
+    /// What downloading this one costs, engine included when it is the first.
+    pub bytes: u64,
 }
 
 #[tauri::command]
 pub(crate) fn piper_voices(app: tauri::AppHandle) -> Vec<VoiceStatus> {
-    crate::speech::piper::VOICES
+    crate::tts::piper::VOICES
         .iter()
-        .map(|voice| VoiceStatus {
-            id: voice.id.to_string(),
-            label: voice.label.to_string(),
-            locale: voice.locale.to_string(),
-            installed: crate::speech::piper::is_installed(&app, voice.id),
+        .map(|voice| {
+            // The engine is fetched once and shared, so only the first
+            // download pays for it. Saying "82 MB" beside every voice after
+            // the first would be a number nobody is going to be charged.
+            let engine_too = !crate::tts::piper::exe(&app).is_file();
+
+            VoiceStatus {
+                id: voice.id.to_string(),
+                label: voice.label.to_string(),
+                locale: voice.locale.to_string(),
+                note: voice.note.to_string(),
+                installed: crate::tts::piper::is_installed(&app, voice.id),
+                bytes: crate::tts::piper::VOICE_BYTES
+                    + if engine_too { crate::tts::piper::ENGINE_BYTES } else { 0 },
+            }
         })
         .collect()
 }
@@ -528,9 +541,9 @@ pub(crate) async fn install_piper_voice(
     use tauri::Emitter;
 
     let reporting = app.clone();
-    crate::speech::piper::install(&app, &voice, move |fraction, stage| {
+    crate::tts::piper::install(&app, &voice, move |fraction, stage| {
         let _ = reporting.emit(
-            "sill://speech-download",
+            "sill://tts-download",
             serde_json::json!({ "fraction": fraction, "stage": stage }),
         );
     })
@@ -539,12 +552,27 @@ pub(crate) async fn install_piper_voice(
 
 #[tauri::command]
 pub(crate) fn remove_piper_voice(app: tauri::AppHandle, voice: String) -> Result<bool, String> {
-    crate::speech::piper::remove(&app, &voice)
+    crate::tts::piper::remove(&app, &voice)
 }
 
 /// Says something in whichever voice is set up, for the settings panel's
 /// preview button.
 #[tauri::command]
 pub(crate) async fn speak_sample(app: tauri::AppHandle, text: String) -> Result<(), String> {
-    crate::speech::aloud(&app, &text).await
+    crate::tts::aloud(&app, &text).await
+}
+
+/// Speaks in one downloaded voice, whether or not it is the chosen one.
+///
+/// Its own command rather than reusing `speak_sample`, because the point of
+/// the button is to hear a voice **before** picking it. Making somebody select
+/// a voice to find out what it sounds like is the thing this avoids.
+#[tauri::command]
+pub(crate) async fn speak_piper_sample(
+    app: tauri::AppHandle,
+    voice: String,
+    text: String,
+) -> Result<(), String> {
+    let wav = crate::tts::piper::speak(&app, &voice, &text).await?;
+    crate::tts::play_bytes(&app, &wav)
 }

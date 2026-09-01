@@ -358,7 +358,7 @@ const SEALED: &[&[&str]] = &[
     // have a key for each of half a dozen services and there is no fixed path
     // that names them all.
     &["ai", "providers", "*", "apiKey"],
-    &["speech", "provider", "apiKey"],
+    &["tts", "provider", "apiKey"],
 ];
 
 /// The step in a path that means "every element of this array".
@@ -680,7 +680,7 @@ pub struct Preferences {
     pub dictation: crate::dictation::models::DictationSettings,
     /// How text is read aloud.
     #[serde(default)]
-    pub speech: crate::speech::SpeechSettings,
+    pub tts: crate::tts::TtsSettings,
     pub hotkey: Hotkey,
     pub clipboard: ClipboardHistory,
     pub snippets: Snippets,
@@ -995,7 +995,7 @@ mod sealed_paths {
 
         let mut prefs = Preferences::default();
         prefs.dictation.provider.api_key = Some(PLAIN.to_string());
-        prefs.speech.provider.api_key = Some(PLAIN.to_string());
+        prefs.tts.provider.api_key = Some(PLAIN.to_string());
         prefs.ai.providers.push(crate::ai::provider::Provider {
             api_key: PLAIN.to_string(),
             ..Default::default()

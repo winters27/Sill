@@ -202,9 +202,9 @@ export interface Binding {
   replace: boolean;
 }
 
-export type SpeechEngine = "system" | "http" | "piper";
+export type TtsEngine = "system" | "http" | "piper";
 
-export interface SpeechProvider {
+export interface TtsProvider {
   enabled: boolean;
   name: string | null;
   providerType: string | null;
@@ -214,9 +214,9 @@ export interface SpeechProvider {
 }
 
 /** How text is read aloud. */
-export interface SpeechSettings {
-  engine: SpeechEngine;
-  provider: SpeechProvider;
+export interface TtsSettings {
+  engine: TtsEngine;
+  provider: TtsProvider;
   voice: string;
   piperVoice: string;
 }
@@ -227,7 +227,7 @@ export interface Preferences {
   taps: TapSettings;
   ai: AiSettings;
   dictation: DictationSettings;
-  speech: SpeechSettings;
+  tts: TtsSettings;
   clipboard: ClipboardHistorySettings;
   hotkey: Hotkey;
   appearance: Appearance;

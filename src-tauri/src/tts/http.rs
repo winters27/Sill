@@ -10,7 +10,7 @@
 //! `ProviderConfig` carrying it, so a key here is sealed by the code that
 //! seals that one.
 
-use crate::speech::SpeechSettings;
+use crate::tts::TtsSettings;
 
 /// What a provider is asked for when nothing else is said.
 ///
@@ -20,7 +20,7 @@ use crate::speech::SpeechSettings;
 const DEFAULT_MODEL: &str = "tts-1";
 
 /// Turns text into a WAV clip.
-pub async fn speak(settings: &SpeechSettings, text: &str) -> Result<Vec<u8>, String> {
+pub async fn speak(settings: &TtsSettings, text: &str) -> Result<Vec<u8>, String> {
     let base = settings
         .provider
         .base_url
@@ -148,7 +148,7 @@ mod tests {
     /// The address is the one thing with no sensible default.
     #[tokio::test]
     async fn no_address_is_a_message_rather_than_a_request_to_nowhere() {
-        let settings = SpeechSettings::default();
+        let settings = TtsSettings::default();
         let err = speak(&settings, "hello").await.unwrap_err();
 
         assert!(err.contains("No address"), "{err}");

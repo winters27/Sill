@@ -59,7 +59,7 @@ pub enum Engine {
 /// How text is read aloud.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
-pub struct SpeechSettings {
+pub struct TtsSettings {
     pub engine: Engine,
     /// Where to send the text, and what to authenticate with.
     ///
@@ -73,7 +73,7 @@ pub struct SpeechSettings {
     pub piper_voice: String,
 }
 
-impl Default for SpeechSettings {
+impl Default for TtsSettings {
     fn default() -> Self {
         Self {
             engine: Engine::System,
@@ -129,11 +129,11 @@ pub fn stop(app: &tauri::AppHandle) -> Result<(), String> {
     said
 }
 
-fn settings_of(app: &tauri::AppHandle) -> SpeechSettings {
+fn settings_of(app: &tauri::AppHandle) -> TtsSettings {
     use tauri::Manager;
 
     app.try_state::<crate::state::PrefsState>()
-        .map(|prefs| prefs.inner.blocking_lock().speech.clone())
+        .map(|prefs| prefs.inner.blocking_lock().tts.clone())
         .unwrap_or_default()
 }
 
@@ -147,7 +147,7 @@ fn spoken_path(app: &tauri::AppHandle) -> std::path::PathBuf {
 }
 
 /// Writes a clip and plays it, replacing whatever was playing.
-fn play_bytes(app: &tauri::AppHandle, wav: &[u8]) -> Result<(), String> {
+pub fn play_bytes(app: &tauri::AppHandle, wav: &[u8]) -> Result<(), String> {
     if !looks_like_wav(wav) {
         // Worth naming rather than playing silence. Every provider here is
         // asked for WAV, so anything else means the request was answered by
@@ -237,6 +237,6 @@ mod tests {
     /// The default has to be the one that needs no setting up.
     #[test]
     fn nothing_configured_still_speaks() {
-        assert_eq!(SpeechSettings::default().engine, Engine::System);
+        assert_eq!(TtsSettings::default().engine, Engine::System);
     }
 }

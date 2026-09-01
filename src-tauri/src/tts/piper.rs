@@ -42,11 +42,45 @@ pub const DEFAULT_VOICE: &str = "en_US-amy-medium";
 /// languages, and a picker showing all of them is a worse answer to "I want a
 /// better voice" than four that are known to be good.
 pub const VOICES: &[Voice] = &[
-    Voice { id: "en_US-amy-medium", label: "Amy", locale: "English (US)", path: "en/en_US/amy/medium" },
-    Voice { id: "en_US-ryan-medium", label: "Ryan", locale: "English (US)", path: "en/en_US/ryan/medium" },
-    Voice { id: "en_GB-alba-medium", label: "Alba", locale: "English (UK)", path: "en/en_GB/alba/medium" },
-    Voice { id: "en_US-lessac-medium", label: "Lessac", locale: "English (US)", path: "en/en_US/lessac/medium" },
+    Voice {
+        id: "en_US-amy-medium",
+        label: "Amy",
+        locale: "English (US)",
+        note: "Warm and even. The one to try first.",
+        path: "en/en_US/amy/medium",
+    },
+    Voice {
+        id: "en_US-ryan-medium",
+        label: "Ryan",
+        locale: "English (US)",
+        note: "Lower and unhurried.",
+        path: "en/en_US/ryan/medium",
+    },
+    Voice {
+        id: "en_GB-alba-medium",
+        label: "Alba",
+        locale: "English (UK)",
+        note: "Scottish, and the clearest of these at speed.",
+        path: "en/en_GB/alba/medium",
+    },
+    Voice {
+        id: "en_US-lessac-medium",
+        label: "Lessac",
+        locale: "English (US)",
+        note: "Crisp and neutral, trained for narration.",
+        path: "en/en_US/lessac/medium",
+    },
 ];
+
+/// What one voice weighs.
+///
+/// Every medium voice in this set is the same size to the byte, because they
+/// are the same network with different weights. Stated once rather than per
+/// entry, and measured rather than guessed.
+pub const VOICE_BYTES: u64 = 63_201_294;
+
+/// What the engine weighs, unpacked once and shared by every voice.
+pub const ENGINE_BYTES: u64 = 22_477_236;
 
 /// One downloadable voice.
 #[derive(Debug, Clone, Copy)]
@@ -54,6 +88,8 @@ pub struct Voice {
     pub id: &'static str,
     pub label: &'static str,
     pub locale: &'static str,
+    /// What it sounds like, in the words somebody choosing would want.
+    pub note: &'static str,
     /// Where it sits in the model repository.
     path: &'static str,
 }

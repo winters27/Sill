@@ -20,7 +20,7 @@
   import Select from "$lib/components/settings/Select.svelte";
   import TextField from "$lib/components/settings/TextField.svelte";
   import DictationPanel from "$lib/components/settings/DictationPanel.svelte";
-  import SpeechPanel from "$lib/components/settings/SpeechPanel.svelte";
+  import TtsPanel from "$lib/components/settings/TtsPanel.svelte";
   import ClipboardPanel from "$lib/components/settings/ClipboardPanel.svelte";
   import SnippetsPanel from "$lib/components/settings/SnippetsPanel.svelte";
   import QuicklinksPanel from "$lib/components/settings/QuicklinksPanel.svelte";
@@ -155,10 +155,9 @@
       group: "Voice",
     },
     {
-      id: "speech",
-      name: "Speech",
+      id: "tts",
+      name: "Text to Speech",
       blurb: "Which voice reads text out loud, and where it comes from",
-      group: "Voice",
     },
     {
       id: "advanced",
@@ -860,8 +859,8 @@
             <AiPanel prefs={p} {commit} />
           {:else if active === "dictation"}
             <DictationPanel prefs={p} {commit} />
-          {:else if active === "speech"}
-            <SpeechPanel prefs={p} {commit} />
+          {:else if active === "tts"}
+            <TtsPanel prefs={p} {commit} />
           {:else if active === "snippets"}
             <SnippetsPanel prefs={p} {commit} />
           {:else if active === "shortcuts"}

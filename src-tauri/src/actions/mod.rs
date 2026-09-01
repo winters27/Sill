@@ -1258,7 +1258,7 @@ impl Action for ReadAloud {
     }
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
-        crate::speech::aloud(&ctx.app, &object.target).await?;
+        crate::tts::aloud(&ctx.app, &object.target).await?;
 
         Ok(Outcome::done("Reading aloud"))
     }
@@ -1291,7 +1291,7 @@ impl Action for StopReading {
     }
 
     async fn run(&self, ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
-        crate::speech::stop(&ctx.app)?;
+        crate::tts::stop(&ctx.app)?;
         Ok(Outcome::done("Stopped"))
     }
 }
