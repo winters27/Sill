@@ -49,7 +49,7 @@ A line is done when something checks it. Where that is a test, it is named.
 | P2.3 | OCR on demand | **Done.** WinRT recognition, ported from AuraKey. Reads a picture on the clipboard, never automatically. Measured: 35 ms on a 640x160 capture |
 | P2.4 | Read aloud | **Done.** Any text a transform accepts can be spoken instead, in the system voice, over OpenAI's speech shape, or in a neural voice Sill downloads and runs. Stopping is its own action, because silence is wanted after the text has left the screen |
 | P2.5 | System control | **Done.** Volume, mute, dark mode, lock, audio output switching, Wi-Fi and Bluetooth, all of them switches you press in the list without leaving it, plus a program's own volume behind its own row. Do not disturb and night light have no public way to set them, see below |
-| P2.6 | Process and resource view | **Done.** What is running and what it costs, heaviest first, behind its own row. Quit asks; Force Quit is beside it and never the primary |
+| P2.6 | Process and resource view | **Done.** A readout rather than a task manager: processor and memory as bars, the five heaviest programs, and Sill's own weight underneath. Nothing selects and nothing acts |
 | P2.7 | Terminal execution, capability gated | Not started |
 | P2.8 | Scripting | Not started |
 | P2.9 | File actions | **Done.** Copy path, copy name, reveal, open a terminal, recycle bin, SHA-256, compress, rename, and move to a folder with a picker and an undo |
