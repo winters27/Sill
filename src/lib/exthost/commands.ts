@@ -34,6 +34,8 @@ export interface RankedCommand {
     | "quicklink"
     /** A quicklink with `{query}` in it, which takes over the field first. */
     | "quicklink-arg"
+    | "script"
+    | "script-arg"
     /** A window that is open right now. Never from the index. */
     | "window"
     /**
@@ -141,6 +143,8 @@ export interface LaunchedCommand {
     | "quicklink"
     /** A quicklink with `{query}` in it, which takes over the field first. */
     | "quicklink-arg"
+    | "script"
+    | "script-arg"
     /** A window that is open right now. Never from the index. */
     | "window"
     /**
@@ -875,4 +879,37 @@ export function pasteSnippetFilled(
   values: Record<string, string>,
 ): Promise<string> {
   return invoke<string>("paste_snippet_filled", { id, values });
+}
+
+/** What a script asks to be told before it runs, in its author's words. */
+export function scriptArguments(path: string): Promise<string[]> {
+  return invoke<string[]>("script_arguments", { path });
+}
+
+/** What a finished script produced. */
+export interface Finished {
+  job: string;
+  title: string;
+  stdout: string;
+  stderr: string;
+  code: number | null;
+  ended: "finished" | "timedOut" | "cancelled";
+  truncated: boolean;
+  tookMs: number;
+}
+
+/**
+ * Starts a script and answers with the job, not the result.
+ *
+ * The result arrives on `sill://script-done`. Waiting for the result here
+ * would make stopping impossible, because the thing that would stop it would
+ * be waiting on it.
+ */
+export function runScript(path: string, args: string[]): Promise<string> {
+  return invoke<string>("run_script", { path, args });
+}
+
+/** Stops one. False means it had already finished, which is not a failure. */
+export function cancelScript(job: string): Promise<boolean> {
+  return invoke<boolean>("cancel_script", { job });
 }

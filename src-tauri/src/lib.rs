@@ -993,6 +993,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(actions::builtins())
+        .manage(commands::scripts::Running::new())
         .manage(timing::Timings::new())
         .manage(previews::Previews::new())
         .manage(ai::chat::Chat::new())
@@ -1353,6 +1354,9 @@ pub fn run() {
             commands::system::speak_piper_sample,
             snippets::commands::snippet_fields,
             snippets::commands::paste_snippet_filled,
+            commands::scripts::script_arguments,
+            commands::scripts::run_script,
+            commands::scripts::cancel_script,
             commands::system::live_rows,
             commands::system::save_workspace,
             commands::system::restore_workspace,

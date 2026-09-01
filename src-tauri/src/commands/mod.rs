@@ -14,6 +14,7 @@ pub mod ai;
 pub mod diagnostics;
 pub mod extensions;
 pub mod launch;
+pub mod scripts;
 pub mod search;
 pub mod settings;
 pub mod store;

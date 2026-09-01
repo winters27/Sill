@@ -52,6 +52,10 @@
     systemStates,
     searchCommands,
     unloadExtension,
+    scriptArguments,
+    runScript,
+    cancelScript,
+    type Finished,
     snippetFields,
     pasteSnippetFilled,
     liveRows,
@@ -145,6 +149,8 @@
      * window nobody wanted.
      */
     | "namingWorkspace"
+    /** A script's output, while it runs and once it has finished. */
+    | "output"
     /**
      * Browsing extensions that are not installed yet.
      *
@@ -190,7 +196,7 @@
    * modes that behave almost the same.
    */
   let awaiting = $state<{
-    what: "quicklink" | "rename" | "snippet";
+    what: "quicklink" | "rename" | "snippet" | "script";
     id: string;
     title: string;
     link: string;
@@ -205,6 +211,16 @@
     fields?: string[];
     /** What has been typed so far, by name. */
     filled?: Record<string, string>;
+    /**
+     * What has been typed so far, in order.
+     *
+     * A script takes its arguments by position, so what matters is the order
+     * they were given in rather than what each one was called. A snippet is
+     * the other way round: its holes are named and can appear in any order in
+     * the text. Two shapes because they are two different things, not one
+     * shape bent to cover both.
+     */
+    given?: string[];
   } | null>(null);
 
   /**
@@ -264,8 +280,56 @@
       : `Enter fills this one and pastes the snippet. ${at} of ${total}.`;
   });
 
+  /**
+   * A script that is running, or the last one that ran.
+   *
+   * Its own surface rather than a line of status, because the whole point of
+   * `fullOutput` is that the output is the answer: a script that prints twenty
+   * lines has nowhere to put them in a subtitle, and a toast that vanishes is
+   * the wrong place for something somebody ran deliberately to read.
+   */
+  let output = $state<{
+    job: string;
+    title: string;
+    running: boolean;
+    stdout: string;
+    stderr: string;
+    code: number | null;
+    ended: "finished" | "timedOut" | "cancelled";
+  } | null>(null);
+
+  /**
+   * Starts one and shows it, without waiting for it to finish.
+   *
+   * The window changes before there is anything to show, because a script that
+   * takes four seconds with no acknowledgement reads as a launcher that
+   * swallowed the keystroke.
+   */
+  async function startScript(path: string, title: string, args: string[]) {
+    try {
+      const job = await runScript(path, args);
+
+      output = {
+        job,
+        title,
+        running: true,
+        stdout: "",
+        stderr: "",
+        code: null,
+        ended: "finished",
+      };
+      mode = "output";
+      query = "";
+      selected = 0;
+    } catch (err) {
+      status = `${err}`;
+    }
+  }
+
   /** The ticker, while there is one. */
   let ticking: ReturnType<typeof setInterval> | undefined;
+
+  let finishedScript: UnlistenFn | undefined;
 
   /**
    * Asks what the live rows say, and stops when the answer is nothing.
@@ -1248,6 +1312,21 @@ const DRAWS_ITS_OWN = new Set([
       const asked = awaiting;
       if (!asked) return;
 
+      if (asked.what === "script") {
+        const [, ...rest] = asked.fields ?? [];
+        const given = [...(asked.given ?? []), query];
+
+        if (rest.length > 0) {
+          awaiting = { ...asked, link: rest[0] ?? "", fields: rest, given };
+          query = "";
+          return;
+        }
+
+        awaiting = null;
+        await startScript(asked.id, asked.title, given);
+        return;
+      }
+
       if (asked.what === "snippet") {
         const [current, ...rest] = asked.fields ?? [];
         if (!current) return;
@@ -1482,6 +1561,39 @@ const DRAWS_ITS_OWN = new Set([
         return;
       }
 
+
+      /*
+       * A script, asked about and then watched.
+       *
+       * Kept here rather than launched through the action registry for the two
+       * things the registry cannot do: ask for the arguments the script's own
+       * header declares, and show the output while it is still running with a
+       * way to stop it. The action stays for the model and for a script run
+       * from anywhere else.
+       */
+      if (command.mode === "script" || command.mode === "script-arg") {
+        void recordUse(command.id, query);
+
+        const asks = await scriptArguments(command.entrypoint).catch(() => []);
+
+        if (asks.length > 0) {
+          awaiting = {
+            what: "script",
+            id: command.entrypoint,
+            title: command.title,
+            link: asks[0] ?? "",
+            fields: asks,
+            given: [],
+          };
+          mode = "argument";
+          selected = 0;
+          query = "";
+          return;
+        }
+
+        await startScript(command.entrypoint, command.title, []);
+        return;
+      }
 
       /*
        * A snippet with named holes, asked about one at a time.
@@ -2555,6 +2667,28 @@ const DRAWS_ITS_OWN = new Set([
     }
 
     /*
+     * Escape stops a running script before it leaves.
+     *
+     * Two jobs on one key, and the order is the important half: leaving first
+     * and stopping never would abandon a script that is still running with no
+     * way back to it, since the surface that could stop it is the one being
+     * left. Pressing it again, once it has stopped, goes back as usual.
+     */
+    if (mode === "output") {
+      if (output?.running) {
+        void cancelScript(output.job);
+        return;
+      }
+
+      output = null;
+      mode = "root";
+      selected = 0;
+      query = "";
+      await refreshRoot();
+      return;
+    }
+
+    /*
      * Escape goes back to the results, and the conversation is kept.
      *
      * Leaving is not finishing: somebody who looks something up mid-answer and
@@ -3091,6 +3225,22 @@ const DRAWS_ITS_OWN = new Set([
       // waiting for a summon that already happened.
       startTicking();
 
+      finishedScript = await listen<Finished>("sill://script-done", (event) => {
+        // Only the one being watched. A script started, left running, and
+        // followed by another would otherwise overwrite the one on screen with
+        // whichever finished last.
+        if (!output || output.job !== event.payload.job) return;
+
+        output = {
+          ...output,
+          running: false,
+          stdout: event.payload.stdout,
+          stderr: event.payload.stderr,
+          code: event.payload.code,
+          ended: event.payload.ended,
+        };
+      });
+
       shown = await listen("sill://shown", () => {
         // Measuring starts when the window appears and stops when Rust says
         // nobody is looking, so a launcher nobody can see costs nothing.
@@ -3247,6 +3397,7 @@ const DRAWS_ITS_OWN = new Set([
       stopTicking();
       unlisten?.();
       shown?.();
+      finishedScript?.();
       switcher?.();
       indexed?.();
       changed?.();
@@ -3267,6 +3418,8 @@ const DRAWS_ITS_OWN = new Set([
     <img class="mark" src="/sill.png" alt="" width="26" height="26" draggable="false" />
     {#if mode === "argument" && awaiting}
       <span class="crumb">{awaiting.title}</span>
+    {:else if mode === "output" && output}
+      <span class="crumb">{output.title}</span>
     {:else if mode === "clipboard"}
       <span class="crumb">Clipboard History</span>
     {:else if mode === "switcher"}
@@ -3420,6 +3573,44 @@ const DRAWS_ITS_OWN = new Set([
   </div>
 
   <div class="divider"></div>
+
+  {#if mode === "output" && output}
+    <!--
+      What a script printed. For `fullOutput` that is the answer rather than a
+      description of where the answer is, and it stays on screen once the
+      script has finished, because somebody ran it deliberately to read it.
+    -->
+    <div class="output">
+      <p class="output-said">
+        {#if output.running}
+          Running {output.title}. Escape stops it.
+        {:else if output.ended === "cancelled"}
+          {output.title} was stopped.
+        {:else if output.ended === "timedOut"}
+          {output.title} ran too long and was stopped.
+        {:else if output.code !== 0}
+          {output.title} failed with code {output.code}.
+        {:else}
+          {output.title} finished.
+        {/if}
+      </p>
+
+      {#if output.stdout.trim()}
+        <pre class="output-text sill-scrolls">{output.stdout}</pre>
+      {/if}
+
+      {#if output.stderr.trim()}
+        <!-- Kept apart from the output rather than mixed into it. A script
+             that printed a result and a warning has said two things, and
+             running them together loses which was which. -->
+        <pre class="output-text output-wrong sill-scrolls">{output.stderr}</pre>
+      {/if}
+
+      {#if !output.running && !output.stdout.trim() && !output.stderr.trim()}
+        <p class="output-said">It printed nothing.</p>
+      {/if}
+    </div>
+  {/if}
 
   {#if mode === "argument" && awaiting}
     <!-- The body would otherwise be a large empty rectangle. Showing the
@@ -3764,6 +3955,40 @@ const DRAWS_ITS_OWN = new Set([
 </main>
 
 <style>
+  .output {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    overflow: hidden;
+  }
+
+  .output-said {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--text-meta);
+  }
+
+  .output-text {
+    max-height: 40vh;
+    margin: 0;
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--fill-1);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    color: var(--text-1);
+    font-family: var(--font-mono);
+    font-size: var(--text-meta);
+    line-height: 1.5;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .output-wrong {
+    color: var(--text-2);
+  }
+
   /*
    * A conversation, which reads as a column of paragraphs rather than a list.
    *

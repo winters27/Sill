@@ -203,6 +203,24 @@ pub fn read(path: &Path) -> Option<Script> {
     describe(path, &String::from_utf8_lossy(&head))
 }
 
+/// What a script asks to be told, in its author's words.
+///
+/// The placeholder from the header, because a script asking for "branch"
+/// should say "branch". A declared argument with no placeholder still has to
+/// be asked for, and "argument 2" is at least honest about which one it is;
+/// leaving it blank would be a prompt with nothing above it.
+pub fn asks(script: &Script) -> Vec<String> {
+    script
+        .arguments
+        .iter()
+        .enumerate()
+        .map(|(at, argument)| match argument.placeholder.trim() {
+            "" => format!("argument {}", at + 1),
+            said => said.to_string(),
+        })
+        .collect()
+}
+
 /// Every script command in these folders, one level deep.
 ///
 /// Not recursive on purpose. A scripts folder with a `node_modules` in it
@@ -324,6 +342,56 @@ echo "hello $1"
             let header = "# @raycast.title A\n# @raycast.mode silent";
             assert!(describe(Path::new("notes.txt"), header).is_none());
             assert!(describe(Path::new("go.ps1"), header).is_some());
+        }
+    }
+
+    mod what_it_asks_for {
+        use super::*;
+
+        fn with(header: &str) -> Script {
+            describe(Path::new("go.sh"), header).expect("a command")
+        }
+
+        /// The author's own word, because "branch" tells somebody what to type
+        /// and "argument 1" does not.
+        #[test]
+        fn the_placeholder_is_the_prompt() {
+            let script = with(concat!(
+                "# @raycast.title A
+",
+                "# @raycast.mode silent
+",
+                "# @raycast.argument1 { \"type\": \"text\", \"placeholder\": \"branch\" }
+",
+            ));
+
+            assert_eq!(asks(&script), vec!["branch".to_string()]);
+        }
+
+        /// A declared argument with no placeholder is still asked for.
+        ///
+        /// Skipping it would run the script a parameter short, and a blank
+        /// prompt is a field with nothing above it.
+        #[test]
+        fn one_without_a_placeholder_is_still_named() {
+            let script = with(concat!(
+                "# @raycast.title A
+",
+                "# @raycast.mode silent
+",
+                "# @raycast.argument1 { \"type\": \"text\" }
+",
+                "# @raycast.argument2 { \"type\": \"text\", \"placeholder\": \"to\" }
+",
+            ));
+
+            assert_eq!(asks(&script), vec!["argument 1".to_string(), "to".to_string()]);
+        }
+
+        #[test]
+        fn a_script_declaring_none_asks_nothing() {
+            assert!(asks(&with("# @raycast.title A
+# @raycast.mode silent")).is_empty());
         }
     }
 
