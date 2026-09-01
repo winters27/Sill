@@ -102,3 +102,9 @@ export async function confirmAlert(options: Record<string, unknown>): Promise<bo
 export const Image = {
   Mask: { Circle: "circle", RoundedRectangle: "roundedRectangle" },
 } as const;
+
+// Raycast's synchronous cache, over storage that is not. The trade it makes is
+// in the file itself; it was the second most-wanted API the host did not
+// answer, stopping 13 of 124 commands across the twelve most-installed
+// extensions.
+export { Cache, type CacheOptions } from "./cache";

@@ -159,6 +159,64 @@ export function storeReady(): Promise<boolean> {
   return invoke<boolean>("store_ready");
 }
 
+
+/** One command an installed extension contributes. */
+export interface InstalledCommand {
+  id: string;
+  title: string;
+  subtitle: string;
+  mode: string;
+  /** Whether Sill can run it. Decided in Rust. */
+  runnable: boolean;
+}
+
+/** One permission, and whether this extension has it. */
+export interface PermissionState {
+  capability: string;
+  /** What it lets the extension do, in the words the approval card uses. */
+  plainly: string;
+  granted: boolean;
+}
+
+/** Everything the settings screen needs about one installed extension. */
+export interface InstalledExtension {
+  extension: string;
+  title: string;
+  commands: InstalledCommand[];
+  /** `store`, `folder`, or empty when nothing recorded it. */
+  source: string;
+  revision: string;
+  path: string;
+  installedAt: number;
+  permissions: PermissionState[];
+}
+
+/**
+ * What is installed, what it runs, and what it may reach.
+ *
+ * One call for all three. Reaches no network: the index is a file, the origins
+ * are files beside the bundles, and the grants are already in memory.
+ */
+export function installedExtensions(): Promise<InstalledExtension[]> {
+  return invoke<InstalledExtension[]>("installed_extensions");
+}
+
+/**
+ * Gives one permission to one extension.
+ *
+ * The only way in for a permission needed at `require`: module loading is
+ * synchronous, so there is no RPC to hang an approval card on and the
+ * extension dies before anything can be asked.
+ */
+export function grantPermission(extension: string, capability: string): Promise<void> {
+  return invoke("grant_extension_permission", { extension, capability });
+}
+
+/** Takes one back. The extension is asked again next time it tries. */
+export function revokePermission(extension: string, capability: string): Promise<void> {
+  return invoke("revoke_extension_grant", { extension, capability });
+}
+
 /**
  * A download count, shortened.
  *

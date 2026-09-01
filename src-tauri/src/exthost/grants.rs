@@ -143,6 +143,43 @@ impl Granted {
             .unwrap_or_default()
     }
 
+    /// Records an answer given ahead of time.
+    ///
+    /// The case this file's own doc leaves open: "A manifest that does declare
+    /// permissions can still fill this in ahead of time, and then nothing is
+    /// asked at all." The store is that case. It shows what an extension's
+    /// code reaches **before** anything is installed, derived from the source
+    /// about to be built, and somebody agrees to it or does not install.
+    ///
+    /// Without this the two halves never met. Grants defaulted to nothing and
+    /// the worker refuses `fs`, `net` and `child_process` at `require`, which
+    /// happens at module load with no RPC to hang a card on, so an extension
+    /// died before it rendered: **86 of the 104 commands in the twelve
+    /// most-installed extensions**, measured.
+    ///
+    /// Only ever adds. Anything not on the list is still asked for on the card
+    /// the first time it happens, which is what keeps the loud ones loud:
+    /// pasting is not granted by accepting the clipboard.
+    pub fn grant(&self, extension: &str, capabilities: &[Capability]) {
+        for capability in capabilities {
+            self.remember(extension, *capability);
+        }
+    }
+
+    /// Forgets everything one extension was allowed.
+    ///
+    /// What uninstalling has to do. Leaving grants behind means installing the
+    /// same extension again silently inherits permissions somebody agreed to
+    /// for a version they removed, which is the quietest way for a permission
+    /// system to stop meaning anything.
+    pub fn forget(&self, extension: &str) {
+        if let Ok(mut held) = self.by_extension.lock() {
+            held.remove(extension);
+        }
+
+        self.save();
+    }
+
     /// Takes one back. The extension is asked again next time it tries.
     pub fn revoke(&self, extension: &str, capability: &Capability) {
         if let Ok(mut held) = self.by_extension.lock() {

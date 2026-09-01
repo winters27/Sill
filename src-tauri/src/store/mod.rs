@@ -220,6 +220,17 @@ pub struct Origin {
     /// where they differ. Empty for a folder install, which has no slug.
     #[serde(default)]
     pub listing: String,
+    /// The capability ids somebody agreed to when installing this.
+    ///
+    /// **What was shown, not what a later scan would find.** The screen that
+    /// asked is the only thing entitled to decide what was granted, so the
+    /// answer is written down at the moment it is given rather than derived
+    /// again afterwards from source that could have been rebuilt since.
+    ///
+    /// It is also the record: this is what somebody said yes to, readable in
+    /// settings long after they have forgotten.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     pub installed_at: i64,
 }
 
@@ -230,16 +241,27 @@ impl Origin {
             revision: String::new(),
             path: path.to_string_lossy().into_owned(),
             listing: String::new(),
+            // A folder install shows no screen and so grants nothing. It is
+            // asked on the card the first time it reaches for something, which
+            // is the path that already existed.
+            capabilities: Vec::new(),
             installed_at: at,
         }
     }
 
-    pub fn store(listing: &str, folder: &str, revision: &str, at: i64) -> Self {
+    pub fn store(
+        listing: &str,
+        folder: &str,
+        revision: &str,
+        capabilities: Vec<String>,
+        at: i64,
+    ) -> Self {
         Self {
             source: "store".to_string(),
             revision: revision.to_string(),
             path: folder.to_string(),
             listing: listing.to_string(),
+            capabilities,
             installed_at: at,
         }
     }
@@ -901,7 +923,7 @@ mod tests {
     fn an_installed_extension_says_so_and_says_when_it_is_behind() {
         let listings = vec![listing("here", "Here", 1)];
         let pinned = |name: &str| {
-            (name == "here").then(|| Origin::store("here", "extensions/here", "old-sha", 0))
+            (name == "here").then(|| Origin::store("here", "extensions/here", "old-sha", Vec::new(), 0))
         };
 
         let out = browse(&listings, pinned, &Query::default(), 0);
@@ -928,8 +950,8 @@ mod tests {
     fn updates_only_leaves_everything_that_is_current() {
         let listings = vec![listing("old", "Old", 1), listing("new", "New", 1)];
         let pinned = |name: &str| match name {
-            "old" => Some(Origin::store("old", "extensions/old", "behind", 0)),
-            "new" => Some(Origin::store("new", "extensions/new", "aaaa", 0)),
+            "old" => Some(Origin::store("old", "extensions/old", "behind", Vec::new(), 0)),
+            "new" => Some(Origin::store("new", "extensions/new", "aaaa", Vec::new(), 0)),
             _ => None,
         };
 
@@ -1055,7 +1077,7 @@ mod tests {
 
     #[test]
     fn an_origin_round_trips_through_its_file_shape() {
-        let origin = Origin::store("demo", "extensions/demo", "sha", 1_700_000_000);
+        let origin = Origin::store("demo", "extensions/demo", "sha", vec!["clipboard".to_string()], 1_700_000_000);
         let text = serde_json::to_string(&origin).expect("serialises");
         let back: Origin = serde_json::from_str(&text).expect("parses");
 

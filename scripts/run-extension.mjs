@@ -10,7 +10,8 @@
  * an explicit gap, which is the whole point: this is the tool for finding out
  * what a real extension actually needs.
  *
- * Usage: node scripts/run-extension.mjs <entrypoint.js> [extensionName] [--seed key=json]
+ * Usage: node scripts/run-extension.mjs <entrypoint.js> [extensionName]
+ *          [--seed key=json] [--no-view] [--grant fileRead,network]
  */
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -28,6 +29,25 @@ const extensionName = args[1] && !args[1].startsWith("--") ? args[1] : "ext";
  * and over, which shows up as the same side effect firing a hundred times.
  */
 const modeArg = args.includes("--no-view") ? "NoView" : "View";
+
+/*
+ * What the extension is allowed to reach.
+ *
+ * Empty by default, which is what the launcher does for an extension nobody
+ * has granted anything to. That default is worth knowing about: the worker
+ * refuses `fs`, `net` and `child_process` at `require`, which is module load,
+ * so an ungranted extension dies before it renders and the run looks
+ * identical to a no-view command that did nothing.
+ *
+ * `--grant fileRead,network` supplies them, in the names Rust serialises, so
+ * this runner can exercise what the app actually does after somebody accepts
+ * an install.
+ */
+const grantArg = args.indexOf("--grant");
+const granted =
+  grantArg === -1 || !args[grantArg + 1]
+    ? []
+    : args[grantArg + 1].split(",").map((one) => one.trim()).filter(Boolean);
 
 /** Pre-populated LocalStorage, so a history view has history to show. */
 const seeds = new Map();
@@ -294,6 +314,7 @@ send({
       preferences: manifestPreferences(),
       arguments: {},
       launch_type: "User",
+      capabilities: granted,
     },
   },
 });

@@ -753,6 +753,68 @@ fn refusing(
     )
 }
 
+
+/// A refusal at `require` has to reach the window.
+///
+/// **This is the silent hang.** `fs`, `net` and `child_process` are gated
+/// while a module loads, which is synchronous and has no RPC to hang an
+/// approval card on, so an extension that needs one dies before it renders.
+/// The load itself succeeds and hands back a session id, so the launcher shows
+/// "opening ..." and waits for a first render that is never coming.
+///
+/// Nothing else catches it. `gate:views` builds extensions that are granted
+/// everything, the fixture below existed with a comment saying a refusal
+/// "arrives as an extension crash carrying the reason" and no test asserting
+/// it, and a person reports it as the command doing nothing.
+///
+/// So: load it with nothing granted, and require that the crash arrives and
+/// says which permission it was.
+#[tokio::test]
+async fn a_module_refused_while_loading_reaches_the_window() {
+    let host = host_js();
+    assert!(host.exists(), "host bundle missing at {}", host.display());
+
+    let (tx, mut events) = mpsc::unbounded_channel();
+
+    let exthost = ExtHost::spawn(&PathBuf::from("node"), &host, layer(tx).0)
+        .await
+        .expect("spawned the host");
+
+    let wants_disk = repo_root()
+        .join("host")
+        .join("test")
+        .join("fixture")
+        .join("reads-disk.js");
+
+    // Nothing granted, which is what an extension nobody has answered for gets.
+    let opts = LoadOptions::view(wants_disk.to_string_lossy(), "reads-disk", "cmd");
+    assert!(
+        opts.capabilities.is_empty(),
+        "this test is about the ungranted case"
+    );
+
+    let session = exthost.load(&opts).await.expect("the load itself succeeds");
+
+    // The load succeeding is the whole trap: there is a session, so the window
+    // has every reason to sit and wait for it.
+    assert!(!session.is_empty());
+
+    let reason = wait_for(&mut events, "the crash", |event| match event {
+        UiEvent::Crashed { reason, .. } => Some(reason.clone()),
+        _ => None,
+    })
+    .await;
+
+    assert!(
+        reason.contains("fs"),
+        "the crash has to name the module that was refused, got {reason:?}"
+    );
+    assert!(
+        reason.to_lowercase().contains("not allowed"),
+        "and say it was a permission rather than a fault in the extension, got {reason:?}"
+    );
+}
+
 /// The property the whole permission layer exists for.
 ///
 /// Not "the call returns an error", which a check written after the work would

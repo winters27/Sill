@@ -283,10 +283,17 @@ pub async fn prepare(
 
     // Written now rather than after the build, so step two knows what it is
     // finishing without the window having to carry it back.
+    let capabilities = capability::reached(&sources_under(&staged));
+
+    // Written before the screen is shown, so what gets granted is exactly what
+    // was on it. Deriving it again at install time would scan the same source
+    // twice and give somebody a permission they were never shown if the two
+    // ever disagreed.
     let origin = Origin::store(
         &listing.name,
         &listing.folder,
         &listing.revision,
+        capabilities.iter().map(|it| it.id.clone()).collect(),
         crate::state::now_seconds(),
     );
     super::write_origin(&home, name, &origin)?;
@@ -305,7 +312,7 @@ pub async fn prepare(
         files: fetched.files,
         bytes: fetched.bytes,
         commands: commands_in(&manifest),
-        capabilities: capability::reached(&sources_under(&staged)),
+        capabilities,
         packages: packages_in(&manifest),
         secrets: secrets_in(&manifest),
         not_enforced: capability::NOT_ENFORCED,
@@ -330,15 +337,25 @@ pub fn discard(data_dir: &Path) {
 ///   launched. Turning it off is the one real limit this store places on what
 ///   an install can do, and it is worth the rare native package that needs a
 ///   build step and will now fail loudly instead.
-/// - `--omit=dev`, because the development dependencies are a linter, a
-///   formatter and a type checker. `@raycast/api` alone is 24 MB and is marked
-///   external anyway.
 /// - `--no-audit --no-fund`, which are two more network round trips and a
 ///   paragraph of output for a thing nobody is reading.
+///
+/// **`--omit=dev` is deliberately absent, and it was there once.** The
+/// reasoning for it was sound and wrong: development dependencies are supposed
+/// to be a linter, a formatter and a type checker, and `@raycast/api` alone is
+/// 24 MB and marked external anyway. But an extension's source is free to
+/// import whatever its own `package.json` lists, wherever it lists it, and
+/// esbuild bundles what it is pointed at, so an import it cannot resolve is a
+/// failed build rather than a warning.
+///
+/// Found by installing the twelve most-installed extensions: **`github` puts
+/// `graphql-tag` in `devDependencies` and imports it from generated source**,
+/// so it was the one of the twelve that would not build. The saving was
+/// temporary disk in a directory that is deleted either way, and the cost was
+/// an extension that cannot be installed for a reason nobody could act on.
 pub fn npm_args(has_lock: bool) -> Vec<String> {
     [
         if has_lock { "ci" } else { "install" },
-        "--omit=dev",
         "--ignore-scripts",
         "--no-audit",
         "--no-fund",
@@ -432,6 +449,12 @@ pub struct Done {
     #[serde(flatten)]
     pub installed: crate::extension_install::Installed,
     pub revision: String,
+    /// The capability ids that were agreed to, for the caller to grant.
+    ///
+    /// Handed back rather than granted here, because granting reaches a
+    /// service and this function takes paths. The command layer owns that
+    /// seam, which is the same division `finish` already keeps with esbuild.
+    pub capabilities: Vec<String>,
 }
 
 /// Step two: install the dependencies, build, and record where it came from.
@@ -456,12 +479,36 @@ pub fn finish(data_dir: &Path, esbuild: &Path, name: &str) -> Result<Done, Strin
     let node = crate::host::node_exe().ok_or(crate::host::NO_NODE)?;
     npm_install(&node, &staged)?;
 
-    let installed = crate::extension_install::install_into(
-        esbuild,
-        &super::extensions_home(data_dir),
-        &staged,
-        &origin,
-    )?;
+    let home = super::extensions_home(data_dir);
+    let installed = crate::extension_install::install_into(esbuild, &home, &staged, &origin)?;
+
+    /*
+     * What the built bundles actually require, added to what the source said.
+     *
+     * A dependency can need `fs` without the extension's own code mentioning
+     * it, and the source scan deliberately does not walk `node_modules`. So
+     * after the bundle exists, it is read for the three modules the worker
+     * gates at `require`, and anything found is granted too.
+     *
+     * That is a wider grant than the screen listed, and the screen says so:
+     * it names dependencies as code that can do anything the extension does.
+     * The alternative was measured, and it is 23 of 124 commands dying on a
+     * module nobody could have known to ask about.
+     */
+    let mut capabilities = origin.capabilities.clone();
+    for extra in bundled_requirements(&home.join(&installed.extension)) {
+        if !capabilities.contains(&extra) {
+            capabilities.push(extra);
+        }
+    }
+
+    // Rewritten so the record matches what was granted rather than only what
+    // was forecast, which is what the settings screen reads back.
+    if capabilities != origin.capabilities {
+        let mut updated = origin.clone();
+        updated.capabilities = capabilities.clone();
+        super::write_origin(&home, &installed.extension, &updated)?;
+    }
 
     // Only once the build succeeded. Deleting earlier would take the source
     // away from a build that still needs it, and leaving it costs 45 MB per
@@ -470,8 +517,44 @@ pub fn finish(data_dir: &Path, esbuild: &Path, name: &str) -> Result<Done, Strin
 
     Ok(Done {
         revision: origin.revision.clone(),
+        capabilities,
         installed,
     })
+}
+
+/// What the built bundles in one directory require at load.
+///
+/// Reads the `.js` esbuild produced rather than the source, because that is
+/// what Node will actually execute.
+#[cfg(windows)]
+fn bundled_requirements(directory: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<String> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|it| it != "js") {
+            continue;
+        }
+
+        // No size cap here, unlike the source scan. A bundle is meant to be
+        // large, and skipping the big ones would skip exactly the extensions
+        // with the most dependencies, which are the ones this exists for.
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+
+        for id in capability::required_by_bundle(&text) {
+            if !found.contains(&id) {
+                found.push(id);
+            }
+        }
+    }
+
+    found
 }
 
 /// Removes an installed extension and its commands.
@@ -619,7 +702,23 @@ mod tests {
                 args.contains(&"--ignore-scripts".to_string()),
                 "a postinstall hook is arbitrary code running before anybody agreed to it"
             );
-            assert!(args.contains(&"--omit=dev".to_string()));
+        }
+    }
+
+    /// The one that cost an extension.
+    ///
+    /// `github` imports `graphql-tag` from generated source and declares it as
+    /// a development dependency. Skipping those saved temporary disk in a
+    /// directory that is deleted anyway, and lost an extension nobody could
+    /// have diagnosed from the error.
+    #[test]
+    fn development_dependencies_are_installed_because_extensions_import_them() {
+        for has_lock in [true, false] {
+            assert!(
+                !npm_args(has_lock).contains(&"--omit=dev".to_string()),
+                "an extension may import anything its own manifest lists, and esbuild \
+                 fails on an import it cannot resolve"
+            );
         }
     }
 

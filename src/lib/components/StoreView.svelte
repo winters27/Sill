@@ -86,8 +86,17 @@
 
   /** The install being decided, if one is. */
   let deciding = $state<Preparation | null>(null);
-  /** What the confirmation screen is doing, so its button can say so. */
+  /** What is happening, so every surface can say so. */
   let working = $state<string | null>(null);
+  /**
+   * Which extension it is happening to.
+   *
+   * Held separately from `working` because the row has to say it too. The
+   * first version put the word only on the confirmation screen's button,
+   * which does not exist yet while the fetch that builds it is running, so
+   * pressing Enter looked like pressing a dead key for several seconds.
+   */
+  let workingOn = $state<string | null>(null);
 
   const rows = $derived(browse?.rows ?? []);
   const current = $derived(rows[selected] ?? null);
@@ -176,8 +185,21 @@
     void storeReady().then((answer) => (ready = answer));
   });
 
-  /** Enter on the highlighted row. */
+  /**
+   * Enter on the highlighted row.
+   *
+   * **Refuses while something is already running, and that is a correctness
+   * guard rather than politeness.** Fetching wipes the staging directory
+   * before it fills it, so a second Enter arriving during the first one
+   * deleted what the first had staged and the install that followed reported
+   * "Nothing is staged to install" about an extension it had just fetched.
+   *
+   * That is easy to do, because fetching takes seconds and the only sign it
+   * had started used to be a line in the launcher's status bar.
+   */
   export async function activate() {
+    if (working) return;
+
     if (deciding) {
       await accept();
       return;
@@ -238,7 +260,9 @@
   /** Step one. Fetches the source and reads it; installs nothing. */
   async function decide(row: StoreRow) {
     working = "Fetching";
+    workingOn = row.name;
     onstatus(`Fetching ${row.title}`);
+
     try {
       deciding = await storePrepare(row.name);
       onstatus("");
@@ -246,27 +270,51 @@
       onstatus(`${err}`);
     } finally {
       working = null;
+      workingOn = null;
     }
   }
 
-  /** Step two. */
-  async function accept() {
+  /**
+   * Step two.
+   *
+   * Recovers from a staging directory that is no longer there rather than
+   * telling somebody to "fetch it again" on a screen with nothing on it to
+   * fetch with. That state should not happen now that Enter is guarded, and
+   * an error whose only remedy is an action the screen does not offer is a
+   * dead end whether or not it is reachable.
+   */
+  async function accept(refetched = false) {
     const asked = deciding;
     if (!asked || working) return;
 
     working = "Installing";
+    workingOn = asked.name;
+
     try {
       const done = await storeInstall(asked.name);
-      onstatus(`Installed ${done.title} (${done.commands.join(", ")})`);
+      onstatus(`Installed ${done.title}. Find it by typing ${done.commands[0] ?? done.title}.`);
       onchanged();
       // Clearing this is what puts the list back and reloads it, so the row
       // that was just installed says so. Reloading here as well would run the
       // same query twice for one install.
       deciding = null;
     } catch (err) {
-      onstatus(`${err}`);
+      const said = `${err}`;
+
+      if (!refetched && said.includes("staged")) {
+        working = null;
+        workingOn = null;
+        onstatus(`Fetching ${asked.title} again`);
+        deciding = await storePrepare(asked.name).catch(() => null);
+        if (deciding) return await accept(true);
+        onstatus(said);
+        return;
+      }
+
+      onstatus(said);
     } finally {
       working = null;
+      workingOn = null;
     }
   }
 
@@ -366,7 +414,7 @@
       </p>
 
       <div class="decide-actions">
-        <button class="primary" onclick={accept} disabled={working !== null}>
+        <button class="primary" onclick={() => accept()} disabled={working !== null}>
           {working ?? "Install"}
         </button>
         <button onclick={cancel} disabled={working !== null}>Cancel</button>
@@ -450,14 +498,21 @@
                 <span class="desc">{row.description}</span>
               </div>
               <div class="line meta">
-                <span>{installs(row.downloads)} installs</span>
-                {#if row.installed?.outdated}
-                  <span class="update">Update</span>
-                {:else if row.installed}
-                  <span class="have">Installed</span>
-                {/if}
-                {#if row.blocked}
-                  <span class="blocked">{row.blocked}</span>
+                {#if workingOn === row.name}
+                  <!-- The row says what is happening to it. Anything slower
+                       than a keystroke has to be visible where the eye
+                       already is, not only in the status bar. -->
+                  <span class="busy">{working}…</span>
+                {:else}
+                  <span>{installs(row.downloads)} installs</span>
+                  {#if row.installed?.outdated}
+                    <span class="update">Update</span>
+                  {:else if row.installed}
+                    <span class="have">Installed</span>
+                  {/if}
+                  {#if row.blocked}
+                    <span class="blocked">{row.blocked}</span>
+                  {/if}
                 {/if}
               </div>
             </div>
@@ -508,14 +563,38 @@
       </div>
     </div>
 
+    <!--
+      What you can press.
+
+      Written out rather than left to be discovered, because none of it is:
+      the scopes are chips you can see, and removing an extension, refreshing
+      the catalogue and cycling the scope were three chords with nothing on
+      screen naming them. A capability nobody can find is a capability nobody
+      has, which is the same rule the launcher's own rows are held to.
+    -->
     <div class="foot">
-      <span>
+      <span class="keys">
+        {#if working}
+          <span class="busy">{working} {current?.title ?? ""}…</span>
+        {:else}
+          <span><b>Enter</b> {current ? verb(current) : "install"}</span>
+          {#if current?.installed}
+            <span><b>Ctrl Shift X</b> remove</span>
+          {/if}
+          <span><b>Ctrl T</b> {scope === "all" ? "installed" : scope === "installed" ? "updates" : "all"}</span>
+          <span><b>Ctrl R</b> refresh</span>
+        {/if}
+      </span>
+
+      <span class="counts">
         {browse ? `${browse.matched} of ${browse.total}` : ""}
         {#if browse?.hidden && windowsOnly}
           · {browse.hidden} hidden
         {/if}
+        {#if browse}
+          · fetched {ago(browse.fetchedAt)}
+        {/if}
       </span>
-      <span>{browse ? `Catalogue fetched ${ago(browse.fetchedAt)}` : ""}</span>
     </div>
   {/if}
 </div>
@@ -765,11 +844,36 @@
   .foot {
     display: flex;
     flex: none;
+    gap: var(--space-3);
     justify-content: space-between;
+    align-items: center;
     padding: var(--space-1) var(--space-3);
     border-top: 1px solid var(--line);
     color: var(--text-4);
     font-size: var(--text-micro);
+  }
+
+  .keys {
+    display: flex;
+    gap: var(--space-3);
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .keys b {
+    color: var(--text-3);
+    font-weight: var(--weight-medium);
+  }
+
+  .counts {
+    flex: none;
+  }
+
+  /* The accent means "this one is chosen" everywhere else in Sill; here it is
+     the one thing on screen that is actually happening. */
+  .busy {
+    color: var(--accent);
   }
 
   /* ------------------------------------------------------------- deciding */

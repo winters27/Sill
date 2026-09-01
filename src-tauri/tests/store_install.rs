@@ -236,7 +236,7 @@ fn removing_an_extension_takes_its_commands_out_of_the_index() {
     std::fs::create_dir_all(home.join("demo")).expect("a directory to remove");
     std::fs::create_dir_all(home.join("other")).expect("one to leave alone");
 
-    sill_lib::store::write_origin(&home, "demo", &Origin::store("demo", "extensions/demo", "sha", 0))
+    sill_lib::store::write_origin(&home, "demo", &Origin::store("demo", "extensions/demo", "sha", Vec::new(), 0))
         .expect("an origin");
 
     let index = r#"[

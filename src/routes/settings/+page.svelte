@@ -7,7 +7,6 @@
   import TitleBar from "$lib/components/TitleBar.svelte";
   import Toggle from "$lib/components/Toggle.svelte";
   import Section from "$lib/components/settings/Section.svelte";
-  import ExtensionPermissions from "$lib/components/settings/ExtensionPermissions.svelte";
   import Row from "$lib/components/settings/Row.svelte";
   import Segmented from "$lib/components/settings/Segmented.svelte";
   import Slider from "$lib/components/settings/Slider.svelte";
@@ -29,6 +28,7 @@
   import QuicklinksPanel from "$lib/components/settings/QuicklinksPanel.svelte";
   import ShortcutsPanel from "$lib/components/settings/ShortcutsPanel.svelte";
   import ThemeCards from "$lib/components/settings/ThemeCards.svelte";
+  import ExtensionsPanel from "$lib/components/settings/ExtensionsPanel.svelte";
   import { shortRevision, storePins, type Pin } from "$lib/store";
   import {
     acceleratorFrom,
@@ -1323,20 +1323,9 @@
           </Section>
 
           {:else if active === "extensions"}
-          <Section
-            label="Runs extensions in"
-            description="Extensions are Node programs and Sill runs them in a Node process, so one has to be on the machine. Nothing else in Sill needs it."
-          >
-            <Row
-              title="Node.js"
-              description={info?.nodeInstalled
-                ? "Found. Extensions can run."
-                : "Not found, so no extension can start. Get it from nodejs.org, or run: winget install OpenJS.NodeJS.LTS"}
-            />
-          </Section>
-
-          <ExtensionPermissions />
-
+          <!-- The Store section stays here because it is a preference; what is
+               installed, what it runs and what it may reach is a screen of its
+               own, and it is long. -->
           <Section
             label="Store"
             description="Where Sill looks for extensions, and how much of the catalogue it offers."
@@ -1376,27 +1365,7 @@
             </Row>
           </Section>
 
-          <Section
-            label="Installed"
-            description="Extensions running in Sill's host. Each contributes its commands to the root list."
-            bare={!info?.extensions.length}
-          >
-            {#if info?.extensions.length}
-              {#each info.extensions as extension (extension.id)}
-                <Row
-                  title={extension.title}
-                  description="{extension.commands} {extension.commands === 1
-                    ? 'command'
-                    : 'commands'} · {extension.id}{provenance(extension.id)}"
-                />
-              {/each}
-            {:else}
-              <p class="empty">
-                No extensions are installed yet. Open the launcher and search for Extension Store to
-                browse them, or Install Extension to build one from a folder.
-              </p>
-            {/if}
-          </Section>
+          <ExtensionsPanel nodeInstalled={info?.nodeInstalled ?? false} />
           {:else if active === "advanced"}
           <!--
             What Sill has done sits here rather than in a row of its own. The
@@ -1885,13 +1854,6 @@
     color: var(--text-3);
   }
 
-  .empty {
-    margin: 0;
-    max-width: 56ch;
-    font-size: var(--text-body);
-    line-height: 1.7;
-    color: var(--text-2);
-  }
 
   .recorder {
     min-width: 150px;
