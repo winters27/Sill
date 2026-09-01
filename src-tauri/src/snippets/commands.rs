@@ -148,9 +148,28 @@ pub fn import_snippets(
     Ok(Some(summary))
 }
 
+/// The named holes in a snippet, in the order somebody will be asked for them.
+///
+/// Asked for separately rather than returned with the expansion, because the
+/// window has to know what to ask before it can expand anything, and expanding
+/// first would mean expanding twice.
+#[tauri::command]
+pub fn snippet_fields(app: AppHandle, id: String) -> Result<Vec<String>, String> {
+    let snippet = store::load(&store::path(&app))
+        .into_iter()
+        .find(|snippet| snippet.id == id)
+        .ok_or_else(|| "That snippet no longer exists".to_string())?;
+
+    Ok(placeholder::fields(&snippet.content))
+}
+
 /// Fills in a snippet's placeholders, ready to paste or type.
 #[tauri::command]
-pub fn expand_snippet(app: AppHandle, id: String) -> Result<Expansion, String> {
+pub fn expand_snippet(
+    app: AppHandle,
+    id: String,
+    values: Option<std::collections::BTreeMap<String, String>>,
+) -> Result<Expansion, String> {
     let file = store::path(&app);
     let mut snippets = store::load(&file);
 
@@ -164,7 +183,9 @@ pub fn expand_snippet(app: AppHandle, id: String) -> Result<Expansion, String> {
     let markup = snippet.html.clone();
     let _ = store::save(&file, &snippets);
 
-    let context = context(&app, &content);
+    let mut context = context(&app, &content);
+    context.fields = values.unwrap_or_default();
+
     let mut expansion = placeholder::expand(&content, &context);
 
     /*
@@ -196,7 +217,7 @@ pub fn type_snippet(
     id: String,
     backspaces: usize,
 ) -> Result<(), String> {
-    let expansion = expand_snippet(app, id)?;
+    let expansion = expand_snippet(app, id, None)?;
 
     #[cfg(windows)]
     {
@@ -253,6 +274,7 @@ pub fn context(app: &AppHandle, template: &str) -> Context {
     };
 
     Context {
+        fields: Default::default(),
         clipboard,
         date,
         time,
@@ -357,4 +379,29 @@ mod tests {
         assert!(now.hour < 24 && now.minute < 60 && now.second < 60);
         assert!(now.weekday < 7, "weekday {}", now.weekday);
     }
+}
+
+/// Expands a snippet with its holes filled in, and pastes it.
+///
+/// The same thing `sill.snippet.paste` does, with the values the launcher
+/// collected. A separate command rather than another parameter on the action,
+/// because an action takes an object and nothing else: threading a map of
+/// answers through the registry would put a snippet's shape into every action
+/// that will never have one.
+#[tauri::command]
+pub fn paste_snippet_filled(
+    app: AppHandle,
+    id: String,
+    values: std::collections::BTreeMap<String, String>,
+) -> Result<String, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let expansion = expand_snippet(app.clone(), id, Some(values))?;
+
+    app.clipboard()
+        .write_text(expansion.text)
+        .map_err(|err| format!("Could not copy the snippet: {err}"))?;
+
+    crate::dictation::paste::deliver(&app);
+    Ok("Pasted".to_string())
 }

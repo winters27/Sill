@@ -785,7 +785,14 @@ impl Action for PasteSnippet {
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
         let expansion =
-            crate::snippets::commands::expand_snippet(ctx.app.clone(), object.target.clone())?;
+            crate::snippets::commands::expand_snippet(
+                ctx.app.clone(),
+                object.target.clone(),
+                // The action registry has nowhere to ask, so a snippet with
+                // fields expands with them still in it. The launcher asks
+                // first and calls the command directly.
+                None,
+            )?;
 
         ctx.app
             .clipboard()

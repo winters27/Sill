@@ -863,3 +863,16 @@ export interface LiveRow {
 export function liveRows(): Promise<LiveRow[]> {
   return invoke<LiveRow[]>("live_rows");
 }
+
+/** The named holes in a snippet, in the order to ask for them. */
+export function snippetFields(id: string): Promise<string[]> {
+  return invoke<string[]>("snippet_fields", { id });
+}
+
+/** Expands a snippet with its holes filled in, and pastes it. */
+export function pasteSnippetFilled(
+  id: string,
+  values: Record<string, string>,
+): Promise<string> {
+  return invoke<string>("paste_snippet_filled", { id, values });
+}

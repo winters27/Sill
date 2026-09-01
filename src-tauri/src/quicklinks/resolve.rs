@@ -66,6 +66,7 @@ mod tests {
 
     fn context(query: &str) -> Context {
         Context {
+            fields: Default::default(),
             clipboard: "on the clipboard".into(),
             date: "2026-08-29".into(),
             time: "14:32".into(),

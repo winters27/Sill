@@ -52,6 +52,8 @@
     systemStates,
     searchCommands,
     unloadExtension,
+    snippetFields,
+    pasteSnippetFilled,
     liveRows,
     type LiveRow,
     performBuiltin,
@@ -188,10 +190,21 @@
    * modes that behave almost the same.
    */
   let awaiting = $state<{
-    what: "quicklink" | "rename";
+    what: "quicklink" | "rename" | "snippet";
     id: string;
     title: string;
     link: string;
+    /**
+     * The holes still to be asked about, first one first.
+     *
+     * Only a snippet has these. One field at a time rather than a form,
+     * because the launcher already knows how to borrow its own field for a
+     * line of text, and a window that opens to collect three words is a window
+     * to dismiss afterwards.
+     */
+    fields?: string[];
+    /** What has been typed so far, by name. */
+    filled?: Record<string, string>;
   } | null>(null);
 
   /**
@@ -203,6 +216,20 @@
    */
   let moving = $state<{ path: string; title: string } | null>(null);
   let session = $state<string | null>(null);
+
+  /**
+   * Sessions that crashed, and why, keyed by session id.
+   *
+   * Not state, because nothing renders from it: it exists so a crash that
+   * arrives before its launch has finished is still there when the launch
+   * looks. An extension refused a module at `require` dies during module load,
+   * which happens before the load's own caller has adopted the session, so the
+   * two race and the launch used to win by clearing the status.
+   *
+   * Entries are removed as they are read, and the only writer is the crash
+   * event, so this cannot grow without bound in a session that never crashes.
+   */
+  const died = new Map<string, string>();
   let running = $state<{ title: string; extensionTitle: string } | null>(null);
 
   let query = $state("");
@@ -216,6 +243,26 @@
    * subtitle patched into it would be gone on the next keystroke.
    */
   let live = $state<Record<string, string>>({});
+
+  /**
+   * Which hole is being asked about, and what Enter will do with it.
+   *
+   * Counted out loud because a field that just asks again looks like the last
+   * answer was rejected. Knowing there are two more is the difference between
+   * filling in a form and wondering what went wrong.
+   */
+  const snippetAsking = $derived.by(() => {
+    if (awaiting?.what !== "snippet") return "";
+
+    const left = awaiting.fields?.length ?? 0;
+    const done = Object.keys(awaiting.filled ?? {}).length;
+    const total = done + left;
+    const at = done + 1;
+
+    return left > 1
+      ? `Enter fills this one and asks for the next. ${at} of ${total}.`
+      : `Enter fills this one and pastes the snippet. ${at} of ${total}.`;
+  });
 
   /** The ticker, while there is one. */
   let ticking: ReturnType<typeof setInterval> | undefined;
@@ -1201,6 +1248,30 @@ const DRAWS_ITS_OWN = new Set([
       const asked = awaiting;
       if (!asked) return;
 
+      if (asked.what === "snippet") {
+        const [current, ...rest] = asked.fields ?? [];
+        if (!current) return;
+
+        const filled = { ...(asked.filled ?? {}), [current]: query };
+
+        // More to ask: the same field, a new question. Nothing is pasted
+        // until every hole has an answer, so backing out half way leaves
+        // whatever was being typed into untouched.
+        if (rest.length > 0) {
+          awaiting = { ...asked, link: rest[0] ?? "", fields: rest, filled };
+          query = "";
+          return;
+        }
+
+        try {
+          await pasteSnippetFilled(asked.id, filled);
+          await dismiss();
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
       if (asked.what === "rename") {
         try {
           status = await renamePath(asked.id, query);
@@ -1412,6 +1483,38 @@ const DRAWS_ITS_OWN = new Set([
       }
 
 
+      /*
+       * A snippet with named holes, asked about one at a time.
+       *
+       * Asked here rather than in the action, because an action takes an
+       * object and has nowhere to stop and ask. The keyword expander takes
+       * neither path: it fires while somebody is typing into another program,
+       * where there is no field to borrow, so a snippet with holes expands
+       * there with the holes still in it.
+       *
+       * Only when there is something to ask. A snippet without holes is
+       * pasted by pressing Enter once, as it always was.
+       */
+      if (command.mode === "snippet") {
+        const holes = await snippetFields(command.entrypoint).catch(() => []);
+
+        if (holes.length > 0) {
+          void recordUse(command.id, query);
+          awaiting = {
+            what: "snippet",
+            id: command.entrypoint,
+            title: command.title,
+            link: holes[0] ?? "",
+            fields: holes,
+            filled: {},
+          };
+          mode = "argument";
+          selected = 0;
+          query = "";
+          return;
+        }
+      }
+
       // A quicklink with a hole in it. Kept here rather than launched, so the
       // field can be handed over to filling the hole.
       if (command.mode === "quicklink-arg") {
@@ -1540,6 +1643,23 @@ const DRAWS_ITS_OWN = new Set([
         // screen waiting for a tree that never arrives.
         if (launched.mode === "no-view") {
           status = `Ran ${launched.title}`;
+          return;
+        }
+
+        /*
+         * It may already be dead.
+         *
+         * A module refused at `require` throws while the extension is loading,
+         * which is over before this line runs, so the crash can arrive between
+         * the load returning a session and this adopting it. Entering the
+         * command view anyway leaves the launcher waiting for a first render
+         * from a worker that is gone, which is what "it does nothing" looks
+         * like from the outside.
+         */
+        const already = died.get(launched.session);
+        if (already !== undefined) {
+          died.delete(launched.session);
+          status = `${launched.title} stopped: ${already}`;
           return;
         }
 
@@ -2918,14 +3038,36 @@ const DRAWS_ITS_OWN = new Set([
             void goBack();
             break;
           case "crashed": {
+            /*
+             * Remembered as well as shown, because it can arrive before the
+             * launch that caused it has finished.
+             *
+             * An extension refused a module at `require` dies during module
+             * load, which is the first thing it does. The load itself has
+             * already succeeded and handed back a session id, so the crash and
+             * the launch's own continuation race, and the continuation ends
+             * with `status = ""` and `mode = "command"`. When the crash won
+             * that race its message was wiped and the launcher sat on an empty
+             * command view for a first render that was never coming.
+             *
+             * That is the silent hang: the command appeared to do nothing at
+             * all, and the reason had been on screen for a few milliseconds.
+             */
+            died.set(payload.session, payload.reason);
+
+            // Only the session actually on screen is backed out of here. One
+            // that has not been adopted yet is handled by the launch, which is
+            // still running and about to look this up.
+            if (session !== payload.session) break;
+
             // Read before goBack, which clears `running` synchronously on its
             // way to the root list, so asking afterwards gets null.
-            const died = running?.title ?? "That command";
+            const title = running?.title ?? "That command";
             // Back to the root list rather than staying on a view whose
             // extension is gone. Sitting there looks exactly like a slow
             // load, and nothing would ever arrive to correct the impression.
             void goBack();
-            status = `${died} stopped: ${payload.reason}`;
+            status = `${title} stopped: ${payload.reason}`;
             break;
           }
         }
@@ -3284,11 +3426,25 @@ const DRAWS_ITS_OWN = new Set([
          target answers the question the empty field raises, which is where
          this is about to send you. -->
     <div class="argument-hint">
-      <p class="going">{awaiting.link}</p>
+      <p class="going">
+        {awaiting.what === "snippet" ? `{${awaiting.link}}` : awaiting.link}
+      </p>
       <p class="explains">
-        {query.trim()
-          ? "Enter opens it with what you typed in place of the placeholder."
-          : "Type the words to search for. They are escaped before they go into the address."}
+        <!--
+          What the field is being borrowed for differs, so what this says has
+          to. Telling somebody filling in a snippet that their words are
+          escaped before going into an address would be describing a different
+          feature at them.
+        -->
+        {#if awaiting.what === "snippet"}
+          {snippetAsking}
+        {:else if awaiting.what === "rename"}
+          Enter renames it. Escape leaves it as it was.
+        {:else if query.trim()}
+          Enter opens it with what you typed in place of the placeholder.
+        {:else}
+          Type the words to search for. They are escaped before they go into the address.
+        {/if}
       </p>
     </div>
   {:else if mode === "clipboard" || mode === "collection"}

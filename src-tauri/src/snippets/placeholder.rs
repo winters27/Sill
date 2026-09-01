@@ -21,6 +21,12 @@ pub const CURSOR: &str = "cursor";
 /// a Win32 round trip, and most snippets never mention it.
 #[derive(Debug, Clone, Default)]
 pub struct Context {
+    /// What somebody typed for the named holes in this one.
+    ///
+    /// Empty for everything that has nowhere to ask, which is every path but
+    /// the launcher's. A snippet expanded by the keyword expander mid-typing
+    /// has no surface to stop and ask on, so its fields stay as they are.
+    pub fields: std::collections::BTreeMap<String, String>,
     pub clipboard: String,
     /// Formatted `YYYY-MM-DD`.
     pub date: String,
@@ -287,12 +293,27 @@ pub fn expand_with(
                     out.push_str(&escape(&value));
                 }
             }
-            _ => {
-                // Unknown: put it back verbatim.
-                out.push('{');
-                out.push_str(name);
-                out.push('}');
-            }
+            /*
+             * A name nothing else answers to is a field somebody fills in.
+             *
+             * Checked here, at the end, so it can never shadow a built-in: a
+             * snippet with a field called `date` still gets today's date, and
+             * naming a field after one of these is a mistake that costs the
+             * field rather than the date.
+             *
+             * Still put back verbatim when nobody filled it in. A snippet
+             * pasted with an empty hole reads as broken, where one pasted with
+             * `{name}` still in it reads as a snippet nobody finished, which is
+             * what happened.
+             */
+            _ => match context.fields.get(name) {
+                Some(filled) => out.push_str(&escape(filled)),
+                None => {
+                    out.push('{');
+                    out.push_str(name);
+                    out.push('}');
+                }
+            },
         }
     }
 
@@ -347,6 +368,58 @@ pub fn mentions(template: &str, name: &str) -> bool {
     false
 }
 
+/// Every name this module answers to itself.
+///
+/// One list, so [`fields`] and the dispatch below cannot disagree about what
+/// counts as built in. Two lists would mean a snippet asking for `{date}` and
+/// being prompted for it, or a field called `uuid` silently becoming a random
+/// one, depending on which list was behind.
+const KNOWN: &[&str] = &[
+    "cursor",
+    "clipboard",
+    "date",
+    "time",
+    "uuid",
+    "query",
+    "selection",
+    "env",
+];
+
+/// The named holes a person has to fill in before this can be pasted.
+///
+/// In the order they appear and without repeats, because that is the order
+/// somebody will be asked for them and asking twice for one name reads as the
+/// first answer having been lost.
+///
+/// A hole carrying an argument is not one of these. `{date:YYYY}` and
+/// `{env:PATH}` are instructions to this module, not questions for a person.
+pub fn fields(template: &str) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut rest = template;
+
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('}') else { break };
+
+        let whole = after[..close].trim();
+        rest = &after[close + 1..];
+
+        // Anything with a colon is addressed to this module.
+        if whole.contains(':') || whole.is_empty() {
+            continue;
+        }
+
+        let known = KNOWN.iter().any(|name| name.eq_ignore_ascii_case(whole));
+        let already = found.iter().any(|name| name.eq_ignore_ascii_case(whole));
+
+        if !known && !already {
+            found.push(whole.to_string());
+        }
+    }
+
+    found
+}
+
 #[cfg(test)]
 mod tests {
     mod formatting {
@@ -398,6 +471,7 @@ mod tests {
         #[test]
         fn the_same_placeholder_fills_both_versions() {
             let context = Context {
+                fields: Default::default(),
                 clipboard: "a < b".to_string(),
                 ..Default::default()
             };
@@ -414,6 +488,7 @@ mod tests {
 
     fn context() -> Context {
         Context {
+            fields: Default::default(),
             clipboard: "PASTED".into(),
             date: "2026-08-29".into(),
             time: "14:32".into(),
@@ -684,5 +759,84 @@ mod tests {
         });
 
         assert_eq!(out.text, "x=/a+b/ 2026");
+    }
+
+    mod holes_somebody_fills_in {
+        use super::*;
+
+        fn filled(pairs: &[(&str, &str)]) -> Context {
+            Context {
+                fields: pairs
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), value.to_string()))
+                    .collect(),
+                ..context()
+            }
+        }
+
+        #[test]
+        fn it_finds_the_names_nothing_else_answers_to() {
+            assert_eq!(
+                fields("Dear {name}, your order {order} ships soon."),
+                vec!["name".to_string(), "order".to_string()],
+            );
+        }
+
+        /// A built-in is never a question.
+        ///
+        /// Being asked to type today's date, from a snippet that says `{date}`
+        /// precisely so nobody has to, would be the feature working against its
+        /// own point.
+        #[test]
+        fn nothing_built_in_is_asked_for() {
+            assert!(fields("{date} {time} {uuid} {clipboard} {selection} {query} {cursor}").is_empty());
+        }
+
+        /// Anything with a colon is addressed to this module, not to a person.
+        #[test]
+        fn an_instruction_is_not_a_question() {
+            assert!(fields("{date:YYYY} and {env:PATH}").is_empty());
+        }
+
+        /// Asked once, however many times it is used.
+        ///
+        /// Being asked twice for one name reads as the first answer having been
+        /// lost, and the second answer would win silently.
+        #[test]
+        fn a_name_used_twice_is_asked_for_once() {
+            assert_eq!(fields("{who} and {who} again"), vec!["who".to_string()]);
+        }
+
+        #[test]
+        fn what_was_typed_is_what_lands() {
+            let out = expand("Dear {name},", &filled(&[("name", "Ada")]));
+
+            assert_eq!(out.text, "Dear Ada,");
+        }
+
+        /// A field nobody filled stays as it was written.
+        ///
+        /// An empty hole reads as a broken snippet; `{name}` still sitting there
+        /// reads as a snippet nobody finished, which is what happened. The
+        /// keyword expander takes this path every time, because it fires mid-typing
+        /// and has nowhere to stop and ask.
+        #[test]
+        fn an_unfilled_field_is_left_where_it_was() {
+            let out = expand("Dear {name},", &context());
+
+            assert_eq!(out.text, "Dear {name},");
+        }
+
+        /// A field cannot shadow a built-in.
+        ///
+        /// Naming one `date` is a mistake, and it must cost the field rather than
+        /// the date: a snippet that suddenly stopped dating itself because
+        /// somebody typed a value once would be the harder bug to find.
+        #[test]
+        fn a_field_named_after_a_builtin_does_not_win() {
+            let out = expand("{date}", &filled(&[("date", "not a date")]));
+
+            assert_ne!(out.text, "not a date");
+        }
     }
 }
