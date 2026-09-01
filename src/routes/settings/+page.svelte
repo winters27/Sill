@@ -21,6 +21,7 @@
   import TextField from "$lib/components/settings/TextField.svelte";
   import DictationPanel from "$lib/components/settings/DictationPanel.svelte";
   import TtsPanel from "$lib/components/settings/TtsPanel.svelte";
+  import ActivityPanel from "$lib/components/settings/ActivityPanel.svelte";
   import ClipboardPanel from "$lib/components/settings/ClipboardPanel.svelte";
   import SnippetsPanel from "$lib/components/settings/SnippetsPanel.svelte";
   import QuicklinksPanel from "$lib/components/settings/QuicklinksPanel.svelte";
@@ -1303,6 +1304,14 @@
             {/if}
           </Section>
           {:else if active === "advanced"}
+          <!--
+            What Sill has done sits here rather than in a row of its own. The
+            sidebar rule is that a sub-view folds into its parent, and Advanced
+            already owns the index and the usage history: a log of what was run
+            is the same kind of thing.
+          -->
+          <ActivityPanel />
+
           <Section
             label="Index"
             description="Rebuilt in the background. Searching keeps working while it runs."

@@ -576,3 +576,33 @@ pub(crate) async fn speak_piper_sample(
     let wav = crate::tts::piper::speak(&app, &voice, &text).await?;
     crate::tts::play_bytes(&app, &wav)
 }
+
+/// What Sill has done this run, newest first.
+#[tauri::command]
+pub(crate) fn activity(app: tauri::AppHandle) -> Vec<crate::activity::Done> {
+    use tauri::Manager;
+    app.state::<crate::activity::Activity>().recent()
+}
+
+/// Takes back one thing, named by its entry rather than by its descriptor.
+///
+/// The window sends an id, never an undo token. A token is an instruction to
+/// change the machine, and one held by the page is one that can be replayed
+/// after the log has moved on.
+#[tauri::command]
+pub(crate) async fn undo_activity(app: tauri::AppHandle, id: u64) -> Result<String, String> {
+    use tauri::Manager;
+
+    let undo = app
+        .state::<crate::activity::Activity>()
+        .take(id)
+        .ok_or("That cannot be taken back any more.")?;
+
+    crate::action::undo(&crate::action::ActionCtx { app: app.clone() }, &undo)
+}
+
+#[tauri::command]
+pub(crate) fn clear_activity(app: tauri::AppHandle) {
+    use tauri::Manager;
+    app.state::<crate::activity::Activity>().clear();
+}

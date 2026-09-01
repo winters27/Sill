@@ -236,6 +236,34 @@ for (const file of sources(".")) {
  * one has to think about the end of its life, not that this can prove they
  * got it right.
  */
+/*
+ * Nothing runs an action except the registry.
+ *
+ * `ActionRegistry::perform` runs it and records it in the activity log, which
+ * is what makes undo work after the launcher has closed. Calling `run` on an
+ * action directly does the thing and remembers nothing.
+ *
+ * This exists because the log was first hooked into the one command the window
+ * calls, under a comment claiming that was the only way an action could run.
+ * There were three: that command, a bound key, and Enter on a row. Each was
+ * found by the feature failing rather than by reading, so the rule is written
+ * down instead.
+ */
+for (const file of sources("src-tauri/src")) {
+  if (file.endsWith("action.rs")) continue;
+
+  const text = readFileSync(file, "utf8");
+
+  for (const m of text.matchAll(/\.run\(&ActionCtx/g)) {
+    fail(
+      file,
+      lineOf(text, m.index),
+      "an action run outside the registry; use ActionRegistry::perform so it " +
+        "reaches the activity log and can be undone",
+    );
+  }
+}
+
 for (const file of sources("scripts")) {
   const text = readFileSync(file, "utf8");
 

@@ -70,7 +70,9 @@ pub(crate) async fn launch_command(
         .primary(object.kind)
         .ok_or_else(|| format!("nothing is bound to Enter for {}", record.title))?;
 
-    let outcome = action.run(&ActionCtx { app: app.clone() }, &object).await?;
+    let outcome = actions
+        .perform(&ActionCtx { app: app.clone() }, action, &object)
+        .await?;
 
     /*
      * Where a switch ended up, so the row it was pressed on can show it.
@@ -411,7 +413,9 @@ pub(crate) async fn extract_text_from_last_image(app: AppHandle) -> Result<Strin
         .get("sill.extractText")
         .ok_or_else(|| "text recognition is not available".to_string())?;
 
-    let outcome = action.run(&ActionCtx { app: app.clone() }, &object).await?;
+    let outcome = registry
+        .perform(&ActionCtx { app: app.clone() }, action, &object)
+        .await?;
     Ok(outcome.message)
 }
 
@@ -459,7 +463,9 @@ pub(crate) async fn run_action(
         ));
     }
 
-    let outcome = chosen.run(&ActionCtx { app: app.clone() }, &object).await?;
+    let outcome = registry
+        .perform(&ActionCtx { app: app.clone() }, chosen, &object)
+        .await?;
 
     // The screen now belongs to something else, so the launcher must not put
     // it back on the way out. Decided from the kind rather than from the

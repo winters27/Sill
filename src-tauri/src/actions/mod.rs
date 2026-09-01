@@ -323,6 +323,19 @@ impl Action for RunBuiltin {
             // picker, and a dialog behind a launcher that closes on blur is a
             // dialog nobody can answer.
             #[cfg(windows)]
+            // Not an action on the selected row: what it reverses is
+            // whatever happened last, which is usually not what is selected
+            // now. An action accepting every kind turns up in every panel, and
+            // two invariants said so the moment it was written that way.
+            "undo-last" => {
+                let taken = app
+                    .state::<crate::activity::Activity>()
+                    .take_last()
+                    .ok_or("There is nothing to take back.")?;
+
+                let said = crate::action::undo(ctx, &taken.1)?;
+                return Ok(Outcome::done(said));
+            }
             "install-extension" => {
                 use tauri_plugin_dialog::DialogExt;
 

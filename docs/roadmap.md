@@ -44,7 +44,7 @@ A line is done when something checks it. Where that is a test, it is named.
 
 | | Item | State |
 | --- | --- | --- |
-| P2.1 | Activity history and undo | Not started. `Outcome.undo` exists and window moves use it |
+| P2.1 | Activity history and undo | **Done.** Every action is recorded and what can be taken back says so, in Advanced. "Undo Last Action" works after the launcher has closed, which is when it is wanted |
 | P2.2 | Screenshot | **Done.** Drag an area or take every screen, with a markup editor: box, arrow, ellipse, pen, highlight, hide, text |
 | P2.3 | OCR on demand | **Done.** WinRT recognition, ported from AuraKey. Reads a picture on the clipboard, never automatically. Measured: 35 ms on a 640x160 capture |
 | P2.4 | Read aloud | **Done.** Any text a transform accepts can be spoken instead, in the system voice, over OpenAI's speech shape, or in a neural voice Sill downloads and runs. Stopping is its own action, because silence is wanted after the text has left the screen |

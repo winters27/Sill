@@ -187,7 +187,10 @@ async fn fire(app: &AppHandle, binding: &Binding) {
         return;
     }
 
-    let outcome = match action.run(&ActionCtx { app: app.clone() }, &object).await {
+    let outcome = match registry
+        .perform(&ActionCtx { app: app.clone() }, action, &object)
+        .await
+    {
         Ok(outcome) => outcome,
         Err(reason) => {
             crate::say!("{} failed: {reason}", binding.accelerator);

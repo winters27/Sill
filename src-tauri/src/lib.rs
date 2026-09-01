@@ -1,4 +1,5 @@
 pub mod action;
+pub mod activity;
 pub mod actions;
 pub mod ai;
 pub mod app_volume;
@@ -931,6 +932,7 @@ pub fn run() {
         // to Claude Code, which on most days is never.
         .manage(ai::mcp::link::Link::new())
         .manage(commands::system::Marking::default())
+        .manage(activity::Activity::default())
         .manage(tts::sapi::Sapi::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
@@ -1248,6 +1250,9 @@ pub fn run() {
             commands::system::remove_piper_voice,
             commands::system::speak_sample,
             commands::system::speak_piper_sample,
+            commands::system::activity,
+            commands::system::undo_activity,
+            commands::system::clear_activity,
             commands::diagnostics::diagnostics,
             commands::system::rebuild_index,
             commands::system::summon_with,

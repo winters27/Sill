@@ -223,6 +223,33 @@ pub struct ActionRegistry {
 }
 
 impl ActionRegistry {
+    /// Runs an action and records that it happened.
+    ///
+    /// **Everything that runs an action goes through here**, and the reason is
+    /// that the first version of the activity log did not have this: it
+    /// recorded inside the Tauri command the window calls, under a comment
+    /// claiming that was the one place every action passed through. It was
+    /// not. A key bound to an action reaches the registry directly and never
+    /// touches that command, so the hotkey path recorded nothing, which is the
+    /// one path where undo matters most because the launcher has already
+    /// closed.
+    ///
+    /// Same shape as the search that chained four record lists while launch
+    /// looked in one: two routes to the same thing with nothing making them
+    /// agree.
+    pub async fn perform(
+        &self,
+        ctx: &ActionCtx,
+        action: &dyn Action,
+        object: &Object,
+    ) -> Result<Outcome, String> {
+        let outcome = action.run(ctx, object).await?;
+
+        crate::activity::record(ctx, action.title(), &object.title, &outcome);
+
+        Ok(outcome)
+    }
+
     pub fn new(actions: Vec<Box<dyn Action>>) -> Self {
         Self { actions }
     }

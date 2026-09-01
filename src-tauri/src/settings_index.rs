@@ -170,6 +170,12 @@ pub const SETTINGS: &[Setting] = &[
         "Key",
         "ai api key token secret credential paste anthropic openrouter",
     ),
+    s(
+        "advanced",
+        "Advanced",
+        "What Sill has done",
+        "activity history undo revert log recent took back reverse",
+    ),
     // ----------------------------------------------------------------- tts
     s(
         "tts",

@@ -368,6 +368,13 @@ pub fn builtins() -> Vec<CommandRecord> {
             &["snippet", "template", "expand", "abbreviation", "text"],
         ),
         builtin(
+            "undo-last",
+            "advanced",
+            "Undo Last Action",
+            "Take back the last thing Sill did that can be taken back",
+            &["undo", "revert", "back", "mistake", "reverse"],
+        ),
+        builtin(
             "install-extension",
             "advanced",
             "Install Extension",
