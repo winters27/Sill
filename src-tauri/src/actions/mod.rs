@@ -1239,7 +1239,7 @@ struct ReadAloud;
 #[async_trait]
 impl Action for ReadAloud {
     fn id(&self) -> &'static str {
-        "text.readAloud"
+        "sill.text.readAloud"
     }
 
     fn title(&self) -> &'static str {
@@ -1277,7 +1277,7 @@ struct StopReading;
 #[async_trait]
 impl Action for StopReading {
     fn id(&self) -> &'static str {
-        "text.stopReading"
+        "sill.text.stopReading"
     }
 
     fn title(&self) -> &'static str {

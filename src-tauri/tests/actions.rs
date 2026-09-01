@@ -697,12 +697,32 @@ fn reading_aloud_reaches_both_places_that_ask_for_text_actions() {
         let offered: Vec<&str> = registry.describe(kind).into_iter().map(|a| a.id).collect();
 
         assert!(
-            offered.contains(&"text.readAloud"),
+            offered.contains(&"sill.text.readAloud"),
             "nothing offers Read Aloud for {mode}, so no key can be bound to it: {offered:?}"
         );
         assert!(
-            offered.contains(&"text.stopReading"),
+            offered.contains(&"sill.text.stopReading"),
             "Stop Reading is unreachable for {mode}, which leaves no way to stop it: {offered:?}"
         );
     }
+}
+
+/// Every action id is namespaced, because a binding stores the id forever.
+///
+/// A binding written to preferences names the action by id, so an id is a
+/// stored format rather than an internal label: renaming one silently breaks
+/// whatever key somebody bound to it. The prefix is what keeps them from
+/// colliding with an extension's own ids once extensions can register actions.
+///
+/// Written after two arrived without it. Thirty-nine of forty-one followed a
+/// convention nothing was enforcing, which is exactly how long that lasts.
+#[test]
+fn every_action_id_is_namespaced() {
+    let stray: Vec<&str> = sill_lib::actions::builtins()
+        .ids()
+        .into_iter()
+        .filter(|id| !id.starts_with("sill."))
+        .collect();
+
+    assert!(stray.is_empty(), "these ids are not namespaced: {stray:?}");
 }
