@@ -62,11 +62,25 @@
 </div>
 
 <style>
+  /*
+   * Scrolls, and that is not a detail.
+   *
+   * The launcher is a fixed 500px window: a board that is taller than the
+   * space left between the field and the chin does not push them apart, it
+   * runs underneath them. The first version did exactly that and the last row
+   * of programs was drawn behind the keys.
+   */
   .board {
     display: grid;
+    align-content: start;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-3);
+    width: 100%;
+    min-height: 0;
     padding: var(--space-3);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   /*
@@ -80,7 +94,7 @@
   .tile {
     position: relative;
     display: flex;
-    min-height: 148px;
+    min-height: 132px;
     border-radius: var(--radius-lg);
     background-color: var(--fill-1);
     background-image: var(--sheen);
