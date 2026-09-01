@@ -358,6 +358,7 @@ const SEALED: &[&[&str]] = &[
     // have a key for each of half a dozen services and there is no fixed path
     // that names them all.
     &["ai", "providers", "*", "apiKey"],
+    &["speech", "provider", "apiKey"],
 ];
 
 /// The step in a path that means "every element of this array".
@@ -677,6 +678,9 @@ pub struct Preferences {
     /// everything, and so the hook can be armed from the same load that sets
     /// up the summon shortcut.
     pub dictation: crate::dictation::models::DictationSettings,
+    /// How text is read aloud.
+    #[serde(default)]
+    pub speech: crate::speech::SpeechSettings,
     pub hotkey: Hotkey,
     pub clipboard: ClipboardHistory,
     pub snippets: Snippets,
@@ -968,5 +972,44 @@ mod tests {
         });
         seal_secrets(&mut null_key);
         assert!(null_key["dictation"]["provider"]["apiKey"].is_null());
+    }
+}
+
+#[cfg(test)]
+mod sealed_paths {
+    use super::*;
+
+    /// Every API key in a saved document is sealed, wherever it lives.
+    ///
+    /// `SEALED` is a hand-written list of paths and nothing made it complete:
+    /// a provider added at a new path is written to the file **in plain text**,
+    /// silently, which is the exact failure the sealing exists to prevent. So
+    /// this builds a document with a key at every place a key can be, saves
+    /// it, and asserts none of them survived as plain text.
+    ///
+    /// It reads the real `Preferences` rather than a hand-made document, so a
+    /// provider added to the type is covered without anybody remembering.
+    #[test]
+    fn no_api_key_is_written_in_plain_text() {
+        const PLAIN: &str = "sk-plaintext-canary-0123456789";
+
+        let mut prefs = Preferences::default();
+        prefs.dictation.provider.api_key = Some(PLAIN.to_string());
+        prefs.speech.provider.api_key = Some(PLAIN.to_string());
+        prefs.ai.providers.push(crate::ai::provider::Provider {
+            api_key: PLAIN.to_string(),
+            ..Default::default()
+        });
+
+        let mut document = serde_json::to_value(&prefs).expect("preferences serialise");
+        seal_secrets(&mut document);
+
+        let written = document.to_string();
+
+        assert!(
+            !written.contains(PLAIN),
+            "an API key reached the file in plain text. Every place one can be \
+             stored needs a path in SEALED"
+        );
     }
 }

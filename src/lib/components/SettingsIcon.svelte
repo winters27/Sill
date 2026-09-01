@@ -4,6 +4,7 @@
     | "appearance"
     | "ai"
     | "dictation"
+    | "speech"
     | "snippets"
     | "emoji"
     | "shortcuts"

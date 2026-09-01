@@ -1,16 +1,13 @@
-//! Reading text out loud.
+//! The voice Windows already has.
 //!
-//! P2.4. The same text the transforms act on, spoken instead of rewritten, so
-//! it works on a clipboard row and on a selection without either knowing about
-//! the other.
+//! SAPI's `ISpVoice` synthesises and plays in one call, has been in Windows
+//! since XP, and needs nothing installed, which is what makes it the fallback
+//! rather than the choice: David and Zira are concatenative voices from a
+//! decade ago and they sound like it. Windows 11 does ship neural voices, and
+//! they are registered under `Speech_OneCore` where only Narrator and Edge can
+//! reach them, so there is no better local voice to be had for free.
 //!
-//! ## Why SAPI rather than the WinRT synthesiser
-//!
-//! `Windows.Media.SpeechSynthesis` produces a *stream* and nothing else, so
-//! using it means also pulling in a media player to hear it: three more WinRT
-//! feature sets on a crate whose feature list has already OOM-aborted rustc
-//! once. SAPI's `ISpVoice::Speak` synthesises and plays in one call, has been
-//! in Windows since XP, and lives behind a single Win32 feature.
+//! Everything better is a provider. See [`super`].
 //!
 //! ## Why a thread of its own
 //!
@@ -34,12 +31,12 @@ enum Say {
 
 /// The voice, and the one thread allowed to touch it.
 #[derive(Default)]
-pub struct Speech {
+pub struct Sapi {
     /// `None` until the first thing is said.
     to_voice: Mutex<Option<Sender<Say>>>,
 }
 
-impl Speech {
+impl Sapi {
     /// Says something, interrupting whatever was already being said.
     ///
     /// Interrupting is the right default for a launcher: reading is asked for
@@ -192,7 +189,7 @@ mod tests {
     /// starting a voice to say nothing.
     #[test]
     fn there_is_nothing_to_read_in_blank_text() {
-        let speech = Speech::default();
+        let speech = Sapi::default();
 
         for blank in ["", "   ", "\n\t "] {
             assert!(
@@ -209,7 +206,7 @@ mod tests {
     /// deliver it would be work in answer to a request for none.
     #[test]
     fn stopping_when_nothing_ever_spoke_starts_nothing() {
-        let speech = Speech::default();
+        let speech = Sapi::default();
 
         assert!(speech.stop().is_ok());
         assert!(

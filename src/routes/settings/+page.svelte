@@ -20,10 +20,12 @@
   import Select from "$lib/components/settings/Select.svelte";
   import TextField from "$lib/components/settings/TextField.svelte";
   import DictationPanel from "$lib/components/settings/DictationPanel.svelte";
+  import SpeechPanel from "$lib/components/settings/SpeechPanel.svelte";
   import ClipboardPanel from "$lib/components/settings/ClipboardPanel.svelte";
   import SnippetsPanel from "$lib/components/settings/SnippetsPanel.svelte";
   import QuicklinksPanel from "$lib/components/settings/QuicklinksPanel.svelte";
   import ShortcutsPanel from "$lib/components/settings/ShortcutsPanel.svelte";
+  import ThemeCards from "$lib/components/settings/ThemeCards.svelte";
   import {
     acceleratorFrom,
     applyAppearance,
@@ -150,6 +152,12 @@
       id: "dictation",
       name: "Dictation",
       blurb: "The trigger, where the transcript goes, and which engine hears it",
+      group: "Voice",
+    },
+    {
+      id: "speech",
+      name: "Speech",
+      blurb: "Which voice reads text out loud, and where it comes from",
       group: "Voice",
     },
     {
@@ -852,6 +860,8 @@
             <AiPanel prefs={p} {commit} />
           {:else if active === "dictation"}
             <DictationPanel prefs={p} {commit} />
+          {:else if active === "speech"}
+            <SpeechPanel prefs={p} {commit} />
           {:else if active === "snippets"}
             <SnippetsPanel prefs={p} {commit} />
           {:else if active === "shortcuts"}

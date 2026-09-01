@@ -931,7 +931,7 @@ pub fn run() {
         // to Claude Code, which on most days is never.
         .manage(ai::mcp::link::Link::new())
         .manage(commands::system::Marking::default())
-        .manage(speech::Speech::default())
+        .manage(speech::sapi::Sapi::default())
         .manage(RegistryState {
             inner: Arc::new(tokio::sync::Mutex::new(Registry {
                 commands: Vec::new(),
@@ -1243,6 +1243,10 @@ pub fn run() {
             commands::extensions::install_extension,
             commands::launch::perform_builtin,
             commands::system::app_icon,
+            commands::system::piper_voices,
+            commands::system::install_piper_voice,
+            commands::system::remove_piper_voice,
+            commands::system::speak_sample,
             commands::diagnostics::diagnostics,
             commands::system::rebuild_index,
             commands::system::summon_with,

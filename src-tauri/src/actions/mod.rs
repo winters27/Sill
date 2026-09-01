@@ -1258,9 +1258,7 @@ impl Action for ReadAloud {
     }
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
-        ctx.app
-            .state::<crate::speech::Speech>()
-            .aloud(&object.target)?;
+        crate::speech::aloud(&ctx.app, &object.target).await?;
 
         Ok(Outcome::done("Reading aloud"))
     }
@@ -1293,7 +1291,7 @@ impl Action for StopReading {
     }
 
     async fn run(&self, ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
-        ctx.app.state::<crate::speech::Speech>().stop()?;
+        crate::speech::stop(&ctx.app)?;
         Ok(Outcome::done("Stopped"))
     }
 }

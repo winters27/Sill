@@ -491,3 +491,60 @@ pub(crate) async fn cancel_markup(app: AppHandle) -> Result<(), String> {
 
     Ok(())
 }
+
+/// Which downloaded voices are present, for the Speech settings panel.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct VoiceStatus {
+    pub id: String,
+    pub label: String,
+    pub locale: String,
+    pub installed: bool,
+}
+
+#[tauri::command]
+pub(crate) fn piper_voices(app: tauri::AppHandle) -> Vec<VoiceStatus> {
+    crate::speech::piper::VOICES
+        .iter()
+        .map(|voice| VoiceStatus {
+            id: voice.id.to_string(),
+            label: voice.label.to_string(),
+            locale: voice.locale.to_string(),
+            installed: crate::speech::piper::is_installed(&app, voice.id),
+        })
+        .collect()
+}
+
+/// Downloads the speech engine and one voice, reporting progress as it goes.
+///
+/// Progress is an event rather than a return value, for the reason the model
+/// download already is one: a bar that only moves when the call finishes is a
+/// bar that never moves.
+#[tauri::command]
+pub(crate) async fn install_piper_voice(
+    app: tauri::AppHandle,
+    voice: String,
+) -> Result<(), String> {
+    use tauri::Emitter;
+
+    let reporting = app.clone();
+    crate::speech::piper::install(&app, &voice, move |fraction, stage| {
+        let _ = reporting.emit(
+            "sill://speech-download",
+            serde_json::json!({ "fraction": fraction, "stage": stage }),
+        );
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) fn remove_piper_voice(app: tauri::AppHandle, voice: String) -> Result<bool, String> {
+    crate::speech::piper::remove(&app, &voice)
+}
+
+/// Says something in whichever voice is set up, for the settings panel's
+/// preview button.
+#[tauri::command]
+pub(crate) async fn speak_sample(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    crate::speech::aloud(&app, &text).await
+}

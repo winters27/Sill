@@ -202,12 +202,32 @@ export interface Binding {
   replace: boolean;
 }
 
+export type SpeechEngine = "system" | "http" | "piper";
+
+export interface SpeechProvider {
+  enabled: boolean;
+  name: string | null;
+  providerType: string | null;
+  apiKey: string | null;
+  baseUrl: string | null;
+  lastModelId: string | null;
+}
+
+/** How text is read aloud. */
+export interface SpeechSettings {
+  engine: SpeechEngine;
+  provider: SpeechProvider;
+  voice: string;
+  piperVoice: string;
+}
+
 export interface Preferences {
   general: General;
   snippets: SnippetSettings;
   taps: TapSettings;
   ai: AiSettings;
   dictation: DictationSettings;
+  speech: SpeechSettings;
   clipboard: ClipboardHistorySettings;
   hotkey: Hotkey;
   appearance: Appearance;
