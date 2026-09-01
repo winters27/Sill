@@ -26,7 +26,7 @@ use tauri::AppHandle;
 use crate::dictation::assets;
 use crate::dictation::engine;
 use crate::dictation::error::{DictationError, Result};
-use crate::dictation::job::Job;
+use crate::job::Job;
 
 /// The runtime catalog name for whisper.cpp.
 pub const RUNTIME: &str = "whisper";

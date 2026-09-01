@@ -189,6 +189,7 @@ pub fn plainly(capability: &Capability) -> &'static str {
         Capability::ClipboardRead => "read your clipboard, including its history",
         Capability::ClipboardWrite => "change what is on your clipboard",
         Capability::SelectionRead => "read whatever you have selected",
+        Capability::ShellExecution => "run any command on this machine",
         Capability::FileRead => "read files and see what is installed",
         Capability::FileWrite => "change files on disk",
         Capability::ProcessLaunch => "open programs and links",

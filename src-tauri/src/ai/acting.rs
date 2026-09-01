@@ -65,6 +65,7 @@ fn touching(capability: &Capability) -> Option<&'static str> {
         Capability::WindowControl => Some("moves or closes a window"),
         Capability::Network => Some("sends something over the network"),
         Capability::SelectionRead => Some("reads what you have selected"),
+        Capability::ShellExecution => Some("runs a command on this machine"),
 
         // Nothing leaves the machine and nothing is altered by these, so a
         // card would be a prompt about nothing. They are still declared, and

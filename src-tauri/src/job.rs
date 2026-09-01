@@ -1,5 +1,10 @@
 //! Ties a child process's lifetime to this one at the kernel level.
 //!
+//! Lived under `dictation` while the whisper server was the only thing that
+//! needed it. Moved out when running scripts needed the same guarantee, since
+//! a general way to kill a process tree filed under dictation is a thing the
+//! next person does not find.
+//!
 //! Killing the whisper server when Asyar quits is easy; the hard case is
 //! Asyar *not* quitting, but crashing or being force-killed. Nothing in the
 //! process gets to run then, so no `Drop`, no shutdown hook, and no signal
@@ -81,7 +86,16 @@ mod imp {
         /// the child's thread handle, which `std::process::Command` does not
         /// expose.
         pub fn adopt(&self, child: &Child) -> bool {
-            let process = HANDLE(child.as_raw_handle());
+            self.adopt_raw(child.as_raw_handle())
+        }
+
+        /// The same, for a child this module cannot name.
+        ///
+        /// `tokio::process::Child` is a different type that owns the same kind
+        /// of handle, and asking for the handle rather than the child is what
+        /// lets one job serve both without this module knowing about tokio.
+        pub fn adopt_raw(&self, handle: std::os::windows::io::RawHandle) -> bool {
+            let process = HANDLE(handle);
             // SAFETY: `child` is alive for this call, so its handle is valid,
             // and `self.0` is valid until `Drop`.
             match unsafe { AssignProcessToJobObject(self.0, process) } {
@@ -118,6 +132,10 @@ mod imp {
         }
 
         pub fn adopt(&self, _child: &Child) -> bool {
+            false
+        }
+
+        pub fn adopt_raw(&self, _handle: *mut std::ffi::c_void) -> bool {
             false
         }
     }

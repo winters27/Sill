@@ -39,6 +39,8 @@ pub mod quicklinks;
 pub mod radios;
 pub mod registry;
 pub mod secrets;
+pub mod job;
+pub mod shell;
 pub mod selection;
 pub mod settings_catalog;
 pub mod settings_index;

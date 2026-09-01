@@ -17,7 +17,6 @@ pub mod error;
 pub mod fetch;
 pub mod history;
 pub mod hotkey;
-pub mod job;
 pub mod models;
 pub mod panel;
 pub mod paste;

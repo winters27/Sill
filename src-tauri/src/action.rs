@@ -45,6 +45,14 @@ pub enum Capability {
     /// surface. Somebody granting a launcher permission to draw its own window
     /// has not thereby granted it permission to mute their speakers.
     SystemControl,
+    /// Runs an arbitrary command line.
+    ///
+    /// Not a stronger `ProcessLaunch`, which opens a named thing the way
+    /// double-clicking it would. This hands over a shell, and a shell is every
+    /// other capability on this list at once: it can read files, write them,
+    /// reach the network and start anything. It is separate so that nothing
+    /// grants it by accident while meaning "open a program".
+    ShellExecution,
     /// Reads whatever is selected in whichever program is in front.
     ///
     /// Its own thing rather than a kind of `ClipboardRead`: somebody has to
