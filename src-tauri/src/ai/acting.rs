@@ -26,17 +26,7 @@ use crate::object::{Object, ObjectKind};
 /// tedious enough that the card stops being read, which is the way an
 /// approval prompt actually fails.
 pub fn needs_asking(capabilities: &[Capability]) -> bool {
-    capabilities.iter().any(|capability| {
-        matches!(
-            capability,
-            Capability::FileWrite
-                | Capability::ProcessLaunch
-                | Capability::InputInjection
-                | Capability::SystemControl
-                | Capability::WindowControl
-                | Capability::Network
-        )
-    })
+    capabilities.iter().any(|capability| touching(capability).is_some())
 }
 
 /// What the card says the action is about to do.
@@ -46,20 +36,44 @@ pub fn needs_asking(capabilities: &[Capability]) -> bool {
 /// deciding on this, not on the action's name.
 pub fn what_it_touches(capabilities: &[Capability]) -> &'static str {
     for capability in capabilities {
-        let said = match capability {
-            Capability::FileWrite => "changes files on disk",
-            Capability::ProcessLaunch => "opens something",
-            Capability::InputInjection => "types into whatever is in front",
-            Capability::SystemControl => "changes this machine",
-            Capability::WindowControl => "moves or closes a window",
-            Capability::Network => "sends something over the network",
-            _ => continue,
-        };
-
-        return said;
+        if let Some(said) = touching(capability) {
+            return said;
+        }
     }
 
     "reads something"
+}
+
+/// What one capability changes, or `None` if it changes nothing.
+///
+/// The single place that decides both what a card says and whether there is a
+/// card at all, because those two answers must never disagree: a capability
+/// worth stopping for that the card cannot describe would show somebody a
+/// prompt saying "reads something" about an action that writes.
+///
+/// **Exhaustive on purpose, with no `_` arm.** This match used to end in
+/// `_ => continue`, which meant a capability added later was silently treated
+/// as harmless and never asked about. Naming every one costs a line and makes
+/// the compiler ask the only question that matters when the next is added:
+/// does this change anything?
+fn touching(capability: &Capability) -> Option<&'static str> {
+    match capability {
+        Capability::FileWrite => Some("changes files on disk"),
+        Capability::ProcessLaunch => Some("opens something"),
+        Capability::InputInjection => Some("types into whatever is in front"),
+        Capability::SystemControl => Some("changes this machine"),
+        Capability::WindowControl => Some("moves or closes a window"),
+        Capability::Network => Some("sends something over the network"),
+        Capability::SelectionRead => Some("reads what you have selected"),
+
+        // Nothing leaves the machine and nothing is altered by these, so a
+        // card would be a prompt about nothing. They are still declared, and
+        // still shown wherever what an extension can reach is listed.
+        Capability::ClipboardRead
+        | Capability::ClipboardWrite
+        | Capability::FileRead
+        | Capability::Ui => None,
+    }
 }
 
 /// The object an action is being asked to act on.

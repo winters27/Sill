@@ -45,6 +45,13 @@ pub enum Capability {
     /// surface. Somebody granting a launcher permission to draw its own window
     /// has not thereby granted it permission to mute their speakers.
     SystemControl,
+    /// Reads whatever is selected in whichever program is in front.
+    ///
+    /// Its own thing rather than a kind of `ClipboardRead`: somebody has to
+    /// copy before a clipboard read sees anything, and that act is the consent.
+    /// A selection is read without anybody doing anything at all, so it can
+    /// take text out of a document nobody chose to share.
+    SelectionRead,
     /// Moves, resizes, focuses or closes somebody else's window.
     ///
     /// Separate from `Ui`, which is Sill's own surface. Reaching into another
