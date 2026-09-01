@@ -7,6 +7,14 @@
 
   interface Props {
     commands: RankedCommand[];
+    /**
+     * Subtitles that are a measurement rather than a description.
+     *
+     * By id, and absent for nearly every row. Kept out of `commands` itself
+     * because that list is replaced on every search, and a subtitle patched
+     * into it would be written over by the next keystroke.
+     */
+    live?: Record<string, string>;
     selected: number;
     onselect: (index: number) => void;
     onrun: (index: number) => void;
@@ -32,7 +40,8 @@
     numeric?: boolean;
   }
 
-  let { commands, selected, onselect, onrun, asking = "", numeric = false }: Props = $props();
+  let { commands, selected, onselect, onrun, live, asking = "", numeric = false }: Props =
+    $props();
 
 
 
@@ -402,6 +411,12 @@
   }
 
   function sourceOf(command: RankedCommand): string {
+    // A measurement wins over anything written down, and it is checked first
+    // because the rules below are about descriptions. A row showing what the
+    // machine is doing right now is not describing where that can be found.
+    const measured = live?.[command.id];
+    if (measured) return measured;
+
     // An extension is worth naming, and it is not in the subtitle.
     if (command.mode === "view" || command.mode === "no-view") {
       return command.extensionTitle;

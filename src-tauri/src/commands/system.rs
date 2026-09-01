@@ -786,3 +786,13 @@ pub(crate) fn forget_workspace(app: tauri::AppHandle, name: String) -> Result<()
     crate::reload_index(&app);
     Ok(())
 }
+
+/// The rows whose subtitle is a measurement, and what it says now.
+///
+/// Answers with nothing when the launcher is not visible, which is the
+/// window's signal to stop asking. See `crate::live` for why the refusal lives
+/// there rather than in the timer.
+#[tauri::command]
+pub(crate) fn live_rows(app: tauri::AppHandle) -> Vec<crate::live::Live> {
+    crate::live::rows(&app)
+}

@@ -841,9 +841,18 @@ fn builtin_wearing(
     }
 }
 
+/// How a builtin's id is spelled, for anything that has to name one.
+///
+/// Shared rather than formatted again wherever it is needed. A second copy of
+/// the format is a second thing to change, and the way it fails is silent: an
+/// id that matches no row updates nothing and reports nothing.
+pub fn builtin_id(id: &str) -> String {
+    format!("sill:{id}")
+}
+
 fn builtin(id: &str, panel: &str, title: &str, subtitle: &str, keywords: &[&str]) -> CommandRecord {
     CommandRecord {
-        id: format!("sill:{id}"),
+        id: builtin_id(id),
         extension: "sill".to_string(),
         extension_title: "Sill".to_string(),
         command: id.to_string(),

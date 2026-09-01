@@ -52,6 +52,8 @@
     systemStates,
     searchCommands,
     unloadExtension,
+    liveRows,
+    type LiveRow,
     performBuiltin,
     searchBrowsers,
     searchFiles,
@@ -206,6 +208,63 @@
   let query = $state("");
   let selected = $state(0);
   let commands = $state<RankedCommand[]>([]);
+
+  /**
+   * Subtitles that are a measurement, by row id.
+   *
+   * Separate from `commands` because that is replaced on every search and a
+   * subtitle patched into it would be gone on the next keystroke.
+   */
+  let live = $state<Record<string, string>>({});
+
+  /** The ticker, while there is one. */
+  let ticking: ReturnType<typeof setInterval> | undefined;
+
+  /**
+   * Asks what the live rows say, and stops when the answer is nothing.
+   *
+   * Nothing means Rust has decided the launcher is not visible. That decision
+   * is deliberately not made here: the window can go away by the hotkey, by a
+   * click elsewhere, or because an action put it away, and a timer that had to
+   * recognise all three would be right until the day somebody added a fourth.
+   * Asking something that always knows, and stopping when it says to, is right
+   * however it was dismissed.
+   */
+  async function tick() {
+    let rows: LiveRow[] = [];
+
+    try {
+      rows = await liveRows();
+    } catch {
+      // Nothing worth saying on screen: a subtitle that keeps its last value
+      // is better than an error where a measurement was.
+      rows = [];
+    }
+
+    if (rows.length === 0) {
+      stopTicking();
+      return;
+    }
+
+    live = Object.fromEntries(rows.map((row) => [row.id, row.subtitle]));
+  }
+
+  function startTicking() {
+    if (ticking) return;
+
+    void tick();
+    ticking = setInterval(() => void tick(), 1000);
+  }
+
+  function stopTicking() {
+    if (!ticking) return;
+
+    clearInterval(ticking);
+    ticking = undefined;
+
+    // Left as it was rather than blanked. The launcher is on its way out and
+    // emptying the row first would be a flicker on the way.
+  }
   let version = $state(0);
   let toast = $state<{ title: string; style: string } | null>(null);
   let status = $state("");
@@ -2884,7 +2943,17 @@ const DRAWS_ITS_OWN = new Set([
       // Summoning must hand the keyboard straight to the search field.
       // Focusing only on mount is not enough: that runs once, while the
       // window is still hidden, and focus does not survive hide and show.
+      // Once on mount as well as on every summon. The launcher starts hidden,
+      // so this usually stops itself on the first answer, which costs one call
+      // and means a window that was already up when this page loaded is not
+      // waiting for a summon that already happened.
+      startTicking();
+
       shown = await listen("sill://shown", () => {
+        // Measuring starts when the window appears and stops when Rust says
+        // nobody is looking, so a launcher nobody can see costs nothing.
+        startTicking();
+
         // Re-asked on every summon. A file indexer can be started or stopped
         // between two uses of the launcher, and the alternative to asking here
         // is asking on every keystroke.
@@ -3032,6 +3101,8 @@ const DRAWS_ITS_OWN = new Set([
       disposed = true;
       // A pending file query has nowhere to land once this is torn down.
       clearTimeout(fileTimer);
+      // And a measurement has nobody to show it to.
+      stopTicking();
       unlisten?.();
       shown?.();
       switcher?.();
@@ -3390,6 +3461,7 @@ const DRAWS_ITS_OWN = new Set([
         bind:this={rootList}
         {commands}
         {selected}
+        {live}
         numeric={prefs?.navigation.numeric ?? false}
         asking={`${mode}:${query}`}
         onselect={(i) => (selected = i)}

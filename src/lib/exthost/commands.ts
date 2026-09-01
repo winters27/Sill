@@ -845,3 +845,21 @@ export function undoAction(undo: UndoToken): Promise<string> {
 export function renamePath(path: string, to: string): Promise<string> {
   return invoke<string>("rename_path", { path, to });
 }
+
+/** A row whose subtitle is a measurement rather than a description. */
+export interface LiveRow {
+  id: string;
+  subtitle: string;
+}
+
+/**
+ * What the live rows say now, or nothing at all.
+ *
+ * Nothing means the launcher is not visible. Rust decides that, not the timer
+ * here: there are several ways the window can go away and only one of them is
+ * this page deciding to, so a timer that stopped itself would be right most of
+ * the time and wrong forever when it was not.
+ */
+export function liveRows(): Promise<LiveRow[]> {
+  return invoke<LiveRow[]>("live_rows");
+}

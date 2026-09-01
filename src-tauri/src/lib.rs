@@ -39,6 +39,7 @@ pub mod quicklinks;
 pub mod radios;
 pub mod registry;
 pub mod secrets;
+pub mod live;
 pub mod job;
 pub mod scripts;
 pub mod shell;
@@ -1346,6 +1347,7 @@ pub fn run() {
             commands::system::remove_piper_voice,
             commands::system::speak_sample,
             commands::system::speak_piper_sample,
+            commands::system::live_rows,
             commands::system::save_workspace,
             commands::system::restore_workspace,
             commands::system::forget_workspace,
