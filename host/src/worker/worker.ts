@@ -27,6 +27,14 @@ export interface LaunchData {
   fallbackText?: string;
   isDevelopment: boolean;
   launchType: "userInitiated" | "background";
+  /**
+   * What this extension has been allowed to reach, as Rust spells it.
+   *
+   * Absent means nothing was granted, which is the safe reading: an older host
+   * or a caller that forgot the field gets an extension that cannot touch the
+   * disk, rather than one that can.
+   */
+  capabilities?: string[];
 }
 
 export function workerMain(): void {
@@ -58,7 +66,7 @@ export function workerMain(): void {
   control.handle("Lifecycle/launch", async (params: RpcParams) => {
     const data = params.data as unknown as LaunchData;
 
-    patchRequire();
+    patchRequire(data.capabilities ?? []);
 
     renderer = createRenderer({
       onCommit: (ops) => {

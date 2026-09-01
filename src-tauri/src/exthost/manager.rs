@@ -5,6 +5,8 @@
 //! the API layer.
 
 use serde::{Deserialize, Serialize};
+
+use crate::action::Capability;
 use serde_json::{json, Value};
 
 use super::rpc::{RpcError, RpcPeer};
@@ -51,18 +53,6 @@ pub enum LaunchType {
     CommandLine,
 }
 
-/// What the host is allowed to ask of this build.
-///
-/// An extension that needs a capability we do not have should be told so up
-/// front rather than failing at the call site.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct Capabilities {
-    pub browser_extension: bool,
-    pub window_management: bool,
-    pub file_search: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadOptions {
     pub mode: CommandMode,
@@ -78,7 +68,16 @@ pub struct LoadOptions {
     pub preferences: Value,
     pub arguments: Value,
     pub launch_type: LaunchType,
-    pub capabilities: Capabilities,
+    /// What this extension has been allowed to reach.
+    ///
+    /// Was a struct of three booleans that nothing set and nothing read. Now
+    /// the same `Capability` an action declares, taken from what somebody has
+    /// actually granted, and the worker refuses `fs`, `net` and
+    /// `child_process` on the strength of it.
+    ///
+    /// Empty is the safe default and stays the default: a caller that forgets
+    /// to fill it in gets an extension that can draw and nothing else.
+    pub capabilities: Vec<Capability>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
 }
@@ -136,7 +135,7 @@ impl LoadOptions {
             },
             arguments: json!({}),
             launch_type: LaunchType::User,
-            capabilities: Capabilities::default(),
+            capabilities: Vec::new(),
             cwd: None,
         }
     }

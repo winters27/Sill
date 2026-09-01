@@ -157,6 +157,68 @@ try {
   // ---- unload ----
   const unloadRes = await request("Manager/unload", { session_id: sessionId });
   assert(unloadRes.result === true, "unload succeeded");
+
+  // ---- the sandbox, both ways round ----
+  //
+  // Loading the same fixture twice, once with the permission and once
+  // without, because only the pair proves anything. Refused-on-its-own could
+  // be an extension that never worked, and allowed-on-its-own could be a gate
+  // that never closes.
+  const loadDisk = (capabilities) =>
+    request("Manager/load", {
+      opts: {
+        mode: "View",
+        env: "Development",
+        entrypoint: resolve(root, "test/fixture/reads-disk.js"),
+        extension_name: "disky",
+        command_name: "read",
+        is_raycast: true,
+        preferences: {},
+        arguments: {},
+        launch_type: "User",
+        capabilities,
+      },
+    });
+
+  const refused = await loadDisk([]);
+  const refusedSession = refused.result?.session_id;
+
+  const crash = await waitFor(
+    (m) => m.method === "Manager/extensionCrash" && m.params.session_id === refusedSession,
+    "an extension with no permission crashed rather than reading the disk",
+  );
+
+  assert(
+    /not allowed to read and change files/.test(crash.params.reason),
+    `the crash names the permission (${crash.params.reason})`,
+  );
+  assert(
+    /Settings/.test(crash.params.reason),
+    "the crash says where to grant it",
+  );
+
+  const allowed = await loadDisk(["fileRead", "fileWrite"]);
+  const allowedSession = allowed.result?.session_id;
+
+  send({
+    jsonrpc: "2.0",
+    id: 9100,
+    method: "Manager/ready",
+    params: { session_id: allowedSession },
+  });
+
+  const drew = await waitFor(
+    (m) =>
+      m.method === "Manager/extensionMessage" &&
+      m.params.session_id === allowedSession &&
+      JSON.parse(m.params.payload).method === "UI/render",
+    "the same extension drew once the permission was granted",
+  );
+
+  assert(
+    JSON.stringify(JSON.parse(drew.params.payload).params.ops).includes("reached the disk"),
+    "and it really did reach the disk",
+  );
 } catch (err) {
   console.error(`FAIL ${err.message}`);
   failures++;

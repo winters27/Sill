@@ -127,6 +127,14 @@ impl Granted {
         self.save();
     }
 
+    /// What one extension holds, for the worker that has to enforce it.
+    pub fn held(&self, extension: &str) -> Vec<Capability> {
+        self.by_extension
+            .lock()
+            .map(|held| held.get(extension).cloned().unwrap_or_default())
+            .unwrap_or_default()
+    }
+
     /// Everything granted, by extension, for the screen that lists it.
     pub fn everything(&self) -> BTreeMap<String, Vec<Capability>> {
         self.by_extension
@@ -186,4 +194,20 @@ impl Permits for Granted {
 
         Ok(())
     }
+}
+
+/// What an extension has been allowed, looked up from wherever the app is.
+///
+/// Keyed by `LoadOptions::extension_id`, which is the **same** string
+/// `ExtHost` hands to `ApiLayer::dispatch` as `extension`. If those two ever
+/// stopped agreeing, an extension would be granted a permission under one
+/// name and checked against another, and the symptom would be a permission
+/// that is granted, listed, and still refused.
+///
+/// Nothing managed means nothing granted, which is the safe reading: a caller
+/// with no grant store gets an extension that can draw and nothing else.
+pub fn for_extension(app: &tauri::AppHandle, extension: &str) -> Vec<Capability> {
+    app.try_state::<std::sync::Arc<Granted>>()
+        .map(|grants| grants.held(extension))
+        .unwrap_or_default()
 }

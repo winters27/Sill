@@ -200,13 +200,15 @@ impl Action for RunExtensionCommand {
         let hosts = ctx.app.state::<crate::state::HostState>();
         let host = crate::host::host_of(&hosts).await?;
 
-        let opts = crate::exthost::LoadOptions::with_preferences(
+        let mut opts = crate::exthost::LoadOptions::with_preferences(
             record.entrypoint.clone(),
             &record.extension,
             &record.command,
             mode,
             record.preferences.clone(),
         );
+
+        opts.capabilities = crate::exthost::grants::for_extension(&ctx.app, &record.extension);
 
         let session = host.load(&opts).await.map_err(|e| e.to_string())?;
         Ok(Outcome::running(format!("Ran {}", object.title), session))

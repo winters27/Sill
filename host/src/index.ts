@@ -152,6 +152,12 @@ class ExtensionHost {
       fallbackText: typeof opts.fallbackText === "string" ? opts.fallbackText : undefined,
       isDevelopment: opts.env === "Development",
       launchType: opts.launch_type === "Background" ? "background" : "userInitiated",
+      // Forwarded, and it has to be. The struct this replaced was carried all
+      // the way here in Rust and then never read on this side, which is how a
+      // permission model can exist in the types and enforce nothing.
+      capabilities: Array.isArray(opts.capabilities)
+        ? (opts.capabilities as string[])
+        : [],
     };
 
     // Not awaited: the extension's first render must be free to arrive while

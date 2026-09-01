@@ -9,13 +9,15 @@ use crate::state::HostState;
 
 #[tauri::command]
 pub(crate) async fn load_extension(
+    app: tauri::AppHandle,
     state: State<'_, HostState>,
     entrypoint: String,
     extension: String,
     command: String,
 ) -> Result<String, String> {
     let host = host_of(&state).await?;
-    let opts = LoadOptions::view(entrypoint, &extension, &command);
+    let mut opts = LoadOptions::view(entrypoint, &extension, &command);
+    opts.capabilities = crate::exthost::grants::for_extension(&app, &extension);
     host.load(&opts).await.map_err(|e| e.to_string())
 }
 

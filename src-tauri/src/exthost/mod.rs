@@ -27,7 +27,7 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 pub use api::{ApiLayer, UiEvent};
 pub use bridge::{Alert, AppInfo, Bridge, Clip};
-pub use manager::{Capabilities, CommandEnv, CommandMode, LaunchType, LoadOptions, ManagerClient};
+pub use manager::{CommandEnv, CommandMode, LaunchType, LoadOptions, ManagerClient};
 pub use rpc::{Incoming, RpcError, RpcPeer};
 pub use storage::Storage;
 

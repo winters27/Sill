@@ -833,3 +833,21 @@ async fn every_method_passes_through_the_gate() {
         "some methods reached the machine without being checked",
     );
 }
+
+/// Forgetting to fill in what an extension may reach must cost it everything,
+/// not give it everything.
+///
+/// The struct this replaced defaulted to three `false` booleans that nothing
+/// read, so its default was neither safe nor unsafe; it simply did not matter.
+/// This one matters, and the default is the direction where a mistake is an
+/// extension that cannot open a file rather than one that can.
+#[test]
+fn an_extension_is_allowed_nothing_until_somebody_says_otherwise() {
+    let opts = LoadOptions::view("entry.js", "ext", "cmd");
+
+    assert!(
+        opts.capabilities.is_empty(),
+        "a freshly built load carries permissions nobody granted: {:?}",
+        opts.capabilities,
+    );
+}
