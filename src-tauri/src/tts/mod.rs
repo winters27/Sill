@@ -98,7 +98,7 @@ pub async fn aloud(app: &tauri::AppHandle, text: &str) -> Result<(), String> {
         return Err("There is nothing to read".to_string());
     }
 
-    let settings = settings_of(app);
+    let settings = settings_of(app).await;
 
     match settings.engine {
         Engine::System => {
@@ -129,12 +129,21 @@ pub fn stop(app: &tauri::AppHandle) -> Result<(), String> {
     said
 }
 
-fn settings_of(app: &tauri::AppHandle) -> TtsSettings {
+/// What is set up, read the way every other async path reads preferences.
+///
+/// `.lock().await`, not `blocking_lock`. Tokio's blocking lock **panics when
+/// it is called from a runtime thread**, and every caller here is an async
+/// command, so the first version of this took the whole feature down rather
+/// than only the button that happened to find it.
+async fn settings_of(app: &tauri::AppHandle) -> TtsSettings {
     use tauri::Manager;
 
-    app.try_state::<crate::state::PrefsState>()
-        .map(|prefs| prefs.inner.blocking_lock().tts.clone())
-        .unwrap_or_default()
+    let Some(prefs) = app.try_state::<crate::state::PrefsState>() else {
+        return TtsSettings::default();
+    };
+
+    let settings = prefs.inner.lock().await.tts.clone();
+    settings
 }
 
 /// Where a fetched clip is written before it is played.

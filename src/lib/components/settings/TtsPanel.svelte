@@ -62,8 +62,27 @@
     },
   ];
 
-  const chosen = $derived(voices.find((v) => v.id === prefs.tts.piperVoice));
   const anyInstalled = $derived(voices.some((v) => v.installed));
+
+  /**
+   * Whether an engine can actually say something right now.
+   *
+   * Selecting one is how you get to its setup, so an unready engine is still
+   * pickable. What it must not do is look finished: offering Listen on an
+   * engine with nothing behind it produces silence and an error nobody was
+   * looking at, which is exactly how this panel first failed.
+   */
+  function ready(engine: TtsEngine): boolean {
+    if (engine === "system") return true;
+    if (engine === "http") return (prefs.tts.provider.baseUrl ?? "").trim() !== "";
+    return anyInstalled;
+  }
+
+  /** What is missing, said on the card rather than after a failed attempt. */
+  function missing(engine: TtsEngine): string {
+    if (engine === "http") return "Needs an address below";
+    return "Download a voice below";
+  }
 
   /** Short, so trying a voice costs a second rather than a paragraph. */
   const SAMPLE = "This is how Sill will read your text out loud.";
@@ -184,9 +203,17 @@
               {/if}
             </span>
             <span class="blurb">{engine.blurb}</span>
-            <span class="cost">{engine.cost}</span>
+            <span class="cost" class:todo={!ready(engine.id)}>
+              {ready(engine.id) ? engine.cost : missing(engine.id)}
+            </span>
           </span>
         </button>
+
+        {#if prefs.tts.engine === engine.id && ready(engine.id)}
+          <div class="actions">
+            <Button label="Listen" busy={speaking} onclick={sample} />
+          </div>
+        {/if}
       </div>
     {/each}
   </div>
@@ -341,20 +368,9 @@
   </Section>
 {/if}
 
-<Section label="Try it">
-  <Row
-    title="Read a sample"
-    description="One sentence, in whichever voice is selected above."
-  >
-    {#snippet control()}
-      <Button label="Read a sample" busy={speaking} onclick={sample} />
-    {/snippet}
-  </Row>
-
-  {#if said}
-    <p class="said">{said}</p>
-  {/if}
-</Section>
+{#if said}
+  <p class="said">{said}</p>
+{/if}
 
 <style>
   /*
@@ -445,6 +461,13 @@
     color: var(--text-3);
     font-size: var(--text-meta);
     line-height: 1.5;
+  }
+
+  /* Something still to set up. Dimmed rather than alarmed: nothing is wrong,
+     it is just not finished. The same treatment the AI panel gives a provider
+     that has not been set up yet. */
+  .cost.todo {
+    color: var(--accent);
   }
 
   .reading {
