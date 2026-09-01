@@ -5,6 +5,7 @@
     | "ai"
     | "dictation"
     | "tts"
+    | "widgets"
     | "snippets"
     | "emoji"
     | "shortcuts"

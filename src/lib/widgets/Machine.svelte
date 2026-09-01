@@ -18,6 +18,12 @@
     sill: number;
   };
 
+  interface Props {
+    compact?: boolean;
+  }
+
+  let { compact = false }: Props = $props();
+
   let reading = $state<Reading | null>(null);
   let failed = $state("");
 
@@ -117,6 +123,15 @@
   </div>
 {/snippet}
 
+{#if compact}
+  {#if reading}
+    <span class="strip">
+      <span class="dot" style:background={tone(reading.cpu)}></span>
+      {reading.cpu.toFixed(0)}%
+      <span class="apart">{mb(reading.sill)}</span>
+    </span>
+  {/if}
+{:else}
 <div class="readout">
   {#if failed}
     <p class="quiet">{failed}</p>
@@ -173,13 +188,37 @@
     </div>
   {/if}
 </div>
+{/if}
 
 <style>
+  /* The chin: one dot, one number, and what Sill costs. */
+  .strip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--text-1);
+    font-size: var(--text-meta);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-pill);
+  }
+
+  .apart {
+    padding-left: var(--space-1);
+    color: var(--text-3);
+  }
+
   .readout {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-3);
+    gap: var(--space-3);
+    height: 100%;
+    padding: var(--space-4);
   }
 
   .gauges {
@@ -195,16 +234,11 @@
    */
   .tile {
     position: relative;
-    border-radius: var(--radius-lg);
-    background-color: var(--fill-1);
-    background-image: var(--sheen);
-    box-shadow: var(--bevel-tile);
   }
 
   .gauge {
     display: grid;
     place-items: center;
-    padding: var(--space-4) var(--space-3) var(--space-3);
   }
 
   .dial {
@@ -237,7 +271,7 @@
      absolute: a grid cell would push the label down instead. */
   .middle {
     position: absolute;
-    top: var(--space-4);
+    top: 0;
     display: grid;
     place-items: center;
     width: 116px;
@@ -246,7 +280,7 @@
 
   .figure {
     color: var(--text-1);
-    font-size: var(--text-title);
+    font-size: var(--text-display);
     font-weight: var(--weight-medium);
     font-variant-numeric: tabular-nums;
     line-height: 1.1;
@@ -264,7 +298,7 @@
   }
 
   .heaviest {
-    padding: var(--space-3);
+    padding-top: var(--space-1);
   }
 
   .heading,
@@ -332,7 +366,9 @@
     display: flex;
     align-items: baseline;
     gap: var(--space-2);
-    padding: var(--space-3);
+    margin-top: auto;
+    padding-top: var(--space-3);
+    box-shadow: inset 0 1px 0 var(--hairline);
   }
 
   .weight {

@@ -37,6 +37,7 @@ pub const PANELS: &[&str] = &[
     "ai",
     "dictation",
     "tts",
+    "widgets",
     "snippets",
     "emoji",
     "shortcuts",
@@ -175,6 +176,19 @@ pub const SETTINGS: &[Setting] = &[
         "Advanced",
         "What Sill has done",
         "activity history undo revert log recent took back reverse",
+    ),
+    // ------------------------------------------------------------- widgets
+    s(
+        "widgets",
+        "Widgets",
+        "Pin a widget to the launcher",
+        "widget pin chin clock weather glance dashboard",
+    ),
+    s(
+        "widgets",
+        "Widgets",
+        "Where the weather is for",
+        "weather location city place temperature forecast fahrenheit celsius",
     ),
     // ----------------------------------------------------------------- tts
     s(

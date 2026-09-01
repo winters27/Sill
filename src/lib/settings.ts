@@ -221,6 +221,22 @@ export interface TtsSettings {
   piperVoice: string;
 }
 
+/** Where the weather is for. */
+export interface Place {
+  name: string;
+  region: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** The widgets, and which ride along in the launcher's chin. */
+export interface WidgetSettings {
+  pinned: string[];
+  place: Place;
+  fahrenheit: boolean;
+  seconds: boolean;
+}
+
 export interface Preferences {
   general: General;
   snippets: SnippetSettings;
@@ -228,6 +244,7 @@ export interface Preferences {
   ai: AiSettings;
   dictation: DictationSettings;
   tts: TtsSettings;
+  widgets: WidgetSettings;
   clipboard: ClipboardHistorySettings;
   hotkey: Hotkey;
   appearance: Appearance;

@@ -21,6 +21,7 @@
   import TextField from "$lib/components/settings/TextField.svelte";
   import DictationPanel from "$lib/components/settings/DictationPanel.svelte";
   import TtsPanel from "$lib/components/settings/TtsPanel.svelte";
+  import WidgetsPanel from "$lib/components/settings/WidgetsPanel.svelte";
   import ActivityPanel from "$lib/components/settings/ActivityPanel.svelte";
   import ClipboardPanel from "$lib/components/settings/ClipboardPanel.svelte";
   import SnippetsPanel from "$lib/components/settings/SnippetsPanel.svelte";
@@ -161,6 +162,11 @@
       blurb: "Which voice reads text out loud, and where it comes from",
     },
     {
+      id: "widgets",
+      name: "Widgets",
+      blurb: "The clock, the weather, and what rides along in the launcher",
+    },
+    {
       id: "advanced",
       name: "Advanced",
       blurb: "The index, usage history and where Sill keeps its data",
@@ -183,14 +189,6 @@
   /** Themes that paint a chroma wash. A slider for a theme with none is a
       control that visibly does nothing, which is worse than no control. */
   const CHROMATIC: Theme[] = ["oilslick"];
-
-  const THEMES: { id: Theme; name: string; note: string }[] = [
-    { id: "winters-glass", name: "Winters' Glass", note: "Neutral, blue-grey accent" },
-    { id: "oilslick", name: "Oilslick", note: "A faint iridescent wash" },
-    { id: "graphite", name: "Graphite", note: "No hue anywhere" },
-    { id: "ember", name: "Ember", note: "Warm black, amber accent" },
-    { id: "moss", name: "Moss", note: "Cool green" },
-  ];
 
   type SourceKey = Exclude<keyof Preferences["sources"], "excluded" | "hidden">;
 
@@ -693,36 +691,14 @@
             description="A theme moves the canvas and the accent. Everything that carries meaning, the text steps, the hairlines, the fills, is the same in all of them, so nothing gets harder to read whichever you pick."
             bare
           >
-            <!--
-              Each swatch carries its own `data-theme`, so it is rendered by the
-              palette it is offering rather than by a copy of that palette's
-              colours kept here. That is why the theme selectors are written
-              `[data-theme]` rather than `:root[data-theme]`.
-            -->
-            <div class="themes" role="radiogroup" aria-label="Theme">
-              {#each THEMES as t (t.id)}
-                <button
-                  class="theme"
-                  class:selected={p.appearance.theme === t.id}
-                  data-theme={t.id}
-                  role="radio"
-                  aria-checked={p.appearance.theme === t.id}
-                  onclick={() => {
-                    if (!prefs) return;
-                    p.appearance.theme = t.id;
-                    void commit();
-                  }}
-                >
-                  <span class="swatch" aria-hidden="true">
-                    <span class="swatch-row"></span>
-                    <span class="swatch-row lit"></span>
-                    <span class="swatch-row"></span>
-                  </span>
-                  <span class="theme-name">{t.name}</span>
-                  <span class="theme-note">{t.note}</span>
-                </button>
-              {/each}
-            </div>
+            <ThemeCards
+              value={p.appearance.theme}
+              onpick={(id) => {
+                if (!prefs) return;
+                p.appearance.theme = id;
+                void commit();
+              }}
+            />
 
             {#if CHROMATIC.includes(p.appearance.theme)}
               <Row
@@ -862,6 +838,8 @@
             <DictationPanel prefs={p} {commit} />
           {:else if active === "tts"}
             <TtsPanel prefs={p} {commit} />
+          {:else if active === "widgets"}
+            <WidgetsPanel prefs={p} {commit} />
           {:else if active === "snippets"}
             <SnippetsPanel prefs={p} {commit} />
           {:else if active === "shortcuts"}
@@ -1699,87 +1677,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  /* ---- Theme picker -------------------------------------------------- */
-
-  .themes {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-    gap: var(--space-2);
-  }
-
-  /*
-   * Each card is rendered by the theme it offers, so `--core-*` and `--chroma`
-   * inside it are that theme's, not the active one's.
-   */
-  .theme {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--space-2);
-    padding: var(--space-2);
-    border: 0;
-    border-radius: var(--radius-lg);
-    background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
-    color: var(--text-1);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    transition:
-      background-color 0.15s var(--ease),
-      box-shadow 0.15s var(--ease);
-  }
-
-  .theme:hover {
-    background: var(--fill-2);
-  }
-
-  /* Selection is the accent, same as everywhere else. The ring is drawn in
-     the card's OWN accent, so the chosen theme is showing you its highlight
-     colour at the same time as telling you it is chosen. */
-  .theme.selected {
-    background: var(--fill-2);
-    box-shadow: inset 0 0 0 2px var(--core-accent);
-  }
-
-  /* A launcher in miniature: the window surface, three rows, one of them lit
-     by the selection colour. Enough to judge a palette by. */
-  .swatch {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 3px;
-    height: 56px;
-    padding: var(--space-2);
-    border-radius: var(--radius-md);
-    background-color: var(--core-secondary-background);
-    background-image: var(--chroma);
-    box-shadow: var(--bevel-tile);
-    overflow: hidden;
-  }
-
-  .swatch-row {
-    height: 6px;
-    border-radius: 3px;
-    background: var(--fill-3);
-  }
-
-  .swatch-row.lit {
-    background: var(--core-accent);
-    opacity: 0.85;
-  }
-
-  .theme-name {
-    font-size: var(--text-meta);
-    font-weight: var(--weight-medium);
-  }
-
-  .theme-note {
-    margin-top: -4px;
-    font-size: var(--text-label);
-    color: var(--text-3);
   }
 
   .result-panel {

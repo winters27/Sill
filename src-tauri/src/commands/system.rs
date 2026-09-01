@@ -633,3 +633,31 @@ pub(crate) fn forget_machine_reading(app: tauri::AppHandle) {
     use tauri::Manager;
     app.state::<crate::meter::Meter>().forget();
 }
+
+/// Looks a place up by name, for the weather widget's setting.
+#[tauri::command]
+pub(crate) async fn find_place(name: String) -> Result<crate::weather::Place, String> {
+    crate::weather::find(&name).await
+}
+
+/// The current conditions where the user said.
+///
+/// Reads the place out of preferences rather than taking it as an argument, so
+/// the window never has to hold a location and cannot ask about one that was
+/// never set up.
+#[tauri::command]
+pub(crate) async fn weather_now(app: tauri::AppHandle) -> Result<crate::weather::Weather, String> {
+    use tauri::Manager;
+
+    let (place, fahrenheit) = {
+        let prefs = app.state::<crate::state::PrefsState>();
+        let held = prefs.inner.lock().await;
+        (held.widgets.place.clone(), held.widgets.fahrenheit)
+    };
+
+    if place.name.trim().is_empty() {
+        return Err("No place is set. Choose one in Settings under Widgets.".to_string());
+    }
+
+    crate::weather::at(&place, fahrenheit).await
+}

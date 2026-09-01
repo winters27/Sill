@@ -14,13 +14,15 @@
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import ClipboardView from "$lib/components/ClipboardView.svelte";
-  import MachineReadout from "$lib/components/MachineReadout.svelte";
+  import WidgetBoard from "$lib/widgets/Board.svelte";
+  import WidgetChin from "$lib/widgets/Chin.svelte";
   import { collectActions, isRunnable } from "$lib/exthost/actions";
   import { clipboardMerge } from "$lib/clipboard";
   import {
     chordFrom,
     navigationChords,
     setAlias,
+    setPreferences,
     type Move as MoveKey,
   } from "$lib/settings";
   import {
@@ -127,7 +129,7 @@
      * process on the machine is not something to do because somebody typed the
      * letter p.
      */
-    | "processes"
+    | "widgets"
     /**
      * A conversation with a model.
      *
@@ -226,6 +228,27 @@
   let panelFilter = $state("");
   let panelSelected = $state(0);
   let prefs = $state<Preferences | null>(null);
+
+  /**
+   * Pins or unpins a widget, and saves.
+   *
+   * Written here rather than in the board so the chin redraws from the same
+   * `prefs` the board just changed: two copies of what is pinned would
+   * disagree for exactly as long as it takes somebody to notice.
+   */
+  async function setPinned(id: string, pinned: boolean) {
+    if (!prefs) return;
+
+    const was = prefs.widgets.pinned.filter((one) => one !== id);
+    // Appended, so the chin's order is the order things were pinned in.
+    prefs.widgets.pinned = pinned ? [...was, id] : was;
+
+    try {
+      await setPreferences($state.snapshot(prefs));
+    } catch (err) {
+      status = `could not save that: ${err}`;
+    }
+  }
   /**
    * Whether to offer looking it up on the web.
    *
@@ -606,7 +629,7 @@
  */
 const DRAWS_ITS_OWN = new Set([
   "command",
-  "processes",
+  "widgets",
   "clipboard",
   "argument",
   "collection",
@@ -727,7 +750,7 @@ const DRAWS_ITS_OWN = new Set([
 
     // Nothing to search. The readout is a picture of the machine rather than a
     // list of rows, and it keeps itself up to date.
-    if (mode === "processes") return;
+    if (mode === "widgets") return;
 
     if (mode === "appVolume") {
       try {
@@ -902,9 +925,9 @@ const DRAWS_ITS_OWN = new Set([
       return true;
     }
 
-    if (id === "sill:processes") {
+    if (id === "sill:widgets") {
       void recordUse(id, typed);
-      mode = "processes";
+      mode = "widgets";
       selected = 0;
       query = "";
       return true;
@@ -3129,11 +3152,14 @@ const DRAWS_ITS_OWN = new Set([
     by exactly that mode and sharing one would be wrong in one direction or the
     other. Written out, and this comment is why.
   -->
-  {:else if mode === "processes"}
-    <!-- A picture of the machine rather than a list of rows: it has nothing
-         to select and nothing to act on, so it draws itself. -->
+  {:else if mode === "widgets"}
+    <!-- A board rather than a list: nothing here is selected or run, and the
+         only thing you press is the pin that puts one in the chin. -->
     <div class="listing">
-      <MachineReadout />
+      <WidgetBoard
+        prefs={prefs ?? null}
+        onpin={(id, pinned) => void setPinned(id, pinned)}
+      />
     </div>
 
   {:else if mode === "conversations"}
@@ -3255,6 +3281,10 @@ const DRAWS_ITS_OWN = new Set([
       <span class="toast">{status}</span>
     {/if}
     <span class="spacer"></span>
+
+    <!-- Whatever is pinned, sitting in what was empty space between the
+         status and the keys. -->
+    <WidgetChin prefs={prefs ?? null} />
 
     <!-- Escape sits outside the pill and stays plain, so the pill holds
          exactly the two things somebody reaches for. -->

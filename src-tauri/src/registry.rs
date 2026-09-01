@@ -368,11 +368,14 @@ pub fn builtins() -> Vec<CommandRecord> {
             &["snippet", "template", "expand", "abbreviation", "text"],
         ),
         builtin(
-            "processes",
-            "advanced",
-            "Processes",
-            "What is running, and what it is costing",
-            &["process", "memory", "ram", "task", "manager", "quit", "kill", "running"],
+            "widgets",
+            "widgets",
+            "Widgets",
+            "The clock, the weather, and what this machine is doing",
+            &[
+                "widget", "clock", "time", "weather", "temperature", "forecast",
+                "process", "memory", "ram", "cpu", "monitor", "dashboard",
+            ],
         ),
         builtin(
             "undo-last",

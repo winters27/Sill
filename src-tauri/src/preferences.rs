@@ -264,6 +264,41 @@ impl Default for Snippets {
     }
 }
 
+/// The widgets, and which of them ride along in the launcher.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Widgets {
+    /// Ids kept in the launcher's chin, in the order they are shown.
+    ///
+    /// A list rather than a flag per widget, because the order is a choice
+    /// too and a set of booleans cannot hold one.
+    pub pinned: Vec<String>,
+    /// Where the weather is for. Empty until somebody says.
+    pub place: crate::weather::Place,
+    /// Fahrenheit, or Celsius.
+    pub fahrenheit: bool,
+    /// A clock that counts seconds, or one that does not.
+    ///
+    /// Off by default, and that is an efficiency decision rather than a taste
+    /// one: seconds mean a redraw every second for as long as the launcher is
+    /// open, and a clock nobody is watching should cost a redraw a minute.
+    pub seconds: bool,
+}
+
+impl Default for Widgets {
+    fn default() -> Self {
+        Self {
+            // Nothing is pinned until it is asked for. A launcher that arrives
+            // with a strip of other people's choices along the bottom has
+            // decided something on somebody's behalf.
+            pinned: Vec::new(),
+            place: crate::weather::Place::default(),
+            fahrenheit: true,
+            seconds: false,
+        }
+    }
+}
+
 /// Clipboard history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -681,6 +716,9 @@ pub struct Preferences {
     /// How text is read aloud.
     #[serde(default)]
     pub tts: crate::tts::TtsSettings,
+    /// The widgets and what is pinned.
+    #[serde(default)]
+    pub widgets: Widgets,
     pub hotkey: Hotkey,
     pub clipboard: ClipboardHistory,
     pub snippets: Snippets,

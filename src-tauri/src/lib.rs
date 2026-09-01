@@ -48,6 +48,7 @@ pub mod taps;
 pub mod timing;
 pub mod synthetic;
 pub mod text;
+pub mod weather;
 pub mod websearch;
 pub mod windowing;
 
@@ -1254,6 +1255,8 @@ pub fn run() {
             commands::system::speak_sample,
             commands::system::speak_piper_sample,
             commands::system::machine_reading,
+            commands::system::find_place,
+            commands::system::weather_now,
             commands::system::forget_machine_reading,
             commands::system::activity,
             commands::system::undo_activity,
