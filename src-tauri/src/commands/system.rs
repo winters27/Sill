@@ -693,13 +693,40 @@ pub(crate) fn save_workspace(app: tauri::AppHandle, name: String) -> Result<usiz
 
 /// Puts a saved arrangement back.
 #[tauri::command]
-pub(crate) fn restore_workspace(app: tauri::AppHandle, name: String) -> Result<usize, String> {
+pub(crate) async fn restore_workspace(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<usize, String> {
     let file = crate::profiles_store::path(&app);
 
     let profile = crate::profiles_store::load(&file)
         .into_iter()
         .find(|one| one.name.eq_ignore_ascii_case(name.trim()))
         .ok_or_else(|| format!("There is no workspace called \"{name}\"."))?;
+
+    /*
+     * Whatever is closed is opened first, and then waited for.
+     *
+     * Restoring only the windows that happened to be open was most of an
+     * arrangement: an arrangement is what was on the desk, and half of it is
+     * usually shut. A window cannot be placed before it exists, so this starts
+     * what is missing and waits, briefly and with a ceiling, for it to appear.
+     *
+     * Bounded and best effort on purpose. A program that is slow to start, or
+     * that opens no window at all, must cost a couple of seconds and then let
+     * the rest of the arrangement happen, rather than holding it up.
+     */
+    let wanted = crate::profiles::missing(&profile, &crate::windowing::list());
+
+    for path in &wanted {
+        if let Err(err) = tauri_plugin_opener::open_path(path, None::<&str>) {
+            crate::say!("workspace: could not start {path}: {err}");
+        }
+    }
+
+    if !wanted.is_empty() {
+        wait_for_windows(&profile).await;
+    }
 
     let works: Vec<crate::windowing::Rect> = crate::windowing::monitors()
         .into_iter()
@@ -719,6 +746,28 @@ pub(crate) fn restore_workspace(app: tauri::AppHandle, name: String) -> Result<u
     }
 
     Ok(moved)
+}
+
+/// Waits for the programs just started to put windows on screen.
+///
+/// Polled rather than subscribed to: there is no event for "a window somebody
+/// might have meant appeared", and a poll that runs for at most a couple of
+/// seconds after a deliberate action is not the kind of waking this codebase
+/// refuses. It stops the moment every saved program has a window, so the
+/// ceiling is only reached when something genuinely did not start.
+async fn wait_for_windows(profile: &crate::profiles::Profile) {
+    const PATIENCE: std::time::Duration = std::time::Duration::from_secs(4);
+    const EVERY: std::time::Duration = std::time::Duration::from_millis(250);
+
+    let started = std::time::Instant::now();
+
+    while started.elapsed() < PATIENCE {
+        tokio::time::sleep(EVERY).await;
+
+        if crate::profiles::missing(profile, &crate::windowing::list()).is_empty() {
+            return;
+        }
+    }
 }
 
 /// Forgets one.

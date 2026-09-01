@@ -1282,10 +1282,11 @@ impl Action for RestoreWorkspace {
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
         let moved =
-            crate::commands::system::restore_workspace(ctx.app.clone(), object.target.clone())?;
+            crate::commands::system::restore_workspace(ctx.app.clone(), object.target.clone())
+                .await?;
 
         Ok(Outcome::done(match moved {
-            0 => "Nothing from that workspace is open".to_string(),
+            0 => "Nothing from that workspace could be put back".to_string(),
             1 => "Put one window back".to_string(),
             many => format!("Put {many} windows back"),
         }))

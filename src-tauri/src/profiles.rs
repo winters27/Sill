@@ -46,6 +46,14 @@ pub struct Placed {
     /// What makes restoring onto a different display sane.
     pub work: Rect,
     pub maximized: bool,
+    /// The executable behind the window, so a closed one can be opened again.
+    ///
+    /// `#[serde(default)]` because arrangements saved before this existed have
+    /// no path in the file, and they must keep working: an arrangement that
+    /// stopped loading because a field was added would be somebody's saved
+    /// desk lost to an upgrade.
+    #[serde(default)]
+    pub path: String,
 }
 
 /// A named arrangement.
@@ -73,9 +81,47 @@ pub fn capture(name: &str, open: &[Window], works: &[Rect]) -> Profile {
                 rect: window.rect,
                 work: works.get(window.monitor).copied().unwrap_or(window.rect),
                 maximized: window.maximized,
+                path: window.app_path.clone(),
             })
             .collect(),
     }
+}
+
+/// What has to be started before anything can be put back.
+///
+/// One path per program, not one per saved window. Somebody with four browser
+/// windows saved and the browser closed wants the browser started, not started
+/// four times: a second launch of most programs opens another window, and a
+/// second launch of the rest does nothing at all. Starting one and placing
+/// whatever appears is the behaviour that is right in both cases.
+///
+/// A program with any window already open is left alone entirely, because the
+/// person is using it and reopening it would put a new window in front of what
+/// they were doing.
+///
+/// Pure, so the awkward cases are testable without a desktop.
+pub fn missing(profile: &Profile, open: &[Window]) -> Vec<String> {
+    let mut wanted: Vec<String> = Vec::new();
+
+    for placed in &profile.windows {
+        if placed.path.is_empty() {
+            continue;
+        }
+
+        let running = open
+            .iter()
+            .any(|window| window.app.eq_ignore_ascii_case(&placed.app));
+
+        let already = wanted
+            .iter()
+            .any(|path| path.eq_ignore_ascii_case(&placed.path));
+
+        if !running && !already {
+            wanted.push(placed.path.clone());
+        }
+    }
+
+    wanted
 }
 
 /// Which open window each saved one means, and where to put it.
@@ -161,6 +207,7 @@ mod tests {
             rect: Rect { x, y: 0, width: 800, height: 600 },
             work: work(),
             maximized: false,
+            path: String::new(),
         }
     }
 
@@ -234,6 +281,7 @@ mod tests {
                 rect: Rect { x: 960, y: 0, width: 960, height: 1040 },
                 work: work(),
                 maximized: false,
+                path: String::new(),
             }],
         };
 
@@ -259,5 +307,70 @@ mod tests {
 
         assert_eq!(moves[0].1.x, 640);
         assert_eq!(moves[0].1.width, 800);
+    }
+
+    mod what_has_to_be_started {
+            use super::*;
+
+        fn with_path(app: &str, path: &str) -> Placed {
+            Placed {
+                path: path.to_string(),
+                ..saved(app, "a window", 0)
+            }
+        }
+
+        fn profile_of(windows: Vec<Placed>) -> Profile {
+            Profile {
+                name: "Desk".to_string(),
+                windows,
+            }
+        }
+
+        /// A program somebody is already using is left alone.
+        ///
+        /// Reopening it would put a new window in front of what they were doing,
+        /// which is the opposite of restoring an arrangement.
+        #[test]
+        fn a_program_that_is_running_is_not_started_again() {
+            let profile = profile_of(vec![with_path("Code", "C:/code.exe")]);
+            let open = vec![window(1, "Code", "main.rs")];
+
+            assert!(missing(&profile, &open).is_empty());
+        }
+
+        #[test]
+        fn a_program_that_is_closed_is_started() {
+            let profile = profile_of(vec![with_path("Code", "C:/code.exe")]);
+
+            assert_eq!(missing(&profile, &[]), vec!["C:/code.exe".to_string()]);
+        }
+
+        /// Four saved browser windows and no browser means start the browser once.
+        ///
+        /// A second launch of most programs opens another window and of the rest
+        /// does nothing, so starting one and placing whatever appears is the
+        /// behaviour that is right either way. Starting four is right in neither.
+        #[test]
+        fn several_windows_of_one_closed_program_start_it_once() {
+            let profile = profile_of(vec![
+                with_path("Zen", "C:/zen.exe"),
+                with_path("Zen", "C:/zen.exe"),
+                with_path("Zen", "C:/zen.exe"),
+            ]);
+
+            assert_eq!(missing(&profile, &[]), vec!["C:/zen.exe".to_string()]);
+        }
+
+        /// An arrangement saved before paths were recorded still restores.
+        ///
+        /// Its windows have no path, so nothing can be started for them, and the
+        /// ones that happen to be open are still put back. Treating a blank path
+        /// as a program to run would try to start the empty string.
+        #[test]
+        fn an_arrangement_saved_without_paths_starts_nothing() {
+            let profile = profile_of(vec![saved("Code", "main.rs", 0)]);
+
+            assert!(missing(&profile, &[]).is_empty());
+        }
     }
 }
