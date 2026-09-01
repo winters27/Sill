@@ -32,6 +32,8 @@ pub mod ocr;
 pub mod object;
 pub mod preferences;
 pub mod previews;
+pub mod profiles;
+pub mod profiles_store;
 pub mod processes;
 pub mod quicklinks;
 pub mod radios;
@@ -40,6 +42,7 @@ pub mod secrets;
 pub mod selection;
 pub mod settings_catalog;
 pub mod settings_index;
+pub mod sleep;
 pub mod snippets;
 pub mod tts;
 pub mod state;
@@ -90,6 +93,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
         )
     };
     let index_paths = index_paths(&handle);
+    let workspaces = profiles_store::path(&handle);
 
     tauri::async_runtime::spawn(async move {
         // Last run's index, shown immediately. Discovery costs a PowerShell
@@ -109,7 +113,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
         // The scan then rebuilds the index from scratch and replaces it
         // wholesale. Merging into the cache instead would mean an uninstalled
         // application never disappeared.
-        let fresh = tokio::task::spawn_blocking(move || scan_everything(&sources, &index_paths))
+        let fresh = tokio::task::spawn_blocking(move || scan_everything(&sources, &index_paths, &workspaces))
             .await
             .unwrap_or_default();
 
@@ -170,6 +174,7 @@ pub(crate) fn tap_binding(
 pub(crate) fn scan_everything(
     sources: &preferences::Sources,
     index_paths: &[PathBuf],
+    workspaces: &PathBuf,
 ) -> Vec<registry::CommandRecord> {
     // Sill's own commands are never optional; they are how the launcher is
     // configured and repaired.
@@ -185,6 +190,10 @@ pub(crate) fn scan_everything(
             }
         }
     }
+
+    // Saved window arrangements, which are rows like anything else so they can
+    // be searched, aliased and given a key of their own.
+    out.extend(profiles_store::records(workspaces));
 
     // Settings pages are not files, so no scan finds them.
     if sources.windows_settings {
@@ -606,6 +615,7 @@ fn show_tray_menu(app: &AppHandle, cursor: tauri::PhysicalPosition<f64>) {
     }
 
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    crate::sleep::wake(&window);
     let _ = window.show();
     let _ = window.set_focus();
 
@@ -678,9 +688,10 @@ pub(crate) fn reload_index(app: &AppHandle) {
         .sources
         .clone();
     let index_paths = index_paths(app);
+    let workspaces = profiles_store::path(app);
 
     tauri::async_runtime::spawn(async move {
-        let fresh = tokio::task::spawn_blocking(move || scan_everything(&sources, &index_paths))
+        let fresh = tokio::task::spawn_blocking(move || scan_everything(&sources, &index_paths, &workspaces))
             .await
             .unwrap_or_default();
 
@@ -783,8 +794,13 @@ fn watch_focus(app: &AppHandle, dismiss_on_blur: bool) {
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(false) = event {
             // Focus is already gone, so the previous window must not be
-            // restored on top of whatever the user just clicked.
+            // restored on top of whatever the user just clicked. Everything
+            // else `summon::hide` does still applies, and letting the renderer
+            // sleep is part of it: dismissing by clicking away is the ordinary
+            // way this window goes, so a dismissal that skipped it would mean
+            // the launcher almost never slept.
             let _ = handle.hide();
+            crate::sleep::sleep_soon(&handle);
         }
     });
 }
@@ -830,6 +846,7 @@ pub(crate) fn autohide_tray_menu(app: &AppHandle) {
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(false) = event {
             let _ = handle.hide();
+            crate::sleep::sleep_soon(&handle);
         }
     });
 }
@@ -1255,6 +1272,9 @@ pub fn run() {
             commands::system::remove_piper_voice,
             commands::system::speak_sample,
             commands::system::speak_piper_sample,
+            commands::system::save_workspace,
+            commands::system::restore_workspace,
+            commands::system::forget_workspace,
             commands::system::machine_reading,
             commands::system::find_place,
             commands::system::weather_now,

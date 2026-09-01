@@ -74,6 +74,23 @@
   let viewport = $state<HTMLDivElement | null>(null);
 
   /**
+   * True while a selection change is the pointer's own doing.
+   *
+   * The keep-in-view effect below must not answer the mouse. A row sitting
+   * half over the bottom edge is selected the moment the cursor touches it,
+   * scrolling it fully on pulls the next row up under the cursor, that one is
+   * selected in turn, and the list crawls downward on its own for as long as
+   * the mouse stays near the edge. Chromium also replays a mousemove after a
+   * wheel scroll to refresh what is hovered, so the list fought the wheel the
+   * same way. The keys still scroll: they move the selection without moving
+   * the pointer, so this stays down.
+   *
+   * Plain rather than `$state`, because the effect reads it without wanting
+   * to run again when it changes.
+   */
+  let byPointer = false;
+
+  /**
    * Every line is drawn.
    *
    * There used to be a window over them, with spacers standing in for what was
@@ -108,6 +125,13 @@
     // Read so the row's position is recomputed when the list changes under it.
     lines.length;
     if (!viewport) return;
+
+    // What the mouse selected is already under the mouse. "Keeping" it on
+    // screen would move the list instead.
+    if (byPointer) {
+      byPointer = false;
+      return;
+    }
 
     const row = viewport.querySelector<HTMLElement>(`[data-row="${target}"]`);
     if (!row) return;
@@ -426,7 +450,14 @@
         role="option"
         aria-selected={index === selected}
         tabindex="-1"
-        onmousemove={() => onselect(index)}
+        onmousemove={() => {
+          // Only a change raises the flag: on the row already selected the
+          // parent's state does not move, the effect never runs, and a raised
+          // flag would be left waiting to swallow the next arrow key.
+          if (index === selected) return;
+          byPointer = true;
+          onselect(index);
+        }}
         onclick={() => onrun(index)}
         onkeydown={(e) => e.key === "Enter" && onrun(index)}
       >

@@ -66,6 +66,17 @@
   let filterOpen = $state(false);
   let listEl = $state<HTMLDivElement | null>(null);
 
+  /**
+   * True while a selection change is the pointer's own doing.
+   *
+   * Same rule as RootList: the keep-in-view effect answers the keys, never
+   * the mouse. A row half over the bottom edge selected by hover would be
+   * scrolled fully on, sliding the next row under the cursor and walking the
+   * list downward on its own. Plain rather than `$state`, because the effect
+   * reads it without wanting to run again when it changes.
+   */
+  let byPointer = false;
+
   const current = $derived(entries[selected] ?? null);
 
   /**
@@ -156,6 +167,11 @@
 
   $effect(() => {
     selected;
+    // What the mouse selected is already under the mouse.
+    if (byPointer) {
+      byPointer = false;
+      return;
+    }
     listEl
       ?.querySelector<HTMLElement>(".row.selected")
       ?.scrollIntoView({ block: "nearest" });
@@ -498,7 +514,12 @@
           aria-selected={row.index === selected}
           tabindex="-1"
           class:picked={picked.includes(row.entry.id)}
-          onmousemove={() => onselect(row.index)}
+          onmousemove={() => {
+            // Only a change raises the flag; see RootList for why.
+            if (row.index === selected) return;
+            byPointer = true;
+            onselect(row.index);
+          }}
           onclick={(e) => {
             // Ctrl-click picks rather than pastes, which is the one gesture
             // everybody already has for "and this one too".

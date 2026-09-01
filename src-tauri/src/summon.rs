@@ -237,6 +237,11 @@ pub fn show(window: &WebviewWindow) {
 
     remember_foreground();
 
+    // Before the window goes up, so the renderer is awake by the time there is
+    // something to paint. Ordinarily there is nothing to wake and this costs a
+    // disarmed timer.
+    crate::sleep::wake(window);
+
     let _ = window.show();
     let _ = window.set_focus();
 
@@ -309,6 +314,10 @@ pub fn show_with(app: &tauri::AppHandle, command: Option<String>) {
 pub fn hide(window: &WebviewWindow) {
     let _ = window.hide();
     restore_foreground();
+
+    // Arms a timer rather than suspending now: coming straight back is the
+    // ordinary way this is used, and that path must stay free.
+    crate::sleep::sleep_soon(window);
 }
 
 /// Summons or dismisses, depending on what the window is doing now.

@@ -63,6 +63,8 @@ pub fn builtins() -> ActionRegistry {
         Box::new(SessionQuieter),
         Box::new(SessionHalf),
         Box::new(SessionFull),
+        Box::new(RestoreWorkspace),
+        Box::new(ForgetWorkspace),
         Box::new(ReadAloud),
         Box::new(StopReading),
     ];
@@ -1239,6 +1241,74 @@ impl Action for Transform {
         // the original came from. Copying is what happens when there is
         // nowhere better to put it.
         Ok(copy_with_undo(ctx, &changed, self.title)?.producing(changed))
+    }
+}
+
+/// Puts a saved arrangement back. P2.12.
+struct RestoreWorkspace;
+
+#[async_trait]
+impl Action for RestoreWorkspace {
+    fn id(&self) -> &'static str {
+        "sill.workspace.restore"
+    }
+
+    fn title(&self) -> &'static str {
+        "Restore"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Workspace
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let moved =
+            crate::commands::system::restore_workspace(ctx.app.clone(), object.target.clone())?;
+
+        Ok(Outcome::done(match moved {
+            0 => "Nothing from that workspace is open".to_string(),
+            1 => "Put one window back".to_string(),
+            many => format!("Put {many} windows back"),
+        }))
+    }
+}
+
+/// Forgets a saved arrangement. P2.12.
+struct ForgetWorkspace;
+
+#[async_trait]
+impl Action for ForgetWorkspace {
+    fn id(&self) -> &'static str {
+        "sill.workspace.forget"
+    }
+
+    fn title(&self) -> &'static str {
+        "Forget"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Workspace
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::FileWrite]
+    }
+
+    fn is_primary(&self, _kind: ObjectKind) -> bool {
+        false
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        crate::commands::system::forget_workspace(ctx.app.clone(), object.target.clone())?;
+        Ok(Outcome::done(format!("Forgot {}", object.title)))
     }
 }
 

@@ -659,3 +659,81 @@ pub(crate) async fn weather_now(app: tauri::AppHandle) -> Result<crate::weather:
 
     crate::weather::at(&place, fahrenheit).await
 }
+
+/// Saves the current arrangement of windows under a name.
+#[tauri::command]
+pub(crate) fn save_workspace(app: tauri::AppHandle, name: String) -> Result<usize, String> {
+    let name = name.trim();
+
+    if name.is_empty() {
+        return Err("Give the workspace a name.".to_string());
+    }
+
+    let works: Vec<crate::windowing::Rect> = crate::windowing::monitors()
+        .into_iter()
+        .map(|monitor| monitor.work)
+        .collect();
+
+    let profile = crate::profiles::capture(name, &crate::windowing::list(), &works);
+    let count = profile.windows.len();
+
+    if count == 0 {
+        return Err("Nothing is open to arrange.".to_string());
+    }
+
+    let file = crate::profiles_store::path(&app);
+    let all = crate::profiles_store::put(crate::profiles_store::load(&file), profile);
+
+    crate::profiles_store::save(&file, &all)
+        .map_err(|err| format!("could not save the workspace: {err}"))?;
+
+    crate::reload_index(&app);
+    Ok(count)
+}
+
+/// Puts a saved arrangement back.
+#[tauri::command]
+pub(crate) fn restore_workspace(app: tauri::AppHandle, name: String) -> Result<usize, String> {
+    let file = crate::profiles_store::path(&app);
+
+    let profile = crate::profiles_store::load(&file)
+        .into_iter()
+        .find(|one| one.name.eq_ignore_ascii_case(name.trim()))
+        .ok_or_else(|| format!("There is no workspace called \"{name}\"."))?;
+
+    let works: Vec<crate::windowing::Rect> = crate::windowing::monitors()
+        .into_iter()
+        .map(|monitor| monitor.work)
+        .collect();
+
+    let moves = crate::profiles::plan(&profile, &crate::windowing::list(), &works);
+    let mut moved = 0;
+
+    for (id, rect, _) in &moves {
+        // A window that has closed since the profile was made is skipped
+        // rather than failing the rest: putting four of five windows back is
+        // most of what was asked for.
+        if crate::windowing::place(*id, *rect).is_ok() {
+            moved += 1;
+        }
+    }
+
+    Ok(moved)
+}
+
+/// Forgets one.
+#[tauri::command]
+pub(crate) fn forget_workspace(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let file = crate::profiles_store::path(&app);
+
+    let left: Vec<crate::profiles::Profile> = crate::profiles_store::load(&file)
+        .into_iter()
+        .filter(|one| !one.name.eq_ignore_ascii_case(name.trim()))
+        .collect();
+
+    crate::profiles_store::save(&file, &left)
+        .map_err(|err| format!("could not save the workspaces: {err}"))?;
+
+    crate::reload_index(&app);
+    Ok(())
+}

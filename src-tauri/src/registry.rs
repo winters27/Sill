@@ -368,6 +368,13 @@ pub fn builtins() -> Vec<CommandRecord> {
             &["snippet", "template", "expand", "abbreviation", "text"],
         ),
         builtin(
+            "save-workspace",
+            "advanced",
+            "Save Workspace",
+            "Remember where every window is, to put them back later",
+            &["workspace", "layout", "arrange", "save", "windows", "session"],
+        ),
+        builtin(
             "widgets",
             "widgets",
             "Widgets",

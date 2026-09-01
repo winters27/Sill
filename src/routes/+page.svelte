@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { beginCapture, captureScreen, lastImage, openMarkup } from "$lib/capture";
   import { openQuicklink } from "$lib/quicklinks";
+  import { saveWorkspace } from "$lib/workspaces";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import ListView from "$lib/components/ListView.svelte";
   import GridView from "$lib/components/GridView.svelte";
@@ -130,6 +131,14 @@
      * letter p.
      */
     | "widgets"
+    /**
+     * Naming the arrangement of windows being saved.
+     *
+     * The launcher's own field rather than a dialog, the way an alias and a
+     * collection are named: a window to dismiss for one short string is a
+     * window nobody wanted.
+     */
+    | "namingWorkspace"
     /**
      * A conversation with a model.
      *
@@ -767,7 +776,7 @@ const DRAWS_ITS_OWN = new Set([
 
     // Nothing to search. The readout is a picture of the machine rather than a
     // list of rows, and it keeps itself up to date.
-    if (mode === "widgets") return;
+    if (mode === "widgets" || mode === "namingWorkspace") return;
 
     if (mode === "appVolume") {
       try {
@@ -942,6 +951,18 @@ const DRAWS_ITS_OWN = new Set([
       return true;
     }
 
+    // Handled here rather than by the action, because running a builtin
+    // dismisses the launcher: the mode was switching and the window was
+    // hiding a moment later, so the name went nowhere. Naming happens in the
+    // field, and the field has to still be on screen.
+    if (id === "sill:save-workspace") {
+      void recordUse(id, typed);
+      mode = "namingWorkspace";
+      selected = 0;
+      query = "";
+      return true;
+    }
+
     if (id === "sill:widgets") {
       void recordUse(id, typed);
       mode = "widgets";
@@ -1091,6 +1112,24 @@ const DRAWS_ITS_OWN = new Set([
       }
 
       naming = null;
+      mode = "root";
+      query = "";
+      selected = 0;
+      await refreshRoot();
+      return;
+    }
+
+    if (mode === "namingWorkspace") {
+      const name = query.trim();
+      if (!name) return;
+
+      try {
+        const saved = await saveWorkspace(name);
+        status = `Saved ${name}, ${saved} ${saved === 1 ? "window" : "windows"}`;
+      } catch (err) {
+        status = `${err}`;
+      }
+
       mode = "root";
       query = "";
       selected = 0;
@@ -2733,6 +2772,7 @@ const DRAWS_ITS_OWN = new Set([
         if (mode === "root") void refreshRoot();
       });
 
+
       // Summoning must hand the keyboard straight to the search field.
       // Focusing only on mount is not enough: that runs once, while the
       // window is still hidden, and focus does not survive hide and show.
@@ -2944,6 +2984,8 @@ const DRAWS_ITS_OWN = new Set([
       <span class="crumb">App Volume</span>
     {:else if mode === "widgets"}
       <span class="crumb">Widgets</span>
+    {:else if mode === "namingWorkspace"}
+      <span class="crumb">Save workspace</span>
     {:else if mode === "destination" && moving}
       <span class="crumb">Move {moving.title}</span>
     {:else if mode === "collection"}
@@ -2988,6 +3030,8 @@ const DRAWS_ITS_OWN = new Set([
           ? "Filter by program name…"
         : mode === "widgets"
           ? "Esc to go back…"
+        : mode === "namingWorkspace"
+          ? "Name this arrangement, then Enter…"
         : mode === "destination"
           ? "Search for a folder, then Enter…"
           : mode === "alias"

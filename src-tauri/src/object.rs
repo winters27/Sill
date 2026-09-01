@@ -84,6 +84,8 @@ pub enum ObjectKind {
     /// for and never in the index, because what is running changes constantly
     /// and a process id stops meaning anything the moment it exits.
     Process,
+    /// A saved window arrangement.
+    Workspace,
 }
 
 impl ObjectKind {
@@ -118,6 +120,7 @@ impl ObjectKind {
         Self::Url,
         Self::AudioSession,
         Self::Process,
+        Self::Workspace,
     ];
 
     /// The kind behind an index entry's `mode`.
@@ -157,6 +160,7 @@ impl ObjectKind {
             "window" => Self::Window,
             "audio-session" => Self::AudioSession,
             "process" => Self::Process,
+            "workspace" => Self::Workspace,
             _ => return None,
         })
     }
@@ -405,12 +409,13 @@ mod tests {
                 ObjectKind::Url => 16,
                 ObjectKind::AudioSession => 17,
                 ObjectKind::Process => 18,
+                ObjectKind::Workspace => 19,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            19,
+            20,
             "a kind was added or removed without `ALL` being told",
         );
 

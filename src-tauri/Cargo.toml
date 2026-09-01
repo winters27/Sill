@@ -38,6 +38,15 @@ windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_UI_Window
 # `::windows_core::` paths. Pinned to the same version `windows` itself uses,
 # or the two would be different types with the same names.
 windows-core = "0.62.2"
+# Reaching the webview's own suspend, which Tauri does not wrap. Pinned to the
+# version Tauri itself depends on, so the controller it hands back and the
+# interface we cast it to are the same type.
+webview2-com = "0.38.2"
+# The `Interface` trait that performs that cast has to come from the
+# windows-core those interfaces were generated against, which is a version
+# behind the one the rest of this crate uses. Two versions of one crate is the
+# price of reaching past the wrapper; renamed so which is which stays obvious.
+webview2-core = { package = "windows-core", version = "0.61.2" }
 window-vibrancy = "0.8.0"
 tauri-plugin-clipboard-manager = "2.3.2"
 png = "0.18.1"

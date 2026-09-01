@@ -25,6 +25,7 @@
   import Button from "$lib/components/settings/Button.svelte";
   import Section from "$lib/components/settings/Section.svelte";
   import Row from "$lib/components/settings/Row.svelte";
+  import ThemeCards from "$lib/components/settings/ThemeCards.svelte";
   import { popover, swap } from "$lib/motion";
 
   const WALLS = {
@@ -115,6 +116,11 @@
         <code>{token}</code>
       </div>
     {/each}
+  </div>
+
+  <h2>Theme cards (the appearance picker; picking one restyles this page)</h2>
+  <div class="themecards">
+    <ThemeCards value={theme} onpick={(t) => (theme = t)} />
   </div>
 
   <h2>Text</h2>
@@ -427,6 +433,12 @@
     flex-wrap: wrap;
     gap: var(--space-2);
     margin-bottom: var(--space-2);
+  }
+
+  /* About what the settings content pane gives the picker at the default
+     window size, so the cards are judged at the width they really get. */
+  .themecards {
+    max-width: 880px;
   }
 
   .swatch { width: 128px; }

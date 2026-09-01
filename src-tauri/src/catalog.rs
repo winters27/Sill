@@ -42,6 +42,13 @@ use crate::files::FileHit;
 /// `AppData` is here because it is the largest single source of churn in a
 /// Windows home folder and none of it is authored by hand. Anything genuinely
 /// wanted from it can be added as a root of its own.
+///
+/// `.claude` is the same shape as `AppData` but lives one level up, so it was
+/// missed. A coding assistant appends to its transcript every few seconds, and
+/// each append looked like a file worth re-indexing: measured on this machine,
+/// the whole 49,402-entry walk was running every 45 seconds while the launcher
+/// sat hidden, against every 30 to 80 minutes with the assistant closed. None
+/// of it is a file anybody searches for by name.
 pub const NOISE: &[&str] = &[
     "node_modules",
     "target",
@@ -56,6 +63,7 @@ pub const NOISE: &[&str] = &[
     ".gradle",
     ".m2",
     "AppData",
+    ".claude",
     ".venv",
     "venv",
     "vendor",
@@ -928,6 +936,20 @@ mod tests {
         for wanted in ["node_modules", "target", ".git", "AppData", ".cargo"] {
             assert!(NOISE.contains(&wanted), "{wanted} is not skipped");
         }
+    }
+
+    /// Regression: a tool that appends to a file every few seconds inside the
+    /// home folder rebuilt the whole index every 45 seconds, because nothing
+    /// below `AppData` was the only churn the list knew about.
+    #[test]
+    fn a_tool_that_writes_constantly_does_not_rebuild_the_index() {
+        let home = PathBuf::from(r"C:\Users\Someone");
+        let roots = vec![home.clone()];
+
+        assert!(
+            !worth_indexing(&home.join(".claude/projects/session.jsonl"), &roots),
+            "an assistant transcript rebuilds the index on every append"
+        );
     }
 
     #[test]
