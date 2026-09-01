@@ -33,6 +33,7 @@ pub fn builtins() -> ActionRegistry {
         Box::new(PasteSnippet),
         Box::new(PasteEmoji),
         Box::new(OpenQuicklink),
+        Box::new(RunScript),
         Box::new(ExtractText),
         Box::new(MarkUp),
         Box::new(SearchWeb),
@@ -2215,5 +2216,258 @@ impl Action for LookUpFile {
         crate::dismiss_main(&ctx.app);
 
         Ok(Outcome::done(format!("Looking up {name} by its checksum")))
+    }
+}
+
+// ------------------------------------------------------------------ scripts
+
+/// Runs a script command and hands back what it printed.
+///
+/// Declaring [`Capability::ShellExecution`] is what makes this safe to have at
+/// all. Somebody pressing Enter on a script they put in their own folder is
+/// the consent for that one run, and the capability is what stops the two
+/// callers who are not that person: the model has to raise an approval card
+/// before `run_action` will touch it, and an extension cannot reach the action
+/// registry at all.
+struct RunScript;
+
+#[async_trait]
+impl Action for RunScript {
+    fn id(&self) -> &'static str {
+        "sill.script.run"
+    }
+
+    fn title(&self) -> &'static str {
+        "Run"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        matches!(kind, ObjectKind::Script)
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        crate::shell::NEEDS
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let path = std::path::PathBuf::from(&object.target);
+
+        // Read again rather than trusting what the index holds. A script's
+        // header decides how its output is shown, and the file may have been
+        // edited since the scan; running it under last week's mode would print
+        // something somebody had since marked silent.
+        let script = crate::scripts::read(&path)
+            .ok_or_else(|| format!("{} is no longer a script command", object.title))?;
+
+        let seconds = ctx
+            .app
+            .try_state::<crate::state::PrefsState>()
+            .map(|prefs| prefs.inner.clone());
+
+        let timeout = match seconds {
+            Some(prefs) => std::time::Duration::from_secs(
+                prefs.lock().await.scripts.timeout_seconds.max(1),
+            ),
+            None => crate::shell::DEFAULT_TIMEOUT,
+        };
+
+        /*
+         * Not yet run with arguments, and it says so rather than running.
+         *
+         * A script that declares a required argument is written expecting one,
+         * and running it with none does whatever the script does when its
+         * first parameter is empty. That is somebody else's code deciding what
+         * an empty string means, which for a script called "Delete branch" is
+         * not a guess worth making on their behalf.
+         *
+         * Arguments reach a quicklink through the launcher's argument mode and
+         * `launch_command` rather than through the action registry, so wiring
+         * this is that path, not another one here.
+         */
+        if script.needs_argument {
+            return Err(format!(
+                "{} asks for something to be typed first, which Sill cannot pass to a script yet",
+                script.title,
+            ));
+        }
+
+        let ran = crate::shell::run(
+            script.shell,
+            &object.target,
+            &[],
+            path.parent(),
+            timeout,
+            &crate::shell::Stop::never(),
+        )
+        .await?;
+
+        Ok(outcome_of(&script, &ran))
+    }
+}
+
+/// Turns a finished run into what the window should say and show.
+///
+/// Split out so the wording is testable without running anything: every branch
+/// here is a sentence somebody reads at the moment they are least inclined to
+/// investigate, and getting "it worked" onto a failure is worse than saying
+/// nothing.
+fn outcome_of(script: &crate::scripts::Script, ran: &crate::shell::Ran) -> Outcome {
+    use crate::scripts::Mode;
+    use crate::shell::Ended;
+
+    let title = &script.title;
+
+    let said = match ran.ended {
+        Ended::TimedOut => format!("{title} was stopped after running too long"),
+        Ended::Cancelled => format!("{title} was stopped"),
+        Ended::Finished if ran.code != Some(0) => {
+            // The last line of stderr is nearly always the actual complaint,
+            // and the rest is a stack. Somebody wants the complaint.
+            let complaint = ran
+                .stderr
+                .lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("no output");
+
+            format!("{title} failed: {complaint}")
+        }
+        Ended::Finished => match script.mode {
+            // The last line is the result for these two, which is the
+            // convention the format was built around: a script prints working
+            // and then the answer.
+            Mode::Compact | Mode::Inline => ran
+                .stdout
+                .lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("Done")
+                .to_string(),
+            Mode::Silent => format!("Ran {title}"),
+            Mode::FullOutput => format!("Ran {title}"),
+        },
+    };
+
+    let outcome = Outcome::done(said);
+
+    // Only `fullOutput` asks for the whole thing, and only a run that produced
+    // something has one to give. A silent script that printed is still silent.
+    match (script.mode, ran.stdout.is_empty()) {
+        (Mode::FullOutput, false) => outcome.producing(ran.stdout.clone()),
+        _ => outcome,
+    }
+}
+
+#[cfg(test)]
+mod running_a_script {
+    use super::*;
+    use crate::scripts::{Mode, Script};
+    use crate::shell::{Ended, Ran, Shell};
+
+    fn script(mode: Mode) -> Script {
+        Script {
+            path: std::path::PathBuf::from("deploy.ps1"),
+            title: "Deploy".to_string(),
+            mode,
+            shell: Shell::PowerShell,
+            package: None,
+            icon: None,
+            description: None,
+            author: None,
+            arguments: Vec::new(),
+            needs_argument: false,
+        }
+    }
+
+    fn ran(code: Option<i32>, ended: Ended, stdout: &str, stderr: &str) -> Ran {
+        Ran {
+            stdout: stdout.to_string(),
+            stderr: stderr.to_string(),
+            code,
+            truncated: false,
+            ended,
+            took_ms: 1,
+        }
+    }
+
+    /// A script that failed must never read as one that worked.
+    ///
+    /// The mode says how to show output, not whether to admit a failure, and
+    /// `silent` in particular means "say nothing when it works". Somebody
+    /// whose backup script exits 1 every night and reports "Ran Deploy" finds
+    /// out when they need the backup.
+    #[test]
+    fn a_failure_is_reported_whatever_the_mode_says() {
+        for mode in [Mode::Silent, Mode::Compact, Mode::Inline, Mode::FullOutput] {
+            let outcome = outcome_of(
+                &script(mode),
+                &ran(Some(1), Ended::Finished, "working", "could not reach the server"),
+            );
+
+            assert!(
+                outcome.message.contains("failed"),
+                "{mode:?} reported a failure as {:?}",
+                outcome.message,
+            );
+            assert!(
+                outcome.message.contains("could not reach the server"),
+                "{mode:?} dropped the complaint: {:?}",
+                outcome.message,
+            );
+        }
+    }
+
+    /// The last line is the answer, which is the convention the format is
+    /// built around: a script prints its working and then its result.
+    #[test]
+    fn compact_says_the_last_line() {
+        let outcome = outcome_of(
+            &script(Mode::Compact),
+            &ran(Some(0), Ended::Finished, "step one\nstep two\n42\n", ""),
+        );
+
+        assert_eq!(outcome.message, "42");
+    }
+
+    /// Only `fullOutput` hands the whole thing back.
+    ///
+    /// A silent script that printed is still silent, and passing its output on
+    /// would put on screen exactly what its author marked as not for showing.
+    #[test]
+    fn only_full_output_carries_the_text() {
+        let stdout = "line one\nline two\n";
+
+        assert_eq!(
+            outcome_of(&script(Mode::FullOutput), &ran(Some(0), Ended::Finished, stdout, "")).text,
+            Some(stdout.to_string()),
+        );
+
+        for quiet in [Mode::Silent, Mode::Compact, Mode::Inline] {
+            assert_eq!(
+                outcome_of(&script(quiet), &ran(Some(0), Ended::Finished, stdout, "")).text,
+                None,
+                "{quiet:?} passed output on",
+            );
+        }
+    }
+
+    #[test]
+    fn being_stopped_is_not_a_failure_and_not_a_success() {
+        for (ended, expected) in [
+            (Ended::TimedOut, "running too long"),
+            (Ended::Cancelled, "was stopped"),
+        ] {
+            let outcome = outcome_of(&script(Mode::FullOutput), &ran(None, ended, "", ""));
+
+            assert!(
+                outcome.message.contains(expected),
+                "{ended:?} said {:?}",
+                outcome.message,
+            );
+        }
     }
 }

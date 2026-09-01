@@ -43,6 +43,12 @@ pub enum ObjectKind {
     SystemControl,
     Snippet,
     Quicklink,
+    /// A file on disk with a header saying it is a command.
+    ///
+    /// Not a [`ObjectKind::File`]: a script command is a thing somebody wrote
+    /// to be run, and the actions that apply to it are running it, not
+    /// revealing it in Explorer.
+    Script,
     /// A calculator result, which exists only for as long as it is on screen.
     Answer,
     /// A row of clipboard history.
@@ -121,6 +127,7 @@ impl ObjectKind {
         Self::AudioSession,
         Self::Process,
         Self::Workspace,
+        Self::Script,
     ];
 
     /// The kind behind an index entry's `mode`.
@@ -148,6 +155,9 @@ impl ObjectKind {
             // The argument version is the same kind of thing; whether it stops
             // to ask is a property of the link, not of what it is.
             "quicklink" | "quicklink-arg" => Self::Quicklink,
+            // Same for a script: whether it stops to ask for an argument is a
+            // property of the script's own header, not of what it is.
+            "script" | "script-arg" => Self::Script,
             "answer" => Self::Answer,
             "url" => Self::Url,
             "websearch" => Self::Search,
@@ -266,6 +276,8 @@ mod tests {
             "snippet",
             "quicklink",
             "quicklink-arg",
+            "script",
+            "script-arg",
             "answer",
         ] {
             assert!(
@@ -410,12 +422,13 @@ mod tests {
                 ObjectKind::AudioSession => 17,
                 ObjectKind::Process => 18,
                 ObjectKind::Workspace => 19,
+                ObjectKind::Script => 20,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            20,
+            21,
             "a kind was added or removed without `ALL` being told",
         );
 

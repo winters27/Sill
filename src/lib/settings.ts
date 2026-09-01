@@ -258,6 +258,13 @@ export interface WidgetSettings {
   seconds: boolean;
 }
 
+/** Script commands: files somebody keeps that the launcher can run. */
+export interface Scripts {
+  enabled: boolean;
+  folders: string[];
+  timeoutSeconds: number;
+}
+
 export interface Preferences {
   general: General;
   snippets: SnippetSettings;
@@ -275,6 +282,7 @@ export interface Preferences {
   store: StoreSettings;
   webSearch: WebSearch;
   screenshot: Screenshot;
+  scripts: Scripts;
   bindings: Binding[];
   aliases: Alias[];
   navigation: NavigationSettings;

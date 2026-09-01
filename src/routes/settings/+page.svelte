@@ -147,6 +147,11 @@
       blurb: "Raycast extensions installed into Sill's host",
     },
     {
+      id: "scripts",
+      name: "Scripts",
+      blurb: "Folders of scripts the launcher can find and run",
+    },
+    {
       id: "ai",
       name: "AI Chat",
       blurb: "Who answers when you press Tab in the launcher",
@@ -1271,6 +1276,52 @@
               {/snippet}
             </Row>
           </Section>
+          {:else if active === "scripts"}
+          <Section
+            label="Script commands"
+            description="A script with a Raycast header at the top becomes a command in the launcher. Sill reads the header it already has and writes nothing back, so a script keeps working everywhere else."
+          >
+            <Row
+              title="Run script commands"
+              description="Off scans nothing at all, rather than scanning and hiding the results. The folders below are kept either way."
+            >
+              <Toggle
+                checked={p.scripts.enabled}
+                label="Run script commands"
+                onchange={(on) => {
+                  p.scripts.enabled = on;
+                  commit();
+                }}
+              />
+            </Row>
+
+            <Row
+              title="Stop a script after"
+              description="A script that waits on something that never arrives would otherwise wait for as long as Sill runs. Whatever it printed before it was stopped is still shown."
+            >
+              <input
+                class="number"
+                type="number"
+                min="1"
+                max="3600"
+                aria-label="Stop a script after, in seconds"
+                value={p.scripts.timeoutSeconds}
+                onchange={(event) => {
+                  const seconds = Number((event.currentTarget as HTMLInputElement).value);
+                  p.scripts.timeoutSeconds = Math.min(3600, Math.max(1, seconds || 60));
+                  commit();
+                }}
+              />
+            </Row>
+          </Section>
+
+          <Section
+            label="Folders"
+            description="Scanned one level deep, so a folder with a project in it does not become a scan of the whole project. Nothing is scanned until a folder is named here: a launcher that went looking for runnable things on its own would find commands nobody put there to be found."
+          >
+            <PathList bind:paths={p.scripts.folders} onchange={commit} />
+          </Section>
+
           {:else if active === "extensions"}
           <Section
             label="Runs extensions in"

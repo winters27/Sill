@@ -628,6 +628,35 @@ pub enum AfterCapture {
     Edit,
 }
 
+/// Script commands: files somebody keeps that the launcher can run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Scripts {
+    /// Whether the folders below are scanned at all.
+    ///
+    /// Off until somebody names a folder, which is the same thing, but saying
+    /// it separately means turning it off does not lose the folders.
+    pub enabled: bool,
+    /// The folders scanned for script commands, one level deep.
+    ///
+    /// Empty by default and never guessed at. A launcher that decided on its
+    /// own to scan Documents for anything runnable would be finding commands
+    /// nobody put there to be found.
+    pub folders: Vec<String>,
+    /// How long a script runs before it is stopped, in seconds.
+    pub timeout_seconds: u64,
+}
+
+impl Default for Scripts {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            folders: Vec::new(),
+            timeout_seconds: 60,
+        }
+    }
+}
+
 /// Taking pictures of the screen.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -779,6 +808,7 @@ pub struct Preferences {
     pub store: Store,
     pub web_search: WebSearch,
     pub screenshot: Screenshot,
+    pub scripts: Scripts,
     /// Global shortcuts that run an action without showing the launcher.
     #[serde(default)]
     pub bindings: Vec<crate::bindings::Binding>,

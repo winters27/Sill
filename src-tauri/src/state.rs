@@ -314,6 +314,8 @@ pub(crate) struct Registry {
     pub(crate) snippets: Vec<CommandRecord>,
     /// Quicklinks, shaped as commands. Held for the same reason as snippets.
     pub(crate) quicklinks: Vec<CommandRecord>,
+    /// Script commands found in the folders somebody chose to scan.
+    pub(crate) scripts: Vec<CommandRecord>,
     pub(crate) frecency: Frecency,
     pub(crate) frecency_path: PathBuf,
     /// The names the user has chosen for things.
@@ -336,11 +338,29 @@ impl Registry {
     /// Nothing about either side said they had to agree. Now the only way to
     /// add a list is here, where both of them read it.
     pub(crate) fn everything(&self) -> impl Iterator<Item = &crate::registry::CommandRecord> {
-        self.commands
-            .iter()
-            .chain(self.snippets.iter())
-            .chain(self.quicklinks.iter())
-            .chain(self.own_settings.iter())
+        self.lists().into_iter().flatten()
+    }
+
+    /// Every list of records, named once.
+    ///
+    /// **Destructured on purpose, with no `..`.** A list added to the struct
+    /// stops this compiling until it is named here, which is the only version
+    /// of this guarantee that does not rely on somebody remembering. The test
+    /// below used to be that guarantee and could not be: it counted the same
+    /// lists it was checking, so a sixth added to neither side passed happily.
+    fn lists(&self) -> Vec<&Vec<crate::registry::CommandRecord>> {
+        let Registry {
+            commands,
+            own_settings,
+            snippets,
+            quicklinks,
+            scripts,
+            frecency: _,
+            frecency_path: _,
+            aliases: _,
+        } = self;
+
+        vec![commands, own_settings, snippets, quicklinks, scripts]
     }
 }
 
@@ -387,6 +407,7 @@ mod tests {
             own_settings: vec![row("sill-setting:general:One", "sill-setting")],
             snippets: vec![row("snippet:one", "snippet")],
             quicklinks: vec![row("quicklink:one", "quicklink")],
+            scripts: vec![row("script:one", "script")],
             frecency: Default::default(),
             frecency_path: PathBuf::new(),
             aliases: Default::default(),
@@ -408,6 +429,7 @@ mod tests {
             "sill-setting:general:One",
             "snippet:one",
             "quicklink:one",
+            "script:one",
         ] {
             assert!(
                 registry.everything().any(|row| row.id == id),
@@ -416,16 +438,18 @@ mod tests {
         }
     }
 
-    /// A fifth list added to the struct and not to `everything` would be the
-    /// same bug again, and this is what says so.
+    /// Every record in the fixture comes back out.
+    ///
+    /// This used to be the guard against a list being added to the struct and
+    /// not to `everything`, and it could not be: it added up the same lists it
+    /// was checking, so one added to neither side balanced. `lists` is
+    /// destructured without a `..` instead, so that is now the compiler's
+    /// problem. What is left here is worth keeping anyway: it catches a list
+    /// named in `lists` and then filtered, skipped or deduplicated away.
     #[test]
     fn nothing_is_left_out_of_everything() {
         let registry = registry();
-
-        let counted = registry.commands.len()
-            + registry.own_settings.len()
-            + registry.snippets.len()
-            + registry.quicklinks.len();
+        let counted: usize = registry.lists().iter().map(|list| list.len()).sum();
 
         assert_eq!(
             registry.everything().count(),

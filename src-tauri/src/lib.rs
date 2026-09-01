@@ -40,6 +40,7 @@ pub mod radios;
 pub mod registry;
 pub mod secrets;
 pub mod job;
+pub mod scripts;
 pub mod shell;
 pub mod selection;
 pub mod settings_catalog;
@@ -680,6 +681,49 @@ pub(crate) fn reload_quicklinks(app: &AppHandle) {
     }
 }
 
+/// Rescans the script folders into the search index.
+///
+/// Scanning is a directory listing and a few kilobytes read per candidate, so
+/// it happens when something changes rather than per keystroke, exactly as
+/// snippets and quicklinks do. Off means no folders are touched at all, not
+/// that the results are hidden afterwards.
+pub(crate) fn reload_scripts(app: &AppHandle) {
+    let (Some(prefs), Some(state)) = (app.try_state::<PrefsState>(), app.try_state::<RegistryState>())
+    else {
+        return;
+    };
+
+    let (prefs, registry) = (prefs.inner.clone(), state.inner.clone());
+
+    tauri::async_runtime::spawn(async move {
+        let (enabled, folders) = {
+            let held = prefs.lock().await;
+            (held.scripts.enabled, held.scripts.folders.clone())
+        };
+
+        let records: Vec<CommandRecord> = if enabled {
+            let folders: Vec<std::path::PathBuf> =
+                folders.iter().map(std::path::PathBuf::from).collect();
+
+            // On a blocking thread: this is a directory listing plus the first
+            // few kilobytes of every candidate, and doing that on the runtime
+            // would stall every other task for the length of a cold folder.
+            tokio::task::spawn_blocking(move || {
+                scripts::scan(&folders)
+                    .iter()
+                    .map(registry::script_record)
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        registry.lock().await.scripts = records;
+    });
+}
+
 /// Rebuilds the index in the background.
 pub(crate) fn reload_index(app: &AppHandle) {
     let handle = app.clone();
@@ -968,6 +1012,7 @@ pub fn run() {
                 own_settings: settings_index::records(),
                 snippets: Vec::new(),
                 quicklinks: Vec::new(),
+                scripts: Vec::new(),
                 frecency: Frecency::default(),
                 frecency_path: PathBuf::new(),
                 aliases: registry::Aliases::default(),
@@ -1178,6 +1223,7 @@ pub fn run() {
             // fills in each of them.
             reload_snippets(&handle);
             reload_quicklinks(&handle);
+            reload_scripts(&handle);
 
             /*
              * Cold start, measured at the last thing setup does.

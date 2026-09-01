@@ -48,6 +48,7 @@ pub const PANELS: &[&str] = &[
     "browsers",
     "websearch",
     "screenshot",
+    "scripts",
     "extensions",
     "advanced",
     "about",
@@ -60,6 +61,25 @@ pub const PANELS: &[&str] = &[
 /// dictation and not a peer of it. The same reasoning would fold any future
 /// sub-view into its parent rather than adding a row to the sidebar.
 pub const SETTINGS: &[Setting] = &[
+    // ------------------------------------------------------------- scripts
+    s(
+        "scripts",
+        "Scripts",
+        "Run script commands",
+        "script shell powershell bash python command run",
+    ),
+    s(
+        "scripts",
+        "Scripts",
+        "Folders scanned for scripts",
+        "script folder directory scan where",
+    ),
+    s(
+        "scripts",
+        "Scripts",
+        "Stop a script after",
+        "script timeout stop long running seconds",
+    ),
     // ------------------------------------------------------------- general
     s(
         "general",

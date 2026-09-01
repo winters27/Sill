@@ -18,6 +18,7 @@
     | "websearch"
     | "screenshot"
     | "extensions"
+    | "scripts"
     | "advanced"
     | "about";
 </script>
@@ -70,6 +71,7 @@
     "sources",
     "files",
     "extensions",
+    "scripts",
     "ai",
     "dictation",
     "advanced",
@@ -182,6 +184,11 @@
     <path d="M4 6.5v11A1.5 1.5 0 0 0 5.5 19h9.2" />
     <circle cx="17.5" cy="16.5" r="3.5" />
     <path d="m21 20-1.1-1.1" />
+  {:else if name === "scripts"}
+    <!-- A prompt: the chevron and the line you type on. The one mark that
+         reads as "a command runs here" without being taught. -->
+    <path d="M5 8l4 4-4 4" />
+    <path d="M13 16h6" />
   {:else if name === "screenshot"}
     <!-- A frame with a corner marked, which is what picking an area looks
          like before anything has been picked. -->

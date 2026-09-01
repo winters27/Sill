@@ -961,6 +961,51 @@ pub fn audio_session_record(session: &crate::app_volume::Session) -> CommandReco
     }
 }
 
+/// A script command, shaped as a command like everything else.
+///
+/// The package name is the subtitle when there is one, because a folder of
+/// scripts from one place is how people organise them and it is what tells two
+/// scripts called "Deploy" apart.
+pub fn script_record(script: &crate::scripts::Script) -> CommandRecord {
+    let id = script.path.to_string_lossy().to_string();
+
+    CommandRecord {
+        id: format!("script:{id}"),
+        extension: "scripts".to_string(),
+        extension_title: "Script".to_string(),
+        command: id.clone(),
+        title: script.title.clone(),
+        subtitle: script
+            .package
+            .clone()
+            .or_else(|| script.description.clone())
+            .unwrap_or_else(|| {
+                script
+                    .path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            }),
+        description: script.description.clone().unwrap_or_default(),
+        // Same shape as a quicklink: whether it stops to ask rides in the mode,
+        // because the launcher has to know that before it opens anything.
+        mode: if script.needs_argument {
+            "script-arg".to_string()
+        } else {
+            "script".to_string()
+        },
+        entrypoint: id,
+        keywords: Vec::new(),
+        // One or the other, never both. A row that carries an icon and a
+        // panel leaves the launcher guessing which mark to wear, and a script
+        // that named an emoji in its header meant that one.
+        icon: script.icon.clone(),
+        toggle: None,
+        panel: script.icon.is_none().then(|| "scripts".to_string()),
+        preferences: serde_json::Value::Null,
+    }
+}
+
 /// A quicklink, shaped as a command so the ranker treats it like anything
 /// else.
 ///
