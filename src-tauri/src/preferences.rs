@@ -926,7 +926,22 @@ impl Preferences {
             return Self::default();
         };
 
-        let parsed = match serde_json::from_str::<serde_json::Value>(&text) {
+        /*
+         * A byte order mark is not part of the JSON.
+         *
+         * Windows puts one on the front of any file written as "UTF-8" by
+         * Notepad, by PowerShell's `Set-Content -Encoding UTF8`, and by a good
+         * deal else. `serde_json` refuses the whole document over it, which
+         * here means every setting and every sealed key is moved aside and the
+         * defaults take over: a file somebody hand-edited to change one line
+         * costs them all of the others.
+         *
+         * Skipped rather than rejected. It carries no information: the
+         * encoding is already known, and nothing else in Sill writes one.
+         */
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+
+        let parsed = match serde_json::from_str::<serde_json::Value>(text) {
             Ok(mut value) => {
                 unseal_secrets(&mut value);
                 serde_json::from_value(value).map_err(|err| err.to_string())
@@ -1278,6 +1293,35 @@ mod sealed_paths {
                 parsed.unwrap_err()
             );
         }
+    }
+
+    /// A file Notepad saved still reads.
+    ///
+    /// Windows writes a byte order mark on the front of anything it calls
+    /// UTF-8: Notepad does, and so does PowerShell's `Set-Content -Encoding
+    /// UTF8`. `serde_json` refuses the document over those three bytes, and
+    /// refusing it here means the whole file is moved aside and the defaults
+    /// take over, so somebody who hand-edited one line loses every other
+    /// setting and every sealed key. This happened while testing something
+    /// else, to a real preferences file.
+    #[test]
+    fn preferences_saved_with_a_byte_order_mark_still_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("preferences.json");
+
+        let json = r#"{ "hotkey": { "summon": "Ctrl+Alt+F9" } }"#;
+        std::fs::write(&path, format!("\u{feff}{json}")).expect("write");
+
+        let prefs = Preferences::load(&path);
+
+        assert_eq!(
+            prefs.hotkey.summon, "Ctrl+Alt+F9",
+            "a byte order mark threw away the whole file"
+        );
+        assert!(
+            !path.with_extension("json.broken").exists(),
+            "the file was moved aside over three bytes of encoding"
+        );
     }
 
     /// One unreadable list entry costs that entry, not the file.

@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  // Aliased: this page has a `tick` of its own, which measures a running
+  // command rather than waiting for the DOM.
+  import { onMount, tick as rendered } from "svelte";
   import { beginCapture, captureScreen, lastImage, openMarkup } from "$lib/capture";
   import { openQuicklink } from "$lib/quicklinks";
   import { saveWorkspace } from "$lib/workspaces";
@@ -12,6 +14,7 @@
   import Markdown from "$lib/components/Markdown.svelte";
   import Steps from "$lib/components/Steps.svelte";
   import { LISTBOX, isBrowsing, isListMode, merged, optionId } from "$lib/results";
+  import { isTyping, typedInto } from "$lib/typing";
   import {
     behaviourOf,
     drawsItsOwn,
@@ -2863,6 +2866,58 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
+    /*
+     * A character typed while the field does not have focus still lands in it.
+     *
+     * The launcher is summoned by a key and typed into at once, so there is
+     * always a moment where the window is up and the field is not focused yet.
+     * Focus is taken as early as it can be now, but "as early as it can be" is
+     * not "before the first keystroke": the summon key is released and the
+     * next character is on its way. Anything landing on the document was
+     * discarded, which gives back a wrong query rather than a slow one.
+     *
+     * Handled here rather than only at the moment of summon, because the same
+     * gap exists every time focus is briefly elsewhere: after a picture is
+     * dismissed, after a row is clicked, after a view of its own goes away.
+     */
+    if (isTyping(event) && !panelOpen && searchInput && document.activeElement !== searchInput) {
+      const busy = document.activeElement;
+      // An extension's own form field, or the settings search: those have
+      // focus because somebody put it there, and stealing their keystrokes
+      // would be a far worse bug than the one this fixes.
+      const elsewhere =
+        busy instanceof HTMLElement &&
+        (busy.isContentEditable ||
+          busy instanceof HTMLInputElement ||
+          busy instanceof HTMLTextAreaElement);
+
+      if (!elsewhere) {
+        event.preventDefault();
+
+        const typed = typedInto(
+          {
+            value: query,
+            // The summon selects the old query so the next character replaces
+            // it, and that selection is on the field whether or not it has
+            // focus. Reading it here is what makes this agree with what
+            // typing a moment later would have done.
+            start: searchInput.selectionStart ?? query.length,
+            end: searchInput.selectionEnd ?? query.length,
+          },
+          event.key,
+        );
+
+        query = typed.value;
+        searchInput.focus();
+
+        // After Svelte has written the value, or the caret would be placed in
+        // the text that was there before this character.
+        const caret = typed.caret;
+        void rendered().then(() => searchInput?.setSelectionRange(caret, caret));
+        return;
+      }
+    }
+
     // Ctrl+, opens settings, which is the convention in essentially every app.
     if (event.key === "," && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
@@ -3190,6 +3245,16 @@
     let wentWrong: UnlistenFn | undefined;
     let disposed = false;
 
+    /*
+     * Before anything is awaited.
+     *
+     * Everything below this line waits on Rust: the listeners, the
+     * preferences, the default browser, the first root list. The field was
+     * focused after all of it, so a summon in the first moments of the
+     * application had nowhere to type. It costs nothing to do it first.
+     */
+    searchInput?.focus();
+
     (async () => {
       unlisten = await listen<UiEvent>("sill://ui", ({ payload }) => {
         // A late message from a command the user already left would otherwise
@@ -3290,6 +3355,17 @@
       });
 
       shown = await listen("sill://shown", () => {
+        /*
+         * Focus first, before anything that can wait.
+         *
+         * The window is already up by the time Rust says so, and the field is
+         * already in the page, so there is nothing to wait for. It used to be
+         * taken a frame later, and every character typed in that frame landed
+         * on the document and was lost. Waiting is still done below, for the
+         * selection and the measurement, but not for this.
+         */
+        searchInput?.focus();
+
         // Measuring starts when the window appears and stops when Rust says
         // nobody is looking, so a launcher nobody can see costs nothing.
         startTicking();
