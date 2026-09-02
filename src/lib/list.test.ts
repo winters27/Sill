@@ -50,6 +50,35 @@ describe("what a row is filed under", () => {
    */
   test("settings say which program they belong to", () => {
     expect(groupOf(command("setting"))).toBe("Windows Settings");
+  });
+
+  /**
+   * The four the old default was silently wrong about.
+   *
+   * `groupOf` was a switch returning "Applications" for anything it did not
+   * name, so a saved window arrangement, a running process, a captured piece
+   * of text and a clipboard entry all read as applications. None of them is
+   * one. This is the recurring shape: a match over modes with a default makes
+   * forgetting silent, and the thing forgotten looks like something else
+   * rather than looking wrong.
+   */
+  test("a row that is not an application does not say it is", () => {
+    expect(groupOf(command("workspace"))).toBe("Arrangements");
+    expect(groupOf(command("process"))).toBe("Running");
+    expect(groupOf(command("text"))).toBe("Text");
+    expect(groupOf(command("clipboard"))).toBe("Clipboard History");
+  });
+
+  /**
+   * A mode nobody named falls back to where the row came from.
+   *
+   * True, where "Applications" was not: an extension command that named a
+   * mode Sill does not know is still that extension's.
+   */
+  test("an unknown mode is filed under whatever produced it", () => {
+    const odd = { ...command("something-nobody-named"), extensionTitle: "Raycast Thing" };
+
+    expect(groupOf(odd)).toBe("Raycast Thing");
     expect(groupOf(command("sill-setting"))).toBe("Sill Settings");
     expect(groupOf(command("system"))).toBe("System Controls");
   });

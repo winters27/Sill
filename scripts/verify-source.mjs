@@ -333,6 +333,58 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Every kind of row Rust can produce has a heading of its own.
+ *
+ * `groupOf` was a switch whose default returned "Applications", so a mode
+ * nobody had thought about read as an application. Four did: a saved window
+ * arrangement, a running process, a captured piece of text and a clipboard
+ * entry. None of them is an application and every one of them said it was.
+ *
+ * This is the shape that has cost this project a session more than once. A
+ * match over modes with a default makes forgetting silent, and the thing
+ * forgotten looks like something else rather than looking wrong. So the
+ * default is gone, and a mode with no heading fails here instead.
+ */
+{
+  const LIST = "src/lib/list.ts";
+  const headings = readFileSync(LIST, "utf8");
+  const table = headings.slice(
+    headings.indexOf("const HEADINGS"),
+    headings.indexOf("export function groupOf"),
+  );
+
+  const named = new Set(
+    Array.from(table.matchAll(/^\s*"?([a-z][a-z-]*)"?\s*:/gm), (m) => m[1]),
+  );
+
+  /*
+   * Modes whose heading is deliberately the row's own extension title.
+   *
+   * A snippet is filed under the collection it is in, and Rust puts that in
+   * the same field an extension command puts its extension: both answer the
+   * question "which heading does this row go under". Naming it here says the
+   * fallback was chosen rather than forgotten, which is the whole difference
+   * this check exists to make.
+   */
+  const byExtension = new Set(["snippet"]);
+
+  for (const file of sources("src-tauri/src")) {
+    const rust = readFileSync(file, "utf8");
+
+    for (const found of rust.matchAll(/\bmode:\s*"([a-z][a-z-]*)"/g)) {
+      if (named.has(found[1]) || byExtension.has(found[1])) continue;
+
+      fail(
+        file,
+        lineOf(rust, found.index),
+        `mode "${found[1]}" has no heading in ${LIST}, so its rows are filed ` +
+          "under whichever extension produced them rather than under a name",
+      );
+    }
+  }
+}
+
+/*
  * The launcher window does not decide what Ctrl+K means.
  *
  * `navigation.rs` resolves every movement chord, presets and overrides

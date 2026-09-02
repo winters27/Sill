@@ -13,84 +13,96 @@ export type Line =
   | { kind: "header"; label: string }
   | { kind: "row"; command: RankedCommand; index: number };
 
-/** What each kind of row is filed under. */
+/**
+ * What each kind of row is filed under.
+ *
+ * ## Why this is a table and not a switch
+ *
+ * It was a `switch` whose default returned "Applications", so a mode nobody
+ * had thought about read as an application. Four did: a saved window
+ * arrangement, a running process, a captured piece of text and a clipboard
+ * entry were all filed under Applications, which is not true of any of them.
+ *
+ * That shape has cost this project a session more than once. A match over
+ * modes with a default is a bug waiting: it makes forgetting silent, and the
+ * thing forgotten looks like something else rather than looking wrong.
+ *
+ * So it is a table with no default, and `verify:source` refuses any `mode:`
+ * that Rust can produce and this does not name. Adding a source without a
+ * heading now fails the build instead of quietly reading "Applications".
+ */
+const HEADINGS: Record<string, string> = {
+  // Applications, and the one mode the old default was actually right about.
+  app: "Applications",
+
+  answer: "Answer",
+  /*
+   * Where you were, rather than what exists.
+   *
+   * The only heading in the list that is about the past. It holds one row, it
+   * sorts above everything because of the floor in the ranker, and it
+   * disappears on its own within ten minutes.
+   */
+  conversation: "Continue",
+  /* Every conversation, in the list that lets you reopen or forget one. */
+  "past-conversation": "Conversations",
+  "sill-setting": "Sill Settings",
+  view: "Commands",
+  "no-view": "Commands",
+  builtin: "Sill",
+  // Windows' own switches, under a heading that says so. Filed with Sill's
+  // commands they read as Sill features, which is the opposite of true.
+  system: "System Controls",
+  /*
+   * Named for whose settings they are.
+   *
+   * "Settings" beside "Sill Settings" reads as though one of them is the
+   * general case and the other a special one, when they are simply two
+   * different programs' settings. Saying which is which costs a word.
+   */
+  setting: "Windows Settings",
+  file: "Files",
+  "file-setup": "Files",
+  window: "Open Windows",
+  /*
+   * Saved and visited under one heading.
+   *
+   * They are the same kind of answer to the same question, and splitting them
+   * puts two headings on a handful of rows. Which one a row is still shows: a
+   * saved page ranks above a visited one of equal strength, so the ordering
+   * carries it without a label.
+   */
+  url: "Browser",
+  websearch: "Web Search",
+  emoji: "Emoji",
+  "audio-session": "Playing Now",
+  destination: "Folders",
+  // What they are rather than who uses them: plenty of these ship with
+  // Windows and have nothing to do with development.
+  exe: "Command Line",
+
+  // The four the default was silently wrong about.
+  //
+  // A saved arrangement of windows, a running process, a piece of text a
+  // shortcut captured, and an entry from the clipboard history. None of them
+  // is an application and every one of them used to say it was.
+  workspace: "Arrangements",
+  process: "Running",
+  text: "Text",
+  clipboard: "Clipboard History",
+};
+
+/**
+ * A row's heading, or the extension it came from.
+ *
+ * The fallback is the extension's own title rather than a guess at a category,
+ * because an extension command that named no mode Sill knows is still that
+ * extension's, and saying so is true where "Applications" was not. A snippet
+ * takes this path on purpose: Rust puts its collection in that field, because
+ * both answer the same question.
+ */
 export function groupOf(command: RankedCommand): string {
-  switch (command.mode) {
-    case "answer":
-      return "Answer";
-    /*
-     * Where you were, rather than what exists.
-     *
-     * The only heading in the list that is about the past. It holds one row,
-     * it sorts above everything because of the floor in the ranker, and it
-     * disappears on its own within ten minutes.
-     */
-    case "conversation":
-      return "Continue";
-    /* Every conversation, in the list that lets you reopen or forget one. */
-    case "past-conversation":
-      return "Conversations";
-    /*
-     * The collection it is in, or "Snippets" when it is in none.
-     *
-     * Rust puts the collection here, in the same field an extension command
-     * puts the extension it belongs to, because both answer the same question:
-     * which heading does this row go under. A field of its own would be a
-     * second thing the window has to be taught to read, for a string that is
-     * only ever a heading.
-     */
-    case "snippet":
-      return command.extensionTitle;
-    case "sill-setting":
-      return "Sill Settings";
-    case "view":
-    case "no-view":
-      return "Commands";
-    case "builtin":
-      return "Sill";
-    // Windows' own switches, under a heading that says so. Filed with Sill's
-    // commands they read as Sill features, which is the opposite of true.
-    case "system":
-      return "System Controls";
-    /*
-     * Named for whose settings they are.
-     *
-     * "Settings" beside "Sill Settings" reads as though one of them is the
-     * general case and the other a special one, when they are simply two
-     * different programs' settings. Saying which is which costs a word.
-     */
-    case "setting":
-      return "Windows Settings";
-    case "file":
-    case "file-setup":
-      return "Files";
-    case "window":
-      return "Open Windows";
-    /*
-     * Saved and visited under one heading.
-     *
-     * They are the same kind of answer to the same question, and splitting
-     * them puts two headings on a handful of rows. Which one a row is still
-     * shows: a saved page ranks above a visited one of equal strength, so the
-     * ordering carries it without a label.
-     */
-    case "url":
-      return "Browser";
-    case "websearch":
-      return "Web Search";
-    case "emoji":
-      return "Emoji";
-    case "audio-session":
-      return "Playing Now";
-    case "destination":
-      return "Folders";
-    // What they are rather than who uses them: plenty of these ship with
-    // Windows and have nothing to do with development.
-    case "exe":
-      return "Command Line";
-    default:
-      return "Applications";
-  }
+  return HEADINGS[command.mode] ?? command.extensionTitle;
 }
 
 /**
