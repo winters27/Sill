@@ -29,7 +29,7 @@
   import { storeClose } from "$lib/store";
   import WidgetBoard from "$lib/widgets/Board.svelte";
   import WidgetChin from "$lib/widgets/Chin.svelte";
-  import { collectActions, isRunnable } from "$lib/exthost/actions";
+  import { actionFor, collectActions, isRunnable } from "$lib/exthost/actions";
   import { clipboardMerge } from "$lib/clipboard";
   import {
     chordFrom,
@@ -3158,6 +3158,35 @@
         void openSelected();
       }
       return;
+    }
+
+    /*
+     * A shortcut an action advertises actually runs it.
+     *
+     * The panel draws these down its right hand side, so "Paste as Plain Text
+     * Ctrl Shift Enter" has been on screen as a promise nothing kept. The same
+     * was true of every shortcut an extension declares: rendered, never read.
+     *
+     * Asked before the chord map and after the mode's own keys, so navigation
+     * still owns the arrows and Escape, and asked only for a keystroke that is
+     * not text, so a bare letter an action happened to claim can never swallow
+     * typing. `shownActions` rather than `actions`, because that is the list
+     * `runAction` counts through.
+     */
+    const selecting =
+      !!searchInput && searchInput.selectionStart !== searchInput.selectionEnd;
+
+    // With text selected in the field, the field owns the keyboard. Ctrl+C is
+    // the case that matters: the clipboard's Copy action claims it, and
+    // somebody who has just selected part of what they typed means the
+    // selection rather than the row.
+    if (!isTyping(event) && !selecting) {
+      const at = actionFor(event, shownActions);
+      if (at >= 0) {
+        event.preventDefault();
+        void runAction(at);
+        return;
+      }
     }
 
     // One lookup rather than a chain of comparisons. Which chord means what is

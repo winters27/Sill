@@ -177,3 +177,81 @@ export function shortcutKeys(shortcut: Shortcut): string[] {
   keys.push(special[shortcut.key] ?? shortcut.key.toUpperCase());
   return keys;
 }
+
+/**
+ * Whether this keystroke is the shortcut an action advertises.
+ *
+ * ## Why this exists
+ *
+ * Shortcuts were drawn and never read. An extension declares them, Sill's own
+ * clipboard actions declare them, and the panel renders them down the right
+ * hand side, so "Paste as Plain Text  Ctrl Shift Enter" sat on screen as a
+ * promise nothing kept. Every one of those chords did nothing.
+ *
+ * ## Why the modifiers have to match exactly
+ *
+ * A held modifier nobody asked for is a different chord. Without that,
+ * Ctrl+Shift+Enter would also fire an action bound to Ctrl+Enter, and the one
+ * somebody meant would depend on which appeared first in the list.
+ */
+export function matchesShortcut(event: Keystroke, shortcut: Shortcut): boolean {
+  const wanted = new Set(shortcut.modifiers.map((m) => m.toLowerCase()));
+
+  // Raycast writes for macOS. `cmd` is Ctrl here, and the panel already draws
+  // it that way, so the two have to agree about it.
+  const control = wanted.has("cmd") || wanted.has("ctrl") || wanted.has("cmdorctrl");
+  const alt = wanted.has("opt") || wanted.has("alt");
+  const shift = wanted.has("shift");
+
+  if (control !== (event.ctrlKey || event.metaKey)) return false;
+  if (alt !== event.altKey) return false;
+  if (shift !== event.shiftKey) return false;
+
+  return sameKey(event.key, shortcut.key);
+}
+
+/**
+ * Whether a browser key name and a Raycast key name are the same key.
+ *
+ * The two vocabularies overlap without matching: the DOM says `ArrowUp`,
+ * `Enter` and `Escape`, Raycast says `arrowUp`, `return` and `escape`, and a
+ * letter is `k` on one side and `K` on the other depending on Shift.
+ */
+function sameKey(pressed: string, wanted: string): boolean {
+  const named: Record<string, string> = {
+    return: "enter",
+    esc: "escape",
+    space: " ",
+    // Raycast writes `delete` for the forward delete key, which the DOM also
+    // calls Delete, and `backspace` for the other one.
+    del: "delete",
+  };
+
+  const want = named[wanted.toLowerCase()] ?? wanted.toLowerCase();
+  return pressed.toLowerCase() === want;
+}
+
+/**
+ * The action this keystroke runs, if any.
+ *
+ * Returns an index into the list it was given, because that is what running an
+ * action takes: the panel and the window both count through the same array.
+ *
+ * The first match wins and the order is the panel's own. Two actions
+ * advertising the same chord is a bug in whatever declared them, and running
+ * the one drawn first is at least the one a person would guess.
+ */
+export function actionFor(event: Keystroke, actions: ActionEntry[]): number {
+  return actions.findIndex(
+    (action) => action.shortcut && matchesShortcut(event, action.shortcut),
+  );
+}
+
+/** Enough of a keyboard event to match a shortcut against. */
+export interface Keystroke {
+  key: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+}
