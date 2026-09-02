@@ -97,8 +97,59 @@ pub async fn find(name: &str) -> Result<Place, String> {
     })
 }
 
-/// The current conditions at a place.
+/// How long a reading is worth reusing.
+///
+/// The service updates roughly this often and the sky does not change faster
+/// than that in any way a launcher should care about. The widget's own timer
+/// is the same length, so in the ordinary case one poll produces one call.
+const FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// The last reading, and what it was a reading of.
+///
+/// The module comment has always said this is in Rust so it "can be cached
+/// across summons". It could be, and it was not: every call went to the
+/// network. That mattered more after widgets learned to stop while hidden,
+/// because coming back takes a reading immediately, so ten summons in ten
+/// minutes were ten forecasts fetched for the same minute of the same day.
+///
+/// Keyed by the place and the unit together. Asking for Fahrenheit after
+/// Celsius is a different answer to the same question, and handing back the
+/// other one would show the wrong number rather than a stale one.
+static LAST: std::sync::Mutex<Option<(String, bool, Weather, std::time::Instant)>> =
+    std::sync::Mutex::new(None);
+
+/// What identifies a place for the cache.
+///
+/// The coordinates rather than the name: two people can call the same place
+/// different things, the request is made with the numbers, and the numbers are
+/// what the answer depends on.
+fn keyed(place: &Place) -> String {
+    format!("{:.4},{:.4}", place.latitude, place.longitude)
+}
+
+/// The current conditions at a place, from the last reading when it is recent.
 pub async fn at(place: &Place, fahrenheit: bool) -> Result<Weather, String> {
+    let key = keyed(place);
+
+    if let Ok(held) = LAST.lock() {
+        if let Some((had, unit, weather, when)) = held.as_ref() {
+            if *had == key && *unit == fahrenheit && when.elapsed() < FRESH_FOR {
+                return Ok(weather.clone());
+            }
+        }
+    }
+
+    let fetched = fetch(place, fahrenheit).await?;
+
+    if let Ok(mut held) = LAST.lock() {
+        *held = Some((key, fahrenheit, fetched.clone(), std::time::Instant::now()));
+    }
+
+    Ok(fetched)
+}
+
+/// Asks the service, with nothing remembered.
+async fn fetch(place: &Place, fahrenheit: bool) -> Result<Weather, String> {
     let unit = if fahrenheit { "fahrenheit" } else { "celsius" };
 
     let url = format!(
@@ -184,5 +235,49 @@ mod tests {
     #[tokio::test]
     async fn nowhere_is_asked_for_when_nothing_was_typed() {
         assert!(find("   ").await.is_err());
+    }
+
+    fn place(name: &str, lat: f64, lon: f64) -> Place {
+        Place {
+            name: name.to_string(),
+            region: String::new(),
+            latitude: lat,
+            longitude: lon,
+        }
+    }
+
+    /// Two names for one place are one place.
+    ///
+    /// The request is made with the coordinates and the answer depends on the
+    /// coordinates, so that is what the reading is filed under. Keying by the
+    /// name would fetch twice for somebody who typed "Bakersfield" once and
+    /// "Bakersfield, CA" the next time.
+    #[test]
+    fn a_place_is_identified_by_where_it_is() {
+        assert_eq!(
+            keyed(&place("Bakersfield", 35.3733, -119.0187)),
+            keyed(&place("Bakersfield, California", 35.3733, -119.0187))
+        );
+    }
+
+    /// And two places are two places.
+    #[test]
+    fn somewhere_else_is_not_the_same_reading() {
+        assert_ne!(
+            keyed(&place("Bakersfield", 35.3733, -119.0187)),
+            keyed(&place("Portland", 45.5152, -122.6784))
+        );
+    }
+
+    /// Four decimal places is about eleven metres, which is the resolution the
+    /// request itself is made at. Rounding the key harder than the request
+    /// would hand back a reading for somewhere the service was never asked
+    /// about.
+    #[test]
+    fn the_key_is_as_precise_as_the_request() {
+        assert_eq!(
+            keyed(&place("a", 35.373_312, -119.018_712)),
+            "35.3733,-119.0187"
+        );
     }
 }
