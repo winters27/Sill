@@ -87,9 +87,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
         .app_data_dir()
         .unwrap_or_else(|_| PathBuf::from("."));
     let frecency_path = registry::frecency_path(&data_dir);
-    let frecency = Frecency::load(&frecency_path);
     let cache_path = registry::cache_path(&data_dir);
-    let cached = registry::load_cache(&cache_path);
 
     let state = handle.state::<RegistryState>().inner().clone();
     let (sources, aliases) = {
@@ -104,9 +102,36 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
     let workspaces = profiles_store::path(&handle);
 
     tauri::async_runtime::spawn(async move {
-        // Last run's index, shown immediately. Discovery costs a PowerShell
-        // round trip and thousands of filesystem calls, and this is what keeps
-        // a cold start from spending a second half-populated.
+        /*
+         * Both files are read here rather than before the spawn.
+         *
+         * They were read on the main thread, which put them in front of the
+         * "ready" stamp and therefore in front of the hotkey working. Neither
+         * is needed for that: the index cache is what the first search reads
+         * and the ranking is what a launch records into, and both of those
+         * happen after somebody has already pressed the key.
+         *
+         * On a blocking thread, because they are disk reads and the async
+         * runtime is not the place for those.
+         */
+        let read = {
+            let frecency_path = frecency_path.clone();
+            let cache_path = cache_path.clone();
+
+            tokio::task::spawn_blocking(move || {
+                (
+                    Frecency::load(&frecency_path),
+                    registry::load_cache(&cache_path),
+                )
+            })
+            .await
+        };
+
+        let Ok((frecency, cached)) = read else {
+            crate::say!("could not read last run's index");
+            return;
+        };
+
         /*
          * The ranking, before anything can be launched.
          *
@@ -1327,34 +1352,7 @@ pub fn run() {
             // answers from an empty index for that second and from a full one
             // afterwards, which is a better first run than a launcher that
             // will not open until it has read the disk.
-            {
-                let roots = prefs.files.indexed_roots();
-                if !roots.is_empty() {
-                    // The index's container is already managed, before any
-                    // window existed. Only the filling of it waits for a
-                    // preference to say there is something to fill it with.
-                    let catalog = app.state::<state::CatalogState>();
-
-                    // Last run's index first, so searching works immediately,
-                    // then a fresh walk behind it.
-                    catalog.warm(&roots);
-                    catalog.rebuild(roots.clone());
-
-                    if let Some(watcher) =
-                        state::CatalogWatcher::start(catalog.inner().clone(), roots)
-                    {
-                        app.manage(watcher);
-                    }
-                }
-            }
-
             load_registry(app, &handle);
-
-            // After the registry and the expander are both managed, since it
-            // fills in each of them.
-            reload_snippets(&handle);
-            reload_quicklinks(&handle);
-            reload_scripts(&handle);
 
             /*
              * Cold start, measured at the last thing setup does.
@@ -1372,6 +1370,51 @@ pub fn run() {
                 if let Some(timings) = handle.try_state::<timing::Timings>() {
                     timings.ready(since_start);
                 }
+            }
+
+            /*
+             * Everything the hotkey does not need, after the hotkey works.
+             *
+             * The file index, the snippets and the quicklinks were all read
+             * on the main thread before the stamp above, which is to say
+             * before Sill answered its own key. None of them is needed then:
+             * the file index is what the first *file* search reads, and the
+             * other two fill lists that the launcher renders from whatever it
+             * has. Reading them here costs a person nothing, because they are
+             * done long before anybody finishes typing.
+             *
+             * On the blocking pool, in one task, because the order inside it
+             * matters: `warm` puts last run's index up and `rebuild` replaces
+             * it, and the other way round would show the stale one after the
+             * fresh one had already arrived.
+             */
+            {
+                let handle = handle.clone();
+                let roots = prefs.files.indexed_roots();
+
+                tauri::async_runtime::spawn_blocking(move || {
+                    if !roots.is_empty() {
+                        // The container is managed before any window exists.
+                        // Only the filling of it waits for a preference to say
+                        // there is something to fill it with.
+                        let catalog = handle.state::<state::CatalogState>();
+
+                        catalog.warm(&roots);
+                        catalog.rebuild(roots.clone());
+
+                        if let Some(watcher) =
+                            state::CatalogWatcher::start(catalog.inner().clone(), roots)
+                        {
+                            handle.manage(watcher);
+                        }
+                    }
+
+                    // After the registry and the expander are both managed,
+                    // since these fill in each of them.
+                    reload_snippets(&handle);
+                    reload_quicklinks(&handle);
+                    reload_scripts(&handle);
+                });
             }
 
             /*

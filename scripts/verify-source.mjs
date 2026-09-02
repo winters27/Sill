@@ -333,6 +333,58 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Nothing is read from disk before Sill answers its own hotkey.
+ *
+ * The number somebody feels on a cold start is "how long until the key
+ * works", and setup used to do seven synchronous reads before stamping that:
+ * the ranking history, the index cache, last run's file index, the snippets
+ * and the quicklinks. None of them is needed for the key. They are what the
+ * first search reads, and the first search happens after somebody has already
+ * pressed it.
+ *
+ * Preferences are the exception and always will be: the hotkey to register is
+ * written in them.
+ */
+{
+  const LIB = "src-tauri/src/lib.rs";
+  const text = readFileSync(LIB, "utf8");
+
+  const stamp = text.indexOf("timings.ready(since_start)");
+  const setup = text.lastIndexOf(".setup(", stamp);
+
+  if (stamp < 0 || setup < 0) {
+    fail(LIB, 1, "the startup path no longer has a `setup` and a `ready` stamp to check between");
+  } else {
+    const before = text.slice(setup, stamp);
+
+    // Named one at a time rather than matched by shape, because the point is
+    // the list: adding a read here should be a decision somebody makes and
+    // writes down, not something that happens.
+    const reads = [
+      "Frecency::load",
+      "registry::load_cache",
+      "catalog.warm",
+      "reload_snippets",
+      "reload_quicklinks",
+      "snippets::store::load",
+      "quicklinks::store::load",
+    ];
+
+    for (const read of reads) {
+      const at = before.indexOf(read);
+      if (at < 0) continue;
+
+      fail(
+        LIB,
+        lineOf(text, setup + at),
+        `${read} runs before the hotkey is answered, so a cold start waits ` +
+          "for a file nothing needs yet",
+      );
+    }
+  }
+}
+
+/*
  * Every kind of row Rust can produce has a heading of its own.
  *
  * `groupOf` was a switch whose default returned "Applications", so a mode
