@@ -62,6 +62,13 @@ pub(crate) struct CatalogState {
     /// A walk is over a second of work and megabytes of allocation. Two at
     /// once would cost twice that to produce the same answer.
     pub(crate) building: Arc<std::sync::atomic::AtomicBool>,
+    /// Set when something changed while a rebuild was running.
+    ///
+    /// The walk may already have gone past whatever changed, so the index it
+    /// produces cannot be trusted to hold it. Remembered rather than acted on
+    /// at once, because two walks at the same time cost twice as much to
+    /// produce one answer.
+    pub(crate) again: Arc<std::sync::atomic::AtomicBool>,
     /// Where the index is kept between runs.
     pub(crate) cache: Arc<Option<PathBuf>>,
 }
@@ -72,6 +79,14 @@ impl CatalogState {
     /// Returns immediately. Nothing waits for the index: file search answers
     /// from whatever is currently swapped in, which on a first run is empty
     /// and a second later is not.
+    ///
+    /// A request that arrives while one is running is **remembered rather than
+    /// dropped**. It used to return here and the change went with it: a file
+    /// created while the walk was in progress, in a directory the walk had
+    /// already passed, was missing from the index that walk produced and
+    /// nothing would ask again until something else changed. Twenty seconds
+    /// of a rebuild is a long window to be invisible in on a machine where a
+    /// build is writing files.
     pub(crate) fn rebuild(&self, roots: Vec<PathBuf>) {
         use std::sync::atomic::Ordering;
 
@@ -80,15 +95,20 @@ impl CatalogState {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
+            // Something changed during a walk. The walk in progress may have
+            // already gone past it, so the answer it produces is not to be
+            // trusted, and the thread below will go round again.
+            self.again.store(true, Ordering::Release);
             return;
         }
 
         let inner = self.inner.clone();
         let building = self.building.clone();
+        let again = self.again.clone();
         let cache = self.cache.clone();
         let cost = self.cost.clone();
 
-        std::thread::spawn(move || {
+        std::thread::spawn(move || loop {
             let started = std::time::Instant::now();
             let catalog = crate::catalog::Catalog::build(&roots);
             cost.store(started.elapsed().as_millis() as u64, Ordering::Release);
@@ -111,9 +131,43 @@ impl CatalogState {
                     crate::say!("file index: could not save: {err}");
                 }
             }
+
+            if !take_repeat(&again, &building) {
+                return;
+            }
+
+            crate::say!("file index: something changed while walking, going again");
         });
     }
+}
 
+/// Whether the thread that just finished a walk should do another.
+///
+/// Its own function because it is three atomics in an order that has to be
+/// right, and because the interleavings can be written down as a test rather
+/// than reasoned about in a comment.
+///
+/// Two things have to be true: something asked while the walk was running, and
+/// nobody else has since claimed the right to walk. The second is what stops
+/// two threads walking at once when a request arrives in the moment between
+/// the flag being cleared and this being asked, and it is why the claim is a
+/// compare-exchange rather than a store.
+fn take_repeat(
+    again: &std::sync::atomic::AtomicBool,
+    building: &std::sync::atomic::AtomicBool,
+) -> bool {
+    use std::sync::atomic::Ordering;
+
+    if !again.swap(false, Ordering::AcqRel) {
+        return false;
+    }
+
+    building
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+impl CatalogState {
     /// Reads last run's index, so searching works before the walk finishes.
     ///
     /// Walking a whole drive takes nine seconds and a home folder over one.
@@ -524,6 +578,65 @@ pub(crate) fn data_dir(app: &AppHandle) -> PathBuf {
 mod tests {
     use super::*;
     use crate::registry::CommandRecord;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// A change during a walk is remembered, not dropped.
+    ///
+    /// `rebuild` used to return when one was already running, and the change
+    /// went with it: a file created in a directory the walk had already passed
+    /// was missing from the index that walk produced, and nothing asked again
+    /// until something else happened to change. Twenty seconds of a rebuild is
+    /// a long window to be invisible in while a build is writing files.
+    #[test]
+    fn a_change_during_a_walk_makes_the_walker_go_again() {
+        let again = AtomicBool::new(true);
+        let building = AtomicBool::new(false);
+
+        assert!(
+            take_repeat(&again, &building),
+            "a change that arrived during the walk was dropped"
+        );
+        assert!(
+            building.load(Ordering::Acquire),
+            "going again did not claim the right to walk, so a third rebuild \
+             could start at the same time"
+        );
+        assert!(
+            !again.load(Ordering::Acquire),
+            "the flag was not taken, so the walk after this one would repeat \
+             forever"
+        );
+    }
+
+    /// Nothing changed, so nothing more to do.
+    #[test]
+    fn a_walk_that_nothing_interrupted_stops() {
+        let again = AtomicBool::new(false);
+        let building = AtomicBool::new(false);
+
+        assert!(!take_repeat(&again, &building));
+        assert!(
+            !building.load(Ordering::Acquire),
+            "a walk that had nothing to do still claimed the right to walk"
+        );
+    }
+
+    /// Somebody else got there first, so this thread stands down.
+    ///
+    /// The gap between clearing the flag and asking this question is real: a
+    /// request arriving in it starts its own walk, and this thread starting
+    /// another would be two walks producing one answer, which is the thing the
+    /// flag exists to avoid.
+    #[test]
+    fn a_walk_someone_else_already_claimed_is_left_to_them() {
+        let again = AtomicBool::new(true);
+        let building = AtomicBool::new(true);
+
+        assert!(
+            !take_repeat(&again, &building),
+            "two threads would have walked at once"
+        );
+    }
 
     fn row(id: &str, mode: &str) -> CommandRecord {
         CommandRecord {

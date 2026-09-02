@@ -1940,6 +1940,77 @@ fn join_words(text: &[char]) -> (Vec<char>, Vec<usize>) {
     (kept, from)
 }
 
+#[cfg(test)]
+mod word_runs {
+    use super::{match_class, CommandRecord, MatchClass};
+
+    fn named(title: &str) -> CommandRecord {
+        CommandRecord {
+            id: title.to_lowercase(),
+            extension: "test".into(),
+            extension_title: "Test".into(),
+            command: "run".into(),
+            title: title.to_string(),
+            subtitle: String::new(),
+            description: String::new(),
+            mode: "app".into(),
+            entrypoint: String::new(),
+            keywords: Vec::new(),
+            icon: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            toggle: None,
+        }
+    }
+
+    /// A name that holds the letters twice is judged by the better one.
+    ///
+    /// `CoreRenderer.cs` has `re` in the middle of "Core" and again where
+    /// "Renderer" begins. Asking only about the first occurrence called this
+    /// a mid-word substring, which is the weakest evidence the ranker has,
+    /// while the name plainly starts a word with it.
+    #[test]
+    fn a_run_that_begins_a_word_later_is_still_a_word_match() {
+        assert_eq!(
+            match_class("re", &named("CoreRenderer.cs")),
+            Some(MatchClass::TitleWord)
+        );
+    }
+
+    /// And one that never begins a word is still only a substring.
+    #[test]
+    fn a_run_that_begins_no_word_is_still_a_substring() {
+        assert_eq!(
+            match_class("ignore", &named(".gitignore")),
+            Some(MatchClass::TitleSubstring)
+        );
+    }
+
+    /// The ordinary case has not moved.
+    #[test]
+    fn a_run_at_a_word_start_is_where_it_always_was() {
+        assert_eq!(
+            match_class("render", &named("CoreRenderer.cs")),
+            Some(MatchClass::TitleWord)
+        );
+    }
+}
+
+/// The first place a run of these letters begins a word.
+///
+/// Separate from [`find_run`], which answers with the first occurrence
+/// wherever it is. A name can hold the letters twice, once in the middle of a
+/// word and once at the start of another, and only the second is evidence
+/// that this is what the thing is called.
+fn run_beginning_a_word(hay: &[char], lower: &[char], needle: &[char]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > lower.len() {
+        return None;
+    }
+
+    (0..=lower.len() - needle.len())
+        .find(|&at| lower[at..at + needle.len()] == *needle && begins_a_word(hay, at))
+}
+
 fn find_run(hay: &[char], needle: &[char]) -> Option<usize> {
     if needle.is_empty() || needle.len() > hay.len() {
         return None;
@@ -2021,14 +2092,21 @@ pub fn match_name(needle: &[char], text: &str) -> Option<(MatchClass, Vec<usize>
         if hay_lower == needle {
             return Some((MatchClass::ExactTitle, (0..needle.len()).collect()));
         }
-        // Whether the run starts the title is not asked. Only whether it
-        // starts a *word*, which is what makes it a name rather than an
-        // accident of spelling. `find_run` below answers both cases at once,
-        // since position zero always begins a word.
-        if let Some(at) = find_run(&hay_lower, needle) {
-            if begins_a_word(&hay, at) {
-                return Some((MatchClass::TitleWord, (at..at + needle.len()).collect()));
-            }
+        /*
+         * Whether the run starts the title is not asked. Only whether it
+         * starts a *word*, which is what makes it a name rather than an
+         * accident of spelling. Position zero always begins a word, so this
+         * answers both cases at once.
+         *
+         * Every occurrence, not just the first. `find_run` answers with the
+         * first, and a name can contain the letters twice: `CoreRenderer.cs`
+         * has `re` at index two, in the middle of "Core", and again at index
+         * four where "Renderer" begins. Asking only about the first said this
+         * was a mid-word substring, which is the weakest evidence the ranker
+         * has, when the same name plainly starts a word with it.
+         */
+        if let Some(at) = run_beginning_a_word(&hay, &hay_lower, needle) {
+            return Some((MatchClass::TitleWord, (at..at + needle.len()).collect()));
         }
 
         /*
