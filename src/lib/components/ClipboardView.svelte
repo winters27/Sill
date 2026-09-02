@@ -64,6 +64,17 @@
   let entries = $state<ClipEntry[]>([]);
   let kind = $state<ClipKind | "all">("all");
   let detail = $state<ClipDetail | null>(null);
+
+  /**
+   * Details already asked for, while this view is open.
+   *
+   * Not a module-level cache: an entry can be edited or deleted, and a view
+   * that is opened fresh should see what is there now. Within one visit
+   * nothing changes underneath it except through this component, which clears
+   * what it changed.
+   */
+  const fetched = new Map<number, ClipDetail>();
+
   let filterOpen = $state(false);
   let listEl = $state<HTMLDivElement | null>(null);
 
@@ -121,6 +132,11 @@
   }
 
   async function refresh() {
+    // Anything that changes the list can have changed an entry: pinning it,
+    // pasting it (which counts a use), or removing it. Every one of those
+    // ends here, so this is the one place the held details have to go.
+    fetched.clear();
+
     if (inside) {
       // Arranged order, and filtered here rather than in SQL: a collection is
       // a set somebody curated by hand, so it is small, and a second query
@@ -157,10 +173,29 @@
       return;
     }
 
+    /*
+     * Once per entry while this view is open.
+     *
+     * Arrowing down a list fetched every row again on the way back up, and for
+     * an image entry the answer carries the picture: a PNG data URI, which for
+     * a screenshot is a couple of megabytes. Holding what has already been
+     * asked for costs the same memory the preview pane is showing anyway, and
+     * the map goes when the view does.
+     */
+    const held = fetched.get(id);
+    if (held) {
+      detail = held;
+      return;
+    }
+
     let stale = false;
     void clipboardEntry(id).then((found) => {
-      if (!stale) detail = found;
+      if (stale) return;
+
+      detail = found;
+      if (found) fetched.set(id, found);
     });
+
     return () => {
       stale = true;
     };
@@ -341,6 +376,7 @@
    * reappears.
    */
   let missed = false;
+
 
   async function keepSkipped() {
     try {

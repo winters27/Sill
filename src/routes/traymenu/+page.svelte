@@ -119,10 +119,21 @@
     void readAppearance();
 
     // Every showing starts at the top. A menu that remembers where the cursor
-    // was last time highlights a row nobody is looking at. The hotkey is
-    // re-read too, since it can have been rebound since the last showing.
+    // was last time highlights a row nobody is looking at.
     void listen("sill://tray-menu-shown", () => {
       selected = 0;
+    }).then((stop) => stops.push(stop));
+
+    /*
+     * Told when preferences change, rather than asked on every showing.
+     *
+     * The hotkey and the theme were re-read each time this opened, which is a
+     * round trip and a whole preferences object for two strings that change
+     * about once a month. Rust already announces a change to every window; a
+     * menu that listens for that is right the moment it happens rather than
+     * the next time somebody opens it.
+     */
+    void listen("sill://preferences-changed", () => {
       void readAppearance();
     }).then((stop) => stops.push(stop));
 
