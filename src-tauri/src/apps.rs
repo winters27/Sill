@@ -74,7 +74,11 @@ fn is_noise(name: &str) -> bool {
 /// - **The Start Menu root, not `Start Menu\Programs`.** Some installers write
 ///   directly into the parent, and scanning only `Programs` never sees them.
 ///   Walking the parent picks up `Programs` anyway, since the walk recurses.
-fn shortcut_roots() -> Vec<PathBuf> {
+/// Where Windows keeps the shortcuts that stand for installed applications.
+///
+/// Also read by the watcher, so a folder added here starts being watched by
+/// the same edit that starts it being scanned.
+pub(crate) fn shortcut_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
 
     if let Ok(appdata) = std::env::var("APPDATA") {

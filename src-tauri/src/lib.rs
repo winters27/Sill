@@ -4,6 +4,7 @@ pub mod activity;
 pub mod ai;
 pub mod app_volume;
 pub mod apps;
+pub mod apps_watch;
 pub mod audio;
 pub mod bindings;
 pub mod browsers;
@@ -1224,6 +1225,20 @@ pub fn run() {
             let placement = placement::Placement::default();
             placement.set(prefs.appearance.summon_on);
             app.manage(placement);
+
+            /*
+             * Noticing that something was installed.
+             *
+             * Without this the index was built at startup and never again
+             * unless somebody ran "Reload Sill Index" by hand, so anything
+             * installed while Sill was running was invisible and the way to
+             * find out was to fail to find it.
+             */
+            if let Some(watcher) =
+                apps_watch::AppWatcher::start(handle.clone(), apps::shortcut_roots())
+            {
+                app.manage(watcher);
+            }
 
             // Dictation holds a low-level keyboard hook and, when local, a
             // whisper server process. Both are managed state so they live
