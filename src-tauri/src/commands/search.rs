@@ -54,9 +54,36 @@ pub(crate) async fn search_commands(
             registry::conversation_record(&offer.id, &offer.title, &said_about(&offer))
         });
 
+    /*
+     * Open windows, ranked in the same pass as everything else.
+     *
+     * They used to be a second command, appended to the results after the
+     * first had already been capped at 120. So on a one or two character query
+     * the cap filled with weak command matches and **a window whose title was
+     * an exact match landed at row 121**, which is to say nowhere. Two lists
+     * concatenated is not a ranking, and the cap is what made it visible.
+     *
+     * Chained into the same iterator instead, so a window competes on its
+     * match class like anything else. Enumeration is Win32 and synchronous,
+     * which is why it is cached for a moment: typing eight characters walked
+     * every top-level window on the desktop eight times.
+     *
+     * The switcher is not this. It has its own command and its own order,
+     * because an empty query there means "the window you were just in" rather
+     * than "the best match for nothing".
+     */
+    let windows = if query.trim().is_empty() {
+        Vec::new()
+    } else {
+        windowing::recent_records()
+    };
+
     // Chained, not collected: both sides are borrowed and nothing is copied.
     let mut results = registry::search_excluding(
-        index.everything().chain(offered.iter()),
+        index
+            .everything()
+            .chain(offered.iter())
+            .chain(windows.iter()),
         &query,
         &ranking.frecency,
         &index.aliases,

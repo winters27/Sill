@@ -863,19 +863,40 @@ const DRAWS_ITS_OWN = new Set([
    */
   let lastUndo = $state<number | null>(null);
 
+  /**
+   * The kind the action list on screen belongs to.
+   *
+   * The comment below used to say the effect was "keyed on the kind, so
+   * arrowing through a list of applications asks once rather than once per
+   * row", and it was not: the key guarded only the *assignment*, so the call
+   * still went out every time. Since the effect also reads `commands`, and a
+   * single keystroke rebuilt that list up to six times as each source came
+   * back, one keystroke asked what a row could do **six times over**, plus
+   * once more per arrow key.
+   *
+   * Remembering it is the whole fix. Kept outside the effect deliberately: a
+   * `$state` here would make the effect depend on what it writes.
+   */
+  let askedFor: string | null = null;
+
   $effect(() => {
     const command =
       mode === "root" || mode === "appVolume"
         ? commands[selected]
         : undefined;
+
     if (!command) {
       rootActions = [];
+      askedFor = null;
       return;
     }
 
-    // Keyed on the kind, so arrowing through a list of applications asks once
-    // rather than once per row.
+    // The answer depends only on the kind, and it has not changed.
     const wanted = command.mode;
+    if (wanted === askedFor) return;
+
+    askedFor = wanted;
+
     void actionsFor(wanted).then((list) => {
       // The selection moved to a different kind while this was in flight.
       if (commands[selected]?.mode === wanted) rootActions = list;
@@ -1049,16 +1070,15 @@ const DRAWS_ITS_OWN = new Set([
 
     if (!current.trim()) return;
 
-    // Open windows, above files and below the index. Not debounced: this is
-    // a Win32 enumeration and a rank in Rust, on the same order as the command
-    // search rather than the file one.
-    try {
-      const open = await searchWindows(current);
-      if (id !== searchId) return;
-      if (open.length) commands = [...commands, ...open];
-    } catch (err) {
-      if (id === searchId) status = `window search failed: ${err}`;
-    }
+    /*
+     * Open windows are not asked for separately any more.
+     *
+     * They came back from their own command and were appended after the
+     * command results had already been capped, so on a short query an exact
+     * window title landed past the cap and was never seen. Rust ranks them in
+     * the same pass now, which is both one fewer round trip per keystroke and
+     * the only way a window can outrank a weak command match.
+     */
 
     // Emoji, in their own group. A separate corpus rather than part of the
     // index: two thousand entries would swamp fifteen hundred real ones, and

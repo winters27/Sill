@@ -3076,3 +3076,31 @@ fn saving_the_ranking_history_leaves_nothing_half_written_behind() {
             .expect("the second save parses");
     assert_eq!(back.len(), 2, "the second save replaced rather than appended");
 }
+
+/// A window competing on merit, not on which list it was appended to.
+///
+/// Windows used to come back from a command of their own and be appended after
+/// the index results had already been capped at `SEARCH_LIMIT`. On a short
+/// query the cap fills with weak matches, so a window whose title was an exact
+/// match landed past the end of the list and was never seen. Two lists
+/// concatenated is not a ranking; the cap is what made that visible.
+///
+/// Ranked in the same pass, the exact title wins wherever it came from.
+#[test]
+fn an_exact_window_title_outranks_a_scattered_command_match() {
+    let mut crowd: Vec<CommandRecord> = (0..200)
+        .map(|n| command(&format!("app:{n}"), &format!("Notes Editor Update {n}"), "Apps"))
+        .collect();
+
+    // The window, last in the corpus exactly as an appended list would be.
+    crowd.push(command("window:1", "neu", "Terminal"));
+
+    let results = search(&crowd, "neu", &Frecency::default(), NOW, 20);
+
+    assert_eq!(
+        results.first().map(|hit| hit.command.id.as_str()),
+        Some("window:1"),
+        "the exact title has to win from anywhere in the corpus, or being \
+         appended after the cap is the same as not being there"
+    );
+}

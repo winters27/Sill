@@ -824,6 +824,43 @@ pub use platform::{
 /// The application name goes in `extension_title`, which ranking weights twice
 /// as heavily as a keyword. That is what makes typing "chrome" find every
 /// Chrome window when not one of them has "chrome" in its title.
+/// How long an enumeration is reused for.
+///
+/// Long enough that a burst of typing walks the desktop once rather than once
+/// per character, short enough that a window opened while the launcher is up
+/// is findable by the time anybody has finished typing its name. The same
+/// bargain, and the same number, `system::live` makes for switches.
+const FRESH_FOR: std::time::Duration = std::time::Duration::from_millis(1000);
+
+static LAST: std::sync::Mutex<Option<(std::time::Instant, Vec<crate::registry::CommandRecord>)>> =
+    std::sync::Mutex::new(None);
+
+/**
+The open windows, enumerated at most once a second.
+
+For the search path, which asks on every keystroke. `EnumWindows` walks every
+top-level window on the desktop and asks each one for its title, its process
+and whether the compositor has it cloaked, so typing eight characters did all
+of that eight times for a list that had not changed.
+
+The switcher deliberately does not use this: it is opened on purpose, its whole
+value is that the first row is the window you were just in, and a second-old
+Z-order is exactly the thing it must not show.
+*/
+pub fn recent_records() -> Vec<crate::registry::CommandRecord> {
+    let mut held = LAST.lock().unwrap_or_else(|e| e.into_inner());
+
+    if let Some((taken, records)) = held.as_ref() {
+        if taken.elapsed() < FRESH_FOR {
+            return records.clone();
+        }
+    }
+
+    let records = records();
+    *held = Some((std::time::Instant::now(), records.clone()));
+    records
+}
+
 pub fn records() -> Vec<crate::registry::CommandRecord> {
     list()
         .into_iter()
