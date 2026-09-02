@@ -84,6 +84,27 @@ fn generation(label: &str) -> u64 {
 
 /// Arms the sleep. Called on dismissal, returns immediately.
 pub fn sleep_soon(window: &WebviewWindow) {
+    /*
+     * The page is told it is not on screen, here and only here.
+     *
+     * Every path that puts a window away calls this: the hotkey, clicking
+     * away, the tray, and the lazy windows that hide instead of closing. So
+     * this is the one place where "you are no longer being looked at" is true
+     * for all of them, and putting the event anywhere else would be one more
+     * list to keep in step.
+     *
+     * Nothing told the page before, so a widget pinned to the chin kept
+     * polling into a window nobody could see: the machine readout enumerated
+     * every process on the system once a second, forever, whether or not the
+     * launcher was up.
+     *
+     * At the moment of hiding rather than when the renderer is suspended
+     * twenty seconds later. Those twenty seconds are exactly the window a
+     * once-a-second poll fills with work nobody asked for.
+     */
+    use tauri::Emitter;
+    let _ = window.emit("sill://hidden", ());
+
     let label = window.label().to_string();
     let armed = generation(&label);
     let window = window.clone();

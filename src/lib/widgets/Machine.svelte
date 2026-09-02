@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { pollWhileVisible } from "$lib/visible";
 
   interface Props {
     /** The chin is a strip, not a board. Same widget, less of it. */
@@ -131,11 +132,13 @@
   }
 
   onMount(() => {
-    void take();
-    const timer = setInterval(take, EVERY);
+    // Stops while the launcher is hidden. A reading nobody can see is work
+    // nobody asked for, and this one ran once a second for as long as Sill
+    // was running.
+    const stop = pollWhileVisible(take, EVERY);
 
     return () => {
-      clearInterval(timer);
+      stop();
       void invoke("forget_machine_reading");
     };
   });

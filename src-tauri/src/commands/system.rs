@@ -627,6 +627,15 @@ pub(crate) fn clear_activity(app: tauri::AppHandle) {
 pub(crate) async fn machine_reading(
     app: tauri::AppHandle,
 ) -> Result<crate::meter::Reading, String> {
+    // Refused when nothing is on screen. The window layer stops polling when
+    // it is told it was hidden, and this is the same rule where a second
+    // caller cannot forget it: opening a handle to every process on the
+    // machine for a gauge nobody can see is the exact cost this pair of
+    // changes exists to remove.
+    if !crate::summon::anything_visible(&app) {
+        return Err("Nothing is on screen to show a reading in.".to_string());
+    }
+
     tauri::async_runtime::spawn_blocking(move || {
         use tauri::Manager;
         app.state::<crate::meter::Meter>().read()
@@ -660,6 +669,11 @@ pub(crate) async fn find_place(name: String) -> Result<crate::weather::Place, St
 #[tauri::command]
 pub(crate) async fn weather_now(app: tauri::AppHandle) -> Result<crate::weather::Weather, String> {
     use tauri::Manager;
+
+    // The same rule as the machine readout, and here it is a network call.
+    if !crate::summon::anything_visible(&app) {
+        return Err("Nothing is on screen to show the weather in.".to_string());
+    }
 
     let (place, fahrenheit) = {
         let prefs = app.state::<crate::state::PrefsState>();

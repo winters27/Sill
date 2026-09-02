@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { pollWhileVisible } from "$lib/visible";
 
   interface Props {
     compact?: boolean;
@@ -69,9 +70,9 @@
   }
 
   onMount(() => {
-    void take();
-    const timer = setInterval(take, EVERY);
-    return () => clearInterval(timer);
+    // Stops while the launcher is hidden. Ten minutes apart is not much, and
+    // it is still a network call made on behalf of a window nobody can see.
+    return pollWhileVisible(take, EVERY);
   });
 </script>
 

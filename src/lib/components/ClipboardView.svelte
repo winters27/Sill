@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { visible, whenVisible } from "$lib/visible";
   import ClipKindIcon from "./ClipKindIcon.svelte";
   import {
     clipboardDelete,
@@ -331,6 +332,16 @@
    */
   let skipped = $state<Skipped | null>(null);
 
+  /**
+   * Whether a copy happened while the launcher was hidden.
+   *
+   * The list is not refreshed then, because refreshing a view nobody can see
+   * is a query and an image fetch for nothing. It has to be refreshed on the
+   * way back, though: a list that ignored what it was told is wrong when it
+   * reappears.
+   */
+  let missed = false;
+
   async function keepSkipped() {
     try {
       await clipboardKeepCurrent();
@@ -347,16 +358,39 @@
   onMount(() => {
     let unlisten: UnlistenFn | undefined;
     let refused: UnlistenFn | undefined;
+    let coming: (() => void) | undefined;
 
     (async () => {
       await refresh();
       skipped = await clipboardLastSkipped();
       await loadCollections();
 
-      // Something copied while this is open has to appear, or the history
-      // looks broken at the exact moment it is being watched.
+      /*
+       * Something copied while this is open has to appear, or the history
+       * looks broken at the exact moment it is being watched.
+       *
+       * While the launcher is hidden it is not being watched, and this fires
+       * for every copy anybody makes anywhere. A view left in clipboard mode
+       * ran a query and fetched the detail, which carries the image, for each
+       * one, into a window nobody could see. Noted and caught up on instead,
+       * because a list that ignored what it was told is wrong when it comes
+       * back, which is worse than one that was briefly out of date.
+       */
       unlisten = await listen("clipboard:changed", () => {
         skipped = null;
+
+        if (!visible()) {
+          missed = true;
+          return;
+        }
+
+        void refresh();
+      });
+
+      coming = whenVisible(() => {
+        if (!missed) return;
+
+        missed = false;
         void refresh();
       });
 
@@ -368,6 +402,7 @@
     return () => {
       unlisten?.();
       refused?.();
+      coming?.();
     };
   });
 </script>
