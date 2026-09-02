@@ -282,23 +282,57 @@ impl WhisperServer {
         let inner = Arc::clone(&self.inner);
         std::thread::Builder::new()
             .name("whisper-idle".to_string())
-            .spawn(move || loop {
-                std::thread::sleep(IDLE_CHECK);
-                let idle = {
-                    let Ok(state) = inner.running.lock() else {
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(IDLE_CHECK);
+
+                    let idle = {
+                        let Ok(state) = inner.running.lock() else {
+                            continue;
+                        };
+                        match state.as_ref() {
+                            Some(running) => running.last_used.elapsed() >= IDLE_TIMEOUT,
+                            None => false,
+                        }
+                    };
+
+                    if idle {
+                        crate::say!("whisper server idle; shutting it down");
+                        WhisperServer {
+                            inner: Arc::clone(&inner),
+                        }
+                        .stop();
+                    }
+
+                    /*
+                     * With nothing running there is nothing to watch.
+                     *
+                     * The loop had no way out, so once a server had ever been
+                     * started this thread woke every minute for the rest of
+                     * the run, whether or not anything was there: a day left
+                     * alone is fourteen hundred wakeups to find out that the
+                     * thing it watches is gone.
+                     *
+                     * The flag is cleared under its own lock and only while
+                     * nothing is running, so the next server starts a fresh
+                     * watchdog rather than running without one. `start` puts
+                     * the server in `running` *before* it asks for a
+                     * watchdog, which is what makes that check enough.
+                     */
+                    let Ok(mut started) = inner.watchdog.lock() else {
                         continue;
                     };
-                    match state.as_ref() {
-                        Some(running) => running.last_used.elapsed() >= IDLE_TIMEOUT,
-                        None => false,
+
+                    let gone = inner
+                        .running
+                        .lock()
+                        .map(|state| state.is_none())
+                        .unwrap_or(false);
+
+                    if gone {
+                        *started = false;
+                        return;
                     }
-                };
-                if idle {
-                    crate::say!("whisper server idle; shutting it down");
-                    WhisperServer {
-                        inner: Arc::clone(&inner),
-                    }
-                    .stop();
                 }
             })
             .ok();

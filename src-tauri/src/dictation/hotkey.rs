@@ -598,6 +598,19 @@ mod windows_hook {
             TRIGGER_HELD.store(false, Ordering::SeqCst);
         }
 
+        /// Closes the channel the hook sends on.
+        ///
+        /// Which is how stopping reaches a thread that is blocked waiting for
+        /// something to do: dropping the only sender disconnects the receiver
+        /// and wakes it at once. Before this, that thread woke five times a
+        /// second forever to look at a flag, which on an idle machine is
+        /// three hundred wakeups a minute to discover that nothing happened.
+        pub fn stop_sending() {
+            if let Ok(mut slot) = sender_slot().lock() {
+                *slot = None;
+            }
+        }
+
         pub fn clear_listening() {
             LISTENING.store(false, Ordering::SeqCst);
         }

@@ -233,7 +233,6 @@ impl DictationService {
         chord: crate::dictation::hotkey::Chord,
     ) -> Result<()> {
         use crate::dictation::hotkey::{Action, HotkeyListener};
-        use std::sync::mpsc::RecvTimeoutError;
 
         self.disable_hotkey();
 
@@ -247,14 +246,28 @@ impl DictationService {
             .spawn(move || {
                 // Owned here so that leaving this loop drops it and unhooks.
                 let listener = listener;
-                while !thread_stop.load(Ordering::SeqCst) {
-                    let action = match listener.actions.recv_timeout(Duration::from_millis(200)) {
-                        Ok(action) => action,
-                        // A timeout is just the idle case; it exists so the
-                        // stop flag is checked regularly.
-                        Err(RecvTimeoutError::Timeout) => continue,
-                        Err(RecvTimeoutError::Disconnected) => break,
+
+                loop {
+                    /*
+                     * Waits rather than polls.
+                     *
+                     * This used to wake five times a second, forever, to look
+                     * at a stop flag: three hundred wakeups a minute on an
+                     * idle machine to discover that nothing had happened, for
+                     * as long as dictation was switched on.
+                     *
+                     * Stopping arrives through the channel instead.
+                     * `disable_hotkey` drops the only sender, which
+                     * disconnects this at once, so the flag below is now a
+                     * second opinion rather than the mechanism.
+                     */
+                    let Ok(action) = listener.actions.recv() else {
+                        break;
                     };
+
+                    if thread_stop.load(Ordering::SeqCst) {
+                        break;
+                    }
 
                     crate::say!("action {action:?}");
                     let service = app.state::<DictationService>();
@@ -279,45 +292,34 @@ impl DictationService {
                 DictationError::Other(format!("Could not start the action thread: {e}"))
             })?;
 
-        // A heartbeat, because the counters are the only proof the hook is
-        // alive and the settings window is a bad place to read them from: it
-        // has to be open, and whatever is wrong may be the reason it cannot
-        // be. Written only when something moved, so an idle machine adds
-        // nothing to the log.
-        let beat_stop = Arc::clone(&stop);
-        std::thread::Builder::new()
-            .name("dictation-hook-beat".to_string())
-            .spawn(move || {
-                let mut last = (0u64, 0u64, 0u64, 0u64, 0u64);
-                while !beat_stop.load(Ordering::SeqCst) {
-                    std::thread::sleep(Duration::from_secs(2));
-                    let f = HotkeyListener::state();
-                    let now = (
-                        f.own_seen,
-                        f.injected_seen,
-                        f.keys_seen,
-                        f.chord_key_seen,
-                        f.triggers_seen,
-                    );
-                    if now == last {
-                        continue;
-                    }
-                    last = now;
-                    crate::say!(
-                        "hook: installed={} listening={} held={} own={} injected={} keys={} chordkey={} triggers={} lastmods={}",
-                        f.installed,
-                        f.listening,
-                        f.trigger_held,
-                        f.own_seen,
-                        f.injected_seen,
-                        f.keys_seen,
-                        f.chord_key_seen,
-                        f.triggers_seen,
-                        f.last_modifiers.as_deref().unwrap_or("-")
-                    );
-                }
-            })
-            .map_err(|e| DictationError::Other(format!("Could not start the hook heartbeat: {e}")))?;
+        /*
+         * No heartbeat thread.
+         *
+         * There was one, waking every two seconds forever to compare five
+         * counters and nearly always find them unchanged. Its job was to make
+         * "the hook died and nothing said so" visible in the log, which is a
+         * real failure: Windows silently removes a low-level hook that takes
+         * too long, and the only sign is that a key stops working.
+         *
+         * The same facts are now read on demand. `get_diagnostics` reports
+         * whether the hook is installed and how many keys it has seen, and
+         * Settings shows it; that is a person asking at the moment they
+         * suspect something, rather than thirty wakeups a minute for the
+         * whole time dictation is switched on, on the chance that somebody
+         * later reads the log.
+         *
+         * The facts are also written once here, so the log says what the hook
+         * looked like the moment it was armed.
+         */
+        {
+            let f = HotkeyListener::state();
+            crate::say!(
+                "hook armed: installed={} listening={} keys={}",
+                f.installed,
+                f.listening,
+                f.keys_seen
+            );
+        }
 
         if let Ok(mut slot) = self.hotkey_stop.lock() {
             *slot = Some(stop);
@@ -332,6 +334,12 @@ impl DictationService {
                 stop.store(true, Ordering::SeqCst);
             }
         }
+
+        // And close the channel, which is what actually wakes the action
+        // thread now that it waits rather than polling. Setting the flag alone
+        // would leave it asleep until the next keystroke, which on a machine
+        // where the hook has just been switched off is never.
+        crate::dictation::hotkey::HotkeyListener::stop_sending();
     }
 
     fn take_active(&self) -> Result<Option<ActiveRecording>> {
