@@ -71,7 +71,7 @@ use tokio::sync::mpsc;
 use registry::{CommandRecord, Frecency};
 
 use host::{forward_events, host_js, index_paths};
-use state::{now_seconds, HostState, PrefsState, Registry, RegistryState};
+use state::{now_seconds, HostState, PrefsState, RegistryState};
 
 /// Reads the installed command index and the saved ranking history.
 ///
@@ -105,14 +105,32 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
         // Last run's index, shown immediately. Discovery costs a PowerShell
         // round trip and thousands of filesystem calls, and this is what keeps
         // a cold start from spending a second half-populated.
+        /*
+         * The ranking, before anything can be launched.
+         *
+         * Set outside the cache check on purpose. It used to be inside it, so
+         * on a first run, or any run where the cache was missing, the ranking
+         * history and the path to save it stayed empty until the scan
+         * finished, and anything launched in that window was recorded into a
+         * copy that the scan then replaced.
+         */
+        state.ranking.store(std::sync::Arc::new(state::Ranking {
+            frecency,
+            path: frecency_path,
+        }));
+
+        // Last run's index, shown immediately. Discovery costs a PowerShell
+        // round trip and thousands of filesystem calls, and this is what keeps
+        // a cold start from spending a second half-populated.
         if !cached.is_empty() {
-            let mut registry = state.inner.lock().await;
             println!("[sill] {} entries from cache", cached.len());
-            registry.commands = cached;
-            registry.frecency = frecency;
-            registry.frecency_path = frecency_path.clone();
-            registry.aliases = aliases.clone();
-            drop(registry);
+
+            let aliases = aliases.clone();
+            state.update_index(move |index| {
+                index.commands = cached;
+                index.aliases = aliases;
+            });
+
             let _ = handle.emit("sill://registry-updated", 0);
         }
 
@@ -127,26 +145,15 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
             return;
         }
 
-        let mut registry = state.inner.lock().await;
-        registry.commands = fresh;
+        let total = fresh.len();
+        let text = registry::cache_text(&fresh);
 
-        // Set even when the cache was empty, which the block above skipped.
-        registry.frecency_path = frecency_path;
-        registry.aliases = aliases;
-
-        /*
-         * Serialised under the lock, written outside it.
-         *
-         * The index is what the search reads, so it has to be turned into text
-         * while nothing can change it. Putting it on disk is a different
-         * matter: this runs after every scan, and the whole index is well over
-         * half a megabyte of JSON, which is a long time to hold the lock the
-         * first keystroke after startup is waiting for.
-         */
-        let text = registry::cache_text(&registry.commands);
-
-        let total = registry.commands.len();
-        drop(registry);
+        // Only what the scan produced. Snippets, quicklinks and scripts are
+        // somebody else's to maintain and are left exactly as they are.
+        state.update_index(move |index| {
+            index.commands = fresh;
+            index.aliases = aliases;
+        });
 
         if let Some(text) = text {
             tauri::async_runtime::spawn_blocking(move || {
@@ -665,10 +672,7 @@ pub(crate) fn reload_snippets(app: &AppHandle) {
         .collect();
 
     if let Some(state) = app.try_state::<RegistryState>() {
-        let registry = state.inner.clone();
-        tauri::async_runtime::spawn(async move {
-            registry.lock().await.snippets = records;
-        });
+        state.update_index(move |index| index.snippets = records);
     }
 }
 
@@ -691,10 +695,7 @@ pub(crate) fn reload_quicklinks(app: &AppHandle) {
         .collect();
 
     if let Some(state) = app.try_state::<RegistryState>() {
-        let registry = state.inner.clone();
-        tauri::async_runtime::spawn(async move {
-            registry.lock().await.quicklinks = records;
-        });
+        state.update_index(move |index| index.quicklinks = records);
     }
 }
 
@@ -710,7 +711,7 @@ pub(crate) fn reload_scripts(app: &AppHandle) {
         return;
     };
 
-    let (prefs, registry) = (prefs.inner.clone(), state.inner.clone());
+    let (prefs, registry) = (prefs.inner.clone(), (*state).clone());
 
     tauri::async_runtime::spawn(async move {
         let (enabled, folders) = {
@@ -737,7 +738,7 @@ pub(crate) fn reload_scripts(app: &AppHandle) {
             Vec::new()
         };
 
-        registry.lock().await.scripts = records;
+        registry.update_index(move |index| index.scripts = records);
     });
 }
 
@@ -764,7 +765,7 @@ pub(crate) fn reload_index(app: &AppHandle) {
         }
 
         let total = fresh.len();
-        state.inner.lock().await.commands = fresh;
+        state.update_index(move |index| index.commands = fresh);
         println!("[sill] reindexed {total} entries");
         let _ = handle.emit("sill://registry-updated", total);
     });
@@ -1030,16 +1031,14 @@ pub fn run() {
         .manage(store::StoreState::default())
         .manage(tts::sapi::Sapi::default())
         .manage(RegistryState {
-            inner: Arc::new(tokio::sync::Mutex::new(Registry {
-                commands: Vec::new(),
+            // Sill's own settings are a `const` table and cannot change while
+            // the app runs, so they are here rather than filled in later.
+            index: Arc::new(arc_swap::ArcSwap::from_pointee(state::Index {
                 own_settings: settings_index::records(),
-                snippets: Vec::new(),
-                quicklinks: Vec::new(),
-                scripts: Vec::new(),
-                frecency: Frecency::default(),
-                frecency_path: PathBuf::new(),
-                aliases: registry::Aliases::default(),
+                ..Default::default()
             })),
+            ranking: Arc::new(arc_swap::ArcSwap::default()),
+            recording: Arc::new(std::sync::Mutex::new(())),
         })
         .setup(|app| {
             let handle = app.handle().clone();

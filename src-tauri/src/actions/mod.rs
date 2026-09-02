@@ -178,9 +178,7 @@ impl Action for RunExtensionCommand {
         // it is worth the lookup rather than widening the type for it.
         let registry = ctx.app.state::<crate::state::RegistryState>();
         let record = registry
-            .inner
-            .lock()
-            .await
+            .index()
             .commands
             .iter()
             .find(|c| c.id == object.id)

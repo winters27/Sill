@@ -1293,7 +1293,7 @@ fn simple_subsequence(needle: &[char], hay: &[char]) -> Option<(i64, Vec<usize>)
 /// Frequency alone entrenches whatever was popular last month; recency alone
 /// forgets a daily habit after one detour. The combination is what makes the
 /// top result usually correct without the user typing anything.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Frecency {
     /// id -> (launch count, last launch as unix seconds)
     #[serde(default)]
@@ -1413,6 +1413,16 @@ impl Frecency {
             return Err(err);
         }
         Ok(())
+    }
+
+    /// How many times one entry has been launched.
+    ///
+    /// For a test that has to prove no launch was lost, which is the one
+    /// question the count answers and the score does not: the score folds
+    /// recency in, so two writers losing one launch each can still produce the
+    /// same number.
+    pub fn count(&self, id: &str) -> u32 {
+        self.entries.get(id).map(|(count, _)| *count).unwrap_or(0)
     }
 
     /// How many distinct entries have ever been launched.

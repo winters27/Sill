@@ -287,9 +287,7 @@ async fn resolve(
         Source::Command { id } => {
             let registry = app.state::<crate::state::RegistryState>();
             let record = registry
-                .inner
-                .lock()
-                .await
+                .index()
                 .commands
                 .iter()
                 .find(|c| &c.id == id)

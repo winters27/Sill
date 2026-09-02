@@ -95,11 +95,9 @@ pub(crate) async fn set_preferences(
     if previous.aliases != prefs.aliases {
         // Rebuilt rather than reloaded per query. Ranking asks about aliases
         // once per candidate on every keystroke.
+        let aliases = crate::registry::Aliases::new(&prefs.aliases);
         app.state::<crate::state::RegistryState>()
-            .inner
-            .lock()
-            .await
-            .aliases = crate::registry::Aliases::new(&prefs.aliases);
+            .update_index(move |index| index.aliases = aliases);
     }
 
     if previous.bindings != prefs.bindings {
@@ -310,15 +308,15 @@ pub(crate) async fn index_rows(
         )
     };
 
-    let registry = state.inner.lock().await;
+    let index = state.index();
 
     Ok(rows_for(
-        registry
+        index
             .commands
             .iter()
-            .chain(registry.snippets.iter())
-            .chain(registry.quicklinks.iter())
-            .chain(registry.own_settings.iter()),
+            .chain(index.snippets.iter())
+            .chain(index.quicklinks.iter())
+            .chain(index.own_settings.iter()),
         &aliases,
         &bindings,
         &hidden,

@@ -34,37 +34,38 @@ pub(crate) async fn launch_command(
     // Gmail". Optional, because a launch can come from places with no query.
     query: Option<String>,
 ) -> Result<LaunchedCommand, String> {
-    let record = {
-        let mut registry = state.inner.lock().await;
-        // Everything a search could have offered, not just the index. A
-        // snippet, a quicklink and Sill's own settings are all things the
-        // launcher shows and none of them are in `commands`.
-        let record = registry
-            .everything()
-            .find(|c| c.id == id)
-            .cloned()
-            .ok_or_else(|| format!("no such command: {id}"))?;
+    // Everything a search could have offered, not just the index. A snippet,
+    // a quicklink and Sill's own settings are all things the launcher shows
+    // and none of them are in `commands`.
+    let record = state
+        .index()
+        .everything()
+        .find(|c| c.id == id)
+        .cloned()
+        .ok_or_else(|| format!("no such command: {id}"))?;
 
+    {
         let now = now_seconds();
-        registry.frecency.record(&id, now);
+        let query = query.clone();
+        let id = id.clone();
 
-        // The query as it was typed, not as it was matched. The shorthand is
-        // the thing worth learning; the full name teaches nothing.
-        if let Some(query) = query.as_deref() {
-            registry.frecency.record_query(query, &id, now);
-            registry.frecency.remember(query);
-        }
-        /*
-         * Written after the lock is released, not under it.
-         *
-         * This runs on every launch and the next keystroke's search waits on
-         * the same lock, so the disk was in the path of typing. The copy is of
-         * the ranking history alone, which is a map of counts and timestamps,
-         * not of the index beside it.
-         */
-        save_frecency_soon(&registry.frecency, &registry.frecency_path);
-        record
-    };
+        // Copy, change, swap. Nothing waits on this and nothing waits on the
+        // write that follows it.
+        let (path, text) = state.record(move |ranking| {
+            ranking.frecency.record(&id, now);
+
+            // The query as it was typed, not as it was matched. The shorthand
+            // is the thing worth learning; the full name teaches nothing.
+            if let Some(query) = query.as_deref() {
+                ranking.frecency.record_query(query, &id, now);
+                ranking.frecency.remember(query);
+            }
+
+            ranking.path.clone()
+        });
+
+        save_ranking_soon(&path, text);
+    }
 
     let object = Object::from_record(&record)
         .ok_or_else(|| format!("{} is a kind of thing Sill cannot act on", record.title))?;
@@ -269,16 +270,16 @@ pub(crate) async fn perform_builtin(
 /**
 Writes the ranking history without holding anything up.
 
-Serialised here, where the caller still holds the lock and the data is
-therefore consistent, and written on the blocking pool where a slow disk is
-nobody's problem. Serialising is microseconds; the write is what varies, and it
-used to happen on the lock the next keystroke needs.
+`RegistryState::record` hands back the serialised form, made while the writer
+lock was held and the data was therefore consistent. Putting it on disk is a
+different matter: it happens on the blocking pool, where a slow disk is
+nobody's problem. It used to happen on the lock a search takes.
 
 Losing a launch's ranking is not worth failing the launch over, which is why
 this reports and returns rather than propagating.
 */
-fn save_frecency_soon(frecency: &crate::registry::Frecency, path: &std::path::Path) {
-    let Ok(text) = serde_json::to_string(frecency) else {
+fn save_ranking_soon(path: &std::path::Path, text: Option<String>) {
+    let Some(text) = text else {
         crate::say!("could not serialise the ranking history");
         return;
     };
@@ -395,14 +396,17 @@ pub(crate) async fn move_path(
      * be refused is not learned as one somebody uses.
      */
     {
-        let mut registry = state.inner.lock().await;
         let now = now_seconds();
-
-        registry.frecency.record(&format!("{MOVED_TO}{folder}"), now);
+        let folder = folder.clone();
 
         // Off the lock, like every other write of this file. Losing which
         // folder was used is not worth failing a move over either.
-        save_frecency_soon(&registry.frecency, &registry.frecency_path);
+        let (path, text) = state.record(move |ranking| {
+            ranking.frecency.record(&format!("{MOVED_TO}{folder}"), now);
+            ranking.path.clone()
+        });
+
+        save_ranking_soon(&path, text);
     }
 
     /*
@@ -458,8 +462,7 @@ pub(crate) async fn search_destinations(
         .unwrap_or_default();
 
     let recent = {
-        let registry = state.inner.lock().await;
-        registry.frecency.recent_with_prefix(MOVED_TO, 8)
+        state.ranking().frecency.recent_with_prefix(MOVED_TO, 8)
     };
 
     // Always. These are read off the disk rather than looked up, so a folder
@@ -631,18 +634,22 @@ pub(crate) async fn record_use(
     // nothing. Defaults to true, because every other caller is the root.
     history: Option<bool>,
 ) -> Result<(), String> {
-    let mut registry = state.inner.lock().await;
-
     let now = now_seconds();
-    registry.frecency.record(&id, now);
-    if let Some(query) = query.as_deref() {
-        registry.frecency.record_query(query, &id, now);
-        if history.unwrap_or(true) {
-            registry.frecency.remember(query);
-        }
-    }
 
-    save_frecency_soon(&registry.frecency, &registry.frecency_path);
+    let (path, text) = state.record(move |ranking| {
+        ranking.frecency.record(&id, now);
+
+        if let Some(query) = query.as_deref() {
+            ranking.frecency.record_query(query, &id, now);
+            if history.unwrap_or(true) {
+                ranking.frecency.remember(query);
+            }
+        }
+
+        ranking.path.clone()
+    });
+
+    save_ranking_soon(&path, text);
 
     Ok(())
 }
@@ -654,5 +661,5 @@ pub(crate) async fn record_use(
 /// somebody abandoned would mostly be offering them their mistakes.
 #[tauri::command]
 pub(crate) async fn query_history(state: State<'_, RegistryState>) -> Result<Vec<String>, String> {
-    Ok(state.inner.lock().await.frecency.history().to_vec())
+    Ok(state.ranking().frecency.history().to_vec())
 }

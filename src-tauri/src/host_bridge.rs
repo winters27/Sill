@@ -127,8 +127,7 @@ impl Bridge for SillBridge {
         let name = self
             .app
             .try_state::<crate::RegistryState>()
-            .and_then(|state| state.inner.try_lock().ok().map(|held| named(&held, &program)))
-            .flatten()
+            .and_then(|state| named(&state.index(), &program))
             .unwrap_or_else(|| {
                 std::path::Path::new(&program)
                     .file_stem()
@@ -153,12 +152,11 @@ impl Bridge for SillBridge {
             .try_state::<crate::RegistryState>()
             .ok_or_else(|| "the application index is not ready yet".to_string())?;
 
-        let registry = state
-            .inner
-            .try_lock()
-            .map_err(|_| "the application index is busy being rebuilt".to_string())?;
+        // A snapshot, so an extension asking what is installed can never be
+        // told the index is busy: there is nothing to be busy with.
+        let index = state.index();
 
-        Ok(registry
+        Ok(index
             .commands
             .iter()
             .filter(|command| command.mode == "app")
@@ -205,7 +203,7 @@ impl Bridge for SillBridge {
 }
 
 /// What the index calls the program at this path, if it holds it at all.
-fn named(registry: &crate::state::Registry, program: &str) -> Option<String> {
+fn named(registry: &crate::state::Index, program: &str) -> Option<String> {
     let wanted = program.to_lowercase();
 
     registry

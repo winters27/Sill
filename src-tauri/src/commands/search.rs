@@ -34,7 +34,10 @@ pub(crate) async fn search_commands(
         let prefs = prefs.inner.lock().await;
         (prefs.sources.excluded.clone(), prefs.sources.hidden.clone())
     };
-    let registry = state.inner.lock().await;
+    // A snapshot rather than a lock: ranking reads it from beginning to end
+    // and nothing else should wait for that.
+    let index = state.index();
+    let ranking = state.ranking();
 
     /*
      * The conversation you left, for as long as it is worth offering.
@@ -53,10 +56,10 @@ pub(crate) async fn search_commands(
 
     // Chained, not collected: both sides are borrowed and nothing is copied.
     let mut results = registry::search_excluding(
-        registry.everything().chain(offered.iter()),
+        index.everything().chain(offered.iter()),
         &query,
-        &registry.frecency,
-        &registry.aliases,
+        &ranking.frecency,
+        &index.aliases,
         now_seconds(),
         registry::SEARCH_LIMIT,
         registry::Excluded {
@@ -100,7 +103,7 @@ pub(crate) async fn search_commands(
         .map(|ranked| {
             // Looked up here rather than carried through ranking: only the
             // rows that survive are drawn, and only drawn rows show a name.
-            let alias = registry
+            let alias = index
                 .aliases
                 .for_command(&ranked.command.id)
                 .map(str::to_string);
@@ -127,11 +130,11 @@ pub(crate) async fn system_states(
     state: State<'_, RegistryState>,
     ids: Vec<String>,
 ) -> Result<Vec<Option<bool>>, String> {
-    let registry = state.inner.lock().await;
+    let index = state.index();
     let live = crate::system::live();
 
     Ok(crate::system::states_for(
-        registry
+        index
             .commands
             .iter()
             .map(|row| (row.id.as_str(), row.entrypoint.as_str())),
@@ -237,12 +240,12 @@ pub(crate) async fn search_app_volume(
             .collect());
     }
 
-    let registry = state.inner.lock().await;
+    let ranking = state.ranking();
 
     let results = registry::search_excluding(
         records.iter(),
         &query,
-        &registry.frecency,
+        &ranking.frecency,
         // A session is not in the index, so nothing can have been given a name
         // for one: an alias points at a command id that survives a restart.
         &registry::Aliases::default(),
@@ -294,7 +297,7 @@ pub(crate) async fn search_windows(
             .collect());
     }
 
-    let registry = state.inner.lock().await;
+    let ranking = state.ranking();
 
     // No exclusion terms. Those hide things from the index, and a window that
     // is open is a fact rather than a preference: hiding it would mean the
@@ -302,7 +305,7 @@ pub(crate) async fn search_windows(
     let results = registry::search_excluding(
         records.iter(),
         &query,
-        &registry.frecency,
+        &ranking.frecency,
         // A window is not in the index, so nothing can have been given a name
         // for one. An alias points at a command id that survives a restart.
         &registry::Aliases::default(),
@@ -341,7 +344,8 @@ pub(crate) async fn search_emoji(
         .await
         .unwrap_or_default();
 
-    let registry = state.inner.lock().await;
+    let index = state.index();
+    let ranking = state.ranking();
 
     // An empty query lists them in their own order, which is by group and then
     // by how Unicode arranged them: smileys, people, animals, food. Ranking
@@ -356,8 +360,8 @@ pub(crate) async fn search_emoji(
     let results = registry::search_excluding(
         records.iter(),
         &query,
-        &registry.frecency,
-        &registry.aliases,
+        &ranking.frecency,
+        &index.aliases,
         now_seconds(),
         registry::SEARCH_LIMIT,
         registry::Excluded::none(),
@@ -373,7 +377,7 @@ pub(crate) async fn search_emoji(
             registry::match_class_with_alias(
                 &query,
                 &ranked.command,
-                registry.aliases.for_command(&ranked.command.id).unwrap_or(""),
+                index.aliases.for_command(&ranked.command.id).unwrap_or(""),
             )
             .is_some_and(registry::is_strong)
         })

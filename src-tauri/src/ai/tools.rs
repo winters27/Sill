@@ -305,12 +305,12 @@ async fn search_sill(app: &AppHandle, query: &str) -> Value {
     }
 
     let state = app.state::<crate::state::RegistryState>();
-    let registry = state.inner.lock().await;
+    let index = state.index();
 
     let found: Vec<Value> = crate::registry::search(
-        &registry.everything().cloned().collect::<Vec<_>>(),
+        &index.everything().cloned().collect::<Vec<_>>(),
         query,
-        &registry.frecency,
+        &state.ranking().frecency,
         crate::state::now_seconds(),
         MOST_ROWS,
     )

@@ -293,13 +293,122 @@ impl CatalogWatcher {
     }
 }
 
-/// The installed command registry and its ranking state.
+/**
+The installed command registry and its ranking state.
+
+## Why nothing here is a lock
+
+Both halves are read on **every keystroke** and written rarely, which is the
+shape `arc_swap` exists for and the shape the file catalog beside it already
+uses. This was one `tokio::Mutex` around everything, held for the whole of
+ranking and, until recently, across writing files. A search, a launch and a
+rescan all queued behind each other for no reason: they mostly want to read.
+
+Readers take a snapshot and never wait. A writer builds the replacement and
+swaps it in, so a search in flight finishes against the version it started
+with rather than seeing half an update.
+
+## Why the two halves are separate
+
+They change at completely different rates. The index changes when something is
+installed or a snippet is edited; the ranking changes on **every launch**. One
+`ArcSwap` over both would mean copying the whole index, thousands of records,
+to record that somebody opened a calculator.
+*/
 #[derive(Clone)]
 pub(crate) struct RegistryState {
-    pub(crate) inner: Arc<tokio::sync::Mutex<Registry>>,
+    /// Everything a search can find. Replaced wholesale by a scan.
+    pub(crate) index: Arc<arc_swap::ArcSwap<Index>>,
+    /// What ranking weights by, and where it is kept.
+    pub(crate) ranking: Arc<arc_swap::ArcSwap<Ranking>>,
+    /**
+    Held by whoever is about to change the ranking, and by nobody else.
+
+    `ArcSwap` makes reads free; it does not make read-modify-write safe. Two
+    launches landing together would both copy the same starting point and the
+    second swap would throw the first away. Launches are human-paced so this is
+    vanishingly rare, and a lost launch is a silently wrong ranking rather than
+    an error, which is exactly the kind of bug that is never found.
+
+    A plain `std::sync::Mutex`, deliberately: nothing is awaited while it is
+    held, so an async one would only add a scheduling point.
+    */
+    pub(crate) recording: Arc<std::sync::Mutex<()>>,
 }
 
-pub(crate) struct Registry {
+impl RegistryState {
+    /// A snapshot of everything searchable. Cheap, and never blocks.
+    pub(crate) fn index(&self) -> arc_swap::Guard<Arc<Index>> {
+        self.index.load()
+    }
+
+    /// A snapshot of the ranking state. Cheap, and never blocks.
+    pub(crate) fn ranking(&self) -> arc_swap::Guard<Arc<Ranking>> {
+        self.ranking.load()
+    }
+
+    /**
+    Changes the ranking, under the writer lock.
+
+    Copy, modify, swap. The copy is of the ranking alone, which is a map of
+    counts and timestamps, not of the index beside it.
+
+    Hands back the serialised form so the caller can put it on disk **after**
+    this returns: the write is the slow part and nothing is holding it up by
+    then.
+    */
+    pub(crate) fn record<R>(&self, change: impl FnOnce(&mut Ranking) -> R) -> (R, Option<String>) {
+        let _writing = self
+            .recording
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let mut next = Ranking::clone(&self.ranking.load());
+        let answer = change(&mut next);
+        let text = serde_json::to_string(&next.frecency).ok();
+
+        self.ranking.store(Arc::new(next));
+        (answer, text)
+    }
+
+    /**
+    Changes what a search can find, under the same writer lock.
+
+    Copy, modify, swap, exactly as `record` does, and for the same reason: an
+    `ArcSwap` makes reads free and does nothing for read-modify-write. Five
+    different things update this (the cache, the scan, snippets, quicklinks,
+    scripts) and two of them landing together would lose one.
+
+    A closure rather than a whole `Index` on purpose. Handing in a replacement
+    means naming every field, so the caller that only meant to change snippets
+    has to remember to carry the other four across, and forgetting one empties
+    it with nothing failing. That is the same shape as every other list in this
+    codebase that had to be kept in step by hand.
+    */
+    pub(crate) fn update_index(&self, change: impl FnOnce(&mut Index)) {
+        let _writing = self
+            .recording
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let mut next = Index::clone(&self.index.load());
+        change(&mut next);
+        self.index.store(Arc::new(next));
+    }
+}
+
+/// What ranking weights by.
+#[derive(Clone, Default)]
+pub(crate) struct Ranking {
+    pub(crate) frecency: Frecency,
+    /// Where it is written. Set once, at startup, and carried here so a
+    /// caller holding a snapshot needs nothing else to save it.
+    pub(crate) path: PathBuf,
+}
+
+/// Everything a search can find.
+#[derive(Clone, Default)]
+pub(crate) struct Index {
     pub(crate) commands: Vec<CommandRecord>,
     /// Sill's own settings, shaped as commands.
     ///
@@ -316,17 +425,15 @@ pub(crate) struct Registry {
     pub(crate) quicklinks: Vec<CommandRecord>,
     /// Script commands found in the folders somebody chose to scan.
     pub(crate) scripts: Vec<CommandRecord>,
-    pub(crate) frecency: Frecency,
-    pub(crate) frecency_path: PathBuf,
     /// The names the user has chosen for things.
     ///
-    /// Here beside frecency because it plays the same role: user state that
-    /// ranking consults on every keystroke. Rebuilt when the preference
-    /// changes rather than read from disk per query.
+    /// Here rather than beside frecency because it changes when a preference
+    /// changes, not when something is launched, which is the line these two
+    /// halves are split along.
     pub(crate) aliases: crate::registry::Aliases,
 }
 
-impl Registry {
+impl Index {
     /// Everything a search can return.
     ///
     /// **One definition, used by both ends**, and that is the whole reason it
@@ -349,14 +456,12 @@ impl Registry {
     /// below used to be that guarantee and could not be: it counted the same
     /// lists it was checking, so a sixth added to neither side passed happily.
     fn lists(&self) -> Vec<&Vec<crate::registry::CommandRecord>> {
-        let Registry {
+        let Index {
             commands,
             own_settings,
             snippets,
             quicklinks,
             scripts,
-            frecency: _,
-            frecency_path: _,
             aliases: _,
         } = self;
 
@@ -401,17 +506,96 @@ mod tests {
         }
     }
 
-    fn registry() -> Registry {
-        Registry {
+    fn registry() -> Index {
+        Index {
             commands: vec![row("app:one", "app")],
             own_settings: vec![row("sill-setting:general:One", "sill-setting")],
             snippets: vec![row("snippet:one", "snippet")],
             quicklinks: vec![row("quicklink:one", "quicklink")],
             scripts: vec![row("script:one", "script")],
-            frecency: Default::default(),
-            frecency_path: PathBuf::new(),
             aliases: Default::default(),
         }
+    }
+
+    fn state() -> RegistryState {
+        RegistryState {
+            index: Arc::new(arc_swap::ArcSwap::from_pointee(registry())),
+            ranking: Arc::new(arc_swap::ArcSwap::default()),
+            recording: Arc::new(std::sync::Mutex::new(())),
+        }
+    }
+
+    /**
+    Two things recording at once must not lose one of them.
+
+    This is the whole reason there is still a lock in here. `ArcSwap` makes a
+    read free and does nothing at all for read-modify-write: without the writer
+    lock, two launches landing together both copy the same starting point and
+    whichever swaps second throws the first away. A lost launch is not an
+    error, it is a ranking that is quietly wrong, which is the kind of bug
+    nobody ever reports because nobody can see it.
+
+    Threads rather than tasks, because the writer lock is a plain
+    `std::sync::Mutex` and this is exactly the contention it exists for.
+    */
+    #[test]
+    fn recording_from_several_places_at_once_loses_nothing() {
+        let state = state();
+        let hands = 8;
+        let each = 50;
+
+        std::thread::scope(|scope| {
+            for hand in 0..hands {
+                let state = &state;
+
+                scope.spawn(move || {
+                    for turn in 0..each {
+                        state.record(|ranking| {
+                            ranking.frecency.record(&format!("app:{hand}"), 1_000 + turn);
+                        });
+                    }
+                });
+            }
+        });
+
+        let ranking = state.ranking();
+
+        assert_eq!(
+            ranking.frecency.len(),
+            hands,
+            "every writer's entry survived"
+        );
+
+        for hand in 0..hands {
+            assert_eq!(
+                ranking.frecency.count(&format!("app:{hand}")),
+                each as u32,
+                "app:{hand} lost some of its launches to another thread's swap"
+            );
+        }
+    }
+
+    /// A reader holding a snapshot is unaffected by a writer replacing it.
+    ///
+    /// What the swap buys: a search that started against one index finishes
+    /// against that index rather than seeing a scan land underneath it.
+    #[test]
+    fn a_snapshot_does_not_change_under_the_reader() {
+        let state = state();
+
+        let held = state.index();
+        assert!(held.everything().any(|row| row.id == "app:one"));
+
+        state.update_index(|index| index.commands = vec![row("app:two", "app")]);
+
+        assert!(
+            held.everything().any(|row| row.id == "app:one"),
+            "the snapshot changed under the reader"
+        );
+        assert!(
+            state.index().everything().any(|row| row.id == "app:two"),
+            "and the next reader sees the new one"
+        );
     }
 
     /// What can be found must be able to be run.

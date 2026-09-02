@@ -50,10 +50,13 @@ pub(crate) fn open_data_folder(app: AppHandle) -> Result<(), String> {
 /// Forgets which entries have been launched, so ranking starts over.
 #[tauri::command]
 pub(crate) async fn clear_usage_history(registry: State<'_, RegistryState>) -> Result<(), String> {
-    let mut guard = registry.inner.lock().await;
-    guard.frecency = Frecency::default();
-    let path = guard.frecency_path.clone();
-    guard.frecency.save(&path).map_err(|e| e.to_string())
+    let (path, text) = registry.record(|ranking| {
+        ranking.frecency = Frecency::default();
+        ranking.path.clone()
+    });
+
+    let text = text.ok_or_else(|| "could not write the ranking history".to_string())?;
+    crate::registry::Frecency::write(&path, &text).map_err(|e| e.to_string())
 }
 
 /// The icon for a launchable, as a data URI.

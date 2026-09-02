@@ -63,7 +63,8 @@ pub(crate) async fn diagnostics(
     app: AppHandle,
     registry: State<'_, RegistryState>,
 ) -> Result<Diagnostics, String> {
-    let guard = registry.inner.lock().await;
+    let index = registry.index();
+    let ranking = registry.ranking();
 
     /*
      * Asked before the record is built, and asked of the expander rather than
@@ -82,14 +83,14 @@ pub(crate) async fn diagnostics(
         // Asked live rather than cached: Everything is a separate program the
         // user can quit at any moment, so a remembered answer goes stale.
         everything_running: everything_ipc::available(),
-        indexed_commands: guard.commands.len(),
-        launched_entries: guard.frecency.len(),
+        indexed_commands: index.commands.len(),
+        launched_entries: ranking.frecency.len(),
         // Asked live for the same reason Everything is: somebody can install
         // Node while Sill is open, and the panel showing this is exactly where
         // they would look afterwards.
         node_installed: crate::host::node_exe().is_some(),
-        extensions: extension_summary(&guard.commands),
-        by_source: source_summary(&guard.commands),
+        extensions: extension_summary(&index.commands),
+        by_source: source_summary(&index.commands),
         keyboard_hook_installed: hook.0,
         keyboard_keys_seen: hook.1,
     })
