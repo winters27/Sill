@@ -334,6 +334,17 @@ export interface Diagnostics {
   launchedEntries: number;
   extensions: ExtensionInfo[];
   bySource: { mode: string; count: number }[];
+  /** Whether Sill believes the keyboard hook is installed. */
+  keyboardHookInstalled: boolean;
+  /**
+   * Keystrokes that hook has actually been called for.
+   *
+   * Installed with this stuck at zero is the signature of a hook Windows
+   * removed, which it does silently to any low-level hook whose callback runs
+   * long. Snippet expansion, the hyper key and double-tap all die together and
+   * nothing else says so.
+   */
+  keyboardKeysSeen: number;
 }
 
 export function getDiagnostics(): Promise<Diagnostics> {

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::everything_ipc;
 use crate::registry::CommandRecord;
@@ -31,6 +31,18 @@ pub(crate) struct Diagnostics {
     node_installed: bool,
     /// How many entries each source contributed, for the Sources panel.
     by_source: Vec<SourceCount>,
+    /// Whether Sill believes the keyboard hook is installed.
+    ///
+    /// Believing is the operative word, and why the count beside it exists.
+    keyboard_hook_installed: bool,
+    /// Keystrokes that hook has actually been called for.
+    ///
+    /// **Installed with this stuck at zero is the signature of a hook Windows
+    /// removed**, which it does silently to any low-level hook whose callback
+    /// runs long, and which leaves snippet expansion, the hyper key and
+    /// double-tap all dead at once with nothing to look at. The dictation hook
+    /// reports the same pair for the same reason.
+    keyboard_keys_seen: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -53,6 +65,17 @@ pub(crate) async fn diagnostics(
 ) -> Result<Diagnostics, String> {
     let guard = registry.inner.lock().await;
 
+    /*
+     * Asked before the record is built, and asked of the expander rather than
+     * of the preferences: whether the hook is installed is a fact about the
+     * machine, and the whole point of reporting it is that it can disagree
+     * with what the settings say.
+     */
+    let hook = app
+        .try_state::<crate::snippets::expander::Expander>()
+        .map(|expander| crate::snippets::expander::facts(&expander))
+        .unwrap_or((false, 0));
+
     Ok(Diagnostics {
         version: app.package_info().version.to_string(),
         data_dir: data_dir(&app).to_string_lossy().into_owned(),
@@ -67,6 +90,8 @@ pub(crate) async fn diagnostics(
         node_installed: crate::host::node_exe().is_some(),
         extensions: extension_summary(&guard.commands),
         by_source: source_summary(&guard.commands),
+        keyboard_hook_installed: hook.0,
+        keyboard_keys_seen: hook.1,
     })
 }
 

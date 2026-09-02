@@ -188,8 +188,22 @@ pub(crate) async fn host_of(state: &HostState) -> Result<Arc<ExtHost>, String> {
 
     let mut slot = state.inner.lock().await;
 
+    /*
+     * A stored host is only worth handing back if it is still answering.
+     *
+     * A host that crashed left its handle here and every later launch got it
+     * back and failed with "channel is closed". The idle watchdog could not
+     * clear it either, because asking for the host is what marks it as used,
+     * so a dead host looked permanently busy. Extensions stayed broken until
+     * a restart.
+     */
     if let Some(host) = slot.as_ref() {
-        return Ok(host.clone());
+        if host.alive() {
+            return Ok(host.clone());
+        }
+
+        crate::say!("the extension host had stopped; starting another");
+        *slot = None;
     }
 
     if !state.host_js.exists() {
@@ -220,12 +234,6 @@ pub(crate) async fn host_of(state: &HostState) -> Result<Arc<ExtHost>, String> {
     Ok(host)
 }
 
-/// Shuts the host down once nothing has used it for a while.
-///
-/// Started when the host is spawned and returns when it fires, so a machine
-/// that never opens an extension never runs this timer at all. A permanent
-/// one-minute tick waiting for a process that is usually not there is exactly
-/// the "why are we waking up?" this is meant to avoid.
 /// Which extension a session belongs to, if the host still has it.
 ///
 /// `None` when nothing is running under that id, which is the answer that
@@ -235,6 +243,12 @@ pub(crate) async fn extension_of(state: &HostState, session: &str) -> Option<Str
     running_host(state).await?.extension_of(session)
 }
 
+/// Shuts the host down once nothing has used it for a while.
+///
+/// Started when the host is spawned and returns when it fires, so a machine
+/// that never opens an extension never runs this timer at all. A permanent
+/// one-minute tick waiting for a process that is usually not there is exactly
+/// the "why are we waking up?" this is meant to avoid.
 pub(crate) fn start_host_watchdog(state: HostState) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -246,7 +260,7 @@ pub(crate) fn start_host_watchdog(state: HostState) {
                 .expect("host clock poisoned")
                 .elapsed();
 
-            let mut slot = state.inner.lock().await;
+            let slot = state.inner.lock().await;
 
             // Somebody else already shut it down. Nothing left to watch.
             let Some(host) = slot.as_ref() else { return };
@@ -276,6 +290,19 @@ pub(crate) fn start_host_watchdog(state: HostState) {
              * is the layer that can see the truth: the window knows what it
              * meant to do, and this knows what is actually still running.
              */
+            /*
+             * The lock is dropped before any of this is awaited.
+             *
+             * Unloading talks to the host, and a host that has wedged does not
+             * reply. Holding `state.inner` across that meant every later
+             * launch waited behind a shutdown that could never finish. The
+             * handle is cloned out, the lock released, and the slot cleared
+             * afterwards; `unload` has a deadline of its own as well, because
+             * one belt is not enough when the failure is a hang.
+             */
+            let host = host.clone();
+            drop(slot);
+
             for session in host.session_ids() {
                 crate::say!("unloading extension session {session}: idle {}s", idle.as_secs());
                 let _ = host.unload(&session).await;
@@ -287,7 +314,8 @@ pub(crate) fn start_host_watchdog(state: HostState) {
             );
             // Dropping the last handle kills the child: `ExtHost` holds it
             // with `kill_on_drop`.
-            slot.take();
+            drop(host);
+            state.inner.lock().await.take();
             return;
         }
     });

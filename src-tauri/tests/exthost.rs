@@ -913,3 +913,67 @@ fn an_extension_is_allowed_nothing_until_somebody_says_otherwise() {
         opts.capabilities,
     );
 }
+
+/// A host that has died says so, and stops being handed out.
+///
+/// Nothing watched the child, so a crashed host left its handle in place and
+/// every later launch got it back and failed with "channel is closed". Worse,
+/// asking for the host is what marks it used, so the idle watchdog never
+/// considered it idle and never replaced it: extensions stayed broken until
+/// Sill was restarted.
+///
+/// The stream ending is the signal. Killing the process from outside is the
+/// closest thing to the crash this is about.
+#[tokio::test]
+async fn a_host_that_dies_is_not_handed_out_again() {
+    let host = host_js();
+    assert!(host.exists(), "host bundle missing; run: npm --prefix host run build");
+
+    let (tx, _events) = mpsc::unbounded_channel();
+
+    let exthost = ExtHost::spawn(&PathBuf::from("node"), &host, layer(tx).0)
+        .await
+        .expect("spawned the host");
+
+    assert!(exthost.alive(), "a host that has just started is alive");
+
+    // Loading proves it is answering, so the flag below means something.
+    let opts = LoadOptions::view(fixture().to_string_lossy(), "fixture", "list");
+    exthost.load(&opts).await.expect("load succeeded");
+
+    let id = exthost.child_id().expect("the child has a process id");
+
+    #[cfg(windows)]
+    std::process::Command::new("taskkill")
+        .args(["/PID", &id.to_string(), "/F", "/T"])
+        .output()
+        .expect("killed the host");
+
+    #[cfg(not(windows))]
+    std::process::Command::new("kill")
+        .args(["-9", &id.to_string()])
+        .output()
+        .expect("killed the host");
+
+    // The reader task notices when the stream ends, which is not instant.
+    for _ in 0..100 {
+        if !exthost.alive() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    assert!(
+        !exthost.alive(),
+        "the host was killed and still reports itself as answering, so \
+         `host_of` would hand it back for the rest of the session"
+    );
+
+    // And anything still waiting was told, rather than left holding a
+    // `oneshot` whose sender is gone.
+    let after = exthost.load(&opts).await;
+    assert!(
+        after.is_err(),
+        "a load against a dead host has to fail rather than hang"
+    );
+}

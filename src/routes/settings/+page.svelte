@@ -514,6 +514,23 @@
     }
   }
 
+  /**
+   * What the hook is actually doing, in a sentence.
+   *
+   * Installed and seeing keys is the only healthy answer. Installed and stuck
+   * at zero is the one worth saying out loud: Windows takes a low-level hook
+   * away without telling anybody if its callback ever runs long, and from the
+   * inside everything still looks armed.
+   */
+  const hookStory = $derived.by(() => {
+    if (!info) return "Reading.";
+    if (!info.keyboardHookInstalled) return "Not installed. Nothing on it is running.";
+    if (info.keyboardKeysSeen === 0) {
+      return "Installed, but it has not seen a keystroke. If you have typed since Sill started, Windows has taken it away and expansion will not fire.";
+    }
+    return "Installed and seeing keys.";
+  });
+
   /** Only jump if the name is real, so a stale link cannot blank the page. */
   function jumpTo(name: string | null) {
     if (name && PANELS.some((p) => p.id === name)) {
@@ -1506,6 +1523,20 @@
                 <span class="reading">
                   {timings?.coldStartMs != null ? `${timings.coldStartMs} ms` : "not yet"}
                 </span>
+              {/snippet}
+            </Row>
+          </Section>
+
+          <Section
+            label="Keyboard"
+            description="Snippet expansion, the hyper key and double-tap all run on one low-level hook. Windows removes such a hook silently if it ever runs slow, and everything on it stops at once."
+          >
+            <Row
+              title="Keyboard hook"
+              description={hookStory}
+            >
+              {#snippet control()}
+                <span class="fact">{info?.keyboardKeysSeen.toLocaleString() ?? "—"}</span>
               {/snippet}
             </Row>
           </Section>

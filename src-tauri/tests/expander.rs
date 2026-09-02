@@ -13,7 +13,7 @@
 
 use std::time::{Duration, Instant};
 
-use sill_lib::snippets::expander::{arm, armed, stop, Expander};
+use sill_lib::snippets::expander::{arm, armed, facts, stop, Expander};
 
 /// Waits for the hook's thread to reach a state, rather than sleeping and
 /// hoping. Starting and stopping a thread are not instant, and a fixed sleep
@@ -94,4 +94,41 @@ fn it_can_be_started_again_after_being_stopped() {
 
     stop(&expander);
     assert!(settle(&expander, false));
+}
+
+/// The hook reports what it believes and what actually happened, separately.
+///
+/// Windows removes a low-level hook whose callback runs long and tells nobody:
+/// the thread stays parked, the handle stays valid, and `armed` keeps
+/// answering true while every keyword quietly stops firing. A count beside the
+/// flag is the only thing that can tell that apart from "the keyword is
+/// wrong", which is why the dictation hook has had one since the day its
+/// trigger died for two silent reasons at once.
+///
+/// Nothing here types, so the count stays where it starts. What is asserted is
+/// that the two facts are reported independently, which is the property the
+/// diagnosis needs.
+#[test]
+fn the_hook_reports_installation_and_keystrokes_separately() {
+    let expander = Expander::new();
+
+    let (installed, before) = facts(&expander);
+    assert!(!installed, "nothing is installed yet");
+
+    arm(&expander);
+    assert!(settle(&expander, true));
+
+    let (installed, after) = facts(&expander);
+    assert!(installed, "it says it is installed");
+    assert!(
+        after >= before,
+        "the count never goes backwards, so a reading can be compared with an \
+         earlier one to see whether keys are still arriving"
+    );
+
+    stop(&expander);
+    assert!(settle(&expander, false));
+
+    let (installed, _) = facts(&expander);
+    assert!(!installed, "and it stops claiming to be installed");
 }

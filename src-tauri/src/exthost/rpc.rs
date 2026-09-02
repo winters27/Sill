@@ -9,7 +9,7 @@
 //! to do without holding any lock.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -77,6 +77,17 @@ pub struct RpcPeer {
     incoming: mpsc::UnboundedSender<Incoming>,
     pending: Pending,
     next_id: Arc<AtomicU64>,
+    /**
+    Set once the conversation is over, so a later call fails instead of waiting.
+
+    Failing everything already pending is not enough on its own. A request made
+    *after* the peer has gone inserts a fresh entry into the map that nothing
+    will ever answer, and whether it fails depends on a race: the outbound
+    channel only refuses once the writer task has noticed the broken pipe, and
+    until then the send succeeds and the caller waits forever. Which is exactly
+    what the window does after a host crash, because a crash is when it retries.
+    */
+    closed: Arc<AtomicBool>,
 }
 
 impl RpcPeer {
@@ -95,13 +106,52 @@ impl RpcPeer {
             incoming: in_tx,
             pending: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(AtomicU64::new(1)),
+            closed: Arc::new(AtomicBool::new(false)),
         };
 
         (peer, out_rx, in_rx)
     }
 
+    /**
+    Gives up on everything still waiting.
+
+    Called when the host's stream ends, which is how a host that has died
+    announces it. Without this every caller awaiting a reply waits for one that
+    is never coming: a `oneshot` whose sender is simply leaked never resolves,
+    so a launch, a render or a form submission would hang for as long as the
+    launcher was open.
+    */
+    pub fn give_up_on_everything(&self, why: &str) {
+        self.closed.store(true, Ordering::Relaxed);
+
+        let waiting: Vec<_> = self
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain()
+            .map(|(_, tx)| tx)
+            .collect();
+
+        if !waiting.is_empty() {
+            crate::say!("{} extension request(s) will not be answered: {why}", waiting.len());
+        }
+
+        for tx in waiting {
+            let _ = tx.send(Err(RpcError::internal(why)));
+        }
+    }
+
     /// Calls a method on the peer and waits for its result.
+    ///
+    /// There is no deadline here on purpose: what counts as too long depends
+    /// on the call, and an extension that renders slowly is not a host that
+    /// has stopped answering. [`ExtHost`](super::ExtHost) puts the deadline on
+    /// the calls it makes.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+        if self.closed.load(Ordering::Relaxed) {
+            return Err(RpcError::internal("the extension host stopped"));
+        }
+
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
 

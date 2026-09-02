@@ -253,11 +253,12 @@ impl Expander {
 }
 
 #[cfg(windows)]
-pub use windows_impl::{arm, armed, move_caret_back, replace, stop, watch};
+pub use windows_impl::{arm, armed, facts, move_caret_back, replace, stop, watch};
 
 #[cfg(windows)]
 mod windows_impl {
     use super::*;
+    use std::sync::atomic::AtomicU64;
     use std::sync::OnceLock;
     use tauri::{AppHandle, Emitter};
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -321,20 +322,61 @@ mod windows_impl {
                         .thread
                         .store(GetCurrentThreadId(), Ordering::SeqCst);
 
+                    /*
+                     * Cleared however this thread ends, including by unwinding.
+                     *
+                     * Written as a guard rather than as two lines after the
+                     * loop: a panic anywhere in the pump would otherwise skip
+                     * them, leaving `running` true and `thread` non-zero
+                     * forever, and `arm` returns early when `running` is true.
+                     * The hook would be gone and could never be put back
+                     * without restarting Sill.
+                     */
+                    struct ClearOnExit(Expander);
+
+                    impl Drop for ClearOnExit {
+                        fn drop(&mut self) {
+                            self.0.inner.thread.store(0, Ordering::SeqCst);
+                            self.0.inner.running.store(false, Ordering::SeqCst);
+                        }
+                    }
+
+                    let _clear = ClearOnExit(expander.clone());
+
                     let mut message = MSG::default();
                     while GetMessageW(&mut message, None, 0, 0).as_bool() {}
 
                     let _ = UnhookWindowsHookEx(hook);
-                    expander.inner.thread.store(0, Ordering::SeqCst);
-                    expander.inner.running.store(false, Ordering::SeqCst);
                 }
             })
             .ok();
     }
 
+    /// Every keystroke this hook has been called for.
+    ///
+    /// The one thing that distinguishes an installed hook from a working one.
+    /// **Windows silently removes a low-level hook whose callback takes too
+    /// long** and tells nobody: the thread stays parked in `GetMessageW`, the
+    /// handle stays valid, `armed` keeps answering true, and every keyword
+    /// quietly stops firing. Without a count there is nothing to look at and
+    /// no way to tell that from "the keyword is wrong".
+    ///
+    /// The dictation hook has had this since the day its trigger died for two
+    /// silent reasons at once. Same idea, same reason.
+    static KEYS_SEEN: AtomicU64 = AtomicU64::new(0);
+
     /// Whether the hook is installed right now.
     pub fn armed(expander: &Expander) -> bool {
         expander.inner.thread.load(Ordering::SeqCst) != 0
+    }
+
+    /// What can be said about the hook without guessing.
+    ///
+    /// `installed` is what Sill believes; `keys_seen` is what actually
+    /// happened. Installed with a count stuck at zero while somebody types is
+    /// the signature of a hook Windows took away.
+    pub fn facts(expander: &Expander) -> (bool, u64) {
+        (armed(expander), KEYS_SEEN.load(Ordering::Relaxed))
     }
 
     /// Takes the hook out and lets its thread finish.
@@ -371,6 +413,10 @@ mod windows_impl {
         if code < 0 {
             return next();
         }
+
+        // Counted before anything can return early, so the number answers
+        // "is this hook being called at all" rather than "did it do anything".
+        KEYS_SEEN.fetch_add(1, Ordering::Relaxed);
 
         let Some(expander) = EXPANDER.get() else {
             return next();
@@ -557,8 +603,21 @@ mod windows_impl {
         // Handed to the app rather than expanded here: the replacement needs
         // the clipboard, the date and a paste, none of which belong on a hook
         // callback that Windows expects to return promptly.
+        /*
+         * Off the hook thread, like the double-tap above it.
+         *
+         * `emit` serialises the payload and dispatches it to every webview,
+         * and doing that inside the callback puts all of it on the clock
+         * Windows is measuring when it decides whether this hook is too slow
+         * to keep. It is only reached on a match, so this is rare rather than
+         * hot, and that is exactly why it was easy to leave here.
+         */
         if let Some(app) = APP.get() {
-            let _ = app.emit("snippets:expand", (id, keyword_len));
+            let app = app.clone();
+
+            std::thread::spawn(move || {
+                let _ = app.emit("snippets:expand", (id, keyword_len));
+            });
         }
     }
 
