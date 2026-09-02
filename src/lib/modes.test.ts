@@ -77,14 +77,25 @@ describe("what each mode behaves like", () => {
     }
   });
 
-  it("offers row actions only where there are rows from the index", () => {
+  /**
+   * The rule is about having rows, not about where they came from.
+   *
+   * It used to say "rows from the index", which was true of every mode with a
+   * panel at the time and stopped being the point: the conversation list
+   * counts through its own rows and has real actions on them. What has to
+   * hold is that the panel has something to act on at all, which is any mode
+   * whose arrow keys walk something.
+   */
+  it("offers row actions only where there are rows to act on", () => {
     for (const mode of MODES) {
       if (!hasRowActions(mode)) continue;
 
+      const how = behaviourOf(mode)!;
+
       expect(
-        isListMode(mode),
-        `${mode} takes actions from a selected result and has no results`,
-      ).toBe(true);
+        how.rows,
+        `${mode} takes actions from a selected row and has no rows`,
+      ).not.toBe("none");
     }
   });
 

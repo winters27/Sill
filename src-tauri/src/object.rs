@@ -92,6 +92,14 @@ pub enum ObjectKind {
     Process,
     /// A saved window arrangement.
     Workspace,
+    /// A conversation with the model, as it sits in the list of past ones.
+    ///
+    /// Not in the index either, and for a different reason from a window: it
+    /// exists on disk and could be indexed, but a list of everything ever
+    /// asked has no business competing with applications for a keystroke.
+    /// It reaches the launcher through its own view, and this is the name the
+    /// action registry dispatches on when it does.
+    Conversation,
 }
 
 impl ObjectKind {
@@ -128,6 +136,7 @@ impl ObjectKind {
         Self::Process,
         Self::Workspace,
         Self::Script,
+        Self::Conversation,
     ];
 
     /**
@@ -168,6 +177,7 @@ impl ObjectKind {
             Self::AudioSession => "program's volume",
             Self::Process => "running program",
             Self::Workspace => "saved arrangement",
+            Self::Conversation => "conversation",
         }
     }
 
@@ -212,6 +222,11 @@ impl ObjectKind {
             "audio-session" => Self::AudioSession,
             "process" => Self::Process,
             "workspace" => Self::Workspace,
+            // Two modes, one kind. One is the conversation offered at the top
+            // of the root list for a few minutes after you leave it, the
+            // other is a row in the list of everything you have asked. They
+            // are the same thing and the same actions apply.
+            "conversation" | "past-conversation" => Self::Conversation,
             _ => return None,
         })
     }
@@ -473,12 +488,13 @@ mod tests {
                 ObjectKind::Process => 18,
                 ObjectKind::Workspace => 19,
                 ObjectKind::Script => 20,
+                ObjectKind::Conversation => 21,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            21,
+            22,
             "a kind was added or removed without `ALL` being told",
         );
 

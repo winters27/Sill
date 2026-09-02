@@ -130,7 +130,14 @@ const behaviour: Record<Mode, Behaviour> = {
 
   // Filters rows already in hand, so it counts its own and does not re-search.
   clipboard: { rows: "own", searches: false, shows: "own", escape: true, actions: false },
-  conversations: { rows: "own", searches: false, shows: "own", escape: true, actions: false },
+  /**
+   * Actions on the conversation under the cursor.
+   *
+   * Ctrl+K here said "no actions here", and Delete was the only way to remove
+   * one, wired straight into the window. An action only the page can reach is
+   * one a hotkey cannot bind and the model cannot run.
+   */
+  conversations: { rows: "own", searches: false, shows: "own", escape: true, actions: true },
   // The store's query does go to Rust, but it answers with a page already
   // narrowed and capped, so what is arrowed through is whatever came back.
   store: { rows: "own", searches: false, shows: "own", escape: true, actions: false },

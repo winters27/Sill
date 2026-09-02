@@ -329,6 +329,48 @@ impl Chat {
         all
     }
 
+    /// What was said in one, whichever one it is, as plain text.
+    ///
+    /// For the action that copies a conversation. `transcript` reads only the
+    /// open one, because that is what the view showing it needs; this one is
+    /// asked about a row in the list of past conversations, and that row is
+    /// usually not the open one.
+    ///
+    /// Roles are written out rather than left implicit. A transcript pasted
+    /// somewhere else has lost the layout that told the two speakers apart,
+    /// and a wall of alternating paragraphs with nothing saying who said what
+    /// is not worth pasting.
+    pub fn said_in(&self, id: &str) -> Option<String> {
+        let held = self.held.lock().ok()?;
+
+        let found = held
+            .open
+            .iter()
+            .chain(held.past.iter())
+            .find(|one| one.id == id)?;
+
+        let said = found
+            .messages
+            .iter()
+            .filter(|message| message.role != "system")
+            .map(|message| {
+                let who = if message.role == "user" {
+                    "You"
+                } else {
+                    "Sill"
+                };
+                format!("{who}: {}", message.content.trim())
+            })
+            .collect::<Vec<_>>()
+            .join(
+                "
+
+",
+            );
+
+        Some(said)
+    }
+
     /// Forgets one, wherever it is.
     pub fn forget(&self, id: &str) -> bool {
         let Ok(mut held) = self.held.lock() else {

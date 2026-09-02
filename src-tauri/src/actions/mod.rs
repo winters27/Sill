@@ -66,6 +66,8 @@ pub fn builtins() -> ActionRegistry {
         Box::new(SessionFull),
         Box::new(RestoreWorkspace),
         Box::new(ForgetWorkspace),
+        Box::new(ForgetConversation),
+        Box::new(CopyConversation),
         Box::new(ReadAloud),
         Box::new(StopReading),
     ];
@@ -1330,6 +1332,97 @@ impl Action for ForgetWorkspace {
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
         crate::commands::system::forget_workspace(ctx.app.clone(), object.target.clone())?;
         Ok(Outcome::done(format!("Forgot {}", object.title)))
+    }
+}
+
+/// Forgets one conversation.
+///
+/// The list of past conversations had no action panel at all: Ctrl+K there
+/// said "no actions here", and Delete was the only way to remove one, wired
+/// straight into the window. An action that only the page can reach is one a
+/// hotkey cannot bind and the model cannot run, which is the arrangement the
+/// registry exists to end.
+struct ForgetConversation;
+
+#[async_trait]
+impl Action for ForgetConversation {
+    fn id(&self) -> &'static str {
+        "sill.conversation.forget"
+    }
+
+    fn title(&self) -> &'static str {
+        "Forget"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Conversation
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::FileWrite]
+    }
+
+    /// Enter reopens it, which the window does, so this is never the primary.
+    ///
+    /// Deliberately: the whole point of that list is going back to something,
+    /// and an action panel whose default was "destroy this" would be a trap
+    /// on a list somebody opened to read.
+    fn is_primary(&self, _kind: ObjectKind) -> bool {
+        false
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let chat = ctx.app.state::<crate::ai::chat::Chat>();
+
+        if !chat.forget(&object.target) {
+            return Err("That conversation is already gone.".to_string());
+        }
+
+        chat.save(&crate::state::data_dir(&ctx.app));
+        Ok(Outcome::done(format!("Forgot {}", object.title)))
+    }
+}
+
+/// Copies what was said in one conversation.
+///
+/// The transcript rather than the title, because the reason to reach for a
+/// conversation you have already had is usually the answer that was in it.
+struct CopyConversation;
+
+#[async_trait]
+impl Action for CopyConversation {
+    fn id(&self) -> &'static str {
+        "sill.conversation.copy"
+    }
+
+    fn title(&self) -> &'static str {
+        "Copy Transcript"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Conversation
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardWrite]
+    }
+
+    fn is_primary(&self, _kind: ObjectKind) -> bool {
+        false
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let said = ctx
+            .app
+            .state::<crate::ai::chat::Chat>()
+            .said_in(&object.target)
+            .ok_or_else(|| "That conversation is gone.".to_string())?;
+
+        if said.trim().is_empty() {
+            return Err("Nothing was said in that one.".to_string());
+        }
+
+        Ok(copy_with_undo(ctx, &said, self.title())?.producing(said))
     }
 }
 

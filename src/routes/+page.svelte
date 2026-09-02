@@ -751,7 +751,7 @@
     // two entries written here by hand, which meant the panel and the Enter
     // key were two separate opinions about what a result supports.
     if (hasRowActions(mode)) {
-      const chosen = commands[selected];
+      const chosen = rowForActions;
 
       // Naming a result is offered on the result, not buried in settings.
       // An alias nobody can reach is one nobody sets, and the launcher is
@@ -770,7 +770,12 @@
         chosen &&
         chosen.mode !== "answer" &&
         chosen.mode !== "window" &&
-        chosen.mode !== "audio-session";
+        chosen.mode !== "audio-session" &&
+        // An alias points at a command id and is matched against the index. A
+        // conversation is not in the index, so a name given to one would find
+        // nothing however carefully it was chosen.
+        chosen.mode !== "conversation" &&
+        chosen.mode !== "past-conversation";
 
       const naming =
         namable
@@ -902,10 +907,25 @@
    * Remembering it is the whole fix. Kept outside the effect deliberately: a
    * `$state` here would make the effect depend on what it writes.
    */
+  /**
+   * The row the action panel acts on.
+   *
+   * Not always `commands[selected]`. A view that draws its own list counts
+   * through its own rows, and the conversation list is one: asking `commands`
+   * there returned whatever the last ordinary search had left in it, which is
+   * why Ctrl+K said "no actions here" on a row that plainly has some.
+   */
+  const rowForActions = $derived.by(() => {
+    if (!hasRowActions(mode)) return undefined;
+    if (mode === "conversations") return conversationRows[selected];
+
+    return commands[selected];
+  });
+
   let askedFor: string | null = null;
 
   $effect(() => {
-    const command = hasRowActions(mode) ? commands[selected] : undefined;
+    const command = rowForActions;
 
     if (!command) {
       rootActions = [];
@@ -921,7 +941,7 @@
 
     void actionsFor(wanted).then((list) => {
       // The selection moved to a different kind while this was in flight.
-      if (commands[selected]?.mode === wanted) rootActions = list;
+      if (rowForActions?.mode === wanted) rootActions = list;
     });
   });
 
@@ -2204,7 +2224,9 @@
       const chosen = action.tag.startsWith("Sill.Action:")
         ? action.tag.slice("Sill.Action:".length)
         : "";
-      const command = commands[selected];
+      // The row the panel is showing actions for, which is not always the
+      // ranked results: the conversation list counts through its own.
+      const command = rowForActions;
       if (!chosen || !command) return;
 
       // The primary action goes through openSelected, which knows the two
@@ -2273,6 +2295,12 @@
          */
         if (mode === "appVolume") {
           await refreshRoot();
+        } else if (mode === "conversations") {
+          // Forgetting one removes the row that was acted on, so the list has
+          // to be read again or the panel keeps offering actions on something
+          // that is gone.
+          pastConversations = await aiConversations();
+          selected = Math.min(selected, Math.max(0, conversationRows.length - 1));
         } else if (command.toggle !== undefined) {
           await refreshSwitches();
         }
@@ -2549,7 +2577,7 @@
    * the list is short, it is already ordered by when each was last spoken to,
    * and filtering it is a substring test on the question.
    */
-  const conversationRows = $derived.by(() => {
+  const conversationRows: RankedCommand[] = $derived.by(() => {
     const wanted = query.trim().toLowerCase();
 
     return pastConversations
@@ -2562,6 +2590,8 @@
         title: one.title,
         subtitle: saidAbout(one),
         mode: "past-conversation" as const,
+        // Not a switch, and the row shape wants to be told.
+        toggle: undefined,
         entrypoint: one.id,
         panel: "ai",
         score: 0,
