@@ -1430,6 +1430,21 @@ const LEARNED_MAX_LEN: usize = 24;
 /// rule 23 exists to stop. The oldest are dropped first.
 const LEARNED_QUERIES: usize = 400;
 
+/// How many launched entries are kept.
+///
+/// Bounded for the same reason `learned` is: this is written on every launch
+/// and read at every start, and a map of everything ever opened only grows.
+/// Two thousand is far more than anybody reaches for and small enough that the
+/// file stays a few hundred kilobytes at worst.
+const REMEMBERED: usize = 2_000;
+
+/// How long a single launch is remembered.
+///
+/// Opening something once is not a habit, and after three months it is not
+/// even a memory. Anything launched twice is kept regardless of age, because
+/// twice is the same threshold `LEARNED_AT` uses to call something deliberate.
+const ONE_OFF_FADES_AFTER: i64 = 60 * 60 * 24 * 90;
+
 /// Recency buckets, in seconds, and what each is worth.
 const RECENCY_TIERS: [(i64, i64); 5] = [
     (60 * 60, 100),          // within the hour
@@ -1513,6 +1528,63 @@ impl Frecency {
         let entry = self.entries.entry(id.to_string()).or_insert((0, now));
         entry.0 = entry.0.saturating_add(1);
         entry.1 = now;
+
+        self.forget_stale_entries(now, id);
+    }
+
+    /// Keeps the launch history bounded.
+    ///
+    /// `entries` was the one map here with no limit at all: every application,
+    /// file, setting and window ever opened stayed for good, in a file written
+    /// on every launch and parsed at every start. On a machine used for a year
+    /// that is thousands of things somebody opened once and never again, most
+    /// of which no longer exist.
+    ///
+    /// Two rules, in order. A single launch fades after three months, because
+    /// once is not a habit. Then, if the map is still over its cap, the oldest
+    /// go, whatever their count.
+    ///
+    /// `keep` is what was just recorded and is never dropped, for the reason
+    /// written on `forget_oldest_queries`: times are whole seconds, so
+    /// everything used in the same second ties, and a tie among `HashMap` keys
+    /// is broken by hash order.
+    fn forget_stale_entries(&mut self, now: i64, keep: &str) {
+        // Cheap enough to skip entirely most of the time: below the cap, and
+        // with nothing old enough to have faded, there is nothing to do. The
+        // scan below is O(n) and runs on the registry lock with the next
+        // keystroke waiting behind it.
+        let faded = now.saturating_sub(ONE_OFF_FADES_AFTER);
+        let anything_to_do = self.entries.len() > REMEMBERED
+            || self
+                .entries
+                .iter()
+                .any(|(_, (count, at))| *count <= 1 && *at < faded);
+
+        if !anything_to_do {
+            return;
+        }
+
+        self.entries
+            .retain(|id, (count, at)| id == keep || *count > 1 || *at >= faded);
+
+        if self.entries.len() <= REMEMBERED {
+            return;
+        }
+
+        let mut ages: Vec<(String, i64)> = self
+            .entries
+            .iter()
+            .filter(|(id, _)| id.as_str() != keep)
+            .map(|(id, (_, at))| (id.clone(), *at))
+            .collect();
+
+        // Oldest first, and the id breaks a tie so the same file always loses.
+        ages.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+
+        let excess = self.entries.len() - REMEMBERED;
+        for (id, _) in ages.into_iter().take(excess) {
+            self.entries.remove(&id);
+        }
     }
 
     /// Remembers that this query reached this command.
@@ -2448,12 +2520,32 @@ pub fn search_excluding<'a>(
      * places constantly and the row someone is reaching for slides out from
      * under their finger. It still decides the class; it just no longer
      * decides the position within one.
+     *
+     * ## Except with nothing typed
+     *
+     * The shorter title is only meaningful *against a query*: it says the
+     * query covers more of that title. With nothing typed there is no query to
+     * cover anything, so the rule stops being a reading of the match and turns
+     * into "short names first", which is an order nobody chose and nobody can
+     * predict. The opening list read Ai, Cmd, Edge, Gmail down to the longest
+     * name on the machine.
+     *
+     * So with an empty query it is frecency, then alphabetical: what you reach
+     * for, and then a list somebody can actually find their way down.
      */
+    let typed = !query.is_empty();
+
     scored.sort_by(|(a_class, a_weight, a, _), (b_class, b_weight, b, _)| {
         a_class
             .cmp(b_class)
             .then_with(|| b_weight.cmp(a_weight))
-            .then_with(|| a.title.chars().count().cmp(&b.title.chars().count()))
+            .then_with(|| {
+                if typed {
+                    a.title.chars().count().cmp(&b.title.chars().count())
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
             .then_with(|| a.title.cmp(&b.title))
     });
     scored.truncate(limit);
