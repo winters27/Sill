@@ -697,8 +697,25 @@ impl Catalog {
             had.push(PathBuf::from(text));
         }
 
-        // Indexed somewhere else. Not stale, simply about other folders.
-        if had != roots {
+        /*
+         * Indexed somewhere else. Not stale, simply about other folders.
+         *
+         * Compared as folders rather than as paths. `Path` equality is
+         * component by component, so a separator or a trailing slash was
+         * never the problem: `C:/Users` and `C:\Users\` already matched. Case
+         * was, and Windows does not care about case. A root capitalised
+         * differently threw the whole index away and walked the disk again
+         * for three seconds to rebuild exactly what it had.
+         *
+         * `same_folder` is the rule the drive list already uses, and its
+         * comment says the same thing about the same characters.
+         */
+        let unchanged = had.len() == roots.len()
+            && had.iter().zip(roots).all(|(before, now)| {
+                same_folder(&before.to_string_lossy(), &now.to_string_lossy())
+            });
+
+        if !unchanged {
             return None;
         }
 
@@ -763,6 +780,35 @@ fn take_u32(raw: &[u8], at: &mut usize) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Windows does not care about case, and neither should the index.
+    ///
+    /// The saved index carries the roots it answers for. Rust compares two
+    /// `Path`s component by component, so a separator or a trailing slash was
+    /// never the problem here: `C:/Users` and `C:\Users\` already matched.
+    /// Case was. A root typed as `c:\users\brandon`, or arriving from a folder
+    /// dialog capitalised differently from the one in the preferences, threw
+    /// away a fifty thousand entry index and walked the disk for three seconds
+    /// to rebuild exactly what it already had.
+    #[test]
+    fn an_index_is_kept_when_only_the_capitalisation_changed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("files.bin");
+
+        let built = Catalog::build(&[dir.path().to_path_buf()]);
+        built.save(&file).expect("save");
+
+        let shouted: Vec<PathBuf> = built
+            .roots()
+            .iter()
+            .map(|root| PathBuf::from(root.to_string_lossy().to_uppercase()))
+            .collect();
+
+        assert!(
+            Catalog::load(&file, &shouted).is_some(),
+            "the index was discarded because a root was capitalised differently"
+        );
+    }
 
     #[test]
     fn a_query_is_looked_up_by_its_first_letter() {

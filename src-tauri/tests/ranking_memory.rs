@@ -187,8 +187,5 @@ fn the_map_stays_bounded_and_keeps_the_newest() {
         kept.contains(&2_499),
         "the most recently launched entry was dropped"
     );
-    assert!(
-        !kept.contains(&0),
-        "the oldest entry survived a full sweep"
-    );
+    assert!(!kept.contains(&0), "the oldest entry survived a full sweep");
 }

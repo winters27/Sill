@@ -34,3 +34,11 @@ vite.config.ts.timestamp-*
 # per machine, direct from Fontshare, which is the arrangement that licence
 # describes. `verify:source` fails if a font is ever tracked again.
 /src/lib/theme/fonts/*.woff2
+
+# A second Cargo target directory, used to build and test while a release
+# build of Sill is running and holding a lock on the first one. Cargo writes a
+# `.gitignore` of its own inside `target`, which is why that one never needed
+# a line here, and it does not do the same for a directory named by
+# `CARGO_TARGET_DIR`. Nine thousand build artefacts were committed before this
+# line existed.
+/src-tauri/target-audit/

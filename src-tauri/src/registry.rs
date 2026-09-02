@@ -2156,6 +2156,71 @@ fn every_word_lands(needle: &[char], command: &CommandRecord) -> bool {
     })
 }
 
+/// The longest a field can be and still be read as a name.
+///
+/// Beyond this it is prose, and the two clever rules below stop meaning
+/// anything: the initials of a paragraph spell almost any short word, and a
+/// scattered match has hundreds of places to find each letter. A snippet body
+/// is prose. A keyword is a name; the longest Sill ships is under thirty
+/// characters.
+const NAME_LIMIT: usize = 48;
+
+/// Whether the query matches a field that is not the title.
+///
+/// `fuzzy_with` on its own is an unbounded subsequence: over a long enough
+/// string, almost any query matches. That is tolerable on a title, which is
+/// short and which the caller already gates by word start and widest gap. It
+/// was not tolerable here, because **a snippet's entire body is one of its
+/// keywords**. A three hundred character snippet contains the letters of very
+/// nearly anything in order, so every snippet matched every query and sat in
+/// the results under whatever was actually being looked for.
+///
+/// Two rules for prose, three for a name.
+///
+/// The letters together always count, wherever they sit: that is what "that
+/// phrase is in there" means, it is the only useful way to search a body of
+/// text, and `mail` finding the keyword "email" is a contract this ranker
+/// already had. On something short enough to be a name, the initials
+/// of its words count too, so `vm` still finds the keyword "volume mixer", and
+/// so does a scattered match held to the discipline a title gets: starting at
+/// a word, never jumping more than [`MAX_GAP`].
+///
+/// Both of the extra rules are refused on prose, and each was refused for a
+/// reason found by a test rather than guessed at. The initials of an ordinary
+/// two-sentence snippet spell `figma`. A gap of three has hundreds of chances
+/// to be met over that many characters.
+fn matches_another_field(needle: &[char], text: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+
+    let hay: Vec<char> = text.chars().collect();
+    // `lower_one` is one character in and one out, so indices stay usable.
+    let lower: Vec<char> = hay.iter().copied().map(lower_one).collect();
+
+    // A contiguous run, anywhere, including inside a word: `mail` finds the
+    // keyword "email", which is a contract this ranker already had a test for.
+    // Position matters for a scattered match, where it is the only thing
+    // separating intent from coincidence, and not for letters found together.
+    if find_run(&lower, needle).is_some() {
+        return true;
+    }
+
+    if hay.len() > NAME_LIMIT {
+        return false;
+    }
+
+    if initials(needle, &hay).is_some() {
+        return true;
+    }
+
+    let Some((_, matched)) = fuzzy_with(needle, text) else {
+        return false;
+    };
+
+    matched.first().is_some_and(|&at| begins_a_word(&hay, at)) && widest_gap(&matched) <= MAX_GAP
+}
+
 fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass, Vec<usize>)> {
     if let Some(found) = match_name(needle, &command.title) {
         return Some(found);
@@ -2173,11 +2238,11 @@ fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass
         return Some((MatchClass::KeywordExact, Vec::new()));
     }
 
-    if fuzzy_with(needle, &command.extension_title).is_some()
+    if matches_another_field(needle, &command.extension_title)
         || command
             .keywords
             .iter()
-            .any(|k| fuzzy_with(needle, k).is_some())
+            .any(|keyword| matches_another_field(needle, keyword))
     {
         return Some((MatchClass::Elsewhere, Vec::new()));
     }
@@ -2273,14 +2338,34 @@ fn looks_like_a_typo_of(needle: &[char], title: &str, budget: usize) -> bool {
         return false;
     }
 
-    title
-        .to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .any(|word| {
-            let word: Vec<char> = word.chars().collect();
-            near_miss(needle, &word, budget).is_some()
-        })
+    /*
+     * One buffer, filled a word at a time.
+     *
+     * This is the last thing asked of a candidate that matched nothing, which
+     * means it is asked of nearly every entry in the index on nearly every
+     * keystroke. `to_lowercase()` allocated a String for each of them, and
+     * collecting each word allocated again. Neither survived the call.
+     *
+     * The rest of `fuzzy_with`'s doc comment makes the same point about the
+     * same kind of waste, and this was the one place still doing it.
+     */
+    let mut word: Vec<char> = Vec::with_capacity(24);
+
+    for c in title.chars() {
+        if c.is_alphanumeric() {
+            word.push(lower_one(c));
+            continue;
+        }
+
+        if !word.is_empty() {
+            if near_miss(needle, &word, budget).is_some() {
+                return true;
+            }
+            word.clear();
+        }
+    }
+
+    !word.is_empty() && near_miss(needle, &word, budget).is_some()
 }
 
 /// How a query matched this command, if it did.
