@@ -293,15 +293,124 @@ fn file_name(path: &Path) -> String {
 /// Copying can fail while the browser is mid-write, and an older copy is a
 /// better answer than none, so the previous one is only replaced once a new one
 /// has been written in full.
+/// How long a copy nobody is using is kept.
+///
+/// Long enough that a browser somebody opens once a week does not have its
+/// copy thrown away between uses, short enough that a profile they deleted
+/// stops taking up space and stops existing.
+const KEEP_ORPHANS_FOR: Duration = Duration::from_secs(60 * 60 * 24);
+
+/// How often the sweep is worth doing.
+///
+/// It is a directory listing of a handful of files. Doing it on every search
+/// would be harmless and pointless: nothing it looks for changes faster than
+/// somebody uninstalls a browser.
+const SWEEP_EVERY: Duration = Duration::from_secs(60 * 60);
+
+/// When the copies were last tidied.
+static SWEPT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Deletes copies that no live profile claims.
+///
+/// ## Why this exists
+///
+/// Nothing ever deleted them. A copy is made per profile per browser, and on
+/// this machine one of them is 31 MB; they are replaced when they go stale and
+/// otherwise kept for good. Uninstall a browser, or delete a profile, and its
+/// copy stayed in Sill's own data directory until somebody went looking.
+///
+/// That is not only space. **These are copies of somebody's browsing
+/// history.** Keeping one for a profile that no longer exists is holding on to
+/// a record of where they went in a browser they have got rid of, which is not
+/// a thing a launcher should be doing quietly.
+///
+/// The age is a parameter rather than read from the constant, so the rule can
+/// be stated in a test without waiting a day or reaching for a crate that
+/// rewrites timestamps.
+///
+/// ## Why an age as well as a claim
+///
+/// A profile is only "live" if its browser is installed and its directory is
+/// where it was. A browser that is being upgraded, or a profile on a drive
+/// that is not plugged in this minute, would look gone. The day of grace is
+/// what stops a sweep during one of those moments from throwing away a copy
+/// that will be wanted again in an hour.
+pub fn sweep(into: &Path, claimed: &[PathBuf], keep_orphans_for: Duration) {
+    let Ok(entries) = std::fs::read_dir(into) else {
+        // No directory means nothing has been copied yet, which is the
+        // cheapest possible state and nothing to tidy.
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        if claimed.iter().any(|kept| kept == &path) {
+            continue;
+        }
+
+        // The write-ahead log belongs to the database beside it, so it is kept
+        // or dropped with it rather than judged on its own.
+        if let Some(name) = path.to_str() {
+            if name.ends_with("-wal")
+                && claimed
+                    .iter()
+                    .any(|kept| name.starts_with(&kept.to_string_lossy().to_string()))
+            {
+                continue;
+            }
+        }
+
+        let old_enough = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .map(|when| when.elapsed().unwrap_or_default() > keep_orphans_for)
+            .unwrap_or(false);
+
+        if old_enough {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+/// Sweeps, but not more than once an hour.
+fn sweep_occasionally(into: &Path, claimed: &[PathBuf]) {
+    let Ok(mut last) = SWEPT.lock() else {
+        return;
+    };
+
+    if last.is_some_and(|when| when.elapsed() < SWEEP_EVERY) {
+        return;
+    }
+
+    *last = Some(std::time::Instant::now());
+    drop(last);
+
+    sweep(into, claimed, KEEP_ORPHANS_FOR);
+}
+
+/// Where the copy of one file goes.
+///
+/// Its own function because two callers need the answer and they must agree:
+/// one makes the copy, the other lists what to keep, and a name that differed
+/// between them would sweep away every copy and make them all again.
+///
+/// Two browsers both call the file `History`, and every Firefox profile calls
+/// it `places.sqlite`, so the name alone is not enough to tell copies apart.
+/// The path they came from is.
+fn copy_path(source: &Path, into: &Path) -> PathBuf {
+    into.join(format!(
+        "{}-{}",
+        short_hash(&source.to_string_lossy()),
+        file_name(source)
+    ))
+}
+
 pub fn readable_copy(source: &Path, into: &Path, stale_after: Duration) -> Option<PathBuf> {
     // Two browsers both call the file `History`, and every Firefox profile
     // calls it `places.sqlite`, so the name alone is not enough to tell copies
     // apart. The path they came from is.
-    let copy = into.join(format!(
-        "{}-{}",
-        short_hash(&source.to_string_lossy()),
-        file_name(source)
-    ));
+    let copy = copy_path(source, into);
 
     if fresh_enough(&copy, stale_after) {
         return Some(copy);
@@ -695,12 +804,40 @@ pub fn search(query: &str, limit: usize, want: Want, scratch: &Path) -> Vec<Hit>
         return Vec::new();
     }
 
+    let found = profiles();
+
+    // Copies belonging to profiles that no longer exist are deleted, at most
+    // once an hour. See `sweep`: they are somebody's browsing history and
+    // nothing ever removed them.
+    sweep_occasionally(scratch, &copies_for(&found, scratch));
+
     let mut hits = Vec::new();
-    for profile in profiles() {
-        hits.extend(from_profile(&profile, query, want, scratch));
+    for profile in &found {
+        hits.extend(from_profile(profile, query, want, scratch));
     }
 
     rank(hits, query, limit)
+}
+
+/// Where each live profile's copy would be, whether or not it has been made.
+///
+/// The same name `readable_copy` computes, and it has to stay the same name:
+/// this is the list of paths the sweep is told to keep, and a name that
+/// differed by so much as a separator would delete every copy on every pass
+/// and then make them all again.
+fn copies_for(profiles: &[Profile], into: &Path) -> Vec<PathBuf> {
+    let mut kept = Vec::new();
+
+    for profile in profiles {
+        for source in [profile.history.as_ref(), profile.bookmarks.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            kept.push(copy_path(source, into));
+        }
+    }
+
+    kept
 }
 
 /// Where Windows keeps the list of installed browsers.
@@ -1520,5 +1657,80 @@ mod tests {
             assert!(search("github", 10, want, &dir).is_empty());
             assert!(!dir.join("copies").exists(), "a copy was taken anyway");
         }
+    }
+
+    /// A copy nobody claims is deleted once it is old enough.
+    ///
+    /// Nothing ever deleted these. One of them on this machine is 31 MB, and
+    /// every one is a copy of somebody's browsing history, kept in Sill's own
+    /// data directory for a browser they may have uninstalled months ago.
+    #[test]
+    fn an_orphaned_copy_is_swept() {
+        let dir = scratch("sweep-orphan");
+        let orphan = dir.join("abc123-History");
+        std::fs::write(&orphan, b"old history").expect("written");
+
+        // Nothing is kept for any length of time, so "old enough" is now.
+        super::sweep(&dir, &[], Duration::ZERO);
+
+        assert!(!orphan.exists(), "an orphaned copy was kept");
+    }
+
+    /// A copy a live profile claims is kept however old it is.
+    #[test]
+    fn a_claimed_copy_is_kept() {
+        let dir = scratch("sweep-claimed");
+        let claimed = dir.join("abc123-History");
+        std::fs::write(&claimed, b"still in use").expect("written");
+
+        super::sweep(&dir, &[claimed.clone()], Duration::ZERO);
+
+        assert!(claimed.exists(), "a copy still in use was deleted");
+    }
+
+    /// A recent orphan is left alone.
+    ///
+    /// A browser mid-upgrade, or a profile on a drive that is unplugged this
+    /// minute, looks gone. The day of grace is what stops a sweep during one
+    /// of those moments throwing away a copy that is wanted again in an hour.
+    #[test]
+    fn a_fresh_orphan_is_given_its_grace() {
+        let dir = scratch("sweep-fresh");
+        let fresh = dir.join("abc123-History");
+        std::fs::write(&fresh, b"copied a moment ago").expect("written");
+
+        super::sweep(&dir, &[], Duration::from_secs(60 * 60 * 24));
+
+        assert!(fresh.exists(), "a copy made moments ago was swept");
+    }
+
+    /// The write-ahead log goes with its database rather than on its own.
+    #[test]
+    fn a_log_is_kept_with_the_database_it_belongs_to() {
+        let dir = scratch("sweep-wal");
+        let db = dir.join("abc123-History");
+        let wal = dir.join("abc123-History-wal");
+        std::fs::write(&db, b"database").expect("written");
+        std::fs::write(&wal, b"log").expect("written");
+
+        super::sweep(&dir, &[db.clone()], Duration::ZERO);
+
+        assert!(db.exists());
+        assert!(
+            wal.exists(),
+            "the log was swept out from under its database"
+        );
+    }
+
+    /// And a log whose database is gone goes with it.
+    #[test]
+    fn a_log_with_no_database_left_is_swept_too() {
+        let dir = scratch("sweep-lone-wal");
+        let wal = dir.join("abc123-History-wal");
+        std::fs::write(&wal, b"log").expect("written");
+
+        super::sweep(&dir, &[], Duration::ZERO);
+
+        assert!(!wal.exists(), "a log with nothing to belong to was kept");
     }
 }

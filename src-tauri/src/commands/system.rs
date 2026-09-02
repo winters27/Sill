@@ -481,21 +481,33 @@ pub(crate) async fn finish_markup(app: AppHandle, png: String) -> Result<String,
 
     crate::lazy_windows::hide(&app, "markup");
 
+    // The same tidy-up cancelling does, and for the same reason. Only
+    // cancelling did it, so finishing a markup left a full screenshot in
+    // memory for the rest of the run: on this machine that is a 2560 by 1440
+    // PNG, and it is a picture of somebody's screen.
+    forget_marking(&app);
+
     Ok(format!("Copied a marked-up {width}x{height} picture"))
+}
+
+/// Drops the picture waiting to be marked up.
+///
+/// It is a picture of somebody's screen and nothing needs it once the window
+/// is gone. One function because both ways out of that window have to do it
+/// and only one of them did.
+fn forget_marking(app: &AppHandle) {
+    if let Some(pending) = app.try_state::<Marking>() {
+        if let Ok(mut held) = pending.0.lock() {
+            *held = None;
+        }
+    }
 }
 
 /// Closes the markup window without keeping anything.
 #[tauri::command]
 pub(crate) async fn cancel_markup(app: AppHandle) -> Result<(), String> {
     crate::lazy_windows::hide(&app, "markup");
-
-    // Dropped rather than left lying about: it is a picture of somebody's
-    // screen and nothing needs it once the window is gone.
-    if let Some(pending) = app.try_state::<Marking>() {
-        if let Ok(mut held) = pending.0.lock() {
-            *held = None;
-        }
-    }
+    forget_marking(&app);
 
     Ok(())
 }
