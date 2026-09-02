@@ -33,6 +33,17 @@ pub(crate) struct HostState {
     pub(crate) host_js: Arc<PathBuf>,
     /// When the host was last asked for, which is what the watchdog measures.
     pub(crate) last_used: Arc<std::sync::Mutex<std::time::Instant>>,
+    /// Where Node was found, once it has been.
+    ///
+    /// Looking costs a process, because `which` runs `node --version` and
+    /// waits: about forty milliseconds, and it was paid on every cold
+    /// activation *under the lock above*. Held here rather than in a `static`,
+    /// which is what rule 2 refuses, and this is the state that already owns
+    /// everything about running extensions.
+    ///
+    /// Only a positive answer is kept. Somebody can install Node while Sill is
+    /// open and the store is where they would try again.
+    pub(crate) node: Arc<std::sync::Mutex<Option<PathBuf>>>,
 }
 
 /// The user's own preferences.

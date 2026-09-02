@@ -460,11 +460,12 @@ pub struct Done {
 
 /// Step two: install the dependencies, build, and record where it came from.
 ///
-/// `esbuild` is passed in for the same reason `data_dir` is: it is the one
-/// thing here that has to be found rather than known, and the command layer is
-/// where that lookup belongs.
+/// `esbuild` and `node` are passed in for the same reason `data_dir` is: they
+/// are the things here that have to be found rather than known, and the
+/// command layer is where that lookup belongs. Node in particular is found by
+/// running it, which is a process this must not spawn per install.
 #[cfg(windows)]
-pub fn finish(data_dir: &Path, esbuild: &Path, name: &str) -> Result<Done, String> {
+pub fn finish(data_dir: &Path, esbuild: &Path, node: &Path, name: &str) -> Result<Done, String> {
     let name = safe_name(name).ok_or_else(|| format!("{name} is not a name this can install"))?;
 
     let home = staging_home(data_dir);
@@ -477,8 +478,7 @@ pub fn finish(data_dir: &Path, esbuild: &Path, name: &str) -> Result<Done, Strin
     let origin = super::origin_of(&home, name)
         .ok_or_else(|| "Nothing recorded what was staged. Fetch it again.".to_string())?;
 
-    let node = crate::host::node_exe().ok_or(crate::host::NO_NODE)?;
-    npm_install(&node, &staged)?;
+    npm_install(node, &staged)?;
 
     let home = super::extensions_home(data_dir);
     let installed = crate::extension_install::install_into(esbuild, &home, &staged, &origin)?;

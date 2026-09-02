@@ -39,9 +39,6 @@ const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 /// thirtieth.
 const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(60 * 60 * 24);
 
-/// When entries were last cleared out.
-static PRUNED: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
-
 /// Clears out entries past their retention, at most once a day.
 ///
 /// Called from the recording path rather than a timer, because a copy is the
@@ -53,7 +50,7 @@ fn prune_occasionally(clipboard: &Clipboard, retain_days: u32) {
     }
 
     {
-        let Ok(mut last) = PRUNED.lock() else {
+        let Ok(mut last) = clipboard.pruned.lock() else {
             return;
         };
 
@@ -92,6 +89,12 @@ pub(crate) const RETRY_DELAY: std::time::Duration = std::time::Duration::from_mi
 #[derive(Clone)]
 pub struct Clipboard {
     store: Arc<Mutex<Store>>,
+    /// When entries past their retention were last cleared out.
+    ///
+    /// Held here rather than in a `static`, which is what rule 2 refuses: this
+    /// struct is already the managed state for the clipboard and the fact
+    /// belongs to it. It also means a test can have its own.
+    pruned: Arc<Mutex<Option<std::time::Instant>>>,
     /// Set while Sill is itself writing to the clipboard, so a paste out of
     /// the history does not come straight back in as a new entry.
     ignoring: Arc<AtomicUsize>,
@@ -174,6 +177,7 @@ impl Clipboard {
 
         Self {
             store: Arc::new(Mutex::new(Store::open(&path).expect("a temp store opens"))),
+            pruned: Arc::new(Mutex::new(None)),
             ignoring: Arc::new(AtomicUsize::new(0)),
             suspended: Arc::new(AtomicBool::new(false)),
             skipped: Arc::new(Mutex::new(None)),
@@ -189,6 +193,7 @@ impl Clipboard {
         match Store::open(&path) {
             Ok(store) => Some(Self {
                 store: Arc::new(Mutex::new(store)),
+                pruned: Arc::new(Mutex::new(None)),
                 ignoring: Arc::new(AtomicUsize::new(0)),
                 suspended: Arc::new(AtomicBool::new(false)),
                 skipped: Arc::new(Mutex::new(None)),

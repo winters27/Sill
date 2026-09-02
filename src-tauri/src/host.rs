@@ -68,31 +68,21 @@ pub(crate) const NO_NODE: &str =
 /// desktop application does not inherit the shell's `PATH` on Windows in the
 /// way a terminal does, and a Node installed while Sill was running is not in
 /// the environment Sill started with.
-/// Where Node was found, once it has been.
+/// The Node interpreter, remembered once it has been found.
 ///
-/// Looking costs a process: `which` runs `node --version` and waits for it,
-/// because `PATHEXT`, shims and store aliases make walking `PATH` by hand
-/// wrong in ways that only show up on somebody else's computer. That is a
-/// reasonable price to pay once and an unreasonable one to pay on **every cold
-/// activation, under the host lock**, and again on every store readiness
-/// check.
-///
-/// Only a positive answer is kept. Somebody can install Node while Sill is
-/// open, and the store is exactly where they would try again afterwards, so a
-/// "no" has to stay askable. A "yes" that later becomes wrong shows up as a
-/// spawn failure with a message that names the file, which is the same thing
-/// that would have happened anyway.
-static FOUND: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
-
-pub(crate) fn node_exe() -> Option<PathBuf> {
-    if let Some(known) = FOUND.lock().ok().and_then(|held| held.clone()) {
+/// Takes the slot that holds the answer rather than reaching for a global one,
+/// and takes the slot rather than the whole `HostState`, because that is the
+/// dependency it actually has. A test can then hand it an empty one instead of
+/// standing up an extension host to ask a question about a file path.
+pub fn node_exe(remembered: &std::sync::Mutex<Option<PathBuf>>) -> Option<PathBuf> {
+    if let Some(known) = remembered.lock().ok().and_then(|held| held.clone()) {
         return Some(known);
     }
 
     let found = look_for_node();
 
     if let Some(path) = found.as_ref() {
-        if let Ok(mut held) = FOUND.lock() {
+        if let Ok(mut held) = remembered.lock() {
             *held = Some(path.clone());
         }
     }
@@ -248,7 +238,7 @@ pub(crate) async fn host_of(state: &HostState) -> Result<Arc<ExtHost>, String> {
     // Asked before spawning, so the answer names the missing thing rather
     // than the symptom. Failing at the spawn gives "The system cannot find the
     // file specified", which is true of an interpreter nobody knew was needed.
-    let Some(node) = node_exe() else {
+    let Some(node) = node_exe(&state.node) else {
         return Err(NO_NODE.to_string());
     };
 
@@ -385,8 +375,12 @@ mod finding_node {
     /// answer does not cost a process.
     #[test]
     fn the_second_answer_costs_nothing() {
+        // A slot of its own, which is the point: the answer used to live in a
+        // `static` and a test could neither give it a fresh one nor see it.
+        let state = std::sync::Mutex::new(None);
+
         let first = std::time::Instant::now();
-        let found = super::node_exe();
+        let found = super::node_exe(&state);
         let looking = first.elapsed();
 
         if found.is_none() {
@@ -397,7 +391,7 @@ mod finding_node {
         }
 
         let again = std::time::Instant::now();
-        let _ = super::node_exe();
+        let _ = super::node_exe(&state);
         let remembering = again.elapsed();
 
         assert!(

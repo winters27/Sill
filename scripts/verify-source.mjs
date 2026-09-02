@@ -333,6 +333,130 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * A static mutable is a decision, not a convenience.
+ *
+ * Rule 2 of the constitution forbids "static mutable caches" and
+ * "module-global state that effectively behaves as a singleton", even when
+ * thread-safe. The reason is not thread safety: it is that a global cache is
+ * unreachable from a test, invisible in a signature, and shared by everything
+ * whether or not that was intended.
+ *
+ * Five were added in one afternoon of performance work, each one obviously
+ * right on its own, which is exactly how this rule gets eroded. They are
+ * managed state now. What is left below is named, with why, so a new one has
+ * to be argued for here rather than simply appearing.
+ */
+{
+  const ALLOWED = {
+    // The `say!` macro is called from everywhere, including code that has no
+    // handle to anything and no business acquiring one. A logger threaded
+    // through every call site would be a worse design than this.
+    "log.rs": ["FILE", "PATH", "WRITTEN"],
+
+    /*
+     * A `WH_KEYBOARD_LL` callback is a bare `extern "system" fn`. Windows
+     * gives it no context pointer, so there is nowhere to put a handle and no
+     * way to reach one. Every one of these is read or written from inside
+     * that callback, which is an operating system constraint rather than a
+     * design choice.
+     */
+    "dictation/hotkey.rs": [
+      "CHORD",
+      "CHORD_KEY_SEEN",
+      "GENERATION",
+      "HOOK_INSTALLED",
+      "INJECTED_SEEN",
+      "KEYS_SEEN",
+      "LAST_MODS",
+      "LISTENING",
+      "OWN_SEEN",
+      "SENDER",
+      "TRIGGERS_SEEN",
+      "TRIGGER_HELD",
+    ],
+    "snippets/expander.rs": ["APP", "EXPANDER", "KEYS_SEEN", "START"],
+
+    // Read from `restore_foreground`, which runs while a window is being put
+    // away and has only the window. Worth moving; not worth moving badly.
+    "summon.rs": ["PREVIOUS_FOREGROUND"],
+
+    /*
+     * Known violations, inherited rather than introduced. Each is a
+     * short-lived cache that belongs on a service: the audit lists them under
+     * P2-07 and they are not fixed yet. Named here so the count cannot grow
+     * quietly while they wait.
+     */
+    "app_volume.rs": ["LAST"],
+    "commands/store.rs": ["WATCHING"],
+    "everything_ipc.rs": ["QUERIES"],
+    "icons.rs": ["CACHE"],
+    "sleep.rs": ["GENERATIONS"],
+    "system.rs": ["LAST"],
+    "windowing.rs": ["LAST"],
+  };
+
+  const held = /^\s*static\s+([A-Z][A-Z0-9_]*)\s*:/gm;
+
+  /*
+   * Where `thread_local!` blocks are, so their contents can be skipped.
+   *
+   * A thread-local is not a singleton. It is per-thread state, which is the
+   * opposite of what rule 2 is about: nothing is shared and nothing is visible
+   * from another thread. The two in this codebase exist because a window
+   * procedure and a COM apartment are both per-thread by definition.
+   */
+  const perThread = (text) => {
+    const spans = [];
+
+    for (const start of text.matchAll(/thread_local!\s*\{/g)) {
+      let depth = 0;
+      let at = start.index + start[0].length - 1;
+
+      for (; at < text.length; at += 1) {
+        if (text[at] === "{") depth += 1;
+        else if (text[at] === "}") {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+
+      spans.push([start.index, at]);
+    }
+
+    return spans;
+  };
+
+  for (const file of sources("src-tauri/src")) {
+    const text = readFileSync(file, "utf8");
+    const relative = file.replace(/\\/g, "/").replace("src-tauri/src/", "");
+    const allowed = ALLOWED[relative] ?? [];
+    const locals = perThread(text);
+
+    for (const found of text.matchAll(held)) {
+      const name = found[1];
+
+      // A plain constant is not state. Only something with interior
+      // mutability is what the rule is about.
+      const line = text.slice(found.index, text.indexOf("\n", found.index + 1));
+      if (!/Mutex|OnceLock|Atomic|ArcSwap|RwLock|Cell/.test(line)) continue;
+
+      if (allowed.includes(name)) continue;
+      if (locals.some(([from, to]) => found.index > from && found.index < to)) {
+        continue;
+      }
+
+      fail(
+        file,
+        lineOf(text, found.index),
+        `\`static ${name}\` is module-global mutable state, which rule 2 ` +
+          "refuses even when thread-safe. Put it on a managed service, or " +
+          "name it in the allowlist in this check with the reason it cannot be",
+      );
+    }
+  }
+}
+
+/*
  * Nothing is read from disk before Sill answers its own hotkey.
  *
  * The number somebody feels on a cold start is "how long until the key

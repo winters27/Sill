@@ -104,19 +104,46 @@ pub async fn find(name: &str) -> Result<Place, String> {
 /// is the same length, so in the ordinary case one poll produces one call.
 const FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
-/// The last reading, and what it was a reading of.
+/// The last reading, kept for as long as it is worth reusing.
 ///
-/// The module comment has always said this is in Rust so it "can be cached
-/// across summons". It could be, and it was not: every call went to the
-/// network. That mattered more after widgets learned to stop while hidden,
+/// A managed service rather than a `static`, which is what rule 2 refuses.
+/// The module comment has always said this is in Rust so the reading "can be
+/// cached across summons"; it could be, and every call went to the network.
+/// That started mattering more when widgets learned to stop while hidden,
 /// because coming back takes a reading immediately, so ten summons in ten
-/// minutes were ten forecasts fetched for the same minute of the same day.
-///
-/// Keyed by the place and the unit together. Asking for Fahrenheit after
-/// Celsius is a different answer to the same question, and handing back the
-/// other one would show the wrong number rather than a stale one.
-static LAST: std::sync::Mutex<Option<(String, bool, Weather, std::time::Instant)>> =
-    std::sync::Mutex::new(None);
+/// minutes were ten forecasts of the same minute of the same day.
+#[derive(Default)]
+pub struct Forecast {
+    last: std::sync::Mutex<Option<(String, bool, Weather, std::time::Instant)>>,
+}
+
+impl Forecast {
+    /// The current conditions at a place, from the last reading when it is
+    /// recent enough.
+    ///
+    /// Keyed by the place and the unit together. Asking for Fahrenheit after
+    /// Celsius is a different answer to the same question, and handing back
+    /// the other one would show the wrong number rather than a stale one.
+    pub async fn at(&self, place: &Place, fahrenheit: bool) -> Result<Weather, String> {
+        let key = keyed(place);
+
+        if let Ok(held) = self.last.lock() {
+            if let Some((had, unit, weather, when)) = held.as_ref() {
+                if *had == key && *unit == fahrenheit && when.elapsed() < FRESH_FOR {
+                    return Ok(weather.clone());
+                }
+            }
+        }
+
+        let fetched = fetch(place, fahrenheit).await?;
+
+        if let Ok(mut held) = self.last.lock() {
+            *held = Some((key, fahrenheit, fetched.clone(), std::time::Instant::now()));
+        }
+
+        Ok(fetched)
+    }
+}
 
 /// What identifies a place for the cache.
 ///
@@ -125,27 +152,6 @@ static LAST: std::sync::Mutex<Option<(String, bool, Weather, std::time::Instant)
 /// what the answer depends on.
 fn keyed(place: &Place) -> String {
     format!("{:.4},{:.4}", place.latitude, place.longitude)
-}
-
-/// The current conditions at a place, from the last reading when it is recent.
-pub async fn at(place: &Place, fahrenheit: bool) -> Result<Weather, String> {
-    let key = keyed(place);
-
-    if let Ok(held) = LAST.lock() {
-        if let Some((had, unit, weather, when)) = held.as_ref() {
-            if *had == key && *unit == fahrenheit && when.elapsed() < FRESH_FOR {
-                return Ok(weather.clone());
-            }
-        }
-    }
-
-    let fetched = fetch(place, fahrenheit).await?;
-
-    if let Ok(mut held) = LAST.lock() {
-        *held = Some((key, fahrenheit, fetched.clone(), std::time::Instant::now()));
-    }
-
-    Ok(fetched)
 }
 
 /// Asks the service, with nothing remembered.

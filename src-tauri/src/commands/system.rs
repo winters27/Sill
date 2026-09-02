@@ -697,7 +697,9 @@ pub(crate) async fn weather_now(app: tauri::AppHandle) -> Result<crate::weather:
         return Err("No place is set. Choose one in Settings under Widgets.".to_string());
     }
 
-    crate::weather::at(&place, fahrenheit).await
+    app.state::<crate::weather::Forecast>()
+        .at(&place, fahrenheit)
+        .await
 }
 
 /// Saves the current arrangement of windows under a name.

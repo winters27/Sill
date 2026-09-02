@@ -1083,6 +1083,18 @@ fn manage_before_windows(app: &tauri::App) {
     });
 
     /*
+     * The emoji corpus and the last forecast, before any window exists.
+     *
+     * `search_commands` resolves the first one, and the launcher can ask it a
+     * question before the setup hook has run: Tauri creates every window
+     * before calling that hook, so anything a first question touches has to be
+     * managed here. `tests/startup_order.rs` says so, and said so about these
+     * two the moment they were added in the wrong place.
+     */
+    app.manage(emoji::Emoji::default());
+    app.manage(weather::Forecast::default());
+
+    /*
      * The file index's container, empty, whether or not anything will fill it.
      *
      * It used to be managed only when there were folders to index, which made
@@ -1208,6 +1220,7 @@ pub fn run() {
                 )),
                 host_js: Arc::new(host_js(&handle)),
                 last_used: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
+                node: Arc::new(std::sync::Mutex::new(None)),
             });
 
             /*

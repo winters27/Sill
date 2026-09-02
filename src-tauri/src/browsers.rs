@@ -300,16 +300,6 @@ fn file_name(path: &Path) -> String {
 /// stops taking up space and stops existing.
 const KEEP_ORPHANS_FOR: Duration = Duration::from_secs(60 * 60 * 24);
 
-/// How often the sweep is worth doing.
-///
-/// It is a directory listing of a handful of files. Doing it on every search
-/// would be harmless and pointless: nothing it looks for changes faster than
-/// somebody uninstalls a browser.
-const SWEEP_EVERY: Duration = Duration::from_secs(60 * 60);
-
-/// When the copies were last tidied.
-static SWEPT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
-
 /// Deletes copies that no live profile claims.
 ///
 /// ## Why this exists
@@ -371,22 +361,6 @@ pub fn sweep(into: &Path, claimed: &[PathBuf], keep_orphans_for: Duration) {
             let _ = std::fs::remove_file(&path);
         }
     }
-}
-
-/// Sweeps, but not more than once an hour.
-fn sweep_occasionally(into: &Path, claimed: &[PathBuf]) {
-    let Ok(mut last) = SWEPT.lock() else {
-        return;
-    };
-
-    if last.is_some_and(|when| when.elapsed() < SWEEP_EVERY) {
-        return;
-    }
-
-    *last = Some(std::time::Instant::now());
-    drop(last);
-
-    sweep(into, claimed, KEEP_ORPHANS_FOR);
 }
 
 /// Where the copy of one file goes.
@@ -806,10 +780,16 @@ pub fn search(query: &str, limit: usize, want: Want, scratch: &Path) -> Vec<Hit>
 
     let found = profiles();
 
-    // Copies belonging to profiles that no longer exist are deleted, at most
-    // once an hour. See `sweep`: they are somebody's browsing history and
-    // nothing ever removed them.
-    sweep_occasionally(scratch, &copies_for(&found, scratch));
+    /*
+     * Copies belonging to profiles that no longer exist are deleted here.
+     *
+     * On every search rather than on a timer, and with no "not more than once
+     * an hour" to remember. It is a directory listing of a handful of files,
+     * it only runs behind the debounce that already holds this whole search
+     * back, and the throttle it replaces was a static mutable of exactly the
+     * kind rule 2 forbids. Cheaper to do than to remember not to do.
+     */
+    sweep(scratch, &copies_for(&found, scratch), KEEP_ORPHANS_FOR);
 
     let mut hits = Vec::new();
     for profile in &found {

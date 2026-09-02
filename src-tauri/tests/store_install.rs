@@ -167,7 +167,9 @@ async fn a_real_extension_installs_from_the_store() {
     );
 
     // ------------------------------------------------------------ step two
-    let done = install::finish(&root, &esbuild(), EXTENSION).expect("it builds");
+    let node = sill_lib::host::node_exe(&std::sync::Mutex::new(None))
+        .expect("this test needs Node on PATH");
+    let done = install::finish(&root, &esbuild(), &node, EXTENSION).expect("it builds");
 
     println!(
         "installed {} at {}: {}",

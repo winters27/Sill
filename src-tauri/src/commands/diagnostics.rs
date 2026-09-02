@@ -88,7 +88,8 @@ pub(crate) async fn diagnostics(
         // Asked live for the same reason Everything is: somebody can install
         // Node while Sill is open, and the panel showing this is exactly where
         // they would look afterwards.
-        node_installed: crate::host::node_exe().is_some(),
+        node_installed: crate::host::node_exe(&app.state::<crate::state::HostState>().node)
+            .is_some(),
         extensions: extension_summary(&index.commands),
         by_source: source_summary(&index.commands),
         keyboard_hook_installed: hook.0,

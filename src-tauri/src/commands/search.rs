@@ -34,6 +34,7 @@ pub(crate) async fn search_commands(
     app: AppHandle,
     state: State<'_, RegistryState>,
     prefs: State<'_, PrefsState>,
+    emoji: State<'_, crate::emoji::Emoji>,
     query: String,
 ) -> Result<Vec<registry::SearchResult>, String> {
     let (excluded, hidden, tone) = {
@@ -137,7 +138,7 @@ pub(crate) async fn search_commands(
      * rule lived in TypeScript and the list was rebuilt twice for one
      * keystroke.
      */
-    let inline = inline_emoji(&query, &index, &ranking, tone);
+    let inline = inline_emoji(&query, &index, &ranking, &emoji, tone);
     splice_suggestions(&mut results, inline);
 
     // Above everything, because when a query IS a sum the answer is the only
@@ -284,8 +285,11 @@ pub(crate) async fn search_app_volume(
     // An empty query is the whole list, in the order the audio engine gave
     // them, which puts what started playing most recently first.
     if query.trim().is_empty() {
+        // Cloned per row rather than by taking the vector, because the corpus
+        // is shared and the picker is one of several readers of it.
         return Ok(records
-            .into_iter()
+            .iter()
+            .cloned()
             .map(registry::SearchResult::from_record)
             .collect());
     }
@@ -377,6 +381,7 @@ pub(crate) async fn search_windows(
 pub(crate) async fn search_emoji(
     state: State<'_, RegistryState>,
     prefs: State<'_, PrefsState>,
+    emoji: State<'_, crate::emoji::Emoji>,
     query: String,
     // Whether these are being offered beside results that were asked for.
     //
@@ -390,9 +395,9 @@ pub(crate) async fn search_emoji(
 ) -> Result<Vec<registry::SearchResult>, String> {
     let tone = prefs.inner.lock().await.emoji.tone;
 
-    let records = tokio::task::spawn_blocking(move || crate::emoji::records(tone))
-        .await
-        .unwrap_or_default();
+    // The same corpus the inline search uses, so the picker does not build a
+    // second copy of two thousand records every time it is opened.
+    let records = emoji.records(tone);
 
     let index = state.index();
     let ranking = state.ranking();
@@ -401,8 +406,11 @@ pub(crate) async fn search_emoji(
     // by how Unicode arranged them: smileys, people, animals, food. Ranking
     // that by frecency would scatter related emoji across the list.
     if query.trim().is_empty() {
+        // Cloned per row rather than by taking the vector, because the corpus
+        // is shared now and the picker is one of several readers of it.
         return Ok(records
-            .into_iter()
+            .iter()
+            .cloned()
             .map(registry::SearchResult::from_record)
             .collect());
     }
@@ -476,6 +484,7 @@ fn inline_emoji(
     query: &str,
     index: &crate::state::Index,
     ranking: &crate::state::Ranking,
+    emoji: &crate::emoji::Emoji,
     tone: crate::emoji::Tone,
 ) -> Vec<registry::RankedCommand> {
     if query.trim().is_empty() {
@@ -485,7 +494,7 @@ fn inline_emoji(
     // Shared and built once per tone. This runs on every keystroke, and
     // building two thousand records each time was a megabyte of allocation
     // thrown away a moment later.
-    let records = crate::emoji::records_for(tone);
+    let records = emoji.records(tone);
 
     registry::search_excluding(
         records.iter(),

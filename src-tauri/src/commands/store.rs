@@ -180,12 +180,19 @@ pub(crate) async fn store_install(
         crate::extension_install::esbuild_exe(&app).ok_or(crate::extension_install::NO_ESBUILD)?;
     let data_dir = crate::state::data_dir(&app);
 
+    // Found here rather than inside the install, for the same reason esbuild
+    // is: finding Node means running it, and this is the layer that holds the
+    // answer.
+    let node = crate::host::node_exe(&app.state::<crate::state::HostState>().node)
+        .ok_or(crate::host::NO_NODE)?;
+
     // Off the UI thread: npm is a subprocess that takes seconds and esbuild is
     // one more per command.
-    let done =
-        tauri::async_runtime::spawn_blocking(move || install::finish(&data_dir, &esbuild, &name))
-            .await
-            .map_err(|err| format!("the install did not finish: {err}"))??;
+    let done = tauri::async_runtime::spawn_blocking(move || {
+        install::finish(&data_dir, &esbuild, &node, &name)
+    })
+    .await
+    .map_err(|err| format!("the install did not finish: {err}"))??;
 
     // **The join.** What the screen showed is what gets granted, keyed by the
     // extension's own name because that is what the worker asks about.
@@ -435,6 +442,8 @@ pub(crate) async fn store_pins(app: AppHandle) -> Result<Vec<Pinned>, String> {
 /// try again afterwards. Named once here so the store does not reason about
 /// Node in two places.
 #[tauri::command]
-pub(crate) async fn store_ready() -> Result<bool, String> {
-    Ok(crate::host::node_exe().is_some())
+pub(crate) async fn store_ready(
+    host: tauri::State<'_, crate::state::HostState>,
+) -> Result<bool, String> {
+    Ok(crate::host::node_exe(&host.node).is_some())
 }
