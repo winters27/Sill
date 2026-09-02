@@ -519,9 +519,19 @@ export function activateHandler(
   return invoke("activate_handler", { session, handler, args });
 }
 
-/** Runs an action Raycast implements itself, e.g. Action.CopyToClipboard. */
-export function performBuiltin(tag: string, props: Record<string, unknown>): Promise<string> {
-  return invoke<string>("perform_builtin", { tag, props });
+/**
+ * Runs an action Raycast implements itself, e.g. Action.CopyToClipboard.
+ *
+ * The session goes with it because these reach the same capabilities the
+ * extension's own API calls do, and Rust asks the same question about them.
+ * It is an id to be looked up, not a claim to be believed.
+ */
+export function performBuiltin(
+  session: string,
+  tag: string,
+  props: Record<string, unknown>,
+): Promise<string> {
+  return invoke<string>("perform_builtin", { session, tag, props });
 }
 
 /**
@@ -786,12 +796,17 @@ export interface ActionInfo {
   primary: boolean;
 }
 
-/** How to reverse an action that said it could be reversed. */
-export type UndoToken = { kind: "restoreClipboard"; text: string };
-
 export interface ActionOutcome {
   message: string;
-  undo?: UndoToken;
+  /**
+   * Which entry in the activity log this became, when it can be taken back.
+   *
+   * An id rather than a description of how to reverse it. The window used to
+   * be handed the reversal itself and to hand it back on Ctrl+Z, which never
+   * told the log anything, so the same action stayed undoable and "Undo Last
+   * Action" would do it a second time.
+   */
+  undoneBy?: number;
   session?: string;
 }
 
@@ -835,8 +850,13 @@ export function asTarget(command: RankedCommand): ActionTarget {
   };
 }
 
-export function undoAction(undo: UndoToken): Promise<string> {
-  return invoke<string>("undo_action", { undo });
+/**
+ * Takes back one thing that was done, by naming its place in the log.
+ *
+ * The log spends the undo, so asking twice is refused rather than done twice.
+ */
+export function undoAction(id: number): Promise<string> {
+  return invoke<string>("undo_activity", { id });
 }
 
 /**

@@ -48,7 +48,21 @@ static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 /// work twice. Extraction is a millisecond of shell and GDI calls, and rows
 /// ask for icons lazily, so there is nothing to gain from overlapping it.
 pub fn icon_data_uri(path: &str) -> Option<String> {
-    let mut guard = CACHE.lock().expect("icon cache poisoned");
+    /*
+     * Poisoning is recovered from rather than propagated.
+     *
+     * The lock is held across `extract`, which is shell and GDI calls on paths
+     * that come from the disk, so it is the most likely thing in this file to
+     * panic. `expect` here meant that one bad icon poisoned the cache and
+     * **every later call panicked**, for the life of the process. `app_icon`
+     * is a synchronous command, so that is a panic on the main thread with no
+     * unwinding across the boundary: the whole launcher goes, silently.
+     *
+     * The map is only ever left mid-insert, so the worst a recovered lock
+     * holds is a missing entry, which the next call fills in. Same reasoning
+     * as `clipboard::monitor::store`.
+     */
+    let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let cache = guard.get_or_insert_with(Cache::default);
 
     cache.clock += 1;

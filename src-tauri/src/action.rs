@@ -125,8 +125,20 @@ pub struct Outcome {
     /// One line, shown to the user. Past tense, because it already happened.
     pub message: String,
     /// Absent for the great majority of actions. See [`Undo`].
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// **Never sent to the window.** It is the recipe for reversing something,
+    /// and the window's job is to ask for that by name rather than to hold it:
+    /// a descriptor sent out and handed back could be replayed as often as
+    /// somebody pressed the key, which is what `undone` is for.
+    #[serde(skip)]
     pub undo: Option<Undo>,
+    /// Which entry in the activity log this became, when it can be taken back.
+    ///
+    /// The window keeps this and passes it to `undo_activity`, so the log
+    /// spends the undo and the same action cannot be reversed twice. Absent
+    /// when there is nothing to reverse.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub undone_by: Option<u64>,
     /// An extension command that is now running and needs rendering.
     ///
     /// The one piece of an action's result that outlives the action. It is
@@ -150,6 +162,7 @@ impl Outcome {
         Self {
             message: message.into(),
             undo: None,
+            undone_by: None,
             session: None,
             text: None,
         }
@@ -258,9 +271,20 @@ impl ActionRegistry {
         action: &dyn Action,
         object: &Object,
     ) -> Result<Outcome, String> {
-        let outcome = action.run(ctx, object).await?;
+        let mut outcome = action.run(ctx, object).await?;
 
-        crate::activity::record(ctx, action.title(), &object.title, &outcome);
+        /*
+         * Recorded here, and the entry's id goes back with the result.
+         *
+         * The window used to be handed the undo descriptor itself and to hand
+         * it back on Ctrl+Z, which never touched the log. So the entry stayed
+         * undoable and "Undo Last Action", or the Activity panel, would
+         * cheerfully do the same thing again: move a file back to a folder it
+         * was already in, or restore a clipboard over the one just restored.
+         * Naming the entry instead means the log decides, once.
+         */
+        let id = crate::activity::record(ctx, action.title(), &object.title, &outcome);
+        outcome.undone_by = outcome.undo.as_ref().and(id).filter(|id| *id != 0);
 
         Ok(outcome)
     }

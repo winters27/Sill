@@ -606,21 +606,32 @@ async fn run_action(app: &AppHandle, action: &str, target: &str, kind: &str) -> 
 
     let ctx = crate::action::ActionCtx { app: app.clone() };
 
-    // Borrowed again rather than held across the wait above, for the same
-    // reason it was copied out of in the first place.
+    /*
+     * Through the registry, exactly as the launcher and a bound key are.
+     *
+     * This called `run` directly, which is the one path that skips
+     * `ActionRegistry::perform`, and skipping it costs both halves of what
+     * perform is for: **nothing a model did appeared in the activity log**,
+     * and the undo it returned was read for a boolean and then dropped. So the
+     * one caller whose actions somebody is most likely to want to take back
+     * was the one caller whose actions could not be.
+     *
+     * Borrowed again rather than held across the wait above, for the same
+     * reason it was copied out of in the first place.
+     */
     let outcome = {
         let registry = app.state::<crate::action::ActionRegistry>();
         let Some(found) = registry.get(action) else {
             return json!({ "error": format!("Sill has no action called {action}.") });
         };
-        found.run(&ctx, &object).await
+        registry.perform(&ctx, found, &object).await
     };
 
     match outcome {
         Ok(outcome) => json!({
             "done": true,
             "said": outcome.message,
-            "undoable": outcome.undo.is_some(),
+            "undoable": outcome.undone_by.is_some(),
         }),
         Err(why) => json!({ "done": false, "error": why }),
     }

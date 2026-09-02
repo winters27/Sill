@@ -99,6 +99,16 @@ impl ApiLayer {
         }
     }
 
+    /// Who decides whether a capability may be used.
+    ///
+    /// Exposed so the built-in actions the window performs on an extension's
+    /// behalf ask the same question the API layer does. They reach the same
+    /// capabilities by another route, and for a while they did it without
+    /// asking anybody.
+    pub fn permits(&self) -> &Arc<dyn Permits> {
+        &self.permits
+    }
+
     /// Handles one API call from a session. `extension` scopes storage.
     ///
     /// Async because two of these wait on the world: a confirmation waits for

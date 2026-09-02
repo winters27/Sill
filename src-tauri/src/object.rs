@@ -188,6 +188,15 @@ impl ObjectKind {
                 | Self::Folder
                 | Self::SystemSetting
                 | Self::Quicklink
+                // A web search and a remembered page both end in a browser,
+                // for the same reason a quicklink does. They were missing, so
+                // the launcher restored whatever had been in front on top of
+                // the browser it had just handed the question to.
+                | Self::Url
+                | Self::Search
+                // Restoring an arrangement puts other people's windows in
+                // front by definition.
+                | Self::Workspace
                 // Switching to a window is the clearest case of all: the whole
                 // point is that something else ends up in front.
                 | Self::Window

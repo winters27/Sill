@@ -942,6 +942,11 @@ fn manage_before_windows(app: &tauri::App) {
     // reading the preferences file.
     log::open(&data_dir);
 
+    // And before anything that could fall over, so that when something does
+    // there is a line saying where. A release build has no console, so without
+    // this a panic is entirely silent.
+    log::catch_panics();
+
     // Preferences first: the hotkey and the backdrop both come from them, so
     // reading them later would mean applying a default and then immediately
     // replacing it.
@@ -1244,6 +1249,26 @@ pub fn run() {
             if let Some(since_start) = timing::since_process_start() {
                 if let Some(timings) = handle.try_state::<timing::Timings>() {
                     timings.ready(since_start);
+                }
+            }
+
+            /*
+             * The windows that exist at startup go to sleep too.
+             *
+             * `sleep_soon` was only ever armed on dismissal, so between
+             * starting and the first summon-and-dismiss both renderers stayed
+             * awake indefinitely. On a machine where Sill opens at login and
+             * is not used until the afternoon, that is the whole morning spent
+             * holding two live Chromium renderers for a window nobody has
+             * looked at, which is exactly the state rule 23 is about.
+             *
+             * Armed rather than suspended now, because it is the same twenty
+             * seconds the dismissal path waits: a launcher summoned five
+             * seconds after login should not have to wake anything up.
+             */
+            for label in ["main", "traymenu"] {
+                if let Some(window) = handle.get_webview_window(label) {
+                    sleep::sleep_soon(&window);
                 }
             }
 

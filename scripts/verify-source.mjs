@@ -301,6 +301,38 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Every built-in the extension host performs is one that names a permission.
+ *
+ * `perform_builtin` does for an extension what the extension cannot do for
+ * itself, which means it reaches the same capabilities the API layer gates.
+ * The dispatch and the capability table are two lists that have to agree, and
+ * nothing but this makes them: adding an arm and forgetting the table gives
+ * the new action an empty permission set, which is a way round the gate that
+ * compiles and passes every test.
+ */
+{
+  const LAUNCH = "src-tauri/src/commands/launch.rs";
+  const text = readFileSync(LAUNCH, "utf8");
+  const table = text.slice(text.indexOf("fn builtin_needs"));
+  const gate = table.slice(0, table.indexOf("\n}"));
+
+  const dispatch = text.slice(text.indexOf("async fn perform_builtin"));
+  const performed = new Set(
+    Array.from(dispatch.matchAll(/"(Action\.[A-Za-z]+)"\s*(?:\||=>)/g), (m) => m[1]),
+  );
+
+  for (const tag of performed) {
+    if (gate.includes(`"${tag}"`)) continue;
+    fail(
+      LAUNCH,
+      lineOf(text, text.indexOf(`"${tag}"`, text.indexOf("async fn perform_builtin"))),
+      `${tag} is performed for an extension but is not in \`builtin_needs\`, ` +
+        "so it asks for no permission and is a way round the gate",
+    );
+  }
+}
+
+/*
  * Every custom property a component reads is one the theme defines.
  *
  * A `var(--nope)` with no fallback is not an error anywhere: the declaration

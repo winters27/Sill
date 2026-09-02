@@ -105,6 +105,36 @@ pub fn config(bridge: &Path, port: u16, token: &str) -> Value {
     })
 }
 
+/**
+The config file, which removes itself when nobody needs it any more.
+
+**It holds the secret that authorises the silent tools.** Anything reaching the
+bridge with that token can read a file, the clipboard, the screen and the
+selection, with no card raised and nothing to notice afterwards. The honest
+boundary is the one `secrets.rs` already describes: this does not defend
+against a process running as this user. What it does defend against is the file
+still sitting in the sync folder tomorrow, which is what happened before: it
+was written on the first question and never removed, so the token stayed
+readable for the rest of the session and every backup took a copy.
+
+A guard rather than a call at the end, so the error paths are covered too. A
+question that fails, is cancelled, or ends in a panic still takes the file with
+it, which is exactly when nobody would have remembered to tidy up.
+*/
+pub struct Config(PathBuf);
+
+impl Config {
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Config {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Writes it where the CLI can be pointed at it, and says where that was.
 ///
 /// Not in the directory the CLI is run from. That one is empty on purpose, so
@@ -114,19 +144,20 @@ pub fn config(bridge: &Path, port: u16, token: &str) -> Value {
 ///
 /// Rewritten on every question rather than kept, because the port and the
 /// secret both change when Sill restarts and a stale file is a config naming a
-/// server that cannot be reached.
+/// server that cannot be reached. It is also removed once the question is
+/// over; see [`Config`].
 pub fn write_config(
     data_dir: &Path,
     bridge: &Path,
     port: u16,
     token: &str,
-) -> std::io::Result<PathBuf> {
+) -> std::io::Result<Config> {
     let path = data_dir.join("mcp.json");
 
     std::fs::create_dir_all(data_dir)?;
     std::fs::write(&path, serde_json::to_vec_pretty(&config(bridge, port, token))?)?;
 
-    Ok(path)
+    Ok(Config(path))
 }
 
 #[cfg(test)]
@@ -223,8 +254,42 @@ mod tests {
             let written = write_config(&data, Path::new("sill.exe"), 7, "x").unwrap();
             let neutral = crate::ai::claude_code::neutral_directory(&data);
 
-            assert!(!written.starts_with(&neutral), "{written:?} is inside {neutral:?}");
-            assert!(written.is_file());
+            assert!(
+                !written.path().starts_with(&neutral),
+                "{:?} is inside {neutral:?}",
+                written.path()
+            );
+            assert!(written.path().is_file());
+
+            let _ = std::fs::remove_dir_all(&data);
+        }
+
+        /// The secret does not outlive the question that needed it.
+        ///
+        /// Anything holding this token can read a file, the clipboard, the
+        /// screen and the selection without a card being raised, so a copy
+        /// left in the app data folder is a copy in every backup of it.
+        #[test]
+        fn the_token_is_taken_with_it() {
+            let data = std::env::temp_dir().join("sill-mcp-config-lifetime");
+            let _ = std::fs::remove_dir_all(&data);
+
+            let path = {
+                let written =
+                    write_config(&data, Path::new("sill.exe"), 7, "the-secret").unwrap();
+                let path = written.path().to_path_buf();
+
+                let held = std::fs::read_to_string(&path).unwrap();
+                assert!(held.contains("the-secret"), "it was never written");
+
+                path
+            };
+
+            assert!(
+                !path.exists(),
+                "the config outlived the run it was written for, so the token \
+                 is still readable at {path:?}"
+            );
 
             let _ = std::fs::remove_dir_all(&data);
         }

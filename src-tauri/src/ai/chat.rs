@@ -29,7 +29,6 @@
 //! window appends it, so the first words are on screen while the rest is still
 //! being written.
 
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -686,7 +685,10 @@ fn subject_of(call: &super::openai::ToolCall) -> String {
 /// answer at all. The reason is written to the log rather than dropped,
 /// because "it stopped using the tools" is otherwise a silent change in
 /// behaviour with nowhere to look.
-async fn the_toolset(app: &tauri::AppHandle, data_dir: &std::path::Path) -> Option<PathBuf> {
+async fn the_toolset(
+    app: &tauri::AppHandle,
+    data_dir: &std::path::Path,
+) -> Option<super::mcp::Config> {
     let reachable = match app
         .state::<super::mcp::link::Link>()
         .reachable(app)
@@ -754,7 +756,7 @@ async fn through_the_cli(
         .args(super::claude_code::arguments(
             chat.session().as_deref(),
             Some(&provider.model).filter(|m| !m.is_empty()).map(|m| m.as_str()),
-            tools.as_deref(),
+            tools.as_ref().map(super::mcp::Config::path),
         ))
         // The reason is in `claude_code.rs`: a session that is not bare runs
         // the hooks and servers of wherever it starts.

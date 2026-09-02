@@ -294,7 +294,9 @@ static LAST: std::sync::Mutex<Option<(std::time::Instant, Vec<Session>)>> =
 
 /// Every program that has a volume of its own, read at most once a second.
 pub fn sessions() -> Vec<Session> {
-    let mut held = LAST.lock().expect("the session list poisoned");
+    // Recovered rather than propagated, for the reason `system::live` gives:
+    // the lock spans COM calls and this runs on the search path.
+    let mut held = LAST.lock().unwrap_or_else(|e| e.into_inner());
 
     if let Some((taken, list)) = held.as_ref() {
         if taken.elapsed() < FRESH_FOR {

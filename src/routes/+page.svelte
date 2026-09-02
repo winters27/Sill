@@ -89,7 +89,6 @@
     type AiReady,
     type AiTurn,
     type RankedCommand,
-    type UndoToken,
   } from "$lib/exthost/commands";
   import { ViewTree, isHandlerRef, type ElementNode, type Op } from "$lib/exthost/tree";
   import {
@@ -809,13 +808,6 @@
    */
   let clipboardActions = $state<ActionInfo[]>([]);
 
-  /**
-   * How to reverse the last action, when it said it could be.
-   *
-   * One deep on purpose. A launcher is not a document editor, and an undo
-   * stack that goes back through a morning of copies would mostly be a way to
-   * put back something nobody wanted.
-   */
 /**
  * The modes that draw something other than the ordinary result list.
  *
@@ -858,7 +850,18 @@ const DRAWS_ITS_OWN = new Set([
   "store",
 ]);
 
-  let lastUndo = $state<UndoToken | null>(null);
+  /**
+   * The last action that can be taken back, named by its place in the log.
+   *
+   * One deep on purpose. A launcher is not a document editor, and an undo
+   * stack that goes back through a morning of copies would mostly be a way to
+   * put back something nobody wanted.
+   *
+   * An id rather than the reversal itself. Holding the reversal meant Ctrl+Z
+   * never told the log anything, so the entry stayed undoable and Advanced
+   * would happily do it again.
+   */
+  let lastUndo = $state<number | null>(null);
 
   $effect(() => {
     const command =
@@ -1471,7 +1474,7 @@ const DRAWS_ITS_OWN = new Set([
       try {
         const outcome = await movePath(source.path, folder.entrypoint);
         status = outcome.message;
-        lastUndo = outcome.undo ?? null;
+        lastUndo = outcome.undoneBy ?? null;
 
         moving = null;
         mode = "root";
@@ -1529,6 +1532,25 @@ const DRAWS_ITS_OWN = new Set([
       // behaves identically once it is on screen.
       if (command.mode === "emoji") {
         await useEmoji(command);
+        return;
+      }
+
+      /*
+       * The answer to a sum, which Enter copies.
+       *
+       * Intercepted here for the same reason a file or a window is: the row is
+       * built by the search rather than found in the index, so `launch_command`
+       * cannot look its id up and answered "no such command: sill:answer" for
+       * every sum anybody ever pressed Enter on. The action dismisses the
+       * launcher itself, which is why nothing follows this.
+       */
+      if (command.mode === "answer") {
+        try {
+          const outcome = await runObjectAction("sill.copyAnswer", asTarget(command));
+          status = outcome.message;
+        } catch (err) {
+          status = `${err}`;
+        }
         return;
       }
 
@@ -1711,20 +1733,6 @@ const DRAWS_ITS_OWN = new Set([
         // for this rather than only that they opened it.
         const launched = await launchCommand(command.id, query);
 
-        // Launching an app hands the screen to that app, so the launcher
-        // gets out of the way rather than sitting on top of what it opened.
-        // Sill's own commands open their own window, so the launcher steps
-        // aside the same way it does for anything else it hands off to.
-        if (
-          launched.mode === "app" ||
-          launched.mode === "exe" ||
-          launched.mode === "setting" ||
-          launched.mode === "builtin"
-        ) {
-          await dismiss();
-          return;
-        }
-
         /*
          * A switch flips under the cursor instead of the launcher closing.
          *
@@ -1755,6 +1763,33 @@ const DRAWS_ITS_OWN = new Set([
         // screen waiting for a tree that never arrives.
         if (launched.mode === "no-view") {
           status = `Ran ${launched.title}`;
+          return;
+        }
+
+        /*
+         * Nothing to render, so nothing to switch to.
+         *
+         * A command view draws what an extension renders, and Rust hands back
+         * the session it renders into. An empty session means the work is
+         * already finished: an application was launched, a link was opened, an
+         * arrangement was restored, a setting was shown in a window of its own.
+         *
+         * This used to be a list of four modes checked *before* the two
+         * branches above, and **the modes it left out are the bug**. Anything
+         * unlisted fell through to the command view below and sat there with
+         * an empty session, so the next summon came back to a blank screen
+         * wearing the title of whatever was last opened, with Escape the only
+         * way out. `sill-setting`, `quicklink`, `workspace` and
+         * `audio-session` all reached it.
+         *
+         * Written as the rule rather than the cases, because the cases are
+         * what went stale. The two modes that have no session and are not
+         * finished either are answered above, deliberately, and that ordering
+         * is why this is here rather than where the list was.
+         */
+        if (launched.session === "") {
+          if (launched.message) status = launched.message;
+          await dismiss();
           return;
         }
 
@@ -1908,7 +1943,7 @@ const DRAWS_ITS_OWN = new Set([
         title: `${picked.length} entries`,
       });
 
-      lastUndo = outcome.undo ?? null;
+      lastUndo = outcome.undoneBy ?? null;
       status = `Merged ${picked.length} entries`;
       clipboardView?.clearPicks();
       picked = [];
@@ -2020,7 +2055,7 @@ const DRAWS_ITS_OWN = new Set([
             title: entry.text.slice(0, 40),
           });
           status = outcome.message;
-          lastUndo = outcome.undo ?? null;
+          lastUndo = outcome.undoneBy ?? null;
         } catch (err) {
           status = `${err}`;
         }
@@ -2155,7 +2190,7 @@ const DRAWS_ITS_OWN = new Set([
       try {
         const outcome = await runObjectAction(chosen, asTarget(command));
         status = outcome.message;
-        lastUndo = outcome.undo ?? null;
+        lastUndo = outcome.undoneBy ?? null;
 
         /*
          * The panel reaches the same things Enter does, so pressing one here
@@ -2195,7 +2230,7 @@ const DRAWS_ITS_OWN = new Set([
 
       // No callback means Raycast performs it, so Sill does.
       if (isRunnable(action)) {
-        status = await performBuiltin(action.tag, action.props);
+        status = await performBuiltin(session, action.tag, action.props);
         return;
       }
 

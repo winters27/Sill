@@ -181,7 +181,10 @@ pub(crate) async fn running_host(state: &HostState) -> Option<Arc<ExtHost>> {
 /// The lock is held across the spawn on purpose: two commands launched at
 /// once must wait for one host rather than race and start two.
 pub(crate) async fn host_of(state: &HostState) -> Result<Arc<ExtHost>, String> {
-    *state.last_used.lock().expect("host clock poisoned") = std::time::Instant::now();
+    // Recovered rather than propagated: a poisoned clock must not stop
+    // every later extension launch. The worst it holds is a stale instant,
+    // which the idle watchdog corrects on its next pass.
+    *state.last_used.lock().unwrap_or_else(|e| e.into_inner()) = std::time::Instant::now();
 
     let mut slot = state.inner.lock().await;
 
@@ -223,6 +226,15 @@ pub(crate) async fn host_of(state: &HostState) -> Result<Arc<ExtHost>, String> {
 /// that never opens an extension never runs this timer at all. A permanent
 /// one-minute tick waiting for a process that is usually not there is exactly
 /// the "why are we waking up?" this is meant to avoid.
+/// Which extension a session belongs to, if the host still has it.
+///
+/// `None` when nothing is running under that id, which is the answer that
+/// matters: an action claiming to come from a session nobody has is not an
+/// extension's action.
+pub(crate) async fn extension_of(state: &HostState, session: &str) -> Option<String> {
+    running_host(state).await?.extension_of(session)
+}
+
 pub(crate) fn start_host_watchdog(state: HostState) {
     tauri::async_runtime::spawn(async move {
         loop {

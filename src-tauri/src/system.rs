@@ -556,7 +556,9 @@ static LAST: std::sync::Mutex<Option<(std::time::Instant, Live)>> = std::sync::M
 /// Lazily: nothing calls this unless a system row is actually about to be
 /// shown, so a search that matches no switch costs nothing at all.
 pub fn live() -> Live {
-    let mut held = LAST.lock().expect("system state poisoned");
+    // Recovered rather than propagated: the lock is held across COM and
+    // registry reads, and a poisoned cache must not panic every later search.
+    let mut held = LAST.lock().unwrap_or_else(|e| e.into_inner());
 
     if let Some((taken, state)) = held.as_ref() {
         if taken.elapsed() < FRESH_FOR {

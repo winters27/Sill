@@ -14,6 +14,43 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// Reads a list, keeping every entry that can be read.
+///
+/// The rule in the module note above holds for a struct that is a *section* of
+/// this file, because the catch-all default fills in whatever is missing. It
+/// does not hold for a struct that is an *element of a list*: `Binding` and
+/// `Alias` have required fields, so one entry serde cannot read fails the
+/// whole list, which fails the whole file, which resets every setting.
+///
+/// A list is the one place where dropping one thing is obviously better than
+/// dropping everything. Defaulting the fields instead would be worse: a
+/// binding with no accelerator and no action is not a binding, and keeping it
+/// would put an empty row in the Shortcuts panel that does nothing.
+///
+/// Says what it dropped, because a shortcut quietly disappearing after an
+/// update is exactly the kind of thing nobody can report usefully.
+fn entries_that_can_be_read<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let raw = Vec::<serde_json::Value>::deserialize(deserializer)?;
+
+    Ok(raw
+        .into_iter()
+        .filter_map(|value| match serde_json::from_value::<T>(value) {
+            Ok(one) => Some(one),
+            Err(why) => {
+                crate::say!(
+                    "dropped one {} that could not be read: {why}",
+                    std::any::type_name::<T>()
+                );
+                None
+            }
+        })
+        .collect())
+}
+
 /// System integration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -823,14 +860,14 @@ pub struct Preferences {
     pub scripts: Scripts,
     pub hyper: HyperKey,
     /// Global shortcuts that run an action without showing the launcher.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "entries_that_can_be_read")]
     pub bindings: Vec<crate::bindings::Binding>,
     /// Names the user has chosen for things in the index.
     ///
     /// The one piece of ranking information that is not a guess, which is why
     /// an exact alias match outranks every other kind of match. A list rather
     /// than a map so the order shown in settings is the order they were made.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "entries_that_can_be_read")]
     pub aliases: Vec<crate::registry::Alias>,
     /// Which keys move around the launcher.
     #[serde(default)]
@@ -884,27 +921,42 @@ impl Preferences {
     /// launcher that will not start because one setting is unparseable is
     /// worse than one that forgets a preference.
     pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(
-                |text| match serde_json::from_str::<serde_json::Value>(&text) {
-                    Ok(mut value) => {
-                        unseal_secrets(&mut value);
-                        match serde_json::from_value(value) {
-                            Ok(prefs) => Some(prefs),
-                            Err(err) => {
-                                crate::say!("preferences could not be read, using defaults: {err}");
-                                None
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        crate::say!("preferences could not be read, using defaults: {err}");
-                        None
-                    }
-                },
-            )
-            .unwrap_or_default()
+        let Ok(text) = std::fs::read_to_string(path) else {
+            // No file yet is the ordinary first run, not a failure.
+            return Self::default();
+        };
+
+        let parsed = match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(mut value) => {
+                unseal_secrets(&mut value);
+                serde_json::from_value(value).map_err(|err| err.to_string())
+            }
+            Err(err) => Err(err.to_string()),
+        };
+
+        match parsed {
+            Ok(prefs) => prefs,
+            Err(why) => {
+                /*
+                 * Kept, rather than left where the next save will land on it.
+                 *
+                 * Falling back to defaults is right: a launcher that will not
+                 * start because one file is malformed is worse than one that
+                 * starts plain. What was wrong is that the defaults were then
+                 * written straight over the file on the next settings change,
+                 * so a single torn write, half-finished sync or hand edit
+                 * silently destroyed every setting and every sealed key with
+                 * no way back.
+                 *
+                 * Moving it aside costs nothing and makes it recoverable.
+                 * `ai::chat` already does this; the file that holds the API
+                 * keys deserves it at least as much.
+                 */
+                crate::say!("preferences could not be read, keeping them aside: {why}");
+                let _ = std::fs::rename(path, path.with_extension("json.broken"));
+                Self::default()
+            }
+        }
     }
 
     /// Writes preferences immediately.
@@ -913,6 +965,13 @@ impl Preferences {
     /// last change is lost, and that flush is the part that gets forgotten.
     /// These are written on a settings change, which is rare enough that the
     /// cost does not matter.
+    ///
+    /// Staged and renamed, the way `snippets::store::save` already does it. A
+    /// plain write truncates first and fills afterwards, so losing power or
+    /// being killed in that window leaves a half-written file that reads as
+    /// corrupt on the next start. This is the file holding every setting and
+    /// every sealed key, and a rename is atomic on NTFS, so there is no window
+    /// in which it is neither the old file nor the new one.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -926,7 +985,13 @@ impl Preferences {
             Err(_) => "{}".into(),
         };
 
-        std::fs::write(path, text)
+        let staging = path.with_extension("json.partial");
+        std::fs::write(&staging, text)?;
+        if let Err(err) = std::fs::rename(&staging, path) {
+            let _ = std::fs::remove_file(&staging);
+            return Err(err);
+        }
+        Ok(())
     }
 }
 
@@ -1172,5 +1237,72 @@ mod sealed_paths {
                 path.join(".")
             );
         }
+    }
+
+    /**
+    Every section reads from an empty object.
+
+    The module note says each struct carries `#[serde(default)]` on the struct
+    as well as its fields, and until this existed nothing checked it. The way
+    it fails is the reason it matters: a section that does not default cannot
+    be read from a file written before that section existed, so the *whole*
+    file fails, and every setting the user ever chose is replaced by defaults
+    on the next save.
+
+    Walking the serialised shape rather than naming the sections by hand, so a
+    section added later is checked without anybody remembering to add it here.
+    */
+    #[test]
+    fn every_section_can_be_read_from_an_empty_object() {
+        let document = serde_json::to_value(Preferences::default()).expect("serialises");
+        let serde_json::Value::Object(sections) = document else {
+            panic!("preferences serialise as an object");
+        };
+
+        for (name, value) in sections {
+            // Only the sections that are objects have this failure mode; a
+            // bare string or number has nothing to omit.
+            if !value.is_object() {
+                continue;
+            }
+
+            let one = format!("{{\"{name}\":{{}}}}");
+            let parsed = serde_json::from_str::<Preferences>(&one);
+
+            assert!(
+                parsed.is_ok(),
+                "`{name}` cannot be read from an empty object, so a file written \
+                 before one of its fields existed takes every other setting down \
+                 with it. Add #[serde(default)] to the struct, not only its fields.\n\
+                 {}",
+                parsed.unwrap_err()
+            );
+        }
+    }
+
+    /// One unreadable list entry costs that entry, not the file.
+    #[test]
+    fn a_binding_that_cannot_be_read_does_not_take_the_others_with_it() {
+        // The middle one is missing `action`, which is required and has no
+        // default. This is what a hand edit, or a field added to `Binding` in
+        // a later version, looks like from an older file's point of view.
+        let json = r#"{
+            "hotkey": { "summon": "Ctrl+Space" },
+            "bindings": [
+                { "accelerator": "Ctrl+Alt+U", "action": "sill.text.upper", "source": { "from": "selection" } },
+                { "accelerator": "Ctrl+Alt+B" },
+                { "accelerator": "Ctrl+Alt+L", "action": "sill.text.lower", "source": { "from": "selection" } }
+            ]
+        }"#;
+
+        let parsed: Preferences = serde_json::from_str(json).expect("the file still reads");
+
+        assert_eq!(parsed.bindings.len(), 2, "the readable bindings survive");
+        assert_eq!(parsed.bindings[0].accelerator, "Ctrl+Alt+U");
+        assert_eq!(parsed.bindings[1].accelerator, "Ctrl+Alt+L");
+        assert_eq!(
+            parsed.hotkey.summon, "Ctrl+Space",
+            "and the rest of the file is untouched, which is the whole point"
+        );
     }
 }

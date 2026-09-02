@@ -101,12 +101,25 @@ function gateOf(id: string): { needs: string[]; plainly: string } | undefined {
  * program or open a socket without somebody having agreed to it, and the
  * refusal names the permission so it can be granted.
  *
- * It is **not** a sandbox in the sense of containing hostile code. An
- * extension determined to get out has `process.binding`, `eval` and
- * `module.createRequire` to try, and this stops none of them. Saying so
+ * It is **not** a sandbox in the sense of containing hostile code. Saying so
  * plainly matters more than the feature does: the honest claim is that Sill
  * shows you what extensions reach and refuses what you have not allowed, not
  * that a malicious extension is powerless.
+ *
+ * ## What still gets out, named
+ *
+ * `eval`, `new Function` and `WebAssembly` need no module at all, and a
+ * dynamic `import()` goes through the ESM loader rather than through
+ * `Module`, so none of them is stopped here. Closing the last one needs a
+ * loader hook, which is worth doing and is not this.
+ *
+ * Three that *were* open and are not any more, because each was one call:
+ * `Module._load`, which `require` is a wrapper around and which the older
+ * version of this left completely unguarded; `process.getBuiltinModule`,
+ * added in Node 22.3 and therefore present in the runtime this host targets;
+ * and `module.createRequire`, which builds a fresh `require` bound to a path
+ * of the caller's choosing. All three now reach the same gate, because the
+ * gate moved to `_load` where every one of them ends up.
  */
 export function patchRequire(granted: readonly string[] = []): void {
   const overrides: Record<string, () => unknown> = {
@@ -118,30 +131,73 @@ export function patchRequire(granted: readonly string[] = []): void {
     "@raycast/utils": () => raycastUtils,
   };
 
-  const originalRequire = Module.prototype.require;
-
   const held = new Set(granted);
 
+  /**
+   * Throws unless the extension holds what this module needs.
+   *
+   * Checked before the module is resolved, so a refused one is never even
+   * loaded. Node caches a module the first time it is required, and a check
+   * written after resolution would leave it in that cache for whatever asks
+   * next.
+   */
+  const refuseUnlessAllowed = (id: string) => {
+    const gate = gateOf(id);
+    if (!gate) return;
+    if (gate.needs.every((need) => held.has(need))) return;
+
+    throw new Error(
+      `sill: this extension is not allowed to ${gate.plainly}, so "${id}" is unavailable. ` +
+        `Grant it in Settings, under Extensions, then run the command again.`,
+    );
+  };
+
+  /*
+   * The gate goes on `_load`, not on `require`.
+   *
+   * `Module.prototype.require` is one way in and it was the only one guarded.
+   * Everything else that loads a builtin ends up in `Module._load`:
+   * `require` itself, the `require` that `module.createRequire` hands back,
+   * and `Module._load` called directly, which is two words in any extension
+   * and completely defeated the older gate. Guarding the place they all reach
+   * costs nothing and closes all three at once.
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (Module.prototype as any).require = function patched(this: unknown, id: string) {
-    const override = overrides[id];
+  const loader = Module as any;
+  const originalLoad = loader._load;
+
+  loader._load = function patchedLoad(
+    this: unknown,
+    request: string,
+    parent: unknown,
+    isMain: boolean,
+  ) {
+    const override = overrides[request];
     if (override) return override();
 
-    // Checked before the module is resolved, so a refused one is never even
-    // loaded. Node caches a module the first time it is required, and a check
-    // written after resolution would leave it in that cache for whatever asks
-    // next.
-    const gate = gateOf(id);
-
-    if (gate && !gate.needs.every((need) => held.has(need))) {
-      throw new Error(
-        `sill: this extension is not allowed to ${gate.plainly}, so "${id}" is unavailable. ` +
-          `Grant it in Settings, under Extensions, then run the command again.`,
-      );
-    }
-
-    return originalRequire.call(this as never, id);
+    refuseUnlessAllowed(request);
+    return originalLoad.call(this, request, parent, isMain);
   };
+
+  /*
+   * And the one that never goes near `Module` at all.
+   *
+   * `process.getBuiltinModule("fs")` hands back the builtin directly. It is
+   * documented, supported, and has been in Node since 22.3, which is the
+   * runtime this host is built for, so it was not an exotic escape: it was the
+   * shortest one.
+   */
+  const process_ = process as NodeJS.Process & {
+    getBuiltinModule?: (id: string) => unknown;
+  };
+  const originalBuiltin = process_.getBuiltinModule?.bind(process);
+
+  if (originalBuiltin) {
+    process_.getBuiltinModule = (id: string) => {
+      refuseUnlessAllowed(id);
+      return originalBuiltin(id);
+    };
+  }
 }
 
 /**

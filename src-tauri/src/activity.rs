@@ -30,20 +30,18 @@ use crate::action::{ActionCtx, Outcome, Undo};
 ///
 /// Takes the whole outcome rather than its pieces, so a field added to an
 /// outcome cannot be silently left out of the record.
-pub fn record(ctx: &ActionCtx, action: &str, target: &str, outcome: &Outcome) {
+pub fn record(ctx: &ActionCtx, action: &str, target: &str, outcome: &Outcome) -> Option<u64> {
     use tauri::Manager;
 
-    let Some(log) = ctx.app.try_state::<Activity>() else {
-        return;
-    };
+    let log = ctx.app.try_state::<Activity>()?;
 
-    log.record(
+    Some(log.record(
         action,
         target,
         &outcome.message,
         outcome.undo.clone(),
         crate::state::now_seconds(),
-    );
+    ))
 }
 
 /// How many actions are remembered.
@@ -97,12 +95,25 @@ struct Log {
 }
 
 impl Activity {
-    /// Remembers something that happened.
-    pub fn record(&self, action: &str, target: &str, message: &str, undo: Option<Undo>, at: i64) {
+    /// Remembers something that happened, and says which entry it became.
+    ///
+    /// The id is what makes an undo spendable exactly once: the window holds
+    /// it rather than the descriptor, so taking an action back goes through
+    /// `take` and the entry stops offering itself. Zero when the log could not
+    /// be written, which is a record that was lost rather than an action that
+    /// failed.
+    pub fn record(
+        &self,
+        action: &str,
+        target: &str,
+        message: &str,
+        undo: Option<Undo>,
+        at: i64,
+    ) -> u64 {
         let Ok(mut log) = self.inner.lock() else {
             // A poisoned log is not worth failing an action that already
             // succeeded. The thing was done; only the record of it is lost.
-            return;
+            return 0;
         };
 
         log.next_id += 1;
@@ -123,6 +134,8 @@ impl Activity {
         // Oldest first in the vector, so trimming takes from the front.
         let over = log.entries.len().saturating_sub(KEEP);
         log.entries.drain(..over);
+
+        id
     }
 
     /// What happened, newest first.
@@ -189,6 +202,39 @@ mod tests {
         let recent = log.recent();
         assert_eq!(recent[0].target, "b.txt");
         assert_eq!(recent[1].target, "a.txt");
+    }
+
+    /// Recording says which entry it made, which is what makes an undo
+    /// spendable exactly once.
+    ///
+    /// The window holds this id rather than the reversal itself. Holding the
+    /// reversal is what let Ctrl+Z and the Activity panel each do the same
+    /// undo, because neither told the log the first one had happened.
+    #[test]
+    fn recording_names_the_entry_it_made() {
+        let log = log();
+
+        let first = log.record("Copy", "a", "Copied", Some(clipboard_undo("was")), NOW);
+        let second = log.record("Copy", "b", "Copied", Some(clipboard_undo("was")), NOW + 1);
+
+        assert_ne!(first, second, "two entries cannot share an id");
+        assert_ne!(first, 0, "a written entry is never the missing-log answer");
+
+        assert_eq!(
+            log.recent().iter().find(|d| d.id == first).map(|d| d.target.as_str()),
+            Some("a"),
+            "the id has to name the entry that was just made"
+        );
+
+        assert!(log.take(first).is_some());
+        assert!(
+            log.take(first).is_none(),
+            "spent once, which is the whole reason the window holds an id"
+        );
+        assert!(
+            log.take(second).is_some(),
+            "and spending one must not spend the other"
+        );
     }
 
     /// An undo is spent by being used.

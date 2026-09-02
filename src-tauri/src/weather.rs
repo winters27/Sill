@@ -25,8 +25,13 @@
 use serde::{Deserialize, Serialize};
 
 /// Where the forecast is for.
+///
+/// `default` on the struct as well as its fields, which is the rule the
+/// preferences module states and this was breaking: it is stored inside the
+/// widget settings, so a `Place` written before `latitude` existed would have
+/// failed to read and taken every other setting down with it.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct Place {
     /// What to call it, as the service spells it.
     pub name: String,

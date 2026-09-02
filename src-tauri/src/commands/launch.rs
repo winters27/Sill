@@ -70,6 +70,27 @@ pub(crate) async fn launch_command(
         .primary(object.kind)
         .ok_or_else(|| format!("nothing is bound to Enter for {}", record.title))?;
 
+    /*
+     * The screen is about to belong to something else, so the launcher must
+     * not put back what was in front before it.
+     *
+     * The rule `run_action` already follows, and it was missing here, which is
+     * the older half of the same bug: dismissing restores the previous window,
+     * so opening a quicklink or revealing a folder with Enter raced the
+     * program it had just asked for. Launching an application survives that by
+     * accident, because a new process takes the foreground after the restore
+     * has run; anything that reuses a window already open loses every time.
+     *
+     * **Before the action, not after**, and that is the whole difference.
+     * `restore_foreground` takes the handle rather than reading it, and an
+     * action that dismisses the launcher itself has already spent it by the
+     * time it returns. `run_action` gets away with forgetting afterwards only
+     * because the actions it is used for leave the dismissal to the window.
+     */
+    if object.kind.hands_over_the_screen() {
+        crate::summon::forget_foreground();
+    }
+
     let outcome = actions
         .perform(&ActionCtx { app: app.clone() }, action, &object)
         .await?;
@@ -117,20 +138,75 @@ pub(crate) struct LaunchedCommand {
     pub toggle: Option<bool>,
 }
 
-/// Performs an action Raycast implements itself rather than handing to the
-/// extension.
-///
-/// `Action.CopyToClipboard` and friends carry no `onAction`; they declare what
-/// they want done through their props and the launcher is expected to do it.
-/// Treating them as broken because they have no callback would silently kill
-/// the most common action in the whole ecosystem.
+/**
+What each built-in reaches, in the same vocabulary every other capability uses.
+
+Its own function rather than a table inside the command, so a test can read it.
+An empty slice means nothing is required, which is only ever right for a tag
+the dispatch below refuses anyway; `verify:source` checks that every tag the
+dispatch answers is named here, because two lists that must agree with nothing
+making them agree is how the first version of this went wrong.
+*/
+pub fn builtin_needs(tag: &str) -> &'static [crate::action::Capability] {
+    use crate::action::Capability::*;
+
+    match tag {
+        "Action.CopyToClipboard" => &[ClipboardWrite],
+        "Action.OpenInBrowser" | "Action.Open" => &[ProcessLaunch],
+        // Writes the clipboard and then presses keys in somebody else's
+        // window, which is two different things to have agreed to.
+        "Action.Paste" => &[ClipboardWrite, InputInjection],
+        _ => &[],
+    }
+}
+
+/**
+Performs an action Raycast implements itself rather than handing to the
+extension.
+
+`Action.CopyToClipboard` and friends carry no `onAction`; they declare what
+they want done through their props and the launcher is expected to do it.
+Treating them as broken because they have no callback would silently kill the
+most common action in the whole ecosystem.
+
+## Why the session is a parameter
+
+**These are the same capabilities the API layer gates, reached by another
+door.** Every one of the twenty-two host methods asks `Permits` first; these
+four did not, so an extension refused `Clipboard/copy` could render an
+`Action.CopyToClipboard` and have the launcher do it, and `Action.Paste`
+injects keystrokes into whatever is in front without anything having been
+agreed to. The store's own capability screen says pasting is asked about, and
+it was not.
+
+So the window says which session drew the action, Rust turns that into the
+extension's name, and the same `Permits` decides. The session is looked up
+rather than trusted: the window sends an id, and the id means nothing except
+through the host's own map of live sessions.
+*/
 #[tauri::command]
 pub(crate) async fn perform_builtin(
     app: AppHandle,
+    session: String,
     tag: String,
     props: Value,
 ) -> Result<String, String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    {
+        use tauri::Manager;
+
+        let host = app.state::<crate::state::HostState>();
+        let extension = crate::host::extension_of(&host, &session).await;
+
+        let Some(extension) = extension else {
+            // No live session means nothing is asking on an extension's
+            // behalf, and a built-in exists only to serve one.
+            return Err("that action does not belong to a running extension".to_string());
+        };
+
+        host.api.permits().allow(&extension, builtin_needs(&tag)).await?;
+    }
 
     /// Raycast lets `content` be a string, a number, or a shaped object.
     fn text_of(value: Option<&Value>) -> Option<String> {
@@ -249,6 +325,7 @@ pub(crate) async fn rename_path(path: String, to: String) -> Result<String, Stri
 /// a move of a text file costs.
 #[tauri::command]
 pub(crate) async fn move_path(
+    app: AppHandle,
     state: State<'_, RegistryState>,
     path: String,
     folder: String,
@@ -300,16 +377,31 @@ pub(crate) async fn move_path(
         }
     }
 
-    Ok(Outcome {
-        message: format!("Moved {name} to {}", crate::files_ops::name_of(&into)),
-        undo: Some(Undo::MovePath {
+    /*
+     * Built here rather than by an action, and recorded here for the same
+     * reason.
+     *
+     * Moving is a command because the destination is a question, and a
+     * question is not something an action has anywhere to ask. That is a fair
+     * exception, but it left this outside the activity log entirely: the move
+     * could be taken back with Ctrl+Z and appeared nowhere in Advanced, so
+     * anything that scrolled the launcher away lost it. Recording it here
+     * costs one call and puts it where every other reversible thing lives.
+     */
+    let mut outcome = Outcome::undoable(
+        format!("Moved {name} to {}", crate::files_ops::name_of(&into)),
+        Undo::MovePath {
             path: landed.to_string_lossy().to_string(),
             back_to: came_from,
-            name,
-        }),
-        session: None,
-        text: None,
-    })
+            name: name.clone(),
+        },
+    );
+
+    let ctx = ActionCtx { app };
+    let id = crate::activity::record(&ctx, "Move to Folder", &name, &outcome);
+    outcome.undone_by = id.filter(|id| *id != 0);
+
+    Ok(outcome)
 }
 
 /// The folders something could be moved into, for a query.

@@ -173,9 +173,7 @@ pub(crate) struct CaptureTarget {
 /// Copies one window, whole, even where something is sitting on top of it.
 #[tauri::command]
 pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, String> {
-    if let Ok(window) = crate::lazy_windows::ensure(&app, "capture") {
-        let _ = window.hide();
-    }
+    crate::lazy_windows::hide(&app, "capture");
     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
 
     // Read again rather than trusting what the overlay was told: a handle can
@@ -199,9 +197,7 @@ pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, 
 /// Copies one whole display.
 #[tauri::command]
 pub(crate) async fn capture_display(app: AppHandle, index: usize) -> Result<String, String> {
-    if let Ok(window) = crate::lazy_windows::ensure(&app, "capture") {
-        let _ = window.hide();
-    }
+    crate::lazy_windows::hide(&app, "capture");
     crate::dismiss_main(&app);
     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
 
@@ -226,9 +222,7 @@ pub(crate) async fn capture_display(app: AppHandle, index: usize) -> Result<Stri
 /// Takes the overlay away without capturing anything.
 #[tauri::command]
 pub(crate) async fn cancel_capture(app: AppHandle) -> Result<(), String> {
-    if let Ok(window) = crate::lazy_windows::ensure(&app, "capture") {
-        let _ = window.hide();
-    }
+    crate::lazy_windows::hide(&app, "capture");
 
     Ok(())
 }
@@ -246,9 +240,7 @@ pub(crate) async fn capture_area(
     width: i32,
     height: i32,
 ) -> Result<String, String> {
-    if let Ok(window) = crate::lazy_windows::ensure(&app, "capture") {
-        let _ = window.hide();
-    }
+    crate::lazy_windows::hide(&app, "capture");
 
     // Hiding is a request to the compositor, not something that has happened
     // by the time the call returns. Without this the overlay's dimming is in
@@ -465,9 +457,7 @@ pub(crate) async fn finish_markup(app: AppHandle, png: String) -> Result<String,
 
     put_image_on_clipboard(&app, shot)?;
 
-    if let Ok(window) = crate::lazy_windows::ensure(&app, "markup") {
-        let _ = window.hide();
-    }
+    crate::lazy_windows::hide(&app, "markup");
 
     Ok(format!("Copied a marked-up {width}x{height} picture"))
 }
@@ -475,9 +465,7 @@ pub(crate) async fn finish_markup(app: AppHandle, png: String) -> Result<String,
 /// Closes the markup window without keeping anything.
 #[tauri::command]
 pub(crate) async fn cancel_markup(app: AppHandle) -> Result<(), String> {
-    if let Ok(window) = crate::lazy_windows::ensure(&app, "markup") {
-        let _ = window.hide();
-    }
+    crate::lazy_windows::hide(&app, "markup");
 
     // Dropped rather than left lying about: it is a picture of somebody's
     // screen and nothing needs it once the window is gone.

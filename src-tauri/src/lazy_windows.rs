@@ -102,6 +102,34 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
 /// that would give a window a renderer again without anybody noticing.
 pub const DEFERRED: &[&str] = &["markup", "capture", "dictation"];
 
+/**
+Puts one of these away, and lets its renderer go to sleep.
+
+**Building a window on demand only defers the cost; it does not end it.** These
+are all `closable(false)` and are only ever hidden, so once a screenshot has
+been taken the capture overlay's renderer is resident for the rest of the
+session at about the 82 MB the module note measures. The saving was real until
+the first use of the feature and then quietly gone, which is the worst shape
+for a performance fix to have: it measures well on a fresh start and not at all
+on a machine somebody has used.
+
+`summon::hide` has always armed the sleep for the launcher. Nothing armed it
+for these, so `sleep.rs` never saw them. Hiding through here rather than
+calling `window.hide()` directly is what keeps that true as more windows are
+deferred.
+
+Silent when the window does not exist: not having been built is the cheapest
+possible state and there is nothing to put away.
+*/
+pub fn hide(app: &AppHandle, label: &str) {
+    let Some(window) = app.get_webview_window(label) else {
+        return;
+    };
+
+    let _ = window.hide();
+    crate::sleep::sleep_soon(&window);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

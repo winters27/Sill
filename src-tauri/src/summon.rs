@@ -153,7 +153,7 @@ pub fn remember_foreground() {
 
         let mut slot = PREVIOUS_FOREGROUND
             .lock()
-            .expect("foreground slot poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         *slot = worth_keeping;
     }
 }
@@ -175,7 +175,7 @@ pub fn forget_foreground() {
     {
         let mut slot = PREVIOUS_FOREGROUND
             .lock()
-            .expect("foreground slot poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         *slot = None;
     }
 }
@@ -186,7 +186,7 @@ pub fn restore_foreground() {
     {
         let previous = PREVIOUS_FOREGROUND
             .lock()
-            .expect("foreground slot poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .take();
 
         if let Some(raw) = previous {

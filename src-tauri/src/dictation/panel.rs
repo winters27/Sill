@@ -106,6 +106,12 @@ pub fn hide(app: &AppHandle) -> Result<()> {
         window
             .hide()
             .map_err(|e| DictationError::Platform(format!("hide dictation panel: {e}")))?;
+
+        // And let the renderer go to sleep behind it. The panel is built on
+        // demand and never closed, so without this it stays awake for the rest
+        // of the session after one dictation. See `lazy_windows::hide`, which
+        // is the same thing where the failure does not need reporting.
+        crate::sleep::sleep_soon(&window);
     }
     Ok(())
 }

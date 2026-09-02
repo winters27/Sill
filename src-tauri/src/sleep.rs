@@ -98,7 +98,7 @@ pub fn sleep_soon(window: &WebviewWindow) {
             return;
         }
 
-        suspend(&window);
+        suspend(&label, &window);
     });
 }
 
@@ -134,9 +134,22 @@ pub fn wake(window: &WebviewWindow) {
     let _ = window;
 }
 
-/// Puts the renderer to sleep. Only called by the armed timer.
+/**
+Puts the renderer to sleep. Only called by the armed timer.
+
+Says what happened, and that matters more than it sounds. Suspension is best
+effort: `TrySuspend` defers while the page is still running script and never
+lands at all if the page holds something Edge will not sleep through. So "the
+renderer did not shrink" has two completely different causes, one of which is a
+bug in the arming and the other of which is a busy page, and without a line in
+the log there is no way to tell them apart. Measuring this cost a confused hour
+the first time: the same build suspended on one run and not the next, and the
+difference was what the page happened to be doing.
+*/
 #[cfg(windows)]
-fn suspend(window: &WebviewWindow) {
+fn suspend(label: &str, window: &WebviewWindow) {
+    let label = label.to_string();
+
     let _ = window.with_webview(|webview| {
         let controller = webview.controller();
 
@@ -158,14 +171,23 @@ fn suspend(window: &WebviewWindow) {
             // sleep through never suspends at all. Both report through this
             // handler and neither is worth acting on: the window is hidden and
             // invisible either way, which is most of the saving.
-            let handler = TrySuspendCompletedHandler::create(Box::new(|_result, _suspended| Ok(())));
+            let handler = TrySuspendCompletedHandler::create(Box::new(move |_result, suspended| {
+                if suspended {
+                    crate::say!("{label} suspended");
+                } else {
+                    // Not a failure. The page was busy, and it will be asked
+                    // again the next time it is put away.
+                    crate::say!("{label} would not suspend, the page is busy");
+                }
+                Ok(())
+            }));
             let _ = suspendable.TrySuspend(&handler);
         }
     });
 }
 
 #[cfg(not(windows))]
-fn suspend(_window: &WebviewWindow) {}
+fn suspend(_label: &str, _window: &WebviewWindow) {}
 
 #[cfg(test)]
 mod tests {

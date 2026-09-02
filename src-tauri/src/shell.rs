@@ -102,12 +102,63 @@ impl Shell {
                     target.into(),
                 ],
             ),
-            Self::Cmd => ("cmd.exe".into(), vec!["/c".into(), target.into()]),
+            // `/c` and the script are all that is fixed here; the script and
+            // its arguments are appended by `run` as one raw argument, because
+            // cmd does not parse a command line the way everything else does.
+            // See `cmd_line`.
+            Self::Cmd => ("cmd.exe".into(), vec!["/d".into(), "/s".into(), "/c".into()]),
             Self::Bash => ("bash.exe".into(), vec![target.into()]),
             Self::Python => ("python.exe".into(), vec![target.into()]),
             Self::Program => (target.into(), Vec::new()),
         }
     }
+}
+
+/**
+One token, quoted so `cmd.exe` reads it as one token.
+
+Doubling an embedded quote is cmd's own escape, the same rule the shell uses
+for `for /f` and `set`. Nothing else needs escaping once the whole line is
+wrapped, which is what `/s` is for.
+*/
+#[cfg(windows)]
+fn quoted(one: &str) -> String {
+    format!("\"{}\"", one.replace('"', "\"\""))
+}
+
+/**
+The script and its arguments, as one string `cmd.exe` will not take apart.
+
+**`cmd.exe` does not parse its command line the way every other program does.**
+Rust quotes each argument by the C runtime rules, which cmd ignores: it splits
+on its own metacharacters first, so an argument of `x&calc` passed to
+`cmd /c script.bat` ran `script.bat x`, then ran `calc`. A launcher that runs
+somebody's scripts must not turn an argument into a second command.
+
+`/s` is the documented way out. With it, cmd strips exactly the first and last
+quote of the string after `/c` and treats everything between them as the
+command, without the usual quote processing. So the whole line is wrapped once,
+and each token inside is quoted on its own. That also fixes the older,
+quieter half of the same bug: a script under a path with a space, invoked with
+any quoted argument, tripped cmd's rule about which quotes to strip and failed
+with a message about a path nobody had typed.
+
+`/d` is unrelated and worth having anyway: it skips `AutoRun` from the
+registry, so a command somebody once put there does not run before every
+script Sill starts.
+*/
+#[cfg(windows)]
+fn cmd_line(target: &str, args: &[String]) -> String {
+    let mut line = String::from("\"");
+    line.push_str(&quoted(target));
+
+    for one in args {
+        line.push(' ');
+        line.push_str(&quoted(one));
+    }
+
+    line.push('"');
+    line
 }
 
 /// What happened, once it is over.
@@ -219,7 +270,12 @@ pub async fn run(
 ) -> Result<Ran, String> {
     let started = Instant::now();
     let (program, mut argv) = shell.invocation(target);
-    argv.extend_from_slice(args);
+
+    // Everything but cmd takes its arguments the ordinary way, where Rust's
+    // quoting and the program's parsing agree.
+    if shell != Shell::Cmd {
+        argv.extend_from_slice(args);
+    }
 
     let mut command = tokio::process::Command::new(&program);
     command
@@ -231,6 +287,25 @@ pub async fn run(
 
     if let Some(dir) = cwd {
         command.current_dir(dir);
+    }
+
+    /*
+     * The one argument Rust must not quote.
+     *
+     * `raw_arg` appends to the command line verbatim. That is exactly wrong
+     * for every other program and exactly right for cmd under `/s`, which
+     * wants one already-quoted string and strips the outer pair itself.
+     */
+    #[cfg(windows)]
+    if shell == Shell::Cmd {
+        use std::os::windows::process::CommandExt as _;
+        command.as_std_mut().raw_arg(cmd_line(target, args));
+    }
+
+    // There is no cmd here, so this only has to compile and stay coherent.
+    #[cfg(not(windows))]
+    if shell == Shell::Cmd {
+        command.arg(target).args(args);
     }
 
     // tokio's Command carries this itself on Windows, so no trait is needed.
@@ -333,6 +408,80 @@ mod tests {
         Duration::from_secs(10)
     }
 
+    /**
+    A real script on disk, because that is what `run` is given.
+
+    These used to pass a command line as the target, which worked only because
+    `cmd /c` re-parsed the string. Closing that hole closed this shortcut with
+    it, and rightly: `Shell::of` reads an extension off a path, and both callers
+    in the app pass a path. A test that exercises a path nothing in the product
+    takes is testing something nobody runs.
+
+    The directory is returned alongside the path so the caller keeps it alive;
+    dropping it takes the file with it.
+    */
+    fn script(body: &str) -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("go.bat");
+        std::fs::write(&path, format!("@echo off
+{body}
+")).expect("wrote the script");
+        let name = path.to_string_lossy().to_string();
+        (dir, name)
+    }
+
+    /// What cmd is handed, which is the only thing standing between a script
+    /// argument and a second command.
+    #[cfg(windows)]
+    mod the_cmd_line {
+        use super::*;
+
+        fn line(target: &str, args: &[&str]) -> String {
+            cmd_line(
+                target,
+                &args.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
+            )
+        }
+
+        #[test]
+        fn the_whole_thing_is_wrapped_once_and_every_token_is_quoted() {
+            assert_eq!(
+                line(r"C:\a b\go.bat", &["one", "two"]),
+                r##"""C:\a b\go.bat" "one" "two"""##,
+                "one outer pair for /s to strip, and a pair around each token"
+            );
+        }
+
+        /// The bug this exists for.
+        #[test]
+        fn a_metacharacter_in_an_argument_cannot_start_a_second_command() {
+            let out = line("go.bat", &["x&calc", "a|b", "c>d", "e^f"]);
+
+            for one in ["\"x&calc\"", "\"a|b\"", "\"c>d\"", "\"e^f\""] {
+                assert!(out.contains(one), "{one} is not quoted in {out}");
+            }
+
+            // Nothing outside a quoted token, which is what cmd would act on.
+            assert!(
+                !out.contains("&calc\" \"") || out.contains("\"x&calc\""),
+                "the ampersand escaped its token: {out}"
+            );
+        }
+
+        #[test]
+        fn a_quote_inside_an_argument_is_doubled_rather_than_ending_it() {
+            assert_eq!(
+                line("go.bat", &[r#"say "hi""#]),
+                r##"""go.bat" "say ""hi"""""##,
+            );
+        }
+
+        #[test]
+        fn a_script_with_no_arguments_is_still_wrapped() {
+            assert_eq!(line(r"C:\a b\go.bat", &[]), r##"""C:\a b\go.bat"""##);
+        }
+    }
+
     mod picking_an_interpreter {
         use super::*;
 
@@ -367,7 +516,8 @@ mod tests {
 
     #[tokio::test]
     async fn it_reports_what_a_command_printed() {
-        let ran = run(Shell::Cmd, "echo hello", &[], None, quick(), &Stop::never())
+        let (_dir, path) = script("echo hello");
+        let ran = run(Shell::Cmd, &path, &[], None, quick(), &Stop::never())
             .await
             .expect("ran");
 
@@ -384,7 +534,8 @@ mod tests {
     /// window with nothing to show.
     #[tokio::test]
     async fn a_failing_command_still_reports_its_code() {
-        let ran = run(Shell::Cmd, "exit 3", &[], None, quick(), &Stop::never())
+        let (_dir, path) = script("exit /b 3");
+        let ran = run(Shell::Cmd, &path, &[], None, quick(), &Stop::never())
             .await
             .expect("ran");
 
@@ -422,9 +573,10 @@ mod tests {
     async fn a_command_that_never_prints_still_hits_its_deadline() {
         let started = Instant::now();
 
+        let (_dir, path) = script("ping -n 30 127.0.0.1 >nul");
         let ran = run(
             Shell::Cmd,
-            "ping -n 30 127.0.0.1 >nul",
+            &path,
             &[],
             None,
             Duration::from_millis(400),
@@ -452,9 +604,10 @@ mod tests {
 
         let started = Instant::now();
 
+        let (_dir, path) = script("ping -n 30 127.0.0.1 >nul");
         let ran = run(
             Shell::Cmd,
-            "ping -n 30 127.0.0.1 >nul",
+            &path,
             &[],
             None,
             Duration::from_secs(30),

@@ -219,6 +219,83 @@ try {
     JSON.stringify(JSON.parse(drew.params.payload).params.ops).includes("reached the disk"),
     "and it really did reach the disk",
   );
+
+  // ---- the ways round the front door ----
+  //
+  // The gate used to sit on `Module.prototype.require`, and three supported
+  // things reach a builtin without going near it. `process.getBuiltinModule`
+  // is the one that mattered: documented, in Node since 22.3, and one line.
+  // The gate now sits on `Module._load`, which all three end up in.
+  const sneaky = await request("Manager/load", {
+    opts: {
+      mode: "View",
+      env: "Development",
+      entrypoint: resolve(root, "test/fixture/sneaks-to-disk.js"),
+      extension_name: "sneaky",
+      command_name: "read",
+      is_raycast: true,
+      preferences: {},
+      arguments: {},
+      launch_type: "User",
+      capabilities: [],
+    },
+  });
+
+  const sneakyCrash = await waitFor(
+    (m) =>
+      m.method === "Manager/extensionCrash" &&
+      m.params.session_id === sneaky.result?.session_id,
+    "an extension trying the back doors crashed rather than reading the disk",
+  );
+
+  assert(
+    /every escape was refused/.test(sneakyCrash.params.reason),
+    `no back door reached the disk (${sneakyCrash.params.reason})`,
+  );
+
+  for (const door of ["Module._load", "createRequire", "getBuiltinModule"]) {
+    assert(
+      new RegExp(`${door.replace(".", "\\.")}: sill:`).test(sneakyCrash.params.reason),
+      `${door} was refused by the gate rather than failing for some other reason`,
+    );
+  }
+
+  /*
+   * And the same fixture with the permission, which is what makes the check
+   * above worth anything.
+   *
+   * A refusal proves nothing unless the thing being refused would otherwise
+   * work: a fixture whose escapes were simply broken would produce exactly the
+   * same "every escape was refused" and pass while testing nothing.
+   */
+  const sneakyAllowed = await request("Manager/load", {
+    opts: {
+      mode: "View",
+      env: "Development",
+      entrypoint: resolve(root, "test/fixture/sneaks-to-disk.js"),
+      extension_name: "sneaky-allowed",
+      command_name: "read",
+      is_raycast: true,
+      preferences: {},
+      arguments: {},
+      launch_type: "User",
+      capabilities: ["fileRead", "fileWrite"],
+    },
+  });
+
+  const sneakyReached = await waitFor(
+    (m) =>
+      m.method === "Manager/extensionCrash" &&
+      m.params.session_id === sneakyAllowed.result?.session_id,
+    "the same fixture ran with the permission granted",
+  );
+
+  assert(
+    /reached the disk through Module\._load/.test(sneakyReached.params.reason),
+    `the escapes really do work when allowed, so the refusal above means ` +
+      `something (${sneakyReached.params.reason})`,
+  );
+
   // ---- @raycast/utils ----
   //
   // The package the store is written against. Loading an extension that uses

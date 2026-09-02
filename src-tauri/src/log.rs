@@ -54,6 +54,45 @@ pub fn path() -> Option<&'static PathBuf> {
     PATH.get()
 }
 
+/**
+Writes a panic to the log before the default handler runs.
+
+Without this a panic in a release build is completely silent. The default hook
+prints to stderr, and the note at the top of this module explains why stderr
+goes nowhere here: the whole point of `windows_subsystem = "windows"` is that
+there is no console. So the one event that most needs to leave a trace was the
+one event that left none, and the report was always "it just stopped".
+
+Chained rather than replacing: the default hook still runs, so `cargo run` and
+the test binaries keep the output and the backtrace they already had.
+
+The payload is read the way the standard library reads it, because a panic
+carries either a `&str` or a `String` depending on whether it was formatted,
+and a hook that only handles one of them loses exactly the messages that had
+something to say.
+*/
+pub fn catch_panics() {
+    let previous = std::panic::take_hook();
+
+    std::panic::set_hook(Box::new(move |info| {
+        let said = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "no message".to_string());
+
+        let at = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "an unknown place".to_string());
+
+        write(&format!("PANIC at {at}: {said}"));
+
+        previous(info);
+    }));
+}
+
 /// Appends one line, with a timestamp.
 ///
 /// Silent on failure. A launcher that fell over because it could not write to

@@ -726,3 +726,34 @@ fn every_action_id_is_namespaced() {
 
     assert!(stray.is_empty(), "these ids are not namespaced: {stray:?}");
 }
+
+/// Every built-in the extension host performs on an extension's behalf names
+/// what it reaches.
+///
+/// These bypass the API layer by design: `Action.CopyToClipboard` and friends
+/// carry no callback, so the launcher does the work. For a while that meant
+/// they bypassed the permission layer too, and an extension refused the
+/// clipboard could render one and have Sill copy for it. `Action.Paste` was
+/// the sharp end: it injects keystrokes into whatever window is in front.
+#[test]
+fn every_extension_builtin_declares_what_it_reaches() {
+    use sill_lib::commands::launch::builtin_needs;
+
+    for tag in [
+        "Action.CopyToClipboard",
+        "Action.OpenInBrowser",
+        "Action.Open",
+        "Action.Paste",
+    ] {
+        assert!(
+            !builtin_needs(tag).is_empty(),
+            "{tag} is performed for an extension and asks for no permission, \
+             so it is a way round the gate"
+        );
+    }
+
+    assert!(
+        builtin_needs("Action.SomethingNobodyImplemented").is_empty(),
+        "an unknown tag must not inherit anybody's permissions"
+    );
+}
