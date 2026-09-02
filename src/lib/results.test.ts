@@ -1,13 +1,16 @@
 /**
- * Merging two searches into one list, and when the field is a combobox.
+ * When the search field is a combobox.
  *
- * Both were written inside a component and neither could be tested there. The
- * merge decides where a whole group of results reads, and the combobox rule
+ * Written inside a component originally, where it could not be tested, and it
  * decides whether a screen reader says anything at all.
+ *
+ * The merge that used to be tested here moved to Rust with the search itself:
+ * placing a second search's results was the reason the window made two invokes
+ * per keystroke. Its seven cases are now in `commands/search.rs`.
  */
 import { describe, expect, test } from "vitest";
 import type { RankedCommand } from "$lib/exthost/commands";
-import { LISTBOX, isBrowsing, merged, optionId } from "$lib/results";
+import { LISTBOX, isBrowsing, optionId } from "$lib/results";
 
 function result(id: string, strong = false): RankedCommand {
   return {
@@ -24,67 +27,6 @@ function result(id: string, strong = false): RankedCommand {
 }
 
 const ids = (rows: RankedCommand[]) => rows.map((row) => row.id);
-
-describe("putting a second search into the first", () => {
-  test("results found by name keep the top", () => {
-    const index = [result("named", true), result("named too", true), result("loose")];
-
-    expect(ids(merged(index, [result("emoji")]))).toEqual([
-      "named",
-      "named too",
-      "emoji",
-      "loose",
-    ]);
-  });
-
-  /*
-   * The measurement this exists for. Typing "tada" matched eighty-four things
-   * in the index, every one a coincidence of spelling, and the emoji somebody
-   * had plainly named landed eighty-fifth, where Enter opened a Sill setting.
-   */
-  test("when the index only half-recognised the query, the named result leads", () => {
-    const loose = Array.from({ length: 84 }, (_, i) => result(`loose ${i}`));
-
-    expect(ids(merged(loose, [result("emoji")]))[0]).toBe("emoji");
-  });
-
-  test("with nothing strong and nothing to add, nothing moves", () => {
-    const loose = [result("a"), result("b")];
-
-    expect(ids(merged(loose, []))).toEqual(["a", "b"]);
-  });
-
-  test("an empty first list is just the second", () => {
-    expect(ids(merged([], [result("emoji")]))).toEqual(["emoji"]);
-  });
-
-  test("neither list is reordered within itself", () => {
-    const index = [result("s1", true), result("s2", true), result("w1"), result("w2")];
-    const extra = [result("e1"), result("e2")];
-
-    expect(ids(merged(index, extra))).toEqual(["s1", "s2", "e1", "e2", "w1", "w2"]);
-  });
-
-  test("everything strong means the second list goes last", () => {
-    // Nothing to get above, so it reads after what was asked for.
-    const index = [result("a", true), result("b", true)];
-
-    expect(ids(merged(index, [result("e")]))).toEqual(["a", "b", "e"]);
-  });
-
-  test("nothing is lost whatever the mix", () => {
-    // The property. A merge that drops a result is worse than one that orders
-    // them oddly, and much harder to notice.
-    const index = [result("a", true), result("b"), result("c", true), result("d")];
-    const extra = [result("e"), result("f")];
-    const out = merged(index, extra);
-
-    expect(out).toHaveLength(6);
-    for (const row of [...index, ...extra]) {
-      expect(ids(out)).toContain(row.id);
-    }
-  });
-});
 
 describe("when the field is a combobox", () => {
   test("it is one while browsing a list with something in it", () => {

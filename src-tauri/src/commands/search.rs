@@ -36,9 +36,13 @@ pub(crate) async fn search_commands(
     prefs: State<'_, PrefsState>,
     query: String,
 ) -> Result<Vec<registry::SearchResult>, String> {
-    let (excluded, hidden) = {
+    let (excluded, hidden, tone) = {
         let prefs = prefs.inner.lock().await;
-        (prefs.sources.excluded.clone(), prefs.sources.hidden.clone())
+        (
+            prefs.sources.excluded.clone(),
+            prefs.sources.hidden.clone(),
+            prefs.emoji.tone,
+        )
     };
     // A snapshot rather than a lock: ranking reads it from beginning to end
     // and nothing else should wait for that.
@@ -118,6 +122,23 @@ pub(crate) async fn search_commands(
             }
         }
     }
+
+    /*
+     * Emoji, ranked here rather than fetched by a second round trip.
+     *
+     * They stay a separate corpus on purpose: two thousand of them beside
+     * fifteen hundred real entries would swamp the list, and their names are
+     * ordinary words, so ranking them together would put a smiley in the
+     * middle of every search anybody types. Only plainly named ones are
+     * offered, and only a few.
+     *
+     * What changed is who asks. The window used to make a second invoke per
+     * keystroke and splice the answer in itself, which meant the placement
+     * rule lived in TypeScript and the list was rebuilt twice for one
+     * keystroke.
+     */
+    let inline = inline_emoji(&query, &index, &ranking, tone);
+    splice_suggestions(&mut results, inline);
 
     // Above everything, because when a query IS a sum the answer is the only
     // thing wanted. `evaluate` returns nothing for the ninety-nine queries in
@@ -415,6 +436,79 @@ pub(crate) async fn search_emoji(
         .collect())
 }
 
+/// Puts a second search's results into the first, by how well each matched.
+///
+/// Above everything the index only half-recognised, below everything it knew
+/// by name. Neither list is reordered within itself and nothing is dropped.
+///
+/// Appending was wrong and measuring showed how wrong: **typing `tada` matched
+/// eighty-four things in the index, every one a coincidence of spelling, and
+/// the emoji somebody had plainly named landed eighty-fifth**, where Enter
+/// opened a Sill setting instead.
+///
+/// This rule used to live in the window, in TypeScript, which meant a second
+/// invoke per keystroke to have something to splice. It is here now, and this
+/// is where its tests are.
+fn splice_suggestions(
+    results: &mut Vec<registry::RankedCommand>,
+    suggestions: Vec<registry::RankedCommand>,
+) {
+    if suggestions.is_empty() {
+        return;
+    }
+
+    let at = results
+        .iter()
+        .position(|hit| !registry::is_strong(hit.class))
+        .unwrap_or(results.len());
+
+    results.splice(at..at, suggestions);
+}
+
+/// The few emoji worth offering beside an ordinary search.
+///
+/// Empty for an empty query, and empty unless the query plainly names one:
+/// `is_strong` is the same test the ranker uses to separate "this is what you
+/// asked for" from "these letters are in there somewhere". Without it every
+/// search would carry a smiley, because there are nearly two thousand of them
+/// and their names are ordinary words.
+fn inline_emoji(
+    query: &str,
+    index: &crate::state::Index,
+    ranking: &crate::state::Ranking,
+    tone: crate::emoji::Tone,
+) -> Vec<registry::RankedCommand> {
+    if query.trim().is_empty() {
+        return Vec::new();
+    }
+
+    // Shared and built once per tone. This runs on every keystroke, and
+    // building two thousand records each time was a megabyte of allocation
+    // thrown away a moment later.
+    let records = crate::emoji::records_for(tone);
+
+    registry::search_excluding(
+        records.iter(),
+        query,
+        &ranking.frecency,
+        &index.aliases,
+        now_seconds(),
+        registry::SEARCH_LIMIT,
+        registry::Excluded::none(),
+    )
+    .into_iter()
+    .filter(|ranked| {
+        registry::match_class_with_alias(
+            query,
+            &ranked.command,
+            index.aliases.for_command(&ranked.command.id).unwrap_or(""),
+        )
+        .is_some_and(registry::is_strong)
+    })
+    .take(INLINE_EMOJI)
+    .collect()
+}
+
 /// How many emoji may appear beside an ordinary search.
 ///
 /// Few. They are volunteering rather than being asked for, and a row of them
@@ -491,15 +585,14 @@ pub(crate) struct KnownBrowser {
 /// temporary folder. They are derived from somebody's browsing history, and
 /// leaving that in a world-writable directory that nothing ever cleans is not
 /// where it belongs.
-#[tauri::command]
-pub(crate) async fn search_browsers(
-    app: AppHandle,
-    state: State<'_, PrefsState>,
-    searching: State<'_, crate::state::Searching>,
-    query: String,
+async fn matching_pages(
+    query: &str,
+    settings: crate::preferences::Browsers,
+    scratch: std::path::PathBuf,
+    searching: &crate::state::Searching,
+    token: u64,
 ) -> Result<Vec<browsers::Hit>, String> {
-    let token = searching.begin();
-    let settings = state.inner.lock().await.browsers.clone();
+    let query = query.to_string();
 
     if !settings.enabled {
         return Ok(Vec::new());
@@ -518,7 +611,6 @@ pub(crate) async fn search_browsers(
         return Ok(Vec::new());
     }
 
-    let scratch = crate::state::data_dir(&app).join("browser-copies");
     let wanted = settings.max_results as usize;
     let want = browsers::Want {
         history: settings.history,
@@ -531,19 +623,70 @@ pub(crate) async fn search_browsers(
         .map_err(|err| format!("browser search failed: {err}"))
 }
 
-/// Files matching a query, from Everything.
+/// Everything the index does not hold, in one answer.
 ///
-/// Separate from `search_commands` rather than merged into it: this spawns a
-/// process, so the UI debounces it and lets command results appear first.
+/// Files and browser pages, which are the two sources that read somebody
+/// else's files rather than Sill's own index, and the two the window waits a
+/// moment before asking for.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Elsewhere {
+    files: Vec<files::FileHit>,
+    pages: Vec<browsers::Hit>,
+}
+
+/// Both of the slow sources, asked once and answered together.
+///
+/// Two commands before, awaited one after the other, so a keystroke that got
+/// past the debounce cost two round trips and the browser search did not start
+/// until the file search had finished. They run at the same time now, and the
+/// window appends one answer instead of two.
+///
+/// Still separate from `search_commands`, and deliberately: one spawns a
+/// process and the other copies a browser's history, so the window shows what
+/// the index knows first and lets these arrive after.
 #[tauri::command]
-pub(crate) async fn search_files(
+pub(crate) async fn search_elsewhere(
+    app: AppHandle,
     state: State<'_, PrefsState>,
     catalog: State<'_, CatalogState>,
     searching: State<'_, crate::state::Searching>,
     query: String,
-) -> Result<Vec<files::FileHit>, String> {
+) -> Result<Elsewhere, String> {
     let token = searching.begin();
-    let settings = state.inner.lock().await.files.clone();
+
+    let (files_settings, browser_settings) = {
+        let prefs = state.inner.lock().await;
+        (prefs.files.clone(), prefs.browsers.clone())
+    };
+
+    let scratch = crate::state::data_dir(&app).join("browser-copies");
+    // Cloned out of the guard so the snapshot can be handed to a task that
+    // outlives this borrow.
+    let catalog = std::sync::Arc::clone(&catalog.inner.load_full());
+
+    // Together rather than one after the other. Neither needs the other's
+    // answer, and the browser search used to wait out the file search first.
+    let (files, pages) = tokio::join!(
+        matching_files(&query, files_settings, catalog, &searching, token),
+        matching_pages(&query, browser_settings, scratch, &searching, token),
+    );
+
+    Ok(Elsewhere {
+        files: files?,
+        pages: pages?,
+    })
+}
+
+/// Files matching a query, from Sill's index and from Everything.
+async fn matching_files(
+    query: &str,
+    settings: crate::preferences::FileSearch,
+    catalog: std::sync::Arc<crate::catalog::Catalog>,
+    searching: &crate::state::Searching,
+    token: u64,
+) -> Result<Vec<files::FileHit>, String> {
+    let query = query.to_string();
 
     if !settings.enabled {
         return Ok(Vec::new());
@@ -559,10 +702,7 @@ pub(crate) async fn search_files(
     // "only show results in", and a filter that only applied to one of two
     // sources would be a setting that half worked, which is worse than one
     // that does not exist.
-    let ours = catalog
-        .inner
-        .load()
-        .search(query.trim(), wanted, &settings.only_in);
+    let ours = catalog.search(query.trim(), wanted, &settings.only_in);
 
     /*
      * Our own index is a few milliseconds and has already run. The other one
@@ -763,4 +903,141 @@ pub(crate) async fn index_folder(
 #[tauri::command]
 pub(crate) async fn open_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::splice_suggestions;
+    use crate::registry::{CommandRecord, MatchClass, RankedCommand};
+
+    /// A result that matched by name, or one that merely matched.
+    ///
+    /// `ExactTitle` and `TitleSubsequence` are the two sides of `is_strong`,
+    /// which is the only thing the placement rule reads.
+    fn result(id: &str, strong: bool) -> RankedCommand {
+        RankedCommand {
+            class: if strong {
+                MatchClass::ExactTitle
+            } else {
+                MatchClass::TitleSubsequence
+            },
+            score: 0,
+            matched: Vec::new(),
+            command: CommandRecord {
+                id: id.to_string(),
+                extension: "test".into(),
+                extension_title: "Test".into(),
+                command: "run".into(),
+                title: id.to_string(),
+                subtitle: String::new(),
+                description: String::new(),
+                mode: "app".into(),
+                entrypoint: String::new(),
+                keywords: Vec::new(),
+                icon: None,
+                panel: None,
+                preferences: serde_json::Value::Null,
+                toggle: None,
+            },
+        }
+    }
+
+    fn ids(rows: &[RankedCommand]) -> Vec<String> {
+        rows.iter().map(|row| row.command.id.clone()).collect()
+    }
+
+    #[test]
+    fn results_found_by_name_keep_the_top() {
+        let mut results = vec![
+            result("named", true),
+            result("named too", true),
+            result("loose", false),
+        ];
+
+        splice_suggestions(&mut results, vec![result("emoji", true)]);
+
+        assert_eq!(ids(&results), ["named", "named too", "emoji", "loose"]);
+    }
+
+    /// The measurement this exists for.
+    ///
+    /// Typing `tada` matched eighty-four things in the index, every one a
+    /// coincidence of spelling, and the emoji somebody had plainly named
+    /// landed eighty-fifth, where Enter opened a Sill setting instead.
+    #[test]
+    fn when_the_index_only_half_recognised_the_query_the_named_result_leads() {
+        let mut results: Vec<RankedCommand> = (0..84)
+            .map(|n| result(&format!("loose {n}"), false))
+            .collect();
+
+        splice_suggestions(&mut results, vec![result("emoji", true)]);
+
+        assert_eq!(ids(&results)[0], "emoji");
+    }
+
+    #[test]
+    fn with_nothing_to_add_nothing_moves() {
+        let mut results = vec![result("a", false), result("b", false)];
+
+        splice_suggestions(&mut results, Vec::new());
+
+        assert_eq!(ids(&results), ["a", "b"]);
+    }
+
+    #[test]
+    fn an_empty_list_is_just_the_suggestions() {
+        let mut results = Vec::new();
+
+        splice_suggestions(&mut results, vec![result("emoji", true)]);
+
+        assert_eq!(ids(&results), ["emoji"]);
+    }
+
+    #[test]
+    fn neither_list_is_reordered_within_itself() {
+        let mut results = vec![
+            result("s1", true),
+            result("s2", true),
+            result("w1", false),
+            result("w2", false),
+        ];
+
+        splice_suggestions(&mut results, vec![result("e1", true), result("e2", true)]);
+
+        assert_eq!(ids(&results), ["s1", "s2", "e1", "e2", "w1", "w2"]);
+    }
+
+    #[test]
+    fn everything_strong_means_the_suggestions_go_last() {
+        // Nothing to get above, so they read after what was asked for.
+        let mut results = vec![result("a", true), result("b", true)];
+
+        splice_suggestions(&mut results, vec![result("e", true)]);
+
+        assert_eq!(ids(&results), ["a", "b", "e"]);
+    }
+
+    /// The property.
+    ///
+    /// A merge that drops a result is worse than one that orders them oddly,
+    /// and much harder to notice.
+    #[test]
+    fn nothing_is_lost_whatever_the_mix() {
+        let mut results = vec![
+            result("a", true),
+            result("b", false),
+            result("c", true),
+            result("d", false),
+        ];
+
+        splice_suggestions(&mut results, vec![result("e", true), result("f", true)]);
+
+        assert_eq!(results.len(), 6);
+        for id in ["a", "b", "c", "d", "e", "f"] {
+            assert!(
+                ids(&results).iter().any(|had| had == id),
+                "{id} was dropped by the merge"
+            );
+        }
+    }
 }

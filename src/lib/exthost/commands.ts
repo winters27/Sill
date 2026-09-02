@@ -599,8 +599,24 @@ export function indexFolder(path: string, wanted: boolean): Promise<string[]> {
   return invoke<string[]>("index_folder", { path, wanted });
 }
 
-export function searchFiles(query: string): Promise<FileHit[]> {
-  return invoke<FileHit[]>("search_files", { query }).catch(() => []);
+/**
+ * Everything the index does not hold: files and pages a browser remembers.
+ *
+ * One call rather than two. They used to be separate commands awaited one
+ * after the other, so a keystroke that got past the debounce cost two round
+ * trips and the browser search did not start until the file search had
+ * finished. Rust runs them at the same time now.
+ */
+export interface Elsewhere {
+  files: FileHit[];
+  pages: BrowserHit[];
+}
+
+export function searchElsewhere(query: string): Promise<Elsewhere> {
+  return invoke<Elsewhere>("search_elsewhere", { query }).catch(() => ({
+    files: [],
+    pages: [],
+  }));
 }
 
 /**
@@ -683,17 +699,6 @@ export interface BrowserHit {
   visits: number;
   /** The program behind the browser it came from, for the row's icon. */
   icon: string | null;
-}
-
-/**
- * Pages a browser remembers, visited or saved.
- *
- * Behind a debounce like files, and for the same reason: it reads databases
- * that belong to running programs, and one of them on this machine is 31 MB.
- * Ranked in Rust, so these arrive in order and merge straight in.
- */
-export function searchBrowsers(query: string): Promise<BrowserHit[]> {
-  return invoke<BrowserHit[]>("search_browsers", { query }).catch(() => []);
 }
 
 /**

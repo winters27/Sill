@@ -13,7 +13,7 @@
   import AiMark from "$lib/components/settings/AiMark.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
   import Steps from "$lib/components/Steps.svelte";
-  import { LISTBOX, isBrowsing, isListMode, merged, optionId } from "$lib/results";
+  import { LISTBOX, isBrowsing, isListMode, optionId } from "$lib/results";
   import { deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import {
     behaviourOf,
@@ -71,8 +71,7 @@
     liveRows,
     type LiveRow,
     performBuiltin,
-    searchBrowsers,
-    searchFiles,
+    searchElsewhere,
     searchWindows,
     searchEmoji,
     fileSearchMissing,
@@ -1071,20 +1070,18 @@
      * the only way a window can outrank a weak command match.
      */
 
-    // Emoji, in their own group. A separate corpus rather than part of the
-    // index: two thousand entries would swamp fifteen hundred real ones, and
-    // ranking them together would mean every keystroke weighed both.
-    //
-    // Only strong matches come back, which Rust decides. Their names are
-    // ordinary words, so loose matching would put a smiley in the middle of
-    // every search anybody ever typed.
-    try {
-      const faces = await searchEmoji(current, true);
-      if (id !== searchId) return;
-      if (faces.length) commands = merged(commands, faces);
-    } catch (err) {
-      if (id === searchId) status = `emoji search failed: ${err}`;
-    }
+    /*
+     * Emoji are not asked for separately any more.
+     *
+     * They came back from their own command and were spliced into the results
+     * here, which meant a second round trip per keystroke, the list rebuilt
+     * twice for one keystroke, and the rule about where they go living in
+     * TypeScript. Rust ranks them in the same pass now and places them itself.
+     *
+     * They are still a separate corpus: two thousand entries beside fifteen
+     * hundred real ones would swamp the list, and only plainly named ones are
+     * offered, because their names are ordinary words.
+     */
 
     // Nothing will come back, and saying so beats an empty space where files
     // should be. One row, only once something has been typed, and only when
@@ -1102,22 +1099,25 @@
     // a moment before asking, and giving them separate timers would only mean
     // two chances to fire on a query that has already been replaced.
     fileTimer = setTimeout(async () => {
+      /*
+       * Both slow sources in one call.
+       *
+       * Two commands before, awaited one after the other, so this cost two
+       * round trips and the browser search did not start until the file
+       * search had finished. Rust runs them at the same time and answers
+       * once, which is also one list rebuild here instead of two.
+       */
       try {
-        const hits = await searchFiles(current);
+        const found = await searchElsewhere(current);
         if (id !== searchId) return;
 
-        commands = [...commands, ...hits.map(fileAsCommand)];
+        commands = [
+          ...commands,
+          ...found.files.map(fileAsCommand),
+          ...found.pages.map(browserAsCommand),
+        ];
       } catch (err) {
         if (id === searchId) status = `file search failed: ${err}`;
-      }
-
-      try {
-        const pages = await searchBrowsers(current);
-        if (id !== searchId) return;
-
-        commands = [...commands, ...pages.map(browserAsCommand)];
-      } catch (err) {
-        if (id === searchId) status = `browser search failed: ${err}`;
       }
 
       /*

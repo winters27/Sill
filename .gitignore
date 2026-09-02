@@ -42,3 +42,4 @@ vite.config.ts.timestamp-*
 # `CARGO_TARGET_DIR`. Nine thousand build artefacts were committed before this
 # line existed.
 /src-tauri/target-audit/
+/target-audit/

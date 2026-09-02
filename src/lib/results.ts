@@ -21,25 +21,6 @@ export function optionId(index: number): string {
 }
 
 /**
- * Puts a second search's results into the first, by how well each matched.
- *
- * Appending was wrong and measuring showed how wrong: typing "tada" matched
- * eighty-four things in the index, every one a coincidence of spelling, and
- * the emoji somebody had plainly named landed eighty-fifth. Groups are ordered
- * by their best member, so where the first one lands decides where the whole
- * group reads.
- *
- * So: above everything the index only half-recognised, below everything it
- * knew by name. Neither list is reordered within itself.
- */
-export function merged(into: RankedCommand[], extra: RankedCommand[]): RankedCommand[] {
-  let at = 0;
-  while (at < into.length && into[at].strong) at += 1;
-
-  return [...into.slice(0, at), ...extra, ...into.slice(at)];
-}
-
-/**
  * Whether the search field is filtering a list that is on screen and walkable.
  *
  * Only then is it a combobox. The same field is a plain one everywhere else:

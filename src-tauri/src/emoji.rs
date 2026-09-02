@@ -117,11 +117,43 @@ const fn group_name(group: emojis::Group) -> &'static str {
     }
 }
 
+/// The last set built, kept for as long as the tone does not change.
+///
+/// Two thousand records, each with a handful of `String`s, is roughly a
+/// megabyte and takes a few milliseconds to build. That was paid **on every
+/// keystroke**, because the inline emoji search runs beside every ordinary
+/// search, and every one of those allocations was thrown away a moment later.
+///
+/// Held rather than built each time, and cleared when the tone changes, which
+/// is the only thing that can make it wrong. The module comment used to say
+/// this was built on demand so a second copy is not a permanent cost; that is
+/// still true of somebody who never types, because nothing is built until the
+/// first search asks.
+static BUILT: std::sync::Mutex<Option<(Tone, std::sync::Arc<Vec<CommandRecord>>)>> =
+    std::sync::Mutex::new(None);
+
 /// Everything with a name, as launcher entries.
 ///
-/// Built on demand rather than held: the whole set is static data already
-/// compiled into the binary, and a second copy of it shaped as records would
-/// be a permanent cost for a list nobody is looking at most of the time.
+/// Shared rather than cloned: every caller reads them and none of them writes,
+/// so handing out the same allocation is both correct and the whole point.
+pub fn records_for(tone: Tone) -> std::sync::Arc<Vec<CommandRecord>> {
+    let mut held = BUILT.lock().unwrap_or_else(|e| e.into_inner());
+
+    if let Some((had, records)) = held.as_ref() {
+        if *had == tone {
+            return records.clone();
+        }
+    }
+
+    let built = std::sync::Arc::new(records(tone));
+    *held = Some((tone, built.clone()));
+    built
+}
+
+/// Everything with a name, as launcher entries.
+///
+/// Built fresh. [`records_for`] is what callers on a keystroke should use;
+/// this is what builds what that holds, and what the tests read.
 pub fn records(tone: Tone) -> Vec<CommandRecord> {
     emojis::iter()
         .map(|emoji| {
