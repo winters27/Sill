@@ -12,6 +12,13 @@
   import Markdown from "$lib/components/Markdown.svelte";
   import Steps from "$lib/components/Steps.svelte";
   import { LISTBOX, isBrowsing, isListMode, merged, optionId } from "$lib/results";
+  import {
+    behaviourOf,
+    drawsItsOwn,
+    handlesItsOwnEscape,
+    hasRowActions,
+    searchesOnType,
+  } from "$lib/modes";
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import ClipboardView from "$lib/components/ClipboardView.svelte";
@@ -531,27 +538,35 @@
    */
   const browsing = $derived(isBrowsing(mode, commands.length));
 
+  /**
+   * How many rows the arrow keys walk.
+   *
+   * Where the number comes from is a property of the mode and is declared in
+   * `$lib/modes`; only the "own" case still needs naming here, because each of
+   * those keeps its count in a different variable. That was the last of the
+   * four hand-written mode lists.
+   */
   const count = $derived.by(() => {
-    if (isListMode(mode)) {
-      return commands.length;
+    switch (behaviourOf(mode)?.rows) {
+      case "commands":
+        return commands.length;
+
+      case "items":
+        return items.length;
+
+      // The field is a name, not a filter, so there is nothing to walk.
+      case "none":
+        return 0;
+
+      case "own":
+        if (mode === "clipboard") return clipboardCount;
+        if (mode === "conversations") return conversationRows.length;
+        if (mode === "store") return storeCount;
+        return 0;
+
+      default:
+        return items.length;
     }
-    // The field is a name, not a filter, so there is nothing to arrow through.
-    if (mode === "collection" || mode === "alias") return 0;
-    if (mode === "clipboard") return clipboardCount;
-    /*
-     * Its own count rather than a place in `LIST_MODES`.
-     *
-     * That list decides two things at once: what can be arrowed through, and
-     * what re-runs the index search when the query changes. This is the first
-     * and not the second, because the filter is a substring test over rows
-     * already in hand. The clipboard is here for the same reason.
-     */
-    if (mode === "conversations") return conversationRows.length;
-    // The store counts its own rows for the same reason: the query goes to
-    // Rust, which answers with a page already narrowed and capped, so what is
-    // arrowed through is whatever came back rather than anything measured here.
-    if (mode === "store") return storeCount;
-    return items.length;
   });
 
   /**
@@ -697,7 +712,7 @@
     // Whatever Rust says can be done to the selected result. This used to be
     // two entries written here by hand, which meant the panel and the Enter
     // key were two separate opinions about what a result supports.
-    if (mode === "root" || mode === "appVolume") {
+    if (hasRowActions(mode)) {
       const chosen = commands[selected];
 
       // Naming a result is offered on the result, not buried in settings.
@@ -808,47 +823,19 @@
    */
   let clipboardActions = $state<ActionInfo[]>([]);
 
-/**
- * The modes that draw something other than the ordinary result list.
+/*
+ * What each mode behaves like lives in `$lib/modes`.
  *
- * Written as the exceptions rather than as a list of members, and that is the
- * whole point. This was a hand-written list of the modes that *do* draw a
- * list, and it is the fourth such list in this codebase: every one of them
- * silently drew nothing for a mode somebody forgot to add, and this one did it
- * again the day the process view arrived. A new view is an ordinary list until
- * it says otherwise, so forgetting now costs nothing.
- */
-/**
- * The modes that answer Escape themselves.
+ * There were four of these lists across three files: what draws its own view,
+ * what answers Escape, what the arrow keys walk, and what has an action panel.
+ * Every one of them had silently done nothing for a mode somebody forgot to
+ * add, and one still was: `output` was in neither the "draws its own" list nor
+ * the list of ordinary lists, so the script output rendered with a stale
+ * result list under it and dead arrow keys.
  *
- * Everything else goes back to the root, and the root closes the launcher.
- * Written as the exceptions for the same reason `DRAWS_ITS_OWN` is: the list
- * of views that *can* be backed out of had the widget board missing from it,
- * so the board opened and Escape did nothing at all.
+ * One table, keyed by the mode union, so a mode with no entry does not
+ * compile.
  */
-const HANDLES_ITS_OWN_ESCAPE = new Set([
-  "conversations",
-  "clipboard",
-  "alias",
-  "collection",
-  "switcher",
-  "command",
-  // Escape backs out of the screen that asks whether to install something
-  // before it backs out of the store, and leaving the store lets go of the
-  // catalogue rather than only changing the mode.
-  "store",
-]);
-
-const DRAWS_ITS_OWN = new Set([
-  "command",
-  "widgets",
-  "clipboard",
-  "argument",
-  "collection",
-  "ai",
-  "conversations",
-  "store",
-]);
 
   /**
    * The last action that can be taken back, named by its place in the log.
@@ -880,10 +867,7 @@ const DRAWS_ITS_OWN = new Set([
   let askedFor: string | null = null;
 
   $effect(() => {
-    const command =
-      mode === "root" || mode === "appVolume"
-        ? commands[selected]
-        : undefined;
+    const command = hasRowActions(mode) ? commands[selected] : undefined;
 
     if (!command) {
       rootActions = [];
@@ -2152,7 +2136,7 @@ const DRAWS_ITS_OWN = new Set([
     // are ordinary results carrying an ordinary kind, and the registry already
     // knows what can be done to one. A second copy of this would be a second
     // opinion about what a row supports.
-    if (mode === "root" || mode === "appVolume") {
+    if (hasRowActions(mode)) {
       const chosen = action.tag.startsWith("Sill.Action:")
         ? action.tag.slice("Sill.Action:".length)
         : "";
@@ -2780,7 +2764,7 @@ const DRAWS_ITS_OWN = new Set([
      * A view you can get into is one you can get out of, and that should be
      * true by default rather than by being remembered.
      */
-    if (mode !== "root" && !HANDLES_ITS_OWN_ESCAPE.has(mode)) {
+    if (mode !== "root" && !handlesItsOwnEscape(mode)) {
       // Whatever was being moved is no longer being moved.
       moving = null;
       mode = "root";
@@ -3177,8 +3161,17 @@ const DRAWS_ITS_OWN = new Set([
   // Typing at the root re-ranks; inside a command the query is the extension's.
   $effect(() => {
     query;
-    // Not while the field holds a name rather than a query.
-    if (isListMode(mode)) {
+    /*
+     * Not while the field holds a name rather than a query, and not for a view
+     * that filters rows it already has.
+     *
+     * `searchesOnType` rather than `isListMode`, which was deciding both this
+     * and what the arrow keys walk. They are not the same question: the
+     * clipboard and the conversation list are walkable and narrow what they
+     * already hold, and re-running the index search for them answers a
+     * question nobody asked.
+     */
+    if (searchesOnType(mode)) {
       void refreshRoot();
     }
   });
@@ -3855,7 +3848,7 @@ const DRAWS_ITS_OWN = new Set([
       />
     </div>
 
-  {:else if !DRAWS_ITS_OWN.has(mode)}
+  {:else if !drawsItsOwn(mode)}
     <!-- Kept on screen while a name is typed, so what is being named stays
          visible. -->
     <div class="listing">

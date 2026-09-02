@@ -329,21 +329,19 @@ async fn search_sill(app: &AppHandle, query: &str) -> Value {
 }
 
 /// What a row is, said the way somebody would say it.
+///
+/// Asked of the kind rather than matched on the mode. The version this
+/// replaces was a match with `_ => "result"` and **nine kinds fell into it**,
+/// so a script, an emoji, a running program and a saved arrangement were all
+/// described to the model as "result". `ObjectKind::plainly` is exhaustive, so
+/// a kind added later is a compile error rather than another one of those.
+///
+/// Still a fallback for a mode with no kind at all, which is an entry nothing
+/// can act on anyway.
 fn kind_of(mode: &str) -> &'static str {
-    match mode {
-        "app" => "application",
-        "exe" => "command line program",
-        "setting" => "Windows setting",
-        "sill-setting" => "Sill setting",
-        "builtin" => "Sill command",
-        "snippet" => "saved snippet",
-        "quicklink" | "quicklink-arg" => "saved link",
-        "system" => "system switch",
-        "file" => "file",
-        "window" => "open window",
-        "view" | "no-view" => "extension command",
-        _ => "result",
-    }
+    crate::object::ObjectKind::from_mode(mode)
+        .map(crate::object::ObjectKind::plainly)
+        .unwrap_or("result")
 }
 
 fn find_files(query: &str) -> Value {

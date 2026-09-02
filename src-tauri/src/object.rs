@@ -130,6 +130,47 @@ impl ObjectKind {
         Self::Script,
     ];
 
+    /**
+    What this is, said the way somebody would say it.
+
+    For the model, which is told what it is looking at rather than shown a
+    `mode` string. **Exhaustive on purpose, with no catch-all**: this was a
+    match on the mode string with `_ => "result"`, and nine kinds fell into it,
+    so a script, an emoji, a program's volume, a running process, a saved
+    arrangement, a web search and a remembered page were all described to the
+    model as "result". It could not ask about what it could not name.
+
+    Derived from the kind rather than the mode for the same reason: there are
+    more modes than kinds and the kinds are the thing actions are declared
+    against, so a new one is a compile error here instead of a silent
+    "result".
+    */
+    pub fn plainly(self) -> &'static str {
+        match self {
+            Self::Application => "application",
+            Self::File => "file",
+            Self::Folder => "folder",
+            Self::ExtensionCommand => "extension command",
+            Self::SystemSetting => "Windows setting",
+            Self::Setting => "Sill setting",
+            Self::Builtin => "Sill command",
+            Self::SystemControl => "system switch",
+            Self::Snippet => "saved snippet",
+            Self::Quicklink => "saved link",
+            Self::Script => "script",
+            Self::Answer => "calculated answer",
+            Self::ClipboardEntry => "clipboard entry",
+            Self::Text => "piece of text",
+            Self::Emoji => "emoji",
+            Self::Window => "open window",
+            Self::Search => "web search",
+            Self::Url => "web page",
+            Self::AudioSession => "program's volume",
+            Self::Process => "running program",
+            Self::Workspace => "saved arrangement",
+        }
+    }
+
     /// The kind behind an index entry's `mode`.
     ///
     /// `None` for a mode nothing knows about, which is a build newer than this

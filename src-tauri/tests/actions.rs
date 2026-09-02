@@ -757,3 +757,36 @@ fn every_extension_builtin_declares_what_it_reaches() {
         "an unknown tag must not inherit anybody's permissions"
     );
 }
+
+/// Every kind can say what it is, and no two say the same thing.
+///
+/// The model is told what it is looking at rather than shown a `mode` string.
+/// That description used to be a match on the mode with `_ => "result"`, and
+/// nine kinds fell into it: a script, an emoji, a program's volume, a running
+/// process, a saved arrangement, a web search and a remembered page were all
+/// "result". A model cannot ask about what it cannot name.
+#[test]
+fn every_kind_describes_itself_distinctly() {
+    use sill_lib::object::ObjectKind;
+
+    let mut said: Vec<&str> = ObjectKind::ALL.iter().map(|kind| kind.plainly()).collect();
+
+    for word in &said {
+        assert!(!word.is_empty(), "a kind describes itself as nothing");
+        assert_ne!(
+            *word, "result",
+            "a kind still describes itself the way the catch-all used to"
+        );
+    }
+
+    let total = said.len();
+    said.sort_unstable();
+    said.dedup();
+
+    assert_eq!(
+        said.len(),
+        total,
+        "two kinds describe themselves identically, so the model cannot tell \
+         them apart: {said:?}"
+    );
+}

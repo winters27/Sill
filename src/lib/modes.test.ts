@@ -1,0 +1,124 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  MODES,
+  behaviourOf,
+  drawsItsOwn,
+  handlesItsOwnEscape,
+  hasRowActions,
+  isListMode,
+  searchesOnType,
+} from "./modes";
+
+describe("what each mode behaves like", () => {
+  it("has an answer for every mode there is", () => {
+    for (const mode of MODES) {
+      expect(behaviourOf(mode), `${mode} has no entry`).toBeDefined();
+    }
+  });
+
+  it("says nothing about a mode that does not exist", () => {
+    // The helpers are called with a plain string, because `mode` crosses from
+    // Rust as one. A typo has to read as "no special behaviour" rather than as
+    // a crash, and it must not accidentally match another mode's entry.
+    expect(behaviourOf("modeThatIsNotReal")).toBeUndefined();
+    expect(isListMode("modeThatIsNotReal")).toBe(false);
+    expect(drawsItsOwn("modeThatIsNotReal")).toBe(false);
+  });
+
+  /**
+   * The bug this table was written for.
+   *
+   * `output` was in neither the list of views that draw themselves nor the
+   * list of ordinary lists, so the script output block rendered and the
+   * previous result list rendered underneath it, with the arrow keys dead
+   * because its count was zero. A mode has to be one or the other.
+   */
+  it("says what every mode puts on screen", () => {
+    for (const mode of MODES) {
+      const how = behaviourOf(mode)!;
+
+      expect(
+        ["own", "results", "behind"],
+        `${mode} does not say what it shows`,
+      ).toContain(how.shows);
+    }
+  });
+
+  /**
+   * A mode that shows the result list has to walk it.
+   *
+   * The one that did not was `output`: it drew the script output block and,
+   * because it was in neither hand-written list, the previous result list as
+   * well, with the arrow keys dead because its count was zero. Leaving the
+   * list up is fine while a name is typed; leaving it up under a view of its
+   * own is the bug.
+   */
+  it("walks the results wherever it shows them", () => {
+    for (const mode of MODES) {
+      const how = behaviourOf(mode)!;
+      if (how.shows !== "results") continue;
+
+      expect(
+        how.rows,
+        `${mode} shows the result list and does not walk it`,
+      ).toBe("commands");
+    }
+  });
+
+  it("only re-runs the index search for modes that walk its results", () => {
+    for (const mode of MODES) {
+      if (!searchesOnType(mode)) continue;
+
+      expect(
+        isListMode(mode),
+        `${mode} re-runs the index search but does not show its results`,
+      ).toBe(true);
+    }
+  });
+
+  it("offers row actions only where there are rows from the index", () => {
+    for (const mode of MODES) {
+      if (!hasRowActions(mode)) continue;
+
+      expect(
+        isListMode(mode),
+        `${mode} takes actions from a selected result and has no results`,
+      ).toBe(true);
+    }
+  });
+
+  it("keeps the modes that were known to answer Escape themselves", () => {
+    // Named rather than derived: this is the behaviour the table replaced, and
+    // a table that quietly changed it would be a refactor that broke Escape.
+    for (const mode of ["conversations", "clipboard", "alias", "collection", "switcher", "command", "store"]) {
+      expect(handlesItsOwnEscape(mode), `${mode} stopped answering Escape`).toBe(true);
+    }
+
+    expect(handlesItsOwnEscape("root")).toBe(false);
+  });
+
+  it("keeps the modes that were known to draw their own view", () => {
+    // Named rather than derived, for the same reason as Escape above: this is
+    // the behaviour the table replaced. Writing it out caught the table
+    // dropping `collection`, which would have put the result list back under
+    // the collection picker.
+    for (const mode of [
+      "command",
+      "widgets",
+      "clipboard",
+      "argument",
+      "collection",
+      "ai",
+      "conversations",
+      "store",
+    ]) {
+      expect(drawsItsOwn(mode), `${mode} stopped drawing its own view`).toBe(true);
+    }
+
+    // And the ones that deliberately leave the list showing must not start.
+    for (const mode of ["alias", "namingWorkspace", "root"]) {
+      expect(drawsItsOwn(mode), `${mode} started drawing a view of its own`).toBe(false);
+    }
+  });
+});
