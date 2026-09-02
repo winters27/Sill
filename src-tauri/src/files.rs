@@ -42,7 +42,22 @@ fn client() -> Option<String> {
         }
     }
 
-    Some("es".to_string())
+    /*
+     * Then `PATH`, actually looked along.
+     *
+     * This used to end `Some("es".to_string())`, on the reasoning that the
+     * shell would resolve it. The shell would, and it also meant this function
+     * **never returned `None`**, so `available()` was always true, so
+     * `missing()` could never report that file search was absent or asleep,
+     * and the row that says so and offers to fix it was unreachable on every
+     * machine. A fallback that is always taken is not a fallback.
+     */
+    let path = std::env::var_os("PATH")?;
+
+    std::env::split_paths(&path)
+        .map(|dir| dir.join("es.exe"))
+        .find(|candidate| candidate.is_file())
+        .map(|found| found.to_string_lossy().into_owned())
 }
 
 /// Why file search cannot answer.
@@ -149,31 +164,6 @@ pub fn start() -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("Could not start file search: {e}"))
-}
-
-/// Installs it, in a window somebody can watch.
-///
-/// `/k` rather than `/c` so the console stays open: if the package manager
-/// refuses, the reason is on screen instead of gone. Neither agreement is
-/// accepted here on anybody's behalf, which is the reason the window is
-/// visible at all.
-pub fn install() -> Result<(), String> {
-    std::process::Command::new("cmd")
-        .args([
-            "/c",
-            "start",
-            "Install file search",
-            "cmd",
-            "/k",
-            "winget",
-            "install",
-            "--id",
-            "voidtools.Everything",
-            "--exact",
-        ])
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("Could not start the installer: {e}"))
 }
 
 /// Whether file search can work at all.

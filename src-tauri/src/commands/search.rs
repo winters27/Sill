@@ -817,8 +817,36 @@ pub(crate) async fn start_file_search(
         Some(files::Missing::Asleep) => {
             files::start().map(|()| "Starting file search.".to_string())
         }
+        /*
+         * Sill's own index, turned on.
+         *
+         * This used to run winget and install Everything, a program the row
+         * does not mention: it says "Sill is not indexing any folders" and
+         * offers to set that up, and choosing it opened a console window
+         * installing something else. A launcher row that installs third party
+         * software without saying so is not a row anybody should be able to
+         * press by accident.
+         *
+         * Sill has an index of its own and this is what it is for. Everything
+         * is still used when it happens to be running, and adding it is a
+         * choice somebody can make in Settings, where the drive list already
+         * lives and where it can be described honestly.
+         */
         Some(files::Missing::Absent) => {
-            files::install().map(|()| "Installing file search.".to_string())
+            let roots = {
+                let mut prefs = state.inner.lock().await;
+                prefs.files.enabled = true;
+                prefs.files.index = true;
+
+                prefs
+                    .save(&state.path)
+                    .map_err(|err| format!("Could not save: {err}"))?;
+
+                prefs.files.indexed_roots()
+            };
+
+            catalog.rebuild(roots);
+            Ok("Reading your files. This happens once.".to_string())
         }
     }
 }

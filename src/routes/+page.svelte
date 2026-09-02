@@ -15,6 +15,7 @@
   import Steps from "$lib/components/Steps.svelte";
   import { LISTBOX, isBrowsing, isListMode, optionId, selectionAfter } from "$lib/results";
   import { deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
+  import { asUrl, isPath, isUrl } from "$lib/typed";
   import {
     behaviourOf,
     drawsItsOwn,
@@ -84,6 +85,8 @@
     browserAsCommand,
     defaultBrowser,
     extractTextFromLastImage,
+    pathRow,
+    urlRow,
     webSearchRow,
     fileAsCommand,
     actionsFor,
@@ -1159,9 +1162,30 @@
        * this same timer appends. It costs nothing to build and asks Rust for
        * nothing, so it is not what the wait is for.
        */
-      if (webSearchEnabled && id === searchId) {
-        show([...commands, webSearchRow(current.trim(), browser ?? undefined)], current);
-      }
+      if (id !== searchId) return;
+
+      const typed = current.trim();
+
+      /*
+       * An address, and a path, before the offer to look words up.
+       *
+       * Both are destinations rather than questions. Typing an address and
+       * pressing Enter used to search the web for the address itself, and
+       * typing a path did nothing at all: a path is not in the index, is not
+       * a command, and the file search matches names rather than whole paths.
+       *
+       * Here rather than earlier so they land after the real results, which
+       * is where somebody who typed something the index knew about is
+       * looking. Above the web search row, which answers anything and so
+       * goes last.
+       */
+      const offers: RankedCommand[] = [];
+
+      if (isUrl(typed)) offers.push(urlRow(asUrl(typed), browser ?? undefined));
+      if (isPath(typed)) offers.push(pathRow(typed));
+      if (webSearchEnabled) offers.push(webSearchRow(typed, browser ?? undefined));
+
+      if (offers.length) show([...commands, ...offers], current);
     }, FILE_SEARCH_DEBOUNCE_MS);
   }
 
@@ -2012,7 +2036,7 @@
       },
       absent: {
         title: "Turn on file search",
-        subtitle: "Sill is not indexing any folders and nothing else on this machine is either. Choose this to set it up.",
+        subtitle: "Sill is not indexing any folders. Choose this to start, and it will read the ones you work in.",
       },
       asleep: {
         title: "Start file search",

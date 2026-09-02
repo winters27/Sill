@@ -778,6 +778,51 @@ export function webSearchRow(query: string, browser?: string): RankedCommand {
   };
 }
 
+/**
+ * The row that offers to open what was typed, when it is an address.
+ *
+ * Above the web search row, because an address is a destination rather than a
+ * question: typing `https://example.com` and pressing Enter used to search the
+ * web for the words "https://example.com", which is nobody's intent.
+ *
+ * Built here for the same reason the web search row is, and wearing the same
+ * browser mark, because opening it is Sill handing the address to that browser
+ * rather than something Sill does itself.
+ */
+export function urlRow(address: string, browser?: string): RankedCommand {
+  return {
+    id: "url:typed",
+    extension: "websearch",
+    extensionTitle: "Browser",
+    title: `Open ${address}`,
+    subtitle: "",
+    mode: "url",
+    entrypoint: address,
+    icon: browser,
+    matched: [],
+  };
+}
+
+/**
+ * The row that offers to open what was typed, when it is a path.
+ *
+ * `C:\Users\Brandon` did nothing at all: it is not in the index, it is not a
+ * command, and the file search matches names rather than whole paths. Somebody
+ * who typed a whole path has already said exactly what they want.
+ */
+export function pathRow(path: string): RankedCommand {
+  return {
+    id: "file:typed",
+    extension: "files",
+    extensionTitle: "Files",
+    title: `Open ${path}`,
+    subtitle: "",
+    mode: "file",
+    entrypoint: path,
+    matched: [],
+  };
+}
+
 export function dismiss(): Promise<void> {
   return invoke("dismiss");
 }
