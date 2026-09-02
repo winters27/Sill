@@ -39,3 +39,43 @@ import { isListMode } from "./modes";
 export function isBrowsing(mode: string, results: number): boolean {
   return isListMode(mode) && results > 0;
 }
+
+/**
+ * Where the highlight goes when the results change underneath it.
+ *
+ * ## Why the selection cannot just be a number
+ *
+ * It was one, and a number means nothing once the list it counted into has
+ * been replaced. Two things went wrong with that.
+ *
+ * Typing another character kept row five selected, which is now a different
+ * row: the highlight appeared to stay still while what it pointed at changed,
+ * so Enter opened whatever had moved into that position.
+ *
+ * And the list is built in stages. Commands arrive, then files and browser
+ * pages a moment later. Anything appended below the highlighted row is
+ * harmless, but the moment the list is rebuilt the number is pointing into a
+ * different array.
+ *
+ * ## The two rules
+ *
+ * A new query starts at the top, which is what every launcher does and what
+ * somebody typing expects. The same query keeps the row it was on, by id, so
+ * a late page of files cannot move it. If that row is gone, the top.
+ */
+export function selectionAfter(
+  held: { id: string | undefined; index: number },
+  rows: { id: string }[],
+  sameQuery: boolean,
+): number {
+  if (!sameQuery) return 0;
+
+  if (held.id !== undefined) {
+    const at = rows.findIndex((row) => row.id === held.id);
+    if (at >= 0) return at;
+  }
+
+  // The row is gone: a source answered differently, or the list shrank. The
+  // top rather than the same number, which would be an arbitrary row.
+  return held.index < rows.length ? held.index : 0;
+}

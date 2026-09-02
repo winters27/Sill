@@ -13,7 +13,7 @@
   import AiMark from "$lib/components/settings/AiMark.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
   import Steps from "$lib/components/Steps.svelte";
-  import { LISTBOX, isBrowsing, isListMode, optionId } from "$lib/results";
+  import { LISTBOX, isBrowsing, isListMode, optionId, selectionAfter } from "$lib/results";
   import { deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import {
     behaviourOf,
@@ -259,6 +259,35 @@
   let query = $state("");
   let selected = $state(0);
   let commands = $state<RankedCommand[]>([]);
+
+  /**
+   * The query the rows on screen belong to.
+   *
+   * Kept so a list arriving for the query somebody has already typed past can
+   * be told from one arriving for the query they are looking at, which is what
+   * decides whether the highlight starts again at the top.
+   */
+  let showing = $state("");
+
+  /**
+   * Puts a set of rows on screen and decides where the highlight goes.
+   *
+   * One place, because the selection was an index and every one of the eight
+   * sites that replaced the list had its own `if (selected >= length)`, which
+   * is a bounds check rather than a rule. A number means nothing once the list
+   * it counted into has been replaced: typing another character kept row five
+   * selected, and row five was now a different row.
+   */
+  function show(rows: RankedCommand[], forQuery: string) {
+    selected = selectionAfter(
+      { id: commands[selected]?.id, index: selected },
+      rows,
+      forQuery === showing,
+    );
+
+    commands = rows;
+    showing = forQuery;
+  }
 
   /**
    * Subtitles that are a measurement, by row id.
@@ -975,8 +1004,7 @@
         const found = await searchDestinations(current, source.path);
         if (id !== searchId) return;
 
-        commands = found;
-        if (selected >= commands.length) selected = 0;
+        show(found, current);
       } catch (err) {
         if (id === searchId) status = `could not look for folders: ${err}`;
       }
@@ -997,8 +1025,7 @@
         const found = await searchAppVolume(current);
         if (id !== searchId) return;
 
-        commands = found;
-        if (selected >= commands.length) selected = 0;
+        show(found, current);
       } catch (err) {
         if (id === searchId) status = `could not read the volumes: ${err}`;
       }
@@ -1010,8 +1037,7 @@
         const found = await searchEmoji(current);
         if (id !== searchId) return;
 
-        commands = found;
-        if (selected >= commands.length) selected = 0;
+        show(found, current);
       } catch (err) {
         if (id === searchId) status = `emoji search failed: ${err}`;
       }
@@ -1026,8 +1052,7 @@
         const open = await searchWindows(current);
         if (id !== searchId) return;
 
-        commands = open;
-        if (selected >= commands.length) selected = 0;
+        show(open, current);
       } catch (err) {
         if (id === searchId) status = `window search failed: ${err}`;
       }
@@ -1038,8 +1063,7 @@
       const ranked = await searchCommands(current);
       if (id !== searchId) return;
 
-      commands = ranked;
-      if (selected >= commands.length) selected = 0;
+      show(ranked, current);
 
       /*
        * A search that worked clears what a search that failed said.
@@ -1088,7 +1112,7 @@
     // file search is switched on: somebody who turned it off does not need
     // telling that it is off.
     if (fileSearchGap) {
-      commands = [...commands, fileSearchRow(fileSearchGap)];
+      show([...commands, fileSearchRow(fileSearchGap)], current);
     }
 
     // Files and browser pages are appended after the commands, so a slower
@@ -1111,11 +1135,14 @@
         const found = await searchElsewhere(current);
         if (id !== searchId) return;
 
-        commands = [
-          ...commands,
-          ...found.files.map(fileAsCommand),
-          ...found.pages.map(browserAsCommand),
-        ];
+        show(
+          [
+            ...commands,
+            ...found.files.map(fileAsCommand),
+            ...found.pages.map(browserAsCommand),
+          ],
+          current,
+        );
       } catch (err) {
         if (id === searchId) status = `file search failed: ${err}`;
       }
@@ -1133,7 +1160,7 @@
        * nothing, so it is not what the wait is for.
        */
       if (webSearchEnabled && id === searchId) {
-        commands = [...commands, webSearchRow(current.trim(), browser ?? undefined)];
+        show([...commands, webSearchRow(current.trim(), browser ?? undefined)], current);
       }
     }, FILE_SEARCH_DEBOUNCE_MS);
   }

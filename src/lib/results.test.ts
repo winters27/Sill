@@ -10,7 +10,7 @@
  */
 import { describe, expect, test } from "vitest";
 import type { RankedCommand } from "$lib/exthost/commands";
-import { LISTBOX, isBrowsing, optionId } from "$lib/results";
+import { LISTBOX, isBrowsing, optionId, selectionAfter } from "$lib/results";
 
 function result(id: string, strong = false): RankedCommand {
   return {
@@ -72,5 +72,60 @@ describe("the ids the two sides agree on", () => {
     for (const id of [LISTBOX, optionId(0), optionId(999)]) {
       expect(id).toMatch(/^[A-Za-z][\w-]*$/);
     }
+  });
+});
+
+/**
+ * Where the highlight goes when the results change underneath it.
+ *
+ * The selection was a number, and a number means nothing once the list it
+ * counted into has been replaced.
+ */
+describe("keeping the selection while the list changes", () => {
+  const rows = (...ids: string[]) => ids.map((id) => ({ id }));
+
+  test("a new query starts at the top", () => {
+    const held = { id: "notepad", index: 4 };
+
+    expect(selectionAfter(held, rows("a", "notepad", "c"), false)).toBe(0);
+  });
+
+  /**
+   * The bug. Files and browser pages arrive a moment after the commands, and
+   * rebuilding the list moved the highlight to whatever had taken that
+   * position.
+   */
+  test("a late page of files does not move the highlighted row", () => {
+    const held = { id: "notepad", index: 1 };
+    const grown = rows("a", "notepad", "c", "file1", "file2");
+
+    expect(selectionAfter(held, grown, true)).toBe(1);
+  });
+
+  test("a row that moved up is followed", () => {
+    const held = { id: "notepad", index: 3 };
+
+    expect(selectionAfter(held, rows("notepad", "a", "b"), true)).toBe(0);
+  });
+
+  test("a row that is gone falls back to the same position", () => {
+    const held = { id: "vanished", index: 1 };
+
+    expect(selectionAfter(held, rows("a", "b", "c"), true)).toBe(1);
+  });
+
+  test("a row that is gone from a shorter list falls back to the top", () => {
+    const held = { id: "vanished", index: 7 };
+
+    expect(selectionAfter(held, rows("a", "b"), true)).toBe(0);
+  });
+
+  test("an empty list is the top whatever was held", () => {
+    expect(selectionAfter({ id: "notepad", index: 3 }, [], true)).toBe(0);
+  });
+
+  test("nothing held starts where it was, if that still exists", () => {
+    expect(selectionAfter({ id: undefined, index: 2 }, rows("a", "b", "c"), true)).toBe(2);
+    expect(selectionAfter({ id: undefined, index: 9 }, rows("a", "b", "c"), true)).toBe(0);
   });
 });
