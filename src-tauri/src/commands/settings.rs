@@ -77,6 +77,7 @@ pub(crate) async fn set_preferences(
             keep_images: prefs.clipboard.keep_images,
             ignored_apps: prefs.clipboard.ignored_apps.clone(),
             secrets: prefs.clipboard.secrets,
+            retain_days: prefs.clipboard.retain_days,
         });
         // Switched off means stopped. The watcher owns a thread and a hidden
         // window and is woken by every copy on the machine, whether or not it

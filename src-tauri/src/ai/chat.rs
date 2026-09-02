@@ -74,6 +74,75 @@ const KEEP_OFFERING: i64 = 10 * 60;
 /// nobody scrolls past fifty of anything.
 const KEEP_PAST: usize = 50;
 
+/// How many messages of one conversation are kept.
+///
+/// Twenty exchanges, which is far more than anybody has with a launcher and
+/// still a bound. Without one a conversation somebody keeps returning to grows
+/// for as long as Sill runs, is held in memory in full, is written to disk in
+/// full, and is **cloned in full for every question asked**, because the whole
+/// history is what a service is sent.
+const KEEP_TURNS: usize = 40;
+
+/// How many bytes of attached pictures are carried forward.
+///
+/// An attachment is a data URI, so a screenshot handed over is a couple of
+/// megabytes of base64 sitting in the message it came with. A few of those and
+/// the conversation is larger than everything else Sill holds put together.
+///
+/// The newest are kept, because a follow-up is nearly always about the picture
+/// just handed over, and the ones that fall out of the budget keep their name
+/// and their size so the chip still reads correctly. What is dropped is the
+/// body, which is the part that is large.
+const KEEP_ATTACHED_BYTES: usize = 4 * 1024 * 1024;
+
+/// Bounds one conversation, in place.
+///
+/// Its own function so the rule can be stated in a test rather than reasoned
+/// about: this runs after every message, and getting it wrong either loses
+/// what somebody said or keeps everything, and both are quiet.
+fn trim(messages: &mut Vec<Message>) {
+    /*
+     * The system message stays wherever it is.
+     *
+     * It is the instructions, not a turn, and dropping it because it happens
+     * to be oldest would change how the model answers halfway through a
+     * conversation, which is the sort of thing that reads as the model
+     * getting worse the longer you talk to it.
+     */
+    if messages.len() > KEEP_TURNS {
+        let over = messages.len() - KEEP_TURNS;
+        let mut dropped = 0;
+
+        messages.retain(|message| {
+            if dropped >= over || message.role == "system" {
+                return true;
+            }
+
+            dropped += 1;
+            false
+        });
+    }
+
+    // Then the attachment bodies, newest first until the budget is spent.
+    let mut spent = 0usize;
+
+    for message in messages.iter_mut().rev() {
+        for attached in message.attachments.iter_mut() {
+            if attached.body.is_empty() {
+                continue;
+            }
+
+            spent += attached.body.len();
+
+            if spent > KEEP_ATTACHED_BYTES {
+                // The name and the size stay, so the chip that names it still
+                // reads correctly. The body is what was large.
+                attached.body.clear();
+            }
+        }
+    }
+}
+
 /// Where they are kept.
 ///
 /// Plain JSON beside the rest of Sill's own files, which is what the clipboard
@@ -480,6 +549,11 @@ impl Chat {
         if let Some(open) = held.open.as_mut() {
             open.messages.push(message);
             open.last = now;
+
+            // Bounded here rather than when it is sent, because the cost is
+            // holding it: a conversation is kept in memory in full, written to
+            // disk in full, and cloned in full for every question asked.
+            trim(&mut open.messages);
         }
     }
 
@@ -1445,6 +1519,114 @@ mod tests {
         fn cutting_one_full_of_wide_characters_does_not_panic() {
             let name = shorten(&"\u{1f600}".repeat(120));
             assert_eq!(name.chars().count(), TITLE);
+        }
+    }
+
+    mod bounding_a_conversation {
+        use super::super::{trim, KEEP_ATTACHED_BYTES, KEEP_TURNS};
+        use crate::ai::openai::{Attached, Message};
+
+        fn said(role: &str, text: &str) -> Message {
+            Message {
+                role: role.to_string(),
+                content: text.to_string(),
+                tool_calls: Vec::new(),
+                tool_call_id: None,
+                attachments: Vec::new(),
+            }
+        }
+
+        fn with_picture(bytes: usize) -> Message {
+            let mut message = said("user", "what is this");
+            message.attachments.push(Attached {
+                name: "screenshot.png".to_string(),
+                kind: "image".to_string(),
+                body: "x".repeat(bytes),
+                bytes,
+            });
+            message
+        }
+
+        /// A conversation somebody keeps returning to does not grow forever.
+        ///
+        /// It is held in memory in full, written to disk in full, and cloned
+        /// in full for every question asked, because the whole history is
+        /// what a service is sent.
+        #[test]
+        fn the_oldest_turns_fall_out() {
+            let mut messages: Vec<Message> = (0..KEEP_TURNS + 10)
+                .map(|n| said("user", &format!("question {n}")))
+                .collect();
+
+            trim(&mut messages);
+
+            assert_eq!(messages.len(), KEEP_TURNS);
+            assert_eq!(
+                messages[0].content, "question 10",
+                "the wrong end was dropped"
+            );
+        }
+
+        /// The instructions are not a turn and do not fall out with them.
+        ///
+        /// Dropping them because they happen to be oldest would change how the
+        /// model answers halfway through a conversation, which reads as it
+        /// getting worse the longer you talk to it.
+        #[test]
+        fn the_system_message_stays_wherever_it_is() {
+            let mut messages = vec![said("system", "you are Sill")];
+            messages.extend((0..KEEP_TURNS + 10).map(|n| said("user", &format!("q{n}"))));
+
+            trim(&mut messages);
+
+            assert_eq!(messages[0].role, "system", "the instructions were dropped");
+        }
+
+        /// The newest pictures are kept and the older bodies are let go.
+        ///
+        /// An attachment is a data URI, so a screenshot handed over is a
+        /// couple of megabytes of base64 in the message it came with.
+        #[test]
+        fn old_picture_bodies_are_dropped_and_the_newest_kept() {
+            let big = KEEP_ATTACHED_BYTES / 2 + 1;
+            let mut messages = vec![with_picture(big), with_picture(big), with_picture(big)];
+
+            trim(&mut messages);
+
+            assert!(
+                messages[2].attachments[0].body.is_empty() == false,
+                "the newest picture was dropped"
+            );
+            assert!(
+                messages[0].attachments[0].body.is_empty(),
+                "an old picture body was kept and the budget means nothing"
+            );
+        }
+
+        /// What is dropped still says what it was.
+        #[test]
+        fn a_dropped_picture_keeps_its_name_and_size() {
+            let big = KEEP_ATTACHED_BYTES + 1;
+            let mut messages = vec![with_picture(big), with_picture(big)];
+
+            trim(&mut messages);
+
+            let gone = &messages[0].attachments[0];
+            assert!(gone.body.is_empty());
+            assert_eq!(gone.name, "screenshot.png");
+            assert_eq!(gone.bytes, big, "the chip would show the wrong size");
+        }
+
+        /// A short conversation is left exactly as it is.
+        #[test]
+        fn an_ordinary_conversation_is_untouched() {
+            let mut messages = vec![said("user", "hello"), said("assistant", "hello")];
+            let before = messages.clone();
+
+            trim(&mut messages);
+
+            assert_eq!(messages.len(), before.len());
+            assert_eq!(messages[0].content, "hello");
         }
     }
 }

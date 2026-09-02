@@ -30,6 +30,50 @@ const MAX_TEXT_BYTES: usize = 1_000_000;
 /// Largest image kept, before which it is noted but its bytes are dropped.
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
+/// How often old entries are cleared out.
+///
+/// Once a day, from whichever copy happens to be the first after that. The
+/// prune used to run only at startup, which on a machine that is left on
+/// means it never runs: Sill is meant to be up for weeks, and the entry
+/// somebody set to expire after seven days would still be there on the
+/// thirtieth.
+const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(60 * 60 * 24);
+
+/// When entries were last cleared out.
+static PRUNED: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Clears out entries past their retention, at most once a day.
+///
+/// Called from the recording path rather than a timer, because a copy is the
+/// only moment the history changes and a thread waking daily to find nothing
+/// to do is exactly the idle cost rule 23 refuses.
+fn prune_occasionally(clipboard: &Clipboard, retain_days: u32) {
+    if retain_days == 0 {
+        return;
+    }
+
+    {
+        let Ok(mut last) = PRUNED.lock() else {
+            return;
+        };
+
+        if last.is_some_and(|when| when.elapsed() < PRUNE_EVERY) {
+            return;
+        }
+
+        *last = Some(std::time::Instant::now());
+    }
+
+    match clipboard
+        .store()
+        .prune(retain_days, crate::state::now_seconds())
+    {
+        Ok(0) => {}
+        Ok(gone) => crate::say!("pruned {gone} old clipboard entries"),
+        Err(err) => crate::say!("could not prune the clipboard: {err}"),
+    }
+}
+
 /// How many times the clipboard is reached for before giving up.
 ///
 /// The clipboard is a single system-wide resource held under a lock, and the
@@ -101,6 +145,14 @@ pub struct Rules {
     pub ignored_apps: Vec<String>,
     /// What to do with something that looks like a credential.
     pub secrets: crate::clipboard::sensitive::Policy,
+    /// How long an entry is kept, in days. Zero means for good.
+    ///
+    /// Carried here so the watcher can do the pruning. It used to happen once
+    /// at startup, which prunes nothing at all on a machine that is left on:
+    /// a launcher meant to run for weeks would go weeks without honouring the
+    /// setting, and the entry somebody expected to expire yesterday is still
+    /// there.
+    pub retain_days: u32,
 }
 
 impl Clipboard {
@@ -147,6 +199,10 @@ impl Clipboard {
                     keep_images: true,
                     ignored_apps: Vec::new(),
                     secrets: sensitive::Policy::default(),
+                    // Replaced by the real setting the moment preferences are
+                    // read; zero here means nothing is pruned before then,
+                    // which is the safe way round for a default.
+                    retain_days: 0,
                 })),
             }),
             Err(err) => {
@@ -514,6 +570,8 @@ fn capture_with(
             }
         }
         drop(store);
+
+        prune_occasionally(clipboard, rules.retain_days);
 
         let _ = app.emit("clipboard:changed", ());
     }

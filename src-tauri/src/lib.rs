@@ -1310,6 +1310,7 @@ pub fn run() {
                     keep_images: prefs.clipboard.keep_images,
                     ignored_apps: prefs.clipboard.ignored_apps.clone(),
                     secrets: prefs.clipboard.secrets,
+                    retain_days: prefs.clipboard.retain_days,
                 });
                 if prefs.clipboard.enabled {
                     clipboard::monitor::watch(&handle, &history);
