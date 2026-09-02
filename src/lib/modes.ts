@@ -103,9 +103,29 @@ export interface Behaviour {
 
 const behaviour: Record<Mode, Behaviour> = {
   root: { rows: "commands", searches: true, shows: "results", escape: false, actions: true },
-  switcher: { rows: "commands", searches: true, shows: "results", escape: true, actions: false },
-  emoji: { rows: "commands", searches: true, shows: "results", escape: false, actions: false },
+  /**
+   * Window management on the row under the cursor.
+   *
+   * The switcher had no action panel at all, which is the one view where the
+   * whole point is a window you have already picked out: Ctrl+K now offers the
+   * twenty-odd things the registry can do to it, halves and thirds and close
+   * among them. Enter still means "switch to it", because the panel's primary
+   * goes back through `openSelected`, which is where the switcher's own
+   * dismissal lives.
+   */
+  switcher: { rows: "commands", searches: true, shows: "results", escape: true, actions: true },
+  // Copy as well as paste, which the registry already offers on an emoji and
+  // the picker had no way to reach.
+  emoji: { rows: "commands", searches: true, shows: "results", escape: false, actions: true },
   appVolume: { rows: "commands", searches: true, shows: "results", escape: false, actions: true },
+  /**
+   * Deliberately no action panel.
+   *
+   * The rows are folders, so the registry would offer everything it offers a
+   * folder: reveal it, compress it, put it in the recycle bin. This view was
+   * opened to answer one question, "which folder", and offering to delete one
+   * of the answers is not a feature.
+   */
   destination: { rows: "commands", searches: true, shows: "results", escape: false, actions: false },
 
   // Filters rows already in hand, so it counts its own and does not re-search.
