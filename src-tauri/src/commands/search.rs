@@ -466,11 +466,26 @@ pub(crate) struct KnownBrowser {
 pub(crate) async fn search_browsers(
     app: AppHandle,
     state: State<'_, PrefsState>,
+    searching: State<'_, crate::state::Searching>,
     query: String,
 ) -> Result<Vec<browsers::Hit>, String> {
+    let token = searching.begin();
     let settings = state.inner.lock().await.browsers.clone();
 
     if !settings.enabled {
+        return Ok(Vec::new());
+    }
+
+    /*
+     * Checked before anything is read, because the cheapest version of this
+     * search is still expensive.
+     *
+     * A copy of the history is taken when the previous one is over five
+     * minutes old, and Chromium's is tens of megabytes. Doing that for a
+     * keystroke that has already been overtaken is the clearest waste in the
+     * whole search path.
+     */
+    if !searching.is_current(token) {
         return Ok(Vec::new());
     }
 
@@ -495,8 +510,10 @@ pub(crate) async fn search_browsers(
 pub(crate) async fn search_files(
     state: State<'_, PrefsState>,
     catalog: State<'_, CatalogState>,
+    searching: State<'_, crate::state::Searching>,
     query: String,
 ) -> Result<Vec<files::FileHit>, String> {
+    let token = searching.begin();
     let settings = state.inner.lock().await.files.clone();
 
     if !settings.enabled {
@@ -517,6 +534,17 @@ pub(crate) async fn search_files(
         .inner
         .load()
         .search(query.trim(), wanted, &settings.only_in);
+
+    /*
+     * Our own index is a few milliseconds and has already run. The other one
+     * is a different matter, so this is where an overtaken search stops.
+     *
+     * The rows found so far are still returned rather than thrown away: they
+     * cost nothing more, and the window will discard them if it has moved on.
+     */
+    if !searching.is_current(token) {
+        return Ok(ours.into_iter().take(wanted).collect());
+    }
 
     // Then a whole-volume indexer, when one is running. It sees the rest of
     // the machine, which our index deliberately does not.

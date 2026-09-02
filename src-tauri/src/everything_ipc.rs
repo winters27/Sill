@@ -20,7 +20,7 @@
 #![cfg(windows)]
 
 use std::cell::RefCell;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::OnceLock;
 
 use windows::core::{w, PCWSTR};
@@ -90,7 +90,11 @@ thread_local! {
     static REPLY: RefCell<Option<Vec<FileHit>>> = const { RefCell::new(None) };
 }
 
-type Job = (String, usize, u32, Sender<Vec<FileHit>>);
+/// One query waiting for the single worker thread.
+///
+/// The `bool` is whether this query may be thrown away when a newer one
+/// arrives. See [`newest`].
+type Job = (String, usize, u32, bool, Sender<Vec<FileHit>>);
 
 /// The channel into the thread that owns the reply window.
 static QUERIES: OnceLock<Option<Sender<Job>>> = OnceLock::new();
@@ -104,8 +108,29 @@ pub fn search(query: &str, limit: usize) -> Vec<FileHit> {
     search_with(query, limit, 0)
 }
 
+/**
+A search that may be abandoned if another starts before it runs.
+
+For the keystroke path, and **only** for it. Typing eight characters queues
+eight of these and each pumps messages for up to a second and a half, so
+answering all of them in turn is how one slow keystroke becomes ten; the window
+throws away every answer but the last regardless.
+
+Anything that is not a keystroke uses [`search_with`] and is answered. The
+distinction is the whole point: "only the newest matters" is true of somebody
+typing and false of two unrelated callers, and the worker is shared. Two tests
+running in parallel found that immediately.
+*/
+pub fn search_newest(query: &str, limit: usize, flags: u32) -> Vec<FileHit> {
+    ask(query, limit, flags, true)
+}
+
 /// A search with Everything's own match flags applied.
 pub fn search_with(query: &str, limit: usize, flags: u32) -> Vec<FileHit> {
+    ask(query, limit, flags, false)
+}
+
+fn ask(query: &str, limit: usize, flags: u32, supersedable: bool) -> Vec<FileHit> {
     let query = query.trim();
     if query.is_empty() {
         return Vec::new();
@@ -117,7 +142,7 @@ pub fn search_with(query: &str, limit: usize, flags: u32) -> Vec<FileHit> {
 
     let (reply_tx, reply_rx) = mpsc::channel();
     if sender
-        .send((query.to_string(), limit, flags, reply_tx))
+        .send((query.to_string(), limit, flags, supersedable, reply_tx))
         .is_err()
     {
         return Vec::new();
@@ -155,7 +180,8 @@ fn start_worker() -> Option<Sender<Job>> {
             };
             trace!("reply window {:?}", window.0);
 
-            for (query, limit, flags, reply) in rx {
+            while let Ok(job) = rx.recv() {
+                let (query, limit, flags, _, reply) = newest(job, &rx);
                 let hits = run_query(window, &query, limit, flags);
                 let _ = reply.send(hits);
             }
@@ -163,6 +189,37 @@ fn start_worker() -> Option<Sender<Job>> {
         .ok()?;
 
     Some(tx)
+}
+
+/**
+The only query worth answering: the newest one waiting.
+
+One thread serves every search and each query pumps messages for up to a second
+and a half, so typing eight characters queued eight of them and the eighth
+waited behind seven answers nobody would ever look at. The window discards a
+stale result already, which hides the cost without removing it: a wedged
+Everything turned one slow keystroke into ten slow ones.
+
+**A skipped job is answered, not dropped.** Its caller is sitting on a
+two-second timeout, and an empty answer now is the same result it would have
+got then, a great deal sooner. Dropping the sender would work too, and would
+make every superseded keystroke look like a failure in the log.
+
+Its own function so it can be tested: the loop it came out of needs a real
+Everything window and a message pump, and this needs neither.
+*/
+fn newest(mut job: Job, rx: &Receiver<Job>) -> Job {
+    // Only a keystroke may be thrown away. A caller that is not typing asked a
+    // question of its own and is owed an answer, and this worker is shared by
+    // everything, so it runs and whatever is queued behind it waits its turn.
+    while job.3 {
+        let Ok(newer) = rx.try_recv() else { break };
+
+        let _ = job.4.send(Vec::new());
+        job = newer;
+    }
+
+    job
 }
 
 /// A message-only window, which exists purely to receive the reply.
@@ -384,3 +441,102 @@ fn parse_list(bytes: &[u8]) -> Vec<FileHit> {
 
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A keystroke, which may be superseded.
+    fn job(query: &str) -> (Job, mpsc::Receiver<Vec<FileHit>>) {
+        let (tx, rx) = mpsc::channel();
+        ((query.to_string(), 10, 0, true, tx), rx)
+    }
+
+    /// Somebody who is not typing, and is owed an answer.
+    fn asked(query: &str) -> (Job, mpsc::Receiver<Vec<FileHit>>) {
+        let (tx, rx) = mpsc::channel();
+        ((query.to_string(), 10, 0, false, tx), rx)
+    }
+
+    /// Eight keystrokes queued, one search run.
+    ///
+    /// Every query pumps messages for up to a second and a half, so answering
+    /// all of them in turn is how one slow keystroke becomes ten.
+    #[test]
+    fn only_the_newest_query_is_kept() {
+        let (tx, rx) = mpsc::channel::<Job>();
+
+        let mut waiting = Vec::new();
+        for query in ["c", "cl", "cli", "clip", "clipb"] {
+            let (one, reply) = job(query);
+            tx.send(one).expect("queued");
+            waiting.push(reply);
+        }
+
+        let first = rx.recv().expect("something was queued");
+        let (query, _, _, _, _) = newest(first, &rx);
+
+        assert_eq!(query, "clipb", "the newest query is the one that runs");
+
+        // And every skipped caller was answered rather than left waiting out
+        // its two-second timeout.
+        for (n, reply) in waiting.iter().take(4).enumerate() {
+            assert_eq!(
+                reply.try_recv().map(|hits| hits.len()),
+                Ok(0),
+                "the caller of keystroke {n} was left waiting"
+            );
+        }
+    }
+
+    /// One query on its own is still the newest, and is not answered early.
+    #[test]
+    fn a_lone_query_is_left_to_run() {
+        let (tx, rx) = mpsc::channel::<Job>();
+
+        let (one, reply) = job("clipboard");
+        tx.send(one).expect("queued");
+
+        let (query, _, _, _, keep) = newest(rx.recv().expect("queued"), &rx);
+
+        assert_eq!(query, "clipboard");
+        assert!(
+            reply.try_recv().is_err(),
+            "it was answered before it ran, so the search never happened"
+        );
+
+        // The sender that came back is the live one, and answering it reaches
+        // the caller.
+        keep.send(Vec::new()).expect("the reply channel is still open");
+        assert!(reply.try_recv().is_ok());
+    }
+
+    /**
+    A caller that is not typing is never thrown away.
+
+    The worker is one thread shared by everything, and "only the newest
+    matters" is true of somebody typing and false of two unrelated callers.
+    Two tests running in parallel proved it the moment this was added: one
+    asked for `*.md`, the other asked for something else at the same instant,
+    and the first got an empty answer in two milliseconds.
+    */
+    #[test]
+    fn a_query_that_is_not_a_keystroke_is_answered() {
+        let (tx, rx) = mpsc::channel::<Job>();
+
+        let (mine, reply) = asked("*.md");
+        tx.send(mine).expect("queued");
+
+        let (other, _theirs) = asked("*.rs");
+        tx.send(other).expect("queued");
+
+        let (query, _, _, _, _) = newest(rx.recv().expect("queued"), &rx);
+
+        assert_eq!(query, "*.md", "the first question is still the one that runs");
+        assert!(
+            reply.try_recv().is_err(),
+            "it was answered early, so its search never happened"
+        );
+    }
+}
+

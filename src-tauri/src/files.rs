@@ -254,7 +254,9 @@ pub fn search_with(
             flags |= ipc::REGEX;
         }
 
-        let hits = ipc::search_with(query, limit, flags);
+        // Supersedable: this is the keystroke path, and the window keeps only
+        // the answer to the last one anybody typed.
+        let hits = ipc::search_newest(query, limit, flags);
         if !hits.is_empty() {
             return hits;
         }

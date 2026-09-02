@@ -1030,6 +1030,9 @@ pub fn run() {
         // they leave it. Nothing here fetches, warms up or refreshes.
         .manage(store::StoreState::default())
         .manage(tts::sapi::Sapi::default())
+        // Which file or browser search is the newest, so an overtaken one can
+        // stop rather than finish an answer nobody will look at.
+        .manage(state::Searching::default())
         .manage(RegistryState {
             // Sill's own settings are a `const` table and cannot change while
             // the app runs, so they are here rather than filled in later.

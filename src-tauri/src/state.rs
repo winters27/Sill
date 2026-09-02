@@ -397,6 +397,43 @@ impl RegistryState {
     }
 }
 
+/**
+Which search is the current one.
+
+The window already throws away a stale answer: every result carries the
+`searchId` it belongs to and anything older is dropped. What it cannot do is
+stop the work, so typing eight characters started eight file searches and eight
+browser reads, seven of which produced answers nobody would ever see. On the
+Everything path that is up to a second and a half each, and on the browser path
+it is a copy of a history database that can be thirty megabytes.
+
+This is the same idea on the other side of the wire: a search takes a token
+before it starts and checks it before each expensive step, and a search that
+has been overtaken stops there. Nothing is cancelled mid-flight; work simply
+does not begin once it is known to be pointless, which is where nearly all of
+the cost is.
+
+One counter rather than one per source, because they are all driven by the same
+keystroke: when a newer one starts, everything the older one was going to do is
+equally stale.
+*/
+#[derive(Default)]
+pub(crate) struct Searching(std::sync::atomic::AtomicU64);
+
+impl Searching {
+    /// Claims the newest search, and hands back the token to check against.
+    pub(crate) fn begin(&self) -> u64 {
+        self.0
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            .wrapping_add(1)
+    }
+
+    /// Whether this is still the search anybody is waiting for.
+    pub(crate) fn is_current(&self, token: u64) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed) == token
+    }
+}
+
 /// What ranking weights by.
 #[derive(Clone, Default)]
 pub(crate) struct Ranking {
@@ -640,5 +677,60 @@ mod tests {
             counted,
             "a list of records is not in `everything`",
         );
+    }
+}
+
+#[cfg(test)]
+mod searching {
+    use super::*;
+
+    /// The newest search is the only current one.
+    #[test]
+    fn starting_another_search_supersedes_the_one_before_it() {
+        let searching = Searching::default();
+
+        let first = searching.begin();
+        assert!(searching.is_current(first), "the only search is the current one");
+
+        let second = searching.begin();
+        assert!(
+            !searching.is_current(first),
+            "the first must know it has been overtaken, or it goes on to copy a \
+             thirty megabyte history for a keystroke nobody is waiting on"
+        );
+        assert!(searching.is_current(second));
+    }
+
+    /// Two tokens are never the same, even from two threads.
+    ///
+    /// If they were, an overtaken search would believe it was still current
+    /// and the check would be worse than nothing: it would look like a
+    /// safeguard and never fire.
+    #[test]
+    fn no_two_searches_share_a_token() {
+        let searching = Searching::default();
+        let hands = 8;
+        let each = 200;
+
+        let tokens = std::sync::Mutex::new(Vec::new());
+
+        std::thread::scope(|scope| {
+            for _ in 0..hands {
+                let searching = &searching;
+                let tokens = &tokens;
+
+                scope.spawn(move || {
+                    let mine: Vec<u64> = (0..each).map(|_| searching.begin()).collect();
+                    tokens.lock().unwrap().extend(mine);
+                });
+            }
+        });
+
+        let mut all = tokens.into_inner().unwrap();
+        let total = all.len();
+        all.sort_unstable();
+        all.dedup();
+
+        assert_eq!(all.len(), total, "two searches were handed the same token");
     }
 }
