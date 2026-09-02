@@ -474,7 +474,7 @@
     flex: none;
     color: var(--accent);
     font-size: var(--text-meta);
-    font-weight: var(--weight-regular);
+    font-weight: var(--weight-body);
     white-space: nowrap;
   }
 
@@ -495,7 +495,7 @@
   .bar {
     flex: 1;
     height: 4px;
-    border-radius: var(--radius-1);
+    border-radius: var(--radius-pill);
     background: var(--fill-2);
     overflow: hidden;
   }

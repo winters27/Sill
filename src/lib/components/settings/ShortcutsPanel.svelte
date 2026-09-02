@@ -418,8 +418,8 @@
     font: inherit;
     font-size: var(--text-meta);
     font-variant-numeric: tabular-nums;
-    color: var(--text);
-    background: var(--surface-raised);
+    color: var(--text-1);
+    background: var(--fill-1);
     border: 1px solid var(--hairline);
     border-radius: var(--radius-md);
     cursor: pointer;

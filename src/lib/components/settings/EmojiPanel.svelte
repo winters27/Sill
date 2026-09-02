@@ -112,7 +112,7 @@
   }
 
   .tone:hover {
-    background: var(--surface-raised);
+    background: var(--fill-1);
   }
 
   .tone.on {

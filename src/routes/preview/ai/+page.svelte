@@ -178,13 +178,16 @@
    * The real content column.
    *
    * The settings window is 1180 wide with a 244px sidebar and --space-8 of
-   * padding each side, so the panel gets 872px. At the 940px minimum window
-   * it gets 632px, which is why the column is a variable here.
+   * padding each side, so the panel gets 872px. At the 940px minimum window it
+   * gets 632px, so the narrow case is checked by editing this one number.
+   *
+   * It was `var(--column, 872px)`, and nothing anywhere defined `--column`, so
+   * it had always been the fallback. Written as the number it always was.
    */
   .body {
     /* Everything is border-box, so the padding has to be added on top or the
        measured column comes out 64px narrower than the real one. */
-    width: calc(var(--column, 872px) + 2 * var(--space-8));
+    width: calc(872px + 2 * var(--space-8));
     padding: var(--space-6) var(--space-8);
   }
 </style>

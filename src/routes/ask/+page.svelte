@@ -779,7 +779,7 @@
     box-shadow: var(--bevel-window);
     overflow: hidden;
     color: var(--text-1);
-    font-family: var(--font-ui);
+    font-family: var(--font);
     font-size: var(--text-body);
   }
 

@@ -301,6 +301,102 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Every custom property a component reads is one the theme defines.
+ *
+ * A `var(--nope)` with no fallback is not an error anywhere: the declaration
+ * is dropped and the element keeps whatever it inherited, so a missing border
+ * is invisible and a missing background looks like a deliberate transparent
+ * one. Eight of these had accumulated, including `--line`, which drew every
+ * border in the extension store, and `--text`, which coloured ten rows.
+ *
+ * Fallbacks are read as intent rather than as a definition: `var(--danger,
+ * #d24b4b)` still names a token nobody defined, and it hides the fact by
+ * looking correct. Both halves are refused.
+ */
+{
+  const theme = readFileSync(THEME, "utf8");
+  const defined = new Set(
+    Array.from(theme.matchAll(/^\s*(--[\w-]+)\s*:/gm), (m) => m[1]),
+  );
+
+  const files = [
+    ...sources("src/lib"),
+    ...sources("src/routes"),
+  ].filter((f) => /\.(svelte|css)$/.test(f) && !f.includes("theme.css"));
+
+  for (const file of files) {
+    const raw = readFileSync(file, "utf8");
+
+    /*
+     * Comments are prose about the code, not code.
+     *
+     * A note explaining that `var(--column, 872px)` was removed contains the
+     * thing this refuses, and reporting it makes the check fire on its own
+     * explanation. Blanked rather than cut, so every line number still points
+     * at the right line.
+     */
+    const text = raw.replace(/\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->/g, (c) =>
+      c.replace(/[^\n]/g, " "),
+    );
+
+    /*
+     * A component may define its own, scoped to itself, and the interesting
+     * case is where it does it: `style="--columns: {n}"` on the element, so
+     * the value can come from the script. Matched anywhere in the file rather
+     * than at the start of a line for exactly that reason.
+     */
+    for (const m of text.matchAll(/(--[\w-]+)\s*:/g)) defined.add(m[1]);
+
+    for (const m of text.matchAll(/var\(\s*(--[\w-]+)/g)) {
+      if (defined.has(m[1])) continue;
+      fail(
+        file,
+        lineOf(text, m.index),
+        `reads ${m[1]}, which ${THEME} does not define, so the declaration is ` +
+          "dropped and nothing looks wrong",
+      );
+    }
+  }
+}
+
+/*
+ * A panel that hands `commit` a new object must be given a `commit` that takes
+ * one.
+ *
+ * The Shortcuts panel declares `commit: (next: Preferences) => void` and calls
+ * `commit({ ...prefs, taps })`. The page passed a zero-argument `commit` that
+ * snapshotted what it already held, so every write from that panel was
+ * dropped: the hyper key, double-tap, the navigation preset, per-command
+ * hotkeys. Nothing failed and nothing said so, because **a zero-argument
+ * function satisfies a one-argument type**, and the panel is the one screen
+ * whose settings are all verified by pressing keys somewhere else.
+ *
+ * It shipped that way for three days. Types cannot catch it and no test
+ * rendered the panel, so this does.
+ */
+const SETTINGS_PAGE = "src/routes/settings/+page.svelte";
+const page = readFileSync(SETTINGS_PAGE, "utf8");
+
+for (const file of sources("src/lib/components/settings")) {
+  const text = readFileSync(file, "utf8");
+  const call = text.indexOf("commit({");
+  if (call === -1) continue;
+
+  const name = file.split(/[\\/]/).pop().replace(".svelte", "");
+  const used = new RegExp(`<${name}\\b[^>]*commit=\\{commitWith\\}`).test(page);
+
+  if (!used) {
+    fail(
+      file,
+      lineOf(text, call),
+      `hands \`commit\` a new settings object, so ${SETTINGS_PAGE} has to ` +
+        `pass it \`commit={commitWith}\`; with the zero-argument \`commit\` ` +
+        "the object is silently dropped",
+    );
+  }
+}
+
+/*
  * No font file is tracked by git.
  *
  * Satoshi is under the ITF Free Font License, which permits embedding it in a

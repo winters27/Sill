@@ -244,6 +244,37 @@
 
   let prefs = $state<Preferences | null>(null);
   let info = $state<Diagnostics | null>(null);
+
+  /**
+   * The last settings this window sent, so it does not adopt its own echo.
+   *
+   * `set_preferences` tells every window what the settings now are, this one
+   * included. Without this, saving here would immediately reassign `prefs` to
+   * the answer, which throws away anything typed in the moment between.
+   */
+  let echo: string | null = null;
+
+  /**
+   * The same object always spells the same, whatever order its keys arrived in.
+   *
+   * Comparing `JSON.stringify` output directly would work almost always and
+   * fail in the way that is hardest to see: a payload built by Rust and one
+   * built by spreading an object in the window can carry identical settings in
+   * a different order, and the difference would read as somebody else having
+   * changed something.
+   */
+  function canonical(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+
+    if (value && typeof value === "object") {
+      const entries = Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, one]) => `${JSON.stringify(key)}:${canonical(one)}`);
+      return `{${entries.join(",")}}`;
+    }
+
+    return JSON.stringify(value) ?? "null";
+  }
   /** Where each installed extension came from, read off disk. */
   let pins = $state<Pin[]>([]);
 
@@ -357,11 +388,18 @@
    * Rust writes the file immediately rather than debouncing: a debounced write
    * has to be flushed on shutdown, and that flush is the part that gets
    * forgotten. Settings change rarely enough that the cost does not matter.
+   *
+   * Takes nothing: it saves what `prefs` already holds, and most panels write
+   * into `prefs` directly. A panel that builds a new object instead calls
+   * `commitWith`, which is a separate function on purpose. See below.
    */
   async function commit() {
     if (!prefs) return;
     try {
       const next = $state.snapshot(prefs);
+      // Before the call, not after: the event can arrive while it is still in
+      // flight.
+      echo = canonical(next);
       await setPreferences(next);
       applyAppearance(next);
       // A rebind is exactly when a key turns out to be taken, so this is
@@ -373,6 +411,28 @@
     } catch (err) {
       status = `Could not save: ${err}`;
     }
+  }
+
+  /**
+   * Adopts a whole settings object, then saves it.
+   *
+   * For the panels that build a new object rather than writing into `prefs`.
+   * Its own function rather than an optional parameter on `commit`, and the
+   * reason is worth keeping: `commit` is handed straight to controls as their
+   * change callback in twenty-eight places, and a `Toggle` calls its callback
+   * with a boolean. One function taking an optional `Preferences` would let a
+   * switch assign `true` over the entire settings object, which is a worse bug
+   * than the one being fixed and would type-check.
+   *
+   * The bug being fixed: the Shortcuts panel declares
+   * `commit: (next: Preferences) => void` and was handed the zero-argument
+   * `commit`, so everything it wrote was dropped for three days. A
+   * zero-argument function satisfies a one-argument type, so nothing said so.
+   * `scripts/verify-source.mjs` now refuses that pairing.
+   */
+  async function commitWith(next: Preferences) {
+    prefs = next;
+    await commit();
   }
 
   function onRecord(event: KeyboardEvent) {
@@ -464,6 +524,7 @@
 
   onMount(() => {
     let unlisten: UnlistenFn | undefined;
+    let changed: UnlistenFn | undefined;
 
     (async () => {
       // A deep link opens straight at its panel: "About Sill" landing on
@@ -474,6 +535,27 @@
       unlisten = await listen<string>("sill://settings-section", ({ payload }) =>
         jumpTo(payload),
       );
+
+      /*
+       * Settings written anywhere else.
+       *
+       * This window is not the only thing that writes them. Naming a result in
+       * the launcher, binding a key to one, or hiding one all go through
+       * `set_preferences`, and this held a copy taken when it opened. So the
+       * next toggle pressed here sent that stale copy back and **undid the
+       * alias somebody had just made**, with no error and nothing on screen to
+       * suggest it had happened.
+       *
+       * Adopting the payload is the whole fix. The echo check is what keeps it
+       * from being disruptive: every save comes back here too, and reassigning
+       * `prefs` mid-edit would take the cursor out of a field.
+       */
+      changed = await listen<Preferences>("sill://preferences-changed", ({ payload }) => {
+        if (canonical(payload) === echo) return;
+
+        prefs = payload;
+        applyAppearance(payload);
+      });
 
       try {
         prefs = await getPreferences();
@@ -493,7 +575,10 @@
       }
     })();
 
-    return () => unlisten?.();
+    return () => {
+      unlisten?.();
+      changed?.();
+    };
   });
 </script>
 
@@ -872,7 +957,7 @@
           {:else if active === "snippets"}
             <SnippetsPanel prefs={p} {commit} />
           {:else if active === "shortcuts"}
-            <ShortcutsPanel prefs={p} {commit} />
+            <ShortcutsPanel prefs={p} commit={commitWith} />
           {:else if active === "quicklinks"}
             <QuicklinksPanel />
           {:else if active === "emoji"}
@@ -1879,8 +1964,8 @@
   /* A key that Windows refused. Stated rather than merely styled: the colour
      is a hint and the description above says what happened. */
   .recorder.taken {
-    color: var(--danger, #d24b4b);
-    border-color: var(--danger, #d24b4b);
+    color: var(--accent-red);
+    border-color: var(--accent-red);
   }
 
   .recorder.recording {

@@ -612,14 +612,14 @@
      wrapping into a block that eats the list. */
   .bar {
     flex: none;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--hairline);
   }
 
   .missing {
     flex: none;
     margin: 0;
     padding: var(--space-2) var(--space-3);
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--hairline);
     color: var(--text-2);
     font-size: var(--text-meta);
     line-height: var(--line-meta);
@@ -660,7 +660,7 @@
     width: 1px;
     height: 14px;
     margin: 0 var(--space-1);
-    background: var(--line);
+    background: var(--hairline);
   }
 
   .pane {
@@ -680,7 +680,7 @@
     flex: 1 1 42%;
     min-width: 0;
     padding: var(--space-3);
-    border-left: 1px solid var(--line);
+    border-left: 1px solid var(--hairline);
     overflow-y: auto;
   }
 
@@ -848,7 +848,7 @@
     justify-content: space-between;
     align-items: center;
     padding: var(--space-1) var(--space-3);
-    border-top: 1px solid var(--line);
+    border-top: 1px solid var(--hairline);
     color: var(--text-4);
     font-size: var(--text-micro);
   }
@@ -897,7 +897,7 @@
     display: grid;
     gap: 1px;
     padding: var(--space-2) 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--hairline);
   }
 
   .reaches li:last-child {

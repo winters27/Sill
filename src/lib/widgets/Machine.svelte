@@ -342,7 +342,7 @@
     padding-left: 1px;
     color: var(--text-3);
     font-size: var(--text-body);
-    font-weight: var(--weight-regular);
+    font-weight: var(--weight-body);
   }
 
   .label {

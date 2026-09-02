@@ -622,7 +622,7 @@
     padding: 2px var(--space-2);
     font: inherit;
     font-size: var(--text-label);
-    color: var(--text);
+    color: var(--text-1);
     background: transparent;
     border: none;
     border-radius: var(--radius-sm);
@@ -649,7 +649,7 @@
     padding: 2px var(--space-2);
     font: inherit;
     font-size: var(--text-label);
-    color: var(--text);
+    color: var(--text-1);
     background: var(--fill-2);
     border: none;
     border-radius: var(--radius-sm);

@@ -106,7 +106,7 @@ And a quote holding a list:
     margin: 0;
     background: var(--core-background);
     color: var(--text-1);
-    font-family: var(--font-ui);
+    font-family: var(--font);
   }
 
   .page {

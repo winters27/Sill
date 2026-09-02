@@ -114,7 +114,7 @@
   /* One hairline between rows and none around the group: the section already
      has an edge, and a second one inside it reads as a box in a box. */
   .entry + .entry {
-    border-top: 1px solid var(--border-faint);
+    border-top: 1px solid var(--hairline);
   }
 
   .what {
@@ -126,7 +126,7 @@
 
   .name {
     font-size: var(--text-body);
-    color: var(--text);
+    color: var(--text-1);
   }
 
   .note {
@@ -143,6 +143,6 @@
   }
 
   .trouble {
-    color: var(--danger, var(--text));
+    color: var(--accent-red);
   }
 </style>

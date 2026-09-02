@@ -274,7 +274,7 @@
   }
 
   .chip:hover {
-    color: var(--text);
+    color: var(--text-1);
   }
 
   .chip.on {
@@ -287,8 +287,8 @@
     padding: var(--space-1) var(--space-2);
     font: inherit;
     font-size: var(--text-meta);
-    color: var(--text);
-    background: var(--surface-raised);
+    color: var(--text-1);
+    background: var(--fill-1);
     border: 1px solid var(--hairline);
     border-radius: var(--radius-md);
   }
@@ -339,7 +339,7 @@
 
   .name {
     font-size: var(--text-meta);
-    color: var(--text);
+    color: var(--text-1);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -361,8 +361,8 @@
   }
 
   .cell:hover {
-    color: var(--text);
-    background: var(--surface-raised);
+    color: var(--text-1);
+    background: var(--fill-1);
   }
 
   .cell.set {
@@ -375,8 +375,8 @@
   }
 
   .cell.input {
-    color: var(--text);
-    background: var(--surface-raised);
+    color: var(--text-1);
+    background: var(--fill-1);
     cursor: text;
   }
 
@@ -406,6 +406,6 @@
 
   .status {
     padding-left: var(--space-2);
-    color: var(--danger, #d24b4b);
+    color: var(--accent-red);
   }
 </style>
