@@ -304,7 +304,10 @@ pub(crate) fn start_host_watchdog(state: HostState) {
             drop(slot);
 
             for session in host.session_ids() {
-                crate::say!("unloading extension session {session}: idle {}s", idle.as_secs());
+                crate::say!(
+                    "unloading extension session {session}: idle {}s",
+                    idle.as_secs()
+                );
                 let _ = host.unload(&session).await;
             }
 

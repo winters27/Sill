@@ -644,7 +644,12 @@ async fn nothing_selected_reads_as_empty_rather_than_as_a_failure() {
         selection: None,
     });
     let storage = Arc::new(Storage::memory().expect("in-memory store"));
-    let layer = Arc::new(ApiLayer::new(tx, bridge.clone(), storage, Arc::new(AllowAll)));
+    let layer = Arc::new(ApiLayer::new(
+        tx,
+        bridge.clone(),
+        storage,
+        Arc::new(AllowAll),
+    ));
 
     let answered = layer
         .dispatch("s1", "ext", "UI/getSelectedText", &json!({}))
@@ -699,7 +704,12 @@ async fn getting_a_default_for_nothing_is_refused() {
     let (layer, _bridge) = layer(tx);
 
     let refused = layer
-        .dispatch("s1", "ext", "Application/getDefault", &json!({ "target": "" }))
+        .dispatch(
+            "s1",
+            "ext",
+            "Application/getDefault",
+            &json!({ "target": "" }),
+        )
         .await;
 
     assert!(refused.is_err(), "an empty target was accepted");
@@ -742,17 +752,11 @@ fn refusing(
     let storage = Arc::new(Storage::memory().expect("in-memory store"));
 
     (
-        Arc::new(ApiLayer::new(
-            tx,
-            bridge.clone(),
-            storage,
-            permits.clone(),
-        )),
+        Arc::new(ApiLayer::new(tx, bridge.clone(), storage, permits.clone())),
         bridge,
         permits,
     )
 }
-
 
 /// A refusal at `require` has to reach the window.
 ///
@@ -844,7 +848,12 @@ async fn a_refusal_names_the_permission_it_refused() {
     let (layer, _bridge, _permits) = refusing(tx);
 
     let refused = layer
-        .dispatch("s1", "ext", "Application/open", &json!({ "target": "https://x" }))
+        .dispatch(
+            "s1",
+            "ext",
+            "Application/open",
+            &json!({ "target": "https://x" }),
+        )
         .await
         .expect_err("should refuse");
 
@@ -927,7 +936,10 @@ fn an_extension_is_allowed_nothing_until_somebody_says_otherwise() {
 #[tokio::test]
 async fn a_host_that_dies_is_not_handed_out_again() {
     let host = host_js();
-    assert!(host.exists(), "host bundle missing; run: npm --prefix host run build");
+    assert!(
+        host.exists(),
+        "host bundle missing; run: npm --prefix host run build"
+    );
 
     let (tx, _events) = mpsc::unbounded_channel();
 

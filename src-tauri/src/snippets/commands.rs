@@ -130,8 +130,8 @@ pub fn import_snippets(
         .into_path()
         .map_err(|err| format!("that file cannot be read: {err}"))?;
 
-    let text = std::fs::read_to_string(&path)
-        .map_err(|err| format!("could not read that file: {err}"))?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|err| format!("could not read that file: {err}"))?;
 
     let arriving = super::transfer::parse(&text)?;
     if arriving.is_empty() {
@@ -221,12 +221,7 @@ pub fn type_snippet(
 
     #[cfg(windows)]
     {
-        crate::snippets::expander::replace(
-            &expander,
-            backspaces,
-            &expansion.text,
-            &expansion.html,
-        );
+        crate::snippets::expander::replace(&expander, backspaces, &expansion.text, &expansion.html);
 
         // After the text is in, walk the caret back to where the snippet
         // asked for it.
@@ -259,10 +254,7 @@ pub fn context(app: &AppHandle, template: &str) -> Context {
     };
 
     let clock = local_clock();
-    let (date, time) = (
-        clock.format("YYYY-MM-DD"),
-        clock.format("HH:mm"),
-    );
+    let (date, time) = (clock.format("YYYY-MM-DD"), clock.format("HH:mm"));
 
     // Asked for only when the template says so. Reading a selection sends a
     // copy chord and takes the clipboard over for a moment, which is far too

@@ -11,9 +11,23 @@ fn cost() {
     let catalog = Catalog::build(&[root]);
     let built = start.elapsed();
 
-    println!("built {} entries in {} ms", catalog.len(), built.as_millis());
+    println!(
+        "built {} entries in {} ms",
+        catalog.len(),
+        built.as_millis()
+    );
 
-    for query in ["r", "re", "reg", "registry", "registry.rs", ".rs", "package.json", "m", "s"] {
+    for query in [
+        "r",
+        "re",
+        "reg",
+        "registry",
+        "registry.rs",
+        ".rs",
+        "package.json",
+        "m",
+        "s",
+    ] {
         // Ten runs, because one is noise at this scale.
         let start = std::time::Instant::now();
         let mut hits = 0;
@@ -64,5 +78,9 @@ fn gaps() {
     report("drop", "registry.rs", "An app that allows anyone to be a radio dj. Like you start playing music from your library, but can be live to where others can listen to what you are playing as well. A sort of social personal radio.md");
     report("drop", "tada", "Team Device Management");
     report("drop", "note", "Node.js website");
-    report("drop", "package.json", "Presentation And Compatibility Knowledge Assistant Guide Everyone Justifies Simply Or Not");
+    report(
+        "drop",
+        "package.json",
+        "Presentation And Compatibility Knowledge Assistant Guide Everyone Justifies Simply Or Not",
+    );
 }

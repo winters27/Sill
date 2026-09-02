@@ -74,12 +74,28 @@ pub struct Clock {
 }
 
 const MONTHS: [&str; 12] = [
-    "January", "February", "March", "April", "May", "June", "July", "August",
-    "September", "October", "November", "December",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
 ];
 
 const DAYS: [&str; 7] = [
-    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
 ];
 
 impl Clock {
@@ -94,8 +110,8 @@ impl Clock {
     /// get this wrong.
     pub fn format(&self, pattern: &str) -> String {
         const TOKENS: [&str; 18] = [
-            "YYYY", "YY", "MMMM", "MMM", "MM", "M", "DD", "D", "dddd", "ddd",
-            "HH", "H", "hh", "h", "mm", "m", "ss", "s",
+            "YYYY", "YY", "MMMM", "MMM", "MM", "M", "DD", "D", "dddd", "ddd", "HH", "H", "hh", "h",
+            "mm", "m", "ss", "s",
         ];
 
         let mut out = String::with_capacity(pattern.len() + 8);
@@ -445,10 +461,7 @@ mod tests {
 
         #[test]
         fn quotes_cannot_break_out_of_an_attribute() {
-            assert_eq!(
-                escape_markup(r#"" onclick="x"#),
-                "&quot; onclick=&quot;x",
-            );
+            assert_eq!(escape_markup(r#"" onclick="x"#), "&quot; onclick=&quot;x",);
             assert_eq!(escape_markup("it's"), "it&#39;s");
         }
 
@@ -638,9 +651,18 @@ mod tests {
     fn a_twelve_hour_clock_calls_midnight_and_noon_twelve() {
         // Not zero, which is what the arithmetic gives if nobody thinks about
         // it, and which reads as a broken clock.
-        let midnight = Clock { hour: 0, ..moment() };
-        let noon = Clock { hour: 12, ..moment() };
-        let evening = Clock { hour: 21, ..moment() };
+        let midnight = Clock {
+            hour: 0,
+            ..moment()
+        };
+        let noon = Clock {
+            hour: 12,
+            ..moment()
+        };
+        let evening = Clock {
+            hour: 21,
+            ..moment()
+        };
 
         assert_eq!(midnight.format("h:mm A"), "12:07 AM");
         assert_eq!(noon.format("h:mm A"), "12:07 PM");
@@ -665,14 +687,8 @@ mod tests {
         let mut ctx = context();
         ctx.clock = moment();
 
-        assert_eq!(
-            expand("on {date:dddd}", &ctx).text,
-            "on Sunday"
-        );
-        assert_eq!(
-            expand("{date:MMMM D, YYYY}", &ctx).text,
-            "May 3, 2026"
-        );
+        assert_eq!(expand("on {date:dddd}", &ctx).text, "on Sunday");
+        assert_eq!(expand("{date:MMMM D, YYYY}", &ctx).text, "May 3, 2026");
     }
 
     #[test]
@@ -789,7 +805,9 @@ mod tests {
         /// own point.
         #[test]
         fn nothing_built_in_is_asked_for() {
-            assert!(fields("{date} {time} {uuid} {clipboard} {selection} {query} {cursor}").is_empty());
+            assert!(
+                fields("{date} {time} {uuid} {clipboard} {selection} {query} {cursor}").is_empty()
+            );
         }
 
         /// Anything with a colon is addressed to this module, not to a person.

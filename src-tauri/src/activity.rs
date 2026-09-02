@@ -186,7 +186,9 @@ mod tests {
     const NOW: i64 = 1_700_000_000;
 
     fn clipboard_undo(text: &str) -> Undo {
-        Undo::RestoreClipboard { text: text.to_string() }
+        Undo::RestoreClipboard {
+            text: text.to_string(),
+        }
     }
 
     fn log() -> Activity {
@@ -221,7 +223,10 @@ mod tests {
         assert_ne!(first, 0, "a written entry is never the missing-log answer");
 
         assert_eq!(
-            log.recent().iter().find(|d| d.id == first).map(|d| d.target.as_str()),
+            log.recent()
+                .iter()
+                .find(|d| d.id == first)
+                .map(|d| d.target.as_str()),
             Some("a"),
             "the id has to name the entry that was just made"
         );
@@ -262,7 +267,13 @@ mod tests {
     #[test]
     fn the_last_undo_skips_everything_that_cannot_be_undone() {
         let log = log();
-        log.record("Move To", "report.pdf", "Moved", Some(clipboard_undo("x")), NOW);
+        log.record(
+            "Move To",
+            "report.pdf",
+            "Moved",
+            Some(clipboard_undo("x")),
+            NOW,
+        );
         log.record("Open", "Firefox", "Opened", None, NOW + 1);
         log.record("Reveal", "notes.md", "Revealed", None, NOW + 2);
 

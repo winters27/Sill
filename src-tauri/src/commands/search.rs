@@ -15,11 +15,17 @@ fn said_about(offer: &crate::ai::chat::Offer) -> String {
         "Just now".to_string()
     } else {
         let minutes = offer.age / 60;
-        format!("{minutes} minute{} ago", if minutes == 1 { "" } else { "s" })
+        format!(
+            "{minutes} minute{} ago",
+            if minutes == 1 { "" } else { "s" }
+        )
     };
 
     let replies = offer.replies;
-    format!("{when} · {replies} repl{}", if replies == 1 { "y" } else { "ies" })
+    format!(
+        "{when} · {replies} repl{}",
+        if replies == 1 { "y" } else { "ies" }
+    )
 }
 
 /// The root list, or what matches a query.
@@ -50,9 +56,7 @@ pub(crate) async fn search_commands(
     let offered = app
         .state::<crate::ai::chat::Chat>()
         .offer(now_seconds())
-        .map(|offer| {
-            registry::conversation_record(&offer.id, &offer.title, &said_about(&offer))
-        });
+        .map(|offer| registry::conversation_record(&offer.id, &offer.title, &said_about(&offer)));
 
     /*
      * Open windows, ranked in the same pass as everything else.
@@ -191,11 +195,9 @@ pub(crate) async fn window_preview(app: AppHandle, id: String) -> Result<Option<
      * parameter, because a borrow cannot cross onto another thread and a
      * handle can.
      */
-    tokio::task::spawn_blocking(move || {
-        app.state::<crate::previews::Previews>().of(handle)
-    })
-    .await
-    .map_err(|err| format!("could not photograph that window: {err}"))
+    tokio::task::spawn_blocking(move || app.state::<crate::previews::Previews>().of(handle))
+        .await
+        .map_err(|err| format!("could not photograph that window: {err}"))
 }
 
 /// Drops every window picture.
@@ -639,7 +641,11 @@ pub(crate) async fn file_search_missing(
 ) -> Result<Option<files::Missing>, String> {
     let enabled = state.inner.lock().await.files.enabled;
 
-    Ok(files::missing(enabled, catalog.inner.load().len(), busy(&catalog)))
+    Ok(files::missing(
+        enabled,
+        catalog.inner.load().len(),
+        busy(&catalog),
+    ))
 }
 
 /// Whether the index is being rebuilt right now.

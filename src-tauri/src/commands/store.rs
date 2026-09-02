@@ -88,7 +88,10 @@ fn start_idle_watchdog(app: AppHandle) {
             }
 
             if state.forget() {
-                crate::say!("store catalogue idle for {}s; letting it go", idle.as_secs());
+                crate::say!(
+                    "store catalogue idle for {}s; letting it go",
+                    idle.as_secs()
+                );
             }
 
             WATCHING.store(false, Ordering::SeqCst);
@@ -173,8 +176,8 @@ pub(crate) async fn store_install(
     grants: State<'_, std::sync::Arc<crate::exthost::grants::Granted>>,
     name: String,
 ) -> Result<install::Done, String> {
-    let esbuild = crate::extension_install::esbuild_exe(&app)
-        .ok_or(crate::extension_install::NO_ESBUILD)?;
+    let esbuild =
+        crate::extension_install::esbuild_exe(&app).ok_or(crate::extension_install::NO_ESBUILD)?;
     let data_dir = crate::state::data_dir(&app);
 
     // Off the UI thread: npm is a subprocess that takes seconds and esbuild is
@@ -343,12 +346,18 @@ pub(crate) async fn installed_extensions(
                     .map(|_| extension.clone())
                     .unwrap_or_else(|| extension.clone()),
                 commands: by_extension.remove(&extension).unwrap_or_default(),
-                source: origin.as_ref().map(|it| it.source.clone()).unwrap_or_default(),
+                source: origin
+                    .as_ref()
+                    .map(|it| it.source.clone())
+                    .unwrap_or_default(),
                 revision: origin
                     .as_ref()
                     .map(|it| it.revision.clone())
                     .unwrap_or_default(),
-                path: origin.as_ref().map(|it| it.path.clone()).unwrap_or_default(),
+                path: origin
+                    .as_ref()
+                    .map(|it| it.path.clone())
+                    .unwrap_or_default(),
                 installed_at: origin.as_ref().map(|it| it.installed_at).unwrap_or(0),
                 permissions: offerable
                     .iter()

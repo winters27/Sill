@@ -115,15 +115,25 @@ pub fn default_preferences(manifest: &Manifest, command: &ManifestCommand) -> Va
 /// the index is read back into exactly that type. A second struct here would
 /// be two spellings of one file format with nothing keeping them in step, and
 /// the failure would be an extension that installs and cannot be found.
-pub fn record_for(manifest: &Manifest, command: &ManifestCommand, entrypoint: &Path) -> CommandRecord {
-    let extension_title = manifest.title.clone().unwrap_or_else(|| manifest.name.clone());
+pub fn record_for(
+    manifest: &Manifest,
+    command: &ManifestCommand,
+    entrypoint: &Path,
+) -> CommandRecord {
+    let extension_title = manifest
+        .title
+        .clone()
+        .unwrap_or_else(|| manifest.name.clone());
 
     CommandRecord {
         id: format!("{}:{}", manifest.name, command.name),
         extension: manifest.name.clone(),
         extension_title: extension_title.clone(),
         command: command.name.clone(),
-        title: command.title.clone().unwrap_or_else(|| command.name.clone()),
+        title: command
+            .title
+            .clone()
+            .unwrap_or_else(|| command.name.clone()),
         subtitle: command.subtitle.clone().unwrap_or(extension_title),
         description: command.description.clone().unwrap_or_default(),
         mode: command.mode.clone(),
@@ -145,7 +155,10 @@ pub fn record_for(manifest: &Manifest, command: &ManifestCommand, entrypoint: &P
 /// being replaced is kept**: an install is about one extension and must not
 /// quietly uninstall the others, which is the same rule the snippet and
 /// quicklink imports follow.
-pub fn merged_index(existing: Vec<CommandRecord>, installing: Vec<CommandRecord>) -> Vec<CommandRecord> {
+pub fn merged_index(
+    existing: Vec<CommandRecord>,
+    installing: Vec<CommandRecord>,
+) -> Vec<CommandRecord> {
     let mut by_id: BTreeMap<String, CommandRecord> = existing
         .into_iter()
         .map(|record| (record.id.clone(), record))
@@ -215,7 +228,11 @@ pub fn aliases_from_tsconfig(text: &str) -> Vec<(String, String)> {
 
             Some((
                 pattern.trim_end_matches("/*").to_string(),
-                format!("{}/{}", base_url.trim_end_matches('/'), target.trim_end_matches("/*")),
+                format!(
+                    "{}/{}",
+                    base_url.trim_end_matches('/'),
+                    target.trim_end_matches("/*")
+                ),
             ))
         })
         .collect()
@@ -364,8 +381,12 @@ pub fn install_into(
     origin: &crate::store::Origin,
 ) -> Result<Installed, String> {
     let manifest_path = source.join("package.json");
-    let text = std::fs::read_to_string(&manifest_path)
-        .map_err(|_| format!("No package.json in {}, so this is not an extension.", source.display()))?;
+    let text = std::fs::read_to_string(&manifest_path).map_err(|_| {
+        format!(
+            "No package.json in {}, so this is not an extension.",
+            source.display()
+        )
+    })?;
 
     let manifest: Manifest = serde_json::from_str(&text)
         .map_err(|err| format!("{} could not be read: {err}", manifest_path.display()))?;
@@ -394,7 +415,8 @@ pub fn install_into(
     let mut records = Vec::new();
 
     for command in &manifest.commands {
-        let Some(relative) = entrypoint_for(&command.name, |candidate| source.join(candidate).is_file())
+        let Some(relative) =
+            entrypoint_for(&command.name, |candidate| source.join(candidate).is_file())
         else {
             return Err(format!(
                 "{} declares the command \"{}\" and has no source for it under src/.",
@@ -421,7 +443,10 @@ pub fn install_into(
         .map_err(|err| format!("could not write {}: {err}", index_path.display()))?;
 
     Ok(Installed {
-        title: manifest.title.clone().unwrap_or_else(|| manifest.name.clone()),
+        title: manifest
+            .title
+            .clone()
+            .unwrap_or_else(|| manifest.name.clone()),
         commands: manifest
             .commands
             .iter()
@@ -529,14 +554,16 @@ mod tests {
 
     #[test]
     fn a_record_falls_back_through_title_and_never_leaves_one_empty() {
-        let parsed = manifest(
-            r#"{ "name": "demo", "commands": [{ "name": "run", "mode": "view" }] }"#,
-        );
+        let parsed =
+            manifest(r#"{ "name": "demo", "commands": [{ "name": "run", "mode": "view" }] }"#);
 
         let record = record_for(&parsed, &parsed.commands[0], Path::new("out/run.js"));
 
         assert_eq!(record.id, "demo:run");
-        assert_eq!(record.title, "run", "a command with no title is named by its command");
+        assert_eq!(
+            record.title, "run",
+            "a command with no title is named by its command"
+        );
         assert_eq!(
             record.subtitle, "demo",
             "and its subtitle by the extension, which has no title either"
@@ -556,7 +583,11 @@ mod tests {
             Path::new(r"C:\Users\x\extensions\demo\run.js"),
         );
 
-        assert!(!record.entrypoint.contains('\\'), "got {}", record.entrypoint);
+        assert!(
+            !record.entrypoint.contains('\\'),
+            "got {}",
+            record.entrypoint
+        );
     }
 
     fn record(id: &str, title: &str) -> CommandRecord {
@@ -607,7 +638,11 @@ mod tests {
         );
 
         let ids: Vec<&str> = merged.iter().map(|r| r.id.as_str()).collect();
-        assert_eq!(ids, ["demo:run", "other:thing"], "sorted, and nothing dropped");
+        assert_eq!(
+            ids,
+            ["demo:run", "other:thing"],
+            "sorted, and nothing dropped"
+        );
     }
 
     #[test]

@@ -5,7 +5,16 @@
 fn report_actions_per_kind() {
     let registry = sill_lib::actions::builtins();
 
-    for mode in ["clipboard", "app", "file", "url", "websearch", "setting", "system", "text"] {
+    for mode in [
+        "clipboard",
+        "app",
+        "file",
+        "url",
+        "websearch",
+        "setting",
+        "system",
+        "text",
+    ] {
         let kind = sill_lib::object::ObjectKind::from_mode(mode);
         let Some(kind) = kind else {
             println!("{mode:12} (no kind)");

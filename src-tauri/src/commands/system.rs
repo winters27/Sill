@@ -182,16 +182,24 @@ pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, 
     // Read again rather than trusting what the overlay was told: a handle can
     // be reused by a different window after the first one closes, and the one
     // it was holding may have moved while somebody was choosing.
-    let found = crate::windowing::find(id)
-        .ok_or_else(|| "that window has gone".to_string())?;
-    let rect = (found.rect.x, found.rect.y, found.rect.width, found.rect.height);
+    let found = crate::windowing::find(id).ok_or_else(|| "that window has gone".to_string())?;
+    let rect = (
+        found.rect.x,
+        found.rect.y,
+        found.rect.width,
+        found.rect.height,
+    );
 
     let shot = tokio::task::spawn_blocking(move || crate::capture::window(id, rect))
         .await
         .map_err(|err| format!("the capture failed: {err}"))??;
 
     let size = format!("{}x{}", shot.width, shot.height);
-    let named = if found.title.is_empty() { found.app } else { found.title };
+    let named = if found.title.is_empty() {
+        found.app
+    } else {
+        found.title
+    };
 
     after_capture(&app, shot).await?;
     Ok(format!("Copied {named}, {size}"))
@@ -250,9 +258,10 @@ pub(crate) async fn capture_area(
     // the picture, which looks like the capture darkened it.
     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
 
-    let shot = tokio::task::spawn_blocking(move || crate::capture::region(left, top, width, height))
-        .await
-        .map_err(|err| format!("the capture failed: {err}"))??;
+    let shot =
+        tokio::task::spawn_blocking(move || crate::capture::region(left, top, width, height))
+            .await
+            .map_err(|err| format!("the capture failed: {err}"))??;
 
     let size = format!("{}x{}", shot.width, shot.height);
     after_capture(&app, shot).await?;
@@ -270,9 +279,10 @@ pub(crate) async fn capture_screen(app: AppHandle) -> Result<String, String> {
 
     let (left, top, width, height) = crate::capture::virtual_screen();
 
-    let shot = tokio::task::spawn_blocking(move || crate::capture::region(left, top, width, height))
-        .await
-        .map_err(|err| format!("the capture failed: {err}"))??;
+    let shot =
+        tokio::task::spawn_blocking(move || crate::capture::region(left, top, width, height))
+            .await
+            .map_err(|err| format!("the capture failed: {err}"))??;
 
     let size = format!("{}x{}", shot.width, shot.height);
     after_capture(&app, shot).await?;
@@ -303,7 +313,10 @@ async fn after_capture(app: &AppHandle, shot: crate::capture::Shot) -> Result<()
         // with a listener.
         {
             let pending = app.state::<Marking>();
-            let mut held = pending.0.lock().map_err(|_| "markup slot poisoned".to_string())?;
+            let mut held = pending
+                .0
+                .lock()
+                .map_err(|_| "markup slot poisoned".to_string())?;
             *held = Some(png);
         }
 
@@ -388,7 +401,10 @@ pub(crate) async fn open_markup(app: AppHandle, entry: i64) -> Result<(), String
 
     {
         let pending = app.state::<Marking>();
-        let mut held = pending.0.lock().map_err(|_| "markup slot poisoned".to_string())?;
+        let mut held = pending
+            .0
+            .lock()
+            .map_err(|_| "markup slot poisoned".to_string())?;
         *held = Some(png);
     }
 
@@ -424,7 +440,10 @@ pub(crate) async fn markup_image(app: AppHandle) -> Result<Option<String>, Strin
     use base64::Engine;
 
     let pending = app.state::<Marking>();
-    let held = pending.0.lock().map_err(|_| "markup slot poisoned".to_string())?;
+    let held = pending
+        .0
+        .lock()
+        .map_err(|_| "markup slot poisoned".to_string())?;
 
     Ok(held.as_ref().map(|png| {
         format!(
@@ -511,7 +530,11 @@ pub(crate) fn piper_voices(app: tauri::AppHandle) -> Vec<VoiceStatus> {
                 note: voice.note.to_string(),
                 installed: crate::tts::piper::is_installed(&app, voice.id),
                 bytes: crate::tts::piper::VOICE_BYTES
-                    + if engine_too { crate::tts::piper::ENGINE_BYTES } else { 0 },
+                    + if engine_too {
+                        crate::tts::piper::ENGINE_BYTES
+                    } else {
+                        0
+                    },
             }
         })
         .collect()

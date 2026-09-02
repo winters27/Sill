@@ -206,7 +206,11 @@ mod tests {
         let (pixels, width, height) = bgra_from_png(&png).expect("decodes");
 
         assert_eq!((width, height), (1, 1));
-        assert_eq!(pixels, vec![30, 20, 10, 255], "the channels are not in Bgra order");
+        assert_eq!(
+            pixels,
+            vec![30, 20, 10, 255],
+            "the channels are not in Bgra order"
+        );
     }
 
     #[test]
@@ -233,7 +237,10 @@ mod tests {
 
         assert_eq!((width, height), (12, 12));
         assert_eq!(out.len(), 12 * 12 * 4);
-        assert!(out.iter().all(|byte| *byte == 7), "the pixels changed value");
+        assert!(
+            out.iter().all(|byte| *byte == 7),
+            "the pixels changed value"
+        );
     }
 
     /// A big enough one is left exactly as it is.

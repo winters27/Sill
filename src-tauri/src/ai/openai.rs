@@ -75,7 +75,11 @@ pub struct Message {
     #[serde(rename = "tool_calls", default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCall>,
     /// Which call this answers. Only ever set on a `tool` message.
-    #[serde(rename = "tool_call_id", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tool_call_id",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub tool_call_id: Option<String>,
     /// Anything handed over with the question.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -236,7 +240,11 @@ pub fn endpoint(base_url: &str) -> String {
 /// The tool list rides along when there is one. Sending an empty array is not
 /// the same as sending none: several services take it as "tools are in play,
 /// here are zero" and answer differently, so the field is left out entirely.
-pub fn body(provider: &Provider, messages: &[Message], tools: Option<&serde_json::Value>) -> serde_json::Value {
+pub fn body(
+    provider: &Provider,
+    messages: &[Message],
+    tools: Option<&serde_json::Value>,
+) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": provider.model,
         "messages": messages.iter().map(wire).collect::<Vec<_>>(),
@@ -286,7 +294,10 @@ pub fn parse_line(line: &str) -> Event {
     }
 
     // The delta of the first choice, which is the only one asked for.
-    match value.pointer("/choices/0/delta/content").and_then(|c| c.as_str()) {
+    match value
+        .pointer("/choices/0/delta/content")
+        .and_then(|c| c.as_str())
+    {
         Some(text) if !text.is_empty() => Event::Text(text.to_string()),
         _ => Event::Ignored,
     }
@@ -297,7 +308,10 @@ fn read_piece(value: &serde_json::Value) -> Option<CallPiece> {
     Some(CallPiece {
         // Missing means the first and only one. Several services leave the
         // index off when a turn asks for exactly one call.
-        at: value.get("index").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize,
+        at: value
+            .get("index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize,
         id: value
             .get("id")
             .and_then(|id| id.as_str())
@@ -364,7 +378,9 @@ impl Calls {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.building.iter().all(|call| call.function.name.is_empty())
+        self.building
+            .iter()
+            .all(|call| call.function.name.is_empty())
     }
 }
 
@@ -670,7 +686,10 @@ mod tests {
         /// not what somebody who pasted the wrong key needs to read.
         #[test]
         fn a_rejected_key_says_that_and_nothing_else() {
-            let said = complaint(401, r#"{"error":{"message":"Incorrect API key provided: sk-abc..."}}"#);
+            let said = complaint(
+                401,
+                r#"{"error":{"message":"Incorrect API key provided: sk-abc..."}}"#,
+            );
             assert_eq!(said, "That key was not accepted.");
             assert!(!said.contains("sk-abc"), "it repeated the key back");
         }
@@ -687,7 +706,10 @@ mod tests {
         fn a_404_is_not_read_as_a_wrong_address() {
             let said = complaint(404, r#"{"error":{"message":"model \"qwen9\" not found"}}"#);
             assert!(said.contains("qwen9"), "it said {said:?}");
-            assert!(!said.to_lowercase().contains("address"), "it guessed: {said:?}");
+            assert!(
+                !said.to_lowercase().contains("address"),
+                "it guessed: {said:?}"
+            );
         }
 
         #[test]
@@ -716,9 +738,15 @@ mod tests {
         /// The other shape, which is what OpenAI and most of the rest send.
         #[test]
         fn a_nested_message_is_dug_out_of_its_object() {
-            let said = complaint(400, r#"{"error":{"message":"model `grok-9` does not exist","type":"invalid_request_error"}}"#);
+            let said = complaint(
+                400,
+                r#"{"error":{"message":"model `grok-9` does not exist","type":"invalid_request_error"}}"#,
+            );
             assert_eq!(said, "model `grok-9` does not exist (400)");
-            assert!(!said.contains("invalid_request_error"), "the object came too");
+            assert!(
+                !said.contains("invalid_request_error"),
+                "the object came too"
+            );
         }
 
         /// A body that is not JSON at all is still the most useful thing there
@@ -755,7 +783,11 @@ mod tests {
         #[test]
         fn an_enormous_body_is_cut_down() {
             let said = complaint(400, &"x".repeat(5000));
-            assert!(said.chars().count() < 400, "it was {} long", said.chars().count());
+            assert!(
+                said.chars().count() < 400,
+                "it was {} long",
+                said.chars().count()
+            );
         }
     }
 
@@ -965,7 +997,10 @@ mod tests {
          */
         #[test]
         fn a_text_file_is_folded_into_what_was_said() {
-            let sent = wire(&Message::with("summarise", vec![a_file("notes.md", "the body")]));
+            let sent = wire(&Message::with(
+                "summarise",
+                vec![a_file("notes.md", "the body")],
+            ));
 
             let said = sent["content"].as_str().expect("a string");
             assert!(said.starts_with("summarise"), "{said}");
@@ -983,7 +1018,10 @@ mod tests {
 
             let parts = sent["content"].as_array().expect("an array");
             assert_eq!(parts.len(), 2, "the file became its own part");
-            assert!(parts[0]["text"].as_str().unwrap_or_default().contains("the body"));
+            assert!(parts[0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("the body"));
             assert_eq!(parts[1]["type"], "image_url");
         }
 
@@ -994,7 +1032,10 @@ mod tests {
             let call = ToolCall {
                 id: "call_a".into(),
                 kind: "function".into(),
-                function: Called { name: "system_state".into(), arguments: "{}".into() },
+                function: Called {
+                    name: "system_state".into(),
+                    arguments: "{}".into(),
+                },
             };
 
             let sent = wire(&Message::calling("Let me look.", vec![call]));
@@ -1109,7 +1150,12 @@ mod tests {
         #[test]
         fn a_slot_that_never_got_a_name_is_dropped() {
             let mut calls = Calls::default();
-            calls.take(CallPiece { at: 1, id: None, name: None, arguments: "{}".into() });
+            calls.take(CallPiece {
+                at: 1,
+                id: None,
+                name: None,
+                arguments: "{}".into(),
+            });
             assert!(calls.is_empty());
             assert!(calls.finish().is_empty());
         }
@@ -1141,7 +1187,10 @@ mod tests {
             let call = ToolCall {
                 id: "call_a".into(),
                 kind: "function".into(),
-                function: Called { name: "system_state".into(), arguments: "{}".into() },
+                function: Called {
+                    name: "system_state".into(),
+                    arguments: "{}".into(),
+                },
             };
 
             let sent = serde_json::to_value(Message::calling("Let me look.", vec![call])).unwrap();
@@ -1184,7 +1233,9 @@ mod tests {
         fn the_tool_list_rides_along_when_there_is_one() {
             let tools = crate::ai::tools::as_request();
             let sent = body(&provider("http://x/v1", "", "m"), &[], Some(&tools));
-            assert!(sent["tools"].as_array().is_some_and(|list| !list.is_empty()));
+            assert!(sent["tools"]
+                .as_array()
+                .is_some_and(|list| !list.is_empty()));
         }
     }
 

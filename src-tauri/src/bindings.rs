@@ -125,6 +125,20 @@ pub fn apply(app: &AppHandle, previous: &[Binding], current: &[Binding]) {
                     tauri::async_runtime::spawn(async move { fire(&handle, &bound).await });
                 });
 
+        /*
+         * Recorded where settings can show it.
+         *
+         * The summon, switcher and capture keys have always been noted; a
+         * per-command key was not, so a shortcut Windows refused looked
+         * exactly like one that worked. The row showed the key, the key did
+         * nothing, and the only sign was a line in a log nobody has open.
+         *
+         * Before the match below, which consumes the result.
+         */
+        if let Some(conflicts) = app.try_state::<crate::HotkeyConflicts>() {
+            conflicts.note(&binding.accelerator, result.is_ok());
+        }
+
         match result {
             Ok(()) => println!(
                 "[sill] {} runs {} on {:?}",

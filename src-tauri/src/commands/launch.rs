@@ -210,7 +210,10 @@ pub(crate) async fn perform_builtin(
             return Err("that action does not belong to a running extension".to_string());
         };
 
-        host.api.permits().allow(&extension, builtin_needs(&tag)).await?;
+        host.api
+            .permits()
+            .allow(&extension, builtin_needs(&tag))
+            .await?;
     }
 
     /// Raycast lets `content` be a string, a number, or a shaped object.
@@ -461,16 +464,13 @@ pub(crate) async fn search_destinations(
         .map(|parent| parent.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let recent = {
-        state.ranking().frecency.recent_with_prefix(MOVED_TO, 8)
-    };
+    let recent = { state.ranking().frecency.recent_with_prefix(MOVED_TO, 8) };
 
     // Always. These are read off the disk rather than looked up, so a folder
     // made a minute ago is here even though no index has seen it yet, and a
     // folder somebody just made is exactly the one they are about to move
     // something into.
-    let close_by =
-        crate::files_ops::likely_destinations(recent, std::path::Path::new(&source));
+    let close_by = crate::files_ops::likely_destinations(recent, std::path::Path::new(&source));
 
     let typed = query.trim();
 
@@ -501,7 +501,12 @@ pub(crate) async fn search_destinations(
             .load()
             .search(typed, wanted, &settings.only_in);
 
-        near.extend(found.into_iter().filter(|hit| hit.is_dir).map(|hit| hit.path));
+        near.extend(
+            found
+                .into_iter()
+                .filter(|hit| hit.is_dir)
+                .map(|hit| hit.path),
+        );
         near
     };
 

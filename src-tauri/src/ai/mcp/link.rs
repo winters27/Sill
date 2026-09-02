@@ -231,7 +231,10 @@ pub fn bridge() -> i32 {
     use std::io::{copy, stderr, stdin, stdout};
     use std::net::{Shutdown, TcpStream};
 
-    let Some(port) = std::env::var(super::PORT).ok().and_then(|p| p.parse::<u16>().ok()) else {
+    let Some(port) = std::env::var(super::PORT)
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+    else {
         let _ = writeln!(stderr(), "sill --mcp: {} is not set", super::PORT);
         return 2;
     };
@@ -258,7 +261,10 @@ pub fn bridge() -> i32 {
     }
 
     let Ok(mut back) = out.try_clone() else {
-        let _ = writeln!(stderr(), "sill --mcp: could not use the connection both ways");
+        let _ = writeln!(
+            stderr(),
+            "sill --mcp: could not use the connection both ways"
+        );
         return 3;
     };
 
@@ -308,12 +314,20 @@ mod tests {
     /// Answers with whatever came back before the connection closed, which is
     /// nothing at all when the secret was wrong.
     async fn ask(port: u16, token: &str, lines: &[&str]) -> Vec<Value> {
-        let socket = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
+        let socket = TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+            .await
+            .unwrap();
         let (reading, mut writing) = socket.into_split();
 
-        writing.write_all(format!("{token}\n").as_bytes()).await.unwrap();
+        writing
+            .write_all(format!("{token}\n").as_bytes())
+            .await
+            .unwrap();
         for line in lines {
-            writing.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+            writing
+                .write_all(format!("{line}\n").as_bytes())
+                .await
+                .unwrap();
         }
         writing.shutdown().await.unwrap();
 
@@ -339,7 +353,10 @@ mod tests {
         )
         .await;
 
-        assert!(heard.is_empty(), "it answered a caller that did not know the secret");
+        assert!(
+            heard.is_empty(),
+            "it answered a caller that did not know the secret"
+        );
     }
 
     /// The secret is a whole line and must match the whole line. A check that
@@ -348,7 +365,12 @@ mod tests {
     async fn a_secret_that_merely_starts_right_is_not_enough() {
         let (port, _) = listening().await;
 
-        let heard = ask(port, "a-secre", &[r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#]).await;
+        let heard = ask(
+            port,
+            "a-secre",
+            &[r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#],
+        )
+        .await;
 
         assert!(heard.is_empty(), "a prefix of the secret was accepted");
     }
@@ -427,7 +449,10 @@ mod tests {
         assert_eq!(heard.len(), 3, "{heard:?}");
 
         let text = heard[2]["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("one\\ntwo"), "the newlines did not survive: {text}");
+        assert!(
+            text.contains("one\\ntwo"),
+            "the newlines did not survive: {text}"
+        );
     }
 
     #[test]

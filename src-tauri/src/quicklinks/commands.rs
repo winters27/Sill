@@ -169,8 +169,8 @@ pub fn import_quicklinks(app: AppHandle) -> Result<Option<super::transfer::Summa
         .into_path()
         .map_err(|err| format!("that file cannot be read: {err}"))?;
 
-    let text = std::fs::read_to_string(&path)
-        .map_err(|err| format!("could not read that file: {err}"))?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|err| format!("could not read that file: {err}"))?;
 
     let arriving = super::transfer::parse(&text)?;
     if arriving.is_empty() {

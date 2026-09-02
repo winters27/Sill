@@ -526,7 +526,12 @@ pub const SETTINGS: &[Setting] = &[
         "Click a window to take it",
         "screenshot window app capture click",
     ),
-    s("screenshot", "Screenshots", "Tool", "screenshot editor markup default tool"),
+    s(
+        "screenshot",
+        "Screenshots",
+        "Tool",
+        "screenshot editor markup default tool",
+    ),
     s(
         "screenshot",
         "Screenshots",

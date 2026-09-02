@@ -274,7 +274,8 @@ pub async fn prepare(
 
     let client = crate::dictation::fetch::client();
     let files = source::list(&client, &listing.folder, &listing.revision, token).await?;
-    let fetched = source::download(&client, &listing.folder, &listing.revision, &files, &staged).await?;
+    let fetched =
+        source::download(&client, &listing.folder, &listing.revision, &files, &staged).await?;
 
     let manifest_text = std::fs::read_to_string(staged.join("package.json"))
         .map_err(|_| format!("{name} has no package.json at {}", listing.revision))?;
@@ -577,10 +578,8 @@ pub fn uninstall(data_dir: &Path, extension: &str) -> Result<bool, String> {
     }
 
     let index = super::index_file(&home);
-    let kept = crate::extension_install::without_extension(
-        crate::registry::load_index(&index),
-        extension,
-    );
+    let kept =
+        crate::extension_install::without_extension(crate::registry::load_index(&index), extension);
 
     let written = serde_json::to_string_pretty(&kept)
         .map_err(|err| format!("could not write the extension index: {err}"))?;
@@ -689,7 +688,10 @@ mod tests {
         assert_eq!(commands.len(), 3);
         assert!(commands[0].runnable);
         assert!(!commands[1].runnable, "Sill has nowhere to put a menu bar");
-        assert_eq!(commands[1].title, "b", "an untitled command is named by its name");
+        assert_eq!(
+            commands[1].title, "b",
+            "an untitled command is named by its name"
+        );
         assert!(commands[2].runnable);
     }
 

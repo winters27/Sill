@@ -365,8 +365,7 @@ impl Action for RunBuiltin {
                 // Recorded even for a folder, so "where did this come from"
                 // has an answer for every installed extension rather than
                 // only for the ones the store fetched.
-                let origin =
-                    crate::store::Origin::folder(&source, crate::state::now_seconds());
+                let origin = crate::store::Origin::folder(&source, crate::state::now_seconds());
 
                 let installed = crate::extension_install::install(app, &source, &origin)?;
 
@@ -693,14 +692,22 @@ fn run_system(id: &str) -> Result<String, String> {
             let now = system::muted().unwrap_or(false);
             let set = system::set_muted(!now)?;
 
-            Ok(if set { "Sound off".into() } else { "Sound on".into() })
+            Ok(if set {
+                "Sound off".into()
+            } else {
+                "Sound on".into()
+            })
         }
 
         "system.theme" => {
             let now = system::dark().unwrap_or(false);
             let set = system::set_dark(!now)?;
 
-            Ok(if set { "Dark mode".into() } else { "Light mode".into() })
+            Ok(if set {
+                "Dark mode".into()
+            } else {
+                "Light mode".into()
+            })
         }
 
         /*
@@ -782,15 +789,14 @@ impl Action for PasteSnippet {
     }
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
-        let expansion =
-            crate::snippets::commands::expand_snippet(
-                ctx.app.clone(),
-                object.target.clone(),
-                // The action registry has nowhere to ask, so a snippet with
-                // fields expands with them still in it. The launcher asks
-                // first and calls the command directly.
-                None,
-            )?;
+        let expansion = crate::snippets::commands::expand_snippet(
+            ctx.app.clone(),
+            object.target.clone(),
+            // The action registry has nowhere to ask, so a snippet with
+            // fields expands with them still in it. The launcher asks
+            // first and calls the command directly.
+            None,
+        )?;
 
         ctx.app
             .clipboard()
@@ -923,7 +929,6 @@ impl Action for CopyAnswer {
         Ok(outcome)
     }
 }
-
 
 /// Opens a terminal where a file lives.
 ///
@@ -1064,8 +1069,7 @@ pub fn name_of(target: &str) -> String {
 pub fn recycle(path: &std::path::Path) -> Result<(), String> {
     use windows::core::PCWSTR;
     use windows::Win32::UI::Shell::{
-        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FO_DELETE,
-        SHFILEOPSTRUCTW,
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW,
     };
 
     use std::os::windows::ffi::OsStrExt;
@@ -2154,10 +2158,7 @@ impl Action for VerifyFile {
         // reporting it as a mismatch sends somebody off to re-download a file
         // that was fine.
         if kind != crate::files_ops::Checksum::Sha256 {
-            return Err(format!(
-                "that is a {} and Sill checks SHA-256",
-                kind.name()
-            ));
+            return Err(format!("that is a {} and Sill checks SHA-256", kind.name()));
         }
 
         let path = std::path::PathBuf::from(&object.target);
@@ -2202,7 +2203,11 @@ impl Action for LookUpFile {
     }
 
     fn capabilities(&self) -> &'static [Capability] {
-        &[Capability::FileRead, Capability::Network, Capability::ProcessLaunch]
+        &[
+            Capability::FileRead,
+            Capability::Network,
+            Capability::ProcessLaunch,
+        ]
     }
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
@@ -2275,9 +2280,9 @@ impl Action for RunScript {
             .map(|prefs| prefs.inner.clone());
 
         let timeout = match seconds {
-            Some(prefs) => std::time::Duration::from_secs(
-                prefs.lock().await.scripts.timeout_seconds.max(1),
-            ),
+            Some(prefs) => {
+                std::time::Duration::from_secs(prefs.lock().await.scripts.timeout_seconds.max(1))
+            }
             None => crate::shell::DEFAULT_TIMEOUT,
         };
 
@@ -2411,7 +2416,12 @@ mod running_a_script {
         for mode in [Mode::Silent, Mode::Compact, Mode::Inline, Mode::FullOutput] {
             let outcome = outcome_of(
                 &script(mode),
-                &ran(Some(1), Ended::Finished, "working", "could not reach the server"),
+                &ran(
+                    Some(1),
+                    Ended::Finished,
+                    "working",
+                    "could not reach the server",
+                ),
             );
 
             assert!(
@@ -2448,7 +2458,11 @@ mod running_a_script {
         let stdout = "line one\nline two\n";
 
         assert_eq!(
-            outcome_of(&script(Mode::FullOutput), &ran(Some(0), Ended::Finished, stdout, "")).text,
+            outcome_of(
+                &script(Mode::FullOutput),
+                &ran(Some(0), Ended::Finished, stdout, "")
+            )
+            .text,
             Some(stdout.to_string()),
         );
 

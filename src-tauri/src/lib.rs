@@ -1,6 +1,6 @@
 pub mod action;
-pub mod activity;
 pub mod actions;
+pub mod activity;
 pub mod ai;
 pub mod app_volume;
 pub mod apps;
@@ -17,47 +17,47 @@ pub mod emoji;
 pub mod everything_ipc;
 pub mod extension_install;
 pub mod exthost;
-pub mod files_ops;
 pub mod files;
+pub mod files_ops;
 pub mod host;
 pub mod host_bridge;
+pub mod hyper;
 pub mod icons;
 pub mod input;
+pub mod job;
 pub mod lazy_windows;
+pub mod live;
 pub mod lnk;
 pub mod log;
 pub mod meter;
 pub mod navigation;
-pub mod ocr;
 pub mod object;
+pub mod ocr;
 pub mod preferences;
 pub mod previews;
+pub mod processes;
 pub mod profiles;
 pub mod profiles_store;
-pub mod processes;
 pub mod quicklinks;
 pub mod radios;
 pub mod registry;
-pub mod secrets;
-pub mod live;
-pub mod hyper;
-pub mod job;
 pub mod scripts;
-pub mod shell;
+pub mod secrets;
 pub mod selection;
 pub mod settings_catalog;
 pub mod settings_index;
+pub mod shell;
 pub mod sleep;
 pub mod snippets;
-pub mod store;
-pub mod tts;
 pub mod state;
-pub mod system;
+pub mod store;
 pub mod summon;
-pub mod taps;
-pub mod timing;
 pub mod synthetic;
+pub mod system;
+pub mod taps;
 pub mod text;
+pub mod timing;
+pub mod tts;
 pub mod weather;
 pub mod websearch;
 pub mod windowing;
@@ -137,9 +137,11 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
         // The scan then rebuilds the index from scratch and replaces it
         // wholesale. Merging into the cache instead would mean an uninstalled
         // application never disappeared.
-        let fresh = tokio::task::spawn_blocking(move || scan_everything(&sources, &index_paths, &workspaces))
-            .await
-            .unwrap_or_default();
+        let fresh = tokio::task::spawn_blocking(move || {
+            scan_everything(&sources, &index_paths, &workspaces)
+        })
+        .await
+        .unwrap_or_default();
 
         if fresh.is_empty() {
             return;
@@ -185,15 +187,14 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
 ///
 /// One translation, used by startup and by the settings window, so the two
 /// cannot disagree about what is bound.
-pub(crate) fn tap_binding(
-    taps: &preferences::Taps,
-) -> Option<snippets::expander::TapBinding> {
-    taps.modifier.map(|modifier| snippets::expander::TapBinding {
-        modifier,
-        // A window of nothing would mean the second tap has to arrive in the
-        // same instant, which is a gesture nobody can make.
-        window_ms: taps.window_ms.max(1),
-    })
+pub(crate) fn tap_binding(taps: &preferences::Taps) -> Option<snippets::expander::TapBinding> {
+    taps.modifier
+        .map(|modifier| snippets::expander::TapBinding {
+            modifier,
+            // A window of nothing would mean the second tap has to arrive in the
+            // same instant, which is a gesture nobody can make.
+            window_ms: taps.window_ms.max(1),
+        })
 }
 
 /// Blocking on purpose. It is a PowerShell round trip plus a few thousand
@@ -352,7 +353,9 @@ fn register_capture_shortcut(app: &AppHandle, accelerator: &str, whole_screen: b
                 let done = if whole_screen {
                     commands::system::capture_screen(app.clone()).await
                 } else {
-                    commands::system::begin_capture(app.clone()).await.map(|()| String::new())
+                    commands::system::begin_capture(app.clone())
+                        .await
+                        .map(|()| String::new())
                 };
 
                 if let Err(reason) = done {
@@ -666,9 +669,7 @@ pub(crate) fn reload_snippets(app: &AppHandle) {
 
     let records: Vec<CommandRecord> = loaded
         .iter()
-        .map(|snippet| {
-            registry::snippet_record(snippet)
-        })
+        .map(|snippet| registry::snippet_record(snippet))
         .collect();
 
     if let Some(state) = app.try_state::<RegistryState>() {
@@ -706,8 +707,10 @@ pub(crate) fn reload_quicklinks(app: &AppHandle) {
 /// snippets and quicklinks do. Off means no folders are touched at all, not
 /// that the results are hidden afterwards.
 pub(crate) fn reload_scripts(app: &AppHandle) {
-    let (Some(prefs), Some(state)) = (app.try_state::<PrefsState>(), app.try_state::<RegistryState>())
-    else {
+    let (Some(prefs), Some(state)) = (
+        app.try_state::<PrefsState>(),
+        app.try_state::<RegistryState>(),
+    ) else {
         return;
     };
 
@@ -756,9 +759,11 @@ pub(crate) fn reload_index(app: &AppHandle) {
     let workspaces = profiles_store::path(app);
 
     tauri::async_runtime::spawn(async move {
-        let fresh = tokio::task::spawn_blocking(move || scan_everything(&sources, &index_paths, &workspaces))
-            .await
-            .unwrap_or_default();
+        let fresh = tokio::task::spawn_blocking(move || {
+            scan_everything(&sources, &index_paths, &workspaces)
+        })
+        .await
+        .unwrap_or_default();
 
         if fresh.is_empty() {
             return;
@@ -809,6 +814,63 @@ impl HotkeyConflicts {
     }
 }
 
+/// Whether clicking away dismisses the launcher, asked at the moment it does.
+///
+/// Its own flag rather than a read of the preferences, because the answer is
+/// needed inside a window event handler, which is synchronous, and the
+/// preferences live behind an async lock. An atomic bool is also the whole of
+/// what that handler needs to know.
+#[derive(Default)]
+pub struct DismissOnBlur(std::sync::atomic::AtomicBool);
+
+impl DismissOnBlur {
+    pub(crate) fn set(&self, yes: bool) {
+        self.0.store(yes, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn wanted(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Says out loud that the summon key never took.
+///
+/// Everything else about a refused key is visible in the settings window, in
+/// the row that set it. The summon key is the exception that needed more,
+/// because it is the key that opens the window where the message is: with it
+/// taken there is no launcher, no taskbar button, and nothing on screen that
+/// differs from Sill not running at all. On this machine that had already
+/// happened, and the only record was one line in a log.
+///
+/// So the settings window is opened, once, at the section holding that row.
+/// Heavy-handed for an ordinary setting, and right for this one: the
+/// alternative is an application that starts and then cannot be reached.
+fn report_summon_trouble(app: &AppHandle, summon: &str) {
+    let taken = app
+        .try_state::<HotkeyConflicts>()
+        .map(|conflicts| conflicts.all().iter().any(|key| key == summon))
+        .unwrap_or(false);
+
+    if !taken {
+        return;
+    }
+
+    crate::say!("{summon} is taken, so there is no way to summon Sill: opening settings");
+
+    // The tray is the other place somebody looks when a launcher seems dead,
+    // and its tooltip is the one label it has.
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(Some(&format!(
+            "Sill: {summon} is taken by another application, so the hotkey does nothing"
+        )));
+    }
+
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = commands::settings::open_settings(handle, Some("general".to_string())).await;
+    });
+}
+
 fn register_summon_shortcut(app: &AppHandle, accelerator: &str) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
@@ -847,17 +909,32 @@ fn watch_focus(app: &AppHandle, dismiss_on_blur: bool) {
         return;
     }
 
-    if !dismiss_on_blur {
-        return;
-    }
-
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
 
+    /*
+     * Wired whatever the setting says, and the setting read when focus is
+     * actually lost.
+     *
+     * `on_window_event` adds a handler rather than replacing one, so this
+     * cannot be re-wired on save: turning the setting off and on again would
+     * leave two handlers, and each further save another. Baking the preference
+     * into whether the handler exists is what made this the one setting that
+     * needed a restart, and it is the setting somebody most wants to try both
+     * ways before deciding.
+     */
+    let wanted = DismissOnBlur::default();
+    wanted.set(dismiss_on_blur);
+    app.manage(wanted);
+
     let handle = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(false) = event {
+            if !handle.app_handle().state::<DismissOnBlur>().wanted() {
+                return;
+            }
+
             // Focus is already gone, so the previous window must not be
             // restored on top of whatever the user just clicked. Everything
             // else `summon::hide` does still applies, and letting the renderer
@@ -880,11 +957,7 @@ fn watch_focus(app: &AppHandle, dismiss_on_blur: bool) {
 ///
 /// `apply_backdrop` rounds the corners first, so this is also what keeps DWM's
 /// clip in agreement with each page's own radius.
-pub(crate) fn apply_backdrops(
-    app: &AppHandle,
-    backdrop: preferences::Backdrop,
-    tint_alpha: u8,
-) {
+pub(crate) fn apply_backdrops(app: &AppHandle, backdrop: preferences::Backdrop, tint_alpha: u8) {
     for label in ["main", "traymenu"] {
         if let Some(window) = app.get_webview_window(label) {
             summon::apply_backdrop(&window, backdrop, tint_alpha);
@@ -1135,6 +1208,7 @@ pub fn run() {
             autohide_tray_menu(&handle);
             apply_autostart(&handle, prefs.general.open_at_login);
             watch_focus(&handle, prefs.hotkey.dismiss_on_blur);
+            report_summon_trouble(&handle, &prefs.hotkey.summon);
 
             // Dictation holds a low-level keyboard hook and, when local, a
             // whisper server process. Both are managed state so they live
@@ -1472,4 +1546,64 @@ pub fn run() {
     manage_before_windows(&app);
 
     app.run(|_app, _event| {});
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DismissOnBlur, HotkeyConflicts};
+
+    /// A key that binds after being refused stops being reported.
+    ///
+    /// The refusal is what the settings window reads, so a stale entry would
+    /// paint a working shortcut red forever. This is not hypothetical: a
+    /// combination is often taken because the previous owner is still closing,
+    /// and Sill rebinds every time that row is edited.
+    #[test]
+    fn a_key_that_binds_the_second_time_stops_being_reported() {
+        let conflicts = HotkeyConflicts::default();
+
+        conflicts.note("Alt+Space", false);
+        assert_eq!(conflicts.all(), vec!["Alt+Space".to_string()]);
+
+        conflicts.note("Alt+Space", true);
+        assert!(
+            conflicts.all().is_empty(),
+            "a key that bound is still reported as taken"
+        );
+    }
+
+    /// One refused key does not hide another.
+    ///
+    /// Per-command shortcuts arrive here now as well as the four named ones,
+    /// so there can be several at once and each has its own row to mark.
+    #[test]
+    fn every_refused_key_is_reported_not_just_the_last() {
+        let conflicts = HotkeyConflicts::default();
+
+        conflicts.note("Alt+Space", false);
+        conflicts.note("Ctrl+Alt+W", false);
+
+        let mut taken = conflicts.all();
+        taken.sort();
+        assert_eq!(
+            taken,
+            vec!["Alt+Space".to_string(), "Ctrl+Alt+W".to_string()]
+        );
+    }
+
+    /// Whether clicking away dismisses is answered now, not at startup.
+    ///
+    /// The window event handler is wired once and reads this, because
+    /// `on_window_event` adds handlers rather than replacing them. Wiring it
+    /// per save would dismiss the launcher once per time the setting had ever
+    /// been switched on.
+    #[test]
+    fn the_dismissal_setting_is_read_after_it_changes() {
+        let blur = DismissOnBlur::default();
+        blur.set(true);
+        assert!(blur.wanted());
+
+        blur.set(false);
+        assert!(!blur.wanted(), "turning it off still needs a restart");
+    }
 }

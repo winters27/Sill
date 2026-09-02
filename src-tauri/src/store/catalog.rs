@@ -188,7 +188,11 @@ pub fn folder_of(relative_path: &str) -> Option<String> {
     }
 
     let clean = trimmed.split('/').all(|part| {
-        !part.is_empty() && part != "." && part != ".." && !part.contains('\\') && !part.contains(':')
+        !part.is_empty()
+            && part != "."
+            && part != ".."
+            && !part.contains('\\')
+            && !part.contains(':')
     });
 
     clean.then(|| trimmed.to_string())
@@ -278,8 +282,8 @@ fn reduce(raw: Raw) -> Option<Listing> {
 /// Separated from fetching so the awkward listings are values in a test rather
 /// than something the network has to be persuaded to return.
 pub fn listings_in(body: &str) -> Result<Vec<Listing>, String> {
-    let page: Page =
-        serde_json::from_str(body).map_err(|err| format!("the store index was unreadable: {err}"))?;
+    let page: Page = serde_json::from_str(body)
+        .map_err(|err| format!("the store index was unreadable: {err}"))?;
 
     Ok(page.data.into_iter().filter_map(reduce).collect())
 }
@@ -424,7 +428,10 @@ mod tests {
 
         let one = &listings[0];
         assert_eq!(one.name, "translate");
-        assert_eq!(one.folder, "extensions/google-translate", "no trailing slash");
+        assert_eq!(
+            one.folder, "extensions/google-translate",
+            "no trailing slash"
+        );
         assert_eq!(one.author, "someone", "the handle, which is what is shown");
         assert_eq!(one.revision, "abc123");
         assert_eq!(one.commands.len(), 1);
@@ -446,7 +453,10 @@ mod tests {
         let one = &listings[0];
         assert_eq!(one.title, "bare", "the slug stands in for a missing title");
         assert_eq!(one.commands[0].title, "go");
-        assert_eq!(one.commands[0].mode, "", "and an unstated mode is unrunnable");
+        assert_eq!(
+            one.commands[0].mode, "",
+            "and an unstated mode is unrunnable"
+        );
         assert!(!one.commands[0].runnable());
         assert!(one.categories.is_empty());
         assert!(one.platforms.is_empty());
@@ -507,7 +517,11 @@ mod tests {
 
     #[test]
     fn a_listing_with_no_icon_carries_an_empty_one_rather_than_failing() {
-        for icons in [r#""icons":{"light":null,"dark":null}"#, r#""icons":null"#, r#""x":1"#] {
+        for icons in [
+            r#""icons":{"light":null,"dark":null}"#,
+            r#""icons":null"#,
+            r#""x":1"#,
+        ] {
             let listings = listings_in(&format!(
                 r#"{{"data":[{{
                     "name":"x","relative_path":"extensions/x","commit_sha":"s",

@@ -50,7 +50,11 @@ fn switching_takes_effect_and_can_be_put_back() {
         .expect("another one")
         .clone();
 
-    println!("switching from {} to {}", audio::short_name(&was.name), audio::short_name(&other.name));
+    println!(
+        "switching from {} to {}",
+        audio::short_name(&was.name),
+        audio::short_name(&other.name)
+    );
     audio::set_output(&other.id).expect("switches");
 
     let now = audio::outputs();

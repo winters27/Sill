@@ -667,14 +667,21 @@ mod tests {
     fn ids_are_unique() {
         let mut seen = std::collections::BTreeSet::new();
         for capability in CAPABILITIES {
-            assert!(seen.insert(capability.id), "{} is listed twice", capability.id);
+            assert!(
+                seen.insert(capability.id),
+                "{} is listed twice",
+                capability.id
+            );
         }
     }
 
     #[test]
     fn a_token_inside_a_longer_word_is_not_a_use_of_it() {
         assert!(mentions("await open(url)", "open("));
-        assert!(!mentions("fs.open(path)", "open("), "that is a different open");
+        assert!(
+            !mentions("fs.open(path)", "open("),
+            "that is a different open"
+        );
         assert!(!mentions("reopen(x)", "open("));
 
         assert!(mentions("import { Cache } from \"@raycast/api\"", "Cache"));
@@ -702,7 +709,10 @@ mod tests {
             "import { Clipboard } from \"@raycast/api\";\nimport { execSync } from \"child_process\";",
         ));
 
-        assert_eq!(found, vec!["processes".to_string(), "clipboard".to_string()]);
+        assert_eq!(
+            found,
+            vec!["processes".to_string(), "clipboard".to_string()]
+        );
     }
 
     /// A dependency is not scanned, and must not be scanned: the report would

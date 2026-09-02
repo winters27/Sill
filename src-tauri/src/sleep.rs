@@ -76,7 +76,10 @@ const SLEEP_AFTER: Duration = Duration::from_secs(20);
 static GENERATIONS: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
 
 fn generation(label: &str) -> u64 {
-    GENERATIONS.lock().map(|all| all.get(label).copied().unwrap_or(0)).unwrap_or(0)
+    GENERATIONS
+        .lock()
+        .map(|all| all.get(label).copied().unwrap_or(0))
+        .unwrap_or(0)
 }
 
 /// Arms the sleep. Called on dismissal, returns immediately.
@@ -171,16 +174,17 @@ fn suspend(label: &str, window: &WebviewWindow) {
             // sleep through never suspends at all. Both report through this
             // handler and neither is worth acting on: the window is hidden and
             // invisible either way, which is most of the saving.
-            let handler = TrySuspendCompletedHandler::create(Box::new(move |_result, suspended| {
-                if suspended {
-                    crate::say!("{label} suspended");
-                } else {
-                    // Not a failure. The page was busy, and it will be asked
-                    // again the next time it is put away.
-                    crate::say!("{label} would not suspend, the page is busy");
-                }
-                Ok(())
-            }));
+            let handler =
+                TrySuspendCompletedHandler::create(Box::new(move |_result, suspended| {
+                    if suspended {
+                        crate::say!("{label} suspended");
+                    } else {
+                        // Not a failure. The page was busy, and it will be asked
+                        // again the next time it is put away.
+                        crate::say!("{label} would not suspend, the page is busy");
+                    }
+                    Ok(())
+                }));
             let _ = suspendable.TrySuspend(&handler);
         }
     });
@@ -217,7 +221,11 @@ mod tests {
         let armed = generation("main");
         bump("main");
 
-        assert_ne!(generation("main"), armed, "a timer armed earlier would still fire");
+        assert_ne!(
+            generation("main"),
+            armed,
+            "a timer armed earlier would still fire"
+        );
     }
 
     /// The bug this shape exists to prevent: one count for every window let
@@ -228,6 +236,10 @@ mod tests {
         let armed = generation("main");
         bump("traymenu");
 
-        assert_eq!(generation("main"), armed, "the launcher's pending sleep was cancelled");
+        assert_eq!(
+            generation("main"),
+            armed,
+            "the launcher's pending sleep was cancelled"
+        );
     }
 }

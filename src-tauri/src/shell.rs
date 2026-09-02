@@ -106,7 +106,10 @@ impl Shell {
             // its arguments are appended by `run` as one raw argument, because
             // cmd does not parse a command line the way everything else does.
             // See `cmd_line`.
-            Self::Cmd => ("cmd.exe".into(), vec!["/d".into(), "/s".into(), "/c".into()]),
+            Self::Cmd => (
+                "cmd.exe".into(),
+                vec!["/d".into(), "/s".into(), "/c".into()],
+            ),
             Self::Bash => ("bash.exe".into(), vec![target.into()]),
             Self::Python => ("python.exe".into(), vec![target.into()]),
             Self::Program => (target.into(), Vec::new()),
@@ -423,9 +426,15 @@ mod tests {
     fn script(body: &str) -> (tempfile::TempDir, String) {
         let dir = tempfile::tempdir().expect("a temp dir");
         let path = dir.path().join("go.bat");
-        std::fs::write(&path, format!("@echo off
+        std::fs::write(
+            &path,
+            format!(
+                "@echo off
 {body}
-")).expect("wrote the script");
+"
+            ),
+        )
+        .expect("wrote the script");
         let name = path.to_string_lossy().to_string();
         (dir, name)
     }
@@ -605,16 +614,9 @@ mod tests {
         let started = Instant::now();
 
         let (_dir, path) = script("ping -n 30 127.0.0.1 >nul");
-        let ran = run(
-            Shell::Cmd,
-            &path,
-            &[],
-            None,
-            Duration::from_secs(30),
-            &stop,
-        )
-        .await
-        .expect("ran");
+        let ran = run(Shell::Cmd, &path, &[], None, Duration::from_secs(30), &stop)
+            .await
+            .expect("ran");
 
         assert_eq!(ran.ended, Ended::Cancelled);
         assert!(
@@ -636,7 +638,10 @@ mod tests {
 
         let (kept, truncated) = taken(&held);
         assert_eq!(kept.len(), MOST_OUTPUT);
-        assert!(truncated, "it kept the cap and did not say it had cut anything");
+        assert!(
+            truncated,
+            "it kept the cap and did not say it had cut anything"
+        );
     }
 
     #[tokio::test]

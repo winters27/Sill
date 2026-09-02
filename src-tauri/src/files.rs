@@ -401,7 +401,10 @@ mod tests {
         // The walk takes over a second. Offering to install something during
         // it would be wrong twice over: nothing is missing, and by the time
         // anybody read the row it would be gone.
-        assert_eq!(verdict(true, 0, true, false, false), Some(Missing::Indexing));
+        assert_eq!(
+            verdict(true, 0, true, false, false),
+            Some(Missing::Indexing)
+        );
         assert_eq!(verdict(true, 0, true, false, true), Some(Missing::Indexing));
     }
 

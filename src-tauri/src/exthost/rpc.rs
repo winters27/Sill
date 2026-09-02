@@ -133,7 +133,10 @@ impl RpcPeer {
             .collect();
 
         if !waiting.is_empty() {
-            crate::say!("{} extension request(s) will not be answered: {why}", waiting.len());
+            crate::say!(
+                "{} extension request(s) will not be answered: {why}",
+                waiting.len()
+            );
         }
 
         for tx in waiting {

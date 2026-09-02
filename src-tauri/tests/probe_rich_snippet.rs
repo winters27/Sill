@@ -21,7 +21,10 @@ fn both_formats_land_and_the_clipboard_is_put_back() {
     // Whatever is there now, so it can go back. Text only, which is what
     // every borrow in Sill puts back.
     let before = board.get_text().ok();
-    println!("clipboard held {:?} before", before.as_deref().map(|t| &t[..t.len().min(40)]));
+    println!(
+        "clipboard held {:?} before",
+        before.as_deref().map(|t| &t[..t.len().min(40)])
+    );
 
     let html = "Heads up: <b>this is important</b>";
     let plain = "Heads up: this is important";
@@ -36,7 +39,10 @@ fn both_formats_land_and_the_clipboard_is_put_back() {
     // another application reading it.
     let mut reader = arboard::Clipboard::new().expect("a second handle");
     let text = reader.get_text().expect("plain text is there");
-    assert_eq!(text, plain, "the plain half is not what a plain field would get");
+    assert_eq!(
+        text, plain,
+        "the plain half is not what a plain field would get"
+    );
 
     let markup = reader.get().html().expect("markup is there");
     println!("markup came back as {markup:?}");

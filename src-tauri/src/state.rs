@@ -219,30 +219,31 @@ impl CatalogWatcher {
         let (tx, rx) = std::sync::mpsc::channel();
         let cost = state.cost.clone();
 
-        let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            let Ok(event) = event else { return };
+        let mut watcher =
+            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+                let Ok(event) = event else { return };
 
-            // Saving a file cannot change a list of file names, and saving
-            // files is most of what a watcher ever reports.
-            if !crate::catalog::changes_the_index(&event.kind) {
-                return;
-            }
+                // Saving a file cannot change a list of file names, and saving
+                // files is most of what a watcher ever reports.
+                if !crate::catalog::changes_the_index(&event.kind) {
+                    return;
+                }
 
-            // Watching is recursive and the walk is not, so most of what
-            // arrives here is from directories the index deliberately skips.
-            // Left unfiltered this rebuilt eight times in seven minutes on an
-            // idle machine, because `AppData` never stops changing.
-            if !event
-                .paths
-                .iter()
-                .any(|path| crate::catalog::worth_indexing(path, &watched))
-            {
-                return;
-            }
+                // Watching is recursive and the walk is not, so most of what
+                // arrives here is from directories the index deliberately skips.
+                // Left unfiltered this rebuilt eight times in seven minutes on an
+                // idle machine, because `AppData` never stops changing.
+                if !event
+                    .paths
+                    .iter()
+                    .any(|path| crate::catalog::worth_indexing(path, &watched))
+                {
+                    return;
+                }
 
-            let _ = tx.send(());
-        })
-        .ok()?;
+                let _ = tx.send(());
+            })
+            .ok()?;
 
         for root in &roots {
             if let Err(err) = watcher.watch(root, RecursiveMode::Recursive) {
@@ -588,7 +589,9 @@ mod tests {
                 scope.spawn(move || {
                     for turn in 0..each {
                         state.record(|ranking| {
-                            ranking.frecency.record(&format!("app:{hand}"), 1_000 + turn);
+                            ranking
+                                .frecency
+                                .record(&format!("app:{hand}"), 1_000 + turn);
                         });
                     }
                 });
@@ -690,7 +693,10 @@ mod searching {
         let searching = Searching::default();
 
         let first = searching.begin();
-        assert!(searching.is_current(first), "the only search is the current one");
+        assert!(
+            searching.is_current(first),
+            "the only search is the current one"
+        );
 
         let second = searching.begin();
         assert!(

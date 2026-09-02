@@ -510,12 +510,16 @@ mod tests {
         // it is typed. The text is the valuable part, so it arrives without
         // the keyword and the count says so out loud.
         let held = vec![snippet("a", "Mine", ";sig", "mine")];
-        let arriving = parse(r#"[{"name": "Theirs", "text": "theirs", "keyword": ";sig"}]"#).unwrap();
+        let arriving =
+            parse(r#"[{"name": "Theirs", "text": "theirs", "keyword": ";sig"}]"#).unwrap();
 
         let (out, summary) = merge(&held, arriving, NOW);
 
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].keyword, ";sig", "the one already here lost its keyword");
+        assert_eq!(
+            out[0].keyword, ";sig",
+            "the one already here lost its keyword"
+        );
         assert_eq!(out[1].keyword, "", "the arriving one kept a taken keyword");
         assert_eq!(summary.keywords_taken, 1);
         assert_eq!(summary.added, 1);
@@ -527,7 +531,8 @@ mod tests {
         // `;SIG` in beside `;sig` produces exactly the collision the check
         // exists to prevent.
         let held = vec![snippet("a", "Mine", ";sig", "mine")];
-        let arriving = parse(r#"[{"name": "Theirs", "text": "theirs", "keyword": ";SIG"}]"#).unwrap();
+        let arriving =
+            parse(r#"[{"name": "Theirs", "text": "theirs", "keyword": ";SIG"}]"#).unwrap();
 
         let (_, summary) = merge(&held, arriving, NOW);
 
@@ -538,8 +543,8 @@ mod tests {
     fn a_snippet_keeps_its_own_keyword_when_it_is_replacing_itself() {
         // Its keyword is taken by itself, which must not read as a collision.
         let held = vec![snippet("a", "One", ";a", "old")];
-        let arriving = parse(r#"[{"id": "a", "name": "One", "text": "new", "keyword": ";a"}]"#)
-            .unwrap();
+        let arriving =
+            parse(r#"[{"id": "a", "name": "One", "text": "new", "keyword": ";a"}]"#).unwrap();
 
         let (out, summary) = merge(&held, arriving, NOW);
 

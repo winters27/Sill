@@ -28,7 +28,10 @@ fn the_same_file_from_both_sources_is_listed_once() {
     let merged = sill_lib::commands::search::merge(ours, theirs, 10);
     let paths: Vec<&str> = merged.iter().map(|h| h.path.as_str()).collect();
 
-    assert_eq!(paths, vec![r"C:\Sill\src\registry.rs", r"C:\Other\registry.rs"]);
+    assert_eq!(
+        paths,
+        vec![r"C:\Sill\src\registry.rs", r"C:\Other\registry.rs"]
+    );
 }
 
 #[test]

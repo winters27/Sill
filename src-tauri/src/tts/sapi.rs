@@ -97,7 +97,9 @@ const POISONED: &str = "the voice is in an unknown state";
 #[cfg(windows)]
 fn start() -> Result<Sender<Say>, String> {
     use windows::core::HSTRING;
-    use windows::Win32::Media::Speech::{ISpVoice, SpVoice, SPF_ASYNC, SPF_IS_NOT_XML, SPF_PURGEBEFORESPEAK};
+    use windows::Win32::Media::Speech::{
+        ISpVoice, SpVoice, SPF_ASYNC, SPF_IS_NOT_XML, SPF_PURGEBEFORESPEAK,
+    };
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
     };

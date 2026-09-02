@@ -9,8 +9,8 @@
 //! this file re-implemented both judgements, which meant it could pass while
 //! the watcher was wrong, and a deliberate break confirmed exactly that.
 use sill_lib::catalog::{changes_the_index, worth_indexing, NOISE, SYSTEM};
-use std::path::PathBuf;
 use std::path::Path;
+use std::path::PathBuf;
 
 // ------------------------------------------------------- where it happened
 
@@ -198,8 +198,14 @@ fn a_costlier_walk_earns_a_longer_rest() {
     // a twentieth of one processor while files are changing constantly,
     // whether the folder is small or a whole drive. Measured costs: a home
     // folder walks in 1.3 seconds and a whole C: drive in about six.
-    assert_eq!(quiet_after(Duration::from_millis(1300)), Duration::from_secs(26));
-    assert_eq!(quiet_after(Duration::from_millis(6000)), Duration::from_secs(120));
+    assert_eq!(
+        quiet_after(Duration::from_millis(1300)),
+        Duration::from_secs(26)
+    );
+    assert_eq!(
+        quiet_after(Duration::from_millis(6000)),
+        Duration::from_secs(120)
+    );
 
     // Longer walk, longer rest, always.
     let mut previous = Duration::ZERO;
@@ -219,5 +225,8 @@ fn a_very_fast_walk_still_gets_a_rest() {
     // it rebuild on every keystroke of somebody's editor. The first rebuild
     // has no previous cost to go on at all.
     assert_eq!(quiet_after(Duration::ZERO), Duration::from_secs(20));
-    assert_eq!(quiet_after(Duration::from_millis(10)), Duration::from_secs(20));
+    assert_eq!(
+        quiet_after(Duration::from_millis(10)),
+        Duration::from_secs(20)
+    );
 }

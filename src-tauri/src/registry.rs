@@ -399,7 +399,14 @@ pub fn builtins() -> Vec<CommandRecord> {
             "advanced",
             "Save Workspace",
             "Remember where every window is, to put them back later",
-            &["workspace", "layout", "arrange", "save", "windows", "session"],
+            &[
+                "workspace",
+                "layout",
+                "arrange",
+                "save",
+                "windows",
+                "session",
+            ],
         ),
         builtin(
             "widgets",
@@ -407,8 +414,18 @@ pub fn builtins() -> Vec<CommandRecord> {
             "Widgets",
             "The clock, the weather, and what this machine is doing",
             &[
-                "widget", "clock", "time", "weather", "temperature", "forecast",
-                "process", "memory", "ram", "cpu", "monitor", "dashboard",
+                "widget",
+                "clock",
+                "time",
+                "weather",
+                "temperature",
+                "forecast",
+                "process",
+                "memory",
+                "ram",
+                "cpu",
+                "monitor",
+                "dashboard",
             ],
         ),
         builtin(
@@ -424,8 +441,17 @@ pub fn builtins() -> Vec<CommandRecord> {
             "Extension Store",
             "Browse Raycast extensions and install them",
             &[
-                "extension", "store", "raycast", "browse", "install", "add",
-                "plugin", "marketplace", "catalog", "discover", "search",
+                "extension",
+                "store",
+                "raycast",
+                "browse",
+                "install",
+                "add",
+                "plugin",
+                "marketplace",
+                "catalog",
+                "discover",
+                "search",
             ],
         ),
         builtin(
@@ -434,8 +460,14 @@ pub fn builtins() -> Vec<CommandRecord> {
             "Update Extensions",
             "Check which installed extensions have a newer version",
             &[
-                "extension", "update", "upgrade", "outdated", "newer",
-                "version", "store", "refresh",
+                "extension",
+                "update",
+                "upgrade",
+                "outdated",
+                "newer",
+                "version",
+                "store",
+                "refresh",
             ],
         ),
         builtin(
@@ -443,7 +475,15 @@ pub fn builtins() -> Vec<CommandRecord> {
             "advanced",
             "Install Extension",
             "Build a Raycast extension from a folder and add its commands",
-            &["extension", "raycast", "add", "plugin", "import", "build", "folder"],
+            &[
+                "extension",
+                "raycast",
+                "add",
+                "plugin",
+                "import",
+                "build",
+                "folder",
+            ],
         ),
         builtin(
             "quicklinks",
@@ -513,7 +553,15 @@ pub fn builtins() -> Vec<CommandRecord> {
             "clipboard",
             "Capture Whole Screen",
             "Copies everything on every display",
-            &["screenshot", "screen", "shot", "grab", "fullscreen", "display", "capture"],
+            &[
+                "screenshot",
+                "screen",
+                "shot",
+                "grab",
+                "fullscreen",
+                "display",
+                "capture",
+            ],
         ),
         builtin(
             "mark-up",
@@ -563,15 +611,7 @@ pub fn builtins() -> Vec<CommandRecord> {
             "App Volume",
             "Turn one program down without turning everything down",
             &[
-                "volume",
-                "mixer",
-                "app",
-                "program",
-                "per app",
-                "mute",
-                "loud",
-                "quiet",
-                "sound",
+                "volume", "mixer", "app", "program", "per app", "mute", "loud", "quiet", "sound",
                 "audio",
             ],
         ),
@@ -581,13 +621,7 @@ pub fn builtins() -> Vec<CommandRecord> {
             "Emoji",
             "Search every emoji by name and paste one",
             &[
-                "emoji",
-                "symbol",
-                "smiley",
-                "face",
-                "icon",
-                "unicode",
-                "reaction",
+                "emoji", "symbol", "smiley", "face", "icon", "unicode", "reaction",
             ],
         ),
         builtin(
@@ -712,14 +746,24 @@ fn system_commands() -> Vec<CommandRecord> {
             &audio,
             "Toggle Mute",
             "Silences Windows, or brings the sound back",
-            &["mute", "unmute", "silence", "quiet", "sound", "audio", "system"],
+            &[
+                "mute", "unmute", "silence", "quiet", "sound", "audio", "system",
+            ],
         ),
         system_switch(
             "system.theme",
             &theme,
             "Toggle Dark Mode",
             "Switches Windows between light and dark",
-            &["dark", "light", "theme", "appearance", "night", "mode", "system"],
+            &[
+                "dark",
+                "light",
+                "theme",
+                "appearance",
+                "night",
+                "mode",
+                "system",
+            ],
         ),
         system_switch(
             "system.lock",
@@ -759,7 +803,15 @@ fn system_commands() -> Vec<CommandRecord> {
             } else {
                 output.name.trim().to_string()
             },
-            &["audio", "sound", "output", "speakers", "headphones", "device", "system"],
+            &[
+                "audio",
+                "sound",
+                "output",
+                "speakers",
+                "headphones",
+                "device",
+                "system",
+            ],
         ));
     }
 
@@ -777,8 +829,16 @@ fn system_commands() -> Vec<CommandRecord> {
             &id,
             // The network applet for one and the Bluetooth applet for the
             // other, which is what Windows draws them with.
-            if radio.kind == "wifi" { &network } else { &bluetooth },
-            &format!("Turn {} {}", radio.name, if radio.on { "Off" } else { "On" }),
+            if radio.kind == "wifi" {
+                &network
+            } else {
+                &bluetooth
+            },
+            &format!(
+                "Turn {} {}",
+                radio.name,
+                if radio.on { "Off" } else { "On" }
+            ),
             // Nothing. The switch on the row says whether it is on, and a
             // radio has nothing else to tell you about itself.
             "",
@@ -797,9 +857,20 @@ fn system_commands() -> Vec<CommandRecord> {
              * string and still answers for the other spellings.
              */
             &if radio.kind == "wifi" {
-                ["wifi", "wi-fi", "wireless", "wlan", "internet", "network", "radio", "system"]
+                [
+                    "wifi", "wi-fi", "wireless", "wlan", "internet", "network", "radio", "system",
+                ]
             } else {
-                ["bluetooth", "bt", "wireless", "pair", "headphones", "radio", "toggle", "system"]
+                [
+                    "bluetooth",
+                    "bt",
+                    "wireless",
+                    "pair",
+                    "headphones",
+                    "radio",
+                    "toggle",
+                    "system",
+                ]
             },
         ));
     }
@@ -961,7 +1032,11 @@ pub fn process_record(process: &crate::processes::Process) -> CommandRecord {
         // The pid, which is what every action here needs and what stops
         // meaning anything the moment it exits.
         entrypoint: process.pid.to_string(),
-        keywords: vec!["process".to_string(), "memory".to_string(), "quit".to_string()],
+        keywords: vec![
+            "process".to_string(),
+            "memory".to_string(),
+            "quit".to_string(),
+        ],
         // The program's own mark, the rule every other row follows.
         icon: process.path.clone(),
         toggle: None,
@@ -1880,10 +1955,7 @@ pub fn match_name(needle: &[char], text: &str) -> Option<(MatchClass, Vec<usize>
         // since position zero always begins a word.
         if let Some(at) = find_run(&hay_lower, needle) {
             if begins_a_word(&hay, at) {
-                return Some((
-                    MatchClass::TitleWord,
-                    (at..at + needle.len()).collect(),
-                ));
+                return Some((MatchClass::TitleWord, (at..at + needle.len()).collect()));
             }
         }
 

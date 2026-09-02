@@ -269,8 +269,8 @@ mod windows_impl {
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, GetMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
-        KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
-        WM_SYSKEYDOWN, WM_SYSKEYUP,
+        KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN,
+        WM_SYSKEYUP,
     };
 
     /// The one expander the hook callback can reach.
@@ -547,7 +547,6 @@ mod windows_impl {
         START.get_or_init(Instant::now).elapsed().as_millis() as u64
     }
 
-
     fn handle_key(expander: &Expander, vk: u32) {
         if vk == VK_BACK.0 as u32 {
             if let Ok(mut typed) = expander.inner.typed.lock() {
@@ -589,7 +588,7 @@ mod windows_impl {
                 // certain programs, which is rare. See `match_keyword`.
                 || crate::dictation::context::foreground_app_full().map(|app| app.path),
             )
-                .map(|snippet| (snippet.id.clone(), snippet.keyword.trim().chars().count()))
+            .map(|snippet| (snippet.id.clone(), snippet.keyword.trim().chars().count()))
         };
 
         let Some((id, keyword_len)) = matched else {
@@ -648,7 +647,6 @@ mod windows_impl {
             (written == 1).then(|| char::from_u32(buffer[0] as u32))?
         }
     }
-
 
     /// Deletes the keyword and types the replacement.
     ///
@@ -766,7 +764,10 @@ mod windows_impl {
             if html.is_empty() {
                 board.set_text(text.to_string()).is_ok()
             } else {
-                board.set().html(html.to_string(), Some(text.to_string())).is_ok()
+                board
+                    .set()
+                    .html(html.to_string(), Some(text.to_string()))
+                    .is_ok()
             }
         });
 

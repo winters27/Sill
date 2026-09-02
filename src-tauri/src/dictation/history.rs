@@ -248,7 +248,10 @@ fn write_all(file: &Path, entries: &[Entry]) -> Result<()> {
 fn trim_if_needed(file: &Path, retain_days: u32) {
     let entries = read(file);
     let by_count = entries.len() > KEEP + SLACK;
-    let expired = retain_days > 0 && entries.iter().any(|entry| older_than(entry, retain_days, now()));
+    let expired = retain_days > 0
+        && entries
+            .iter()
+            .any(|entry| older_than(entry, retain_days, now()));
 
     // Rewriting the file is the cost here, so it is only paid when something
     // would actually come out of it. Without the second question a machine
@@ -310,7 +313,6 @@ mod tests {
 
     const NOW: i64 = 1_700_000_000;
     const HOUR: i64 = 3_600;
-
 
     /// Zero is the spelling for "no age limit", the same as the clipboard's.
     #[test]

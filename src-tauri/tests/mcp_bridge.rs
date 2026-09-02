@@ -111,7 +111,9 @@ fn a_client_talking_to_the_real_bridge_gets_the_handshake_and_a_tool_answer() {
 
     let offered = heard[1]["result"]["tools"].as_array().expect("no tools");
     assert!(
-        offered.iter().any(|tool| tool["name"] == json!("list_windows")),
+        offered
+            .iter()
+            .any(|tool| tool["name"] == json!("list_windows")),
         "{offered:?}",
     );
 
@@ -155,7 +157,11 @@ fn a_bridge_with_nothing_to_connect_to_gives_up_and_says_so() {
         .expect("it never ended");
 
     assert!(!finished.status.success(), "it claimed to have worked");
-    assert!(finished.stdout.is_empty(), "it wrote to stdout: {:?}", finished.stdout);
+    assert!(
+        finished.stdout.is_empty(),
+        "it wrote to stdout: {:?}",
+        finished.stdout
+    );
 
     let said = String::from_utf8_lossy(&finished.stderr);
     assert!(said.contains("Sill is not running"), "{said}");

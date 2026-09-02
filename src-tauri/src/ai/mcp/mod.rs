@@ -155,7 +155,10 @@ pub fn write_config(
     let path = data_dir.join("mcp.json");
 
     std::fs::create_dir_all(data_dir)?;
-    std::fs::write(&path, serde_json::to_vec_pretty(&config(bridge, port, token))?)?;
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&config(bridge, port, token))?,
+    )?;
 
     Ok(Config(path))
 }
@@ -275,8 +278,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&data);
 
             let path = {
-                let written =
-                    write_config(&data, Path::new("sill.exe"), 7, "the-secret").unwrap();
+                let written = write_config(&data, Path::new("sill.exe"), 7, "the-secret").unwrap();
                 let path = written.path().to_path_buf();
 
                 let held = std::fs::read_to_string(&path).unwrap();

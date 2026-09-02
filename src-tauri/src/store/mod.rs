@@ -341,7 +341,8 @@ pub fn write_origin(
     origin: &Origin,
 ) -> Result<(), String> {
     let dir = home.join(extension);
-    std::fs::create_dir_all(&dir).map_err(|err| format!("could not make {}: {err}", dir.display()))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|err| format!("could not make {}: {err}", dir.display()))?;
 
     let text = serde_json::to_string_pretty(origin)
         .map_err(|err| format!("could not describe the install: {err}"))?;
@@ -482,8 +483,12 @@ pub fn browse(
 
     let mut updates = 0;
     let mut hidden = 0;
-    let mut scored: Vec<(crate::registry::MatchClass, u64, &Listing, Option<Installed>)> =
-        Vec::new();
+    let mut scored: Vec<(
+        crate::registry::MatchClass,
+        u64,
+        &Listing,
+        Option<Installed>,
+    )> = Vec::new();
 
     for listing in listings {
         let origin = installed(&listing.name);
@@ -541,7 +546,11 @@ pub fn browse(
     // Class first, then how many people have it. Reusing the launcher's own
     // classifier rather than scoring here is rule 22: two answers to "does
     // this text match" drift the first time either learns something.
-    scored.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(a.2.name.cmp(&b.2.name)));
+    scored.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(b.1.cmp(&a.1))
+            .then(a.2.name.cmp(&b.2.name))
+    });
 
     let rows = scored
         .into_iter()
@@ -869,8 +878,14 @@ mod tests {
         assert_eq!(
             out.categories,
             vec![
-                Category { name: "Media".to_string(), count: 1 },
-                Category { name: "Productivity".to_string(), count: 2 },
+                Category {
+                    name: "Media".to_string(),
+                    count: 1
+                },
+                Category {
+                    name: "Productivity".to_string(),
+                    count: 2
+                },
             ],
             "a category nobody here has ever heard of still appears, because it \
              is read out of the data"
@@ -923,7 +938,8 @@ mod tests {
     fn an_installed_extension_says_so_and_says_when_it_is_behind() {
         let listings = vec![listing("here", "Here", 1)];
         let pinned = |name: &str| {
-            (name == "here").then(|| Origin::store("here", "extensions/here", "old-sha", Vec::new(), 0))
+            (name == "here")
+                .then(|| Origin::store("here", "extensions/here", "old-sha", Vec::new(), 0))
         };
 
         let out = browse(&listings, pinned, &Query::default(), 0);
@@ -950,8 +966,20 @@ mod tests {
     fn updates_only_leaves_everything_that_is_current() {
         let listings = vec![listing("old", "Old", 1), listing("new", "New", 1)];
         let pinned = |name: &str| match name {
-            "old" => Some(Origin::store("old", "extensions/old", "behind", Vec::new(), 0)),
-            "new" => Some(Origin::store("new", "extensions/new", "aaaa", Vec::new(), 0)),
+            "old" => Some(Origin::store(
+                "old",
+                "extensions/old",
+                "behind",
+                Vec::new(),
+                0,
+            )),
+            "new" => Some(Origin::store(
+                "new",
+                "extensions/new",
+                "aaaa",
+                Vec::new(),
+                0,
+            )),
             _ => None,
         };
 
@@ -1077,7 +1105,13 @@ mod tests {
 
     #[test]
     fn an_origin_round_trips_through_its_file_shape() {
-        let origin = Origin::store("demo", "extensions/demo", "sha", vec!["clipboard".to_string()], 1_700_000_000);
+        let origin = Origin::store(
+            "demo",
+            "extensions/demo",
+            "sha",
+            vec!["clipboard".to_string()],
+            1_700_000_000,
+        );
         let text = serde_json::to_string(&origin).expect("serialises");
         let back: Origin = serde_json::from_str(&text).expect("parses");
 

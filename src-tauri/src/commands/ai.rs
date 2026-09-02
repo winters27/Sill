@@ -165,13 +165,8 @@ pub(crate) async fn ai_follow_up(
 ) -> Result<String, String> {
     let chosen = who_answers(&prefs).await?;
 
-    let answer = crate::ai::chat::ask(
-        &app,
-        &chosen,
-        &question,
-        attachments.unwrap_or_default(),
-    )
-    .await;
+    let answer =
+        crate::ai::chat::ask(&app, &chosen, &question, attachments.unwrap_or_default()).await;
     app.state::<Chat>().save(&crate::state::data_dir(&app));
     answer
 }
@@ -234,28 +229,25 @@ pub(crate) async fn open_ask(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let window = tauri::WebviewWindowBuilder::new(
-        &app,
-        "ask",
-        tauri::WebviewUrl::App("ask".into()),
-    )
-    .title("AI Chat")
-    // Room for a list of conversations beside a column of prose that does not
-    // have to wrap at forty characters.
-    .inner_size(1060.0, 760.0)
-    .min_inner_size(780.0, 520.0)
-    .resizable(true)
-    // Frameless and transparent, so the page draws the same glass every other
-    // Sill window draws. A default title bar beside one of these looks like
-    // two applications.
-    .decorations(false)
-    .transparent(true)
-    .center()
-    // Said here as well as asked for below, because the two happen at
-    // different moments and the race between them is what was losing it.
-    .focused(true)
-    .build()
-    .map_err(|err| err.to_string())?;
+    let window =
+        tauri::WebviewWindowBuilder::new(&app, "ask", tauri::WebviewUrl::App("ask".into()))
+            .title("AI Chat")
+            // Room for a list of conversations beside a column of prose that does not
+            // have to wrap at forty characters.
+            .inner_size(1060.0, 760.0)
+            .min_inner_size(780.0, 520.0)
+            .resizable(true)
+            // Frameless and transparent, so the page draws the same glass every other
+            // Sill window draws. A default title bar beside one of these looks like
+            // two applications.
+            .decorations(false)
+            .transparent(true)
+            .center()
+            // Said here as well as asked for below, because the two happen at
+            // different moments and the race between them is what was losing it.
+            .focused(true)
+            .build()
+            .map_err(|err| err.to_string())?;
 
     let _ = window.set_focus();
 
@@ -292,7 +284,11 @@ pub(crate) async fn open_ask(app: AppHandle) -> Result<(), String> {
 /// it answers is sitting waiting for it: the model asked, the loop paused, and
 /// nothing else will happen until this arrives or the wait runs out.
 #[tauri::command]
-pub(crate) fn ai_decide(pending: State<'_, crate::ai::approval::Pending>, id: String, allowed: bool) {
+pub(crate) fn ai_decide(
+    pending: State<'_, crate::ai::approval::Pending>,
+    id: String,
+    allowed: bool,
+) {
     pending.decide(&id, allowed);
 }
 
@@ -358,9 +354,8 @@ pub(crate) fn ai_resume(chat: State<'_, Chat>, id: String) -> Result<Vec<Turn>, 
 async fn who_answers(prefs: &State<'_, PrefsState>) -> Result<Provider, String> {
     let settings = prefs.inner.lock().await.ai.clone();
 
-    let chosen = chosen(&settings).ok_or_else(|| {
-        "Nothing is set up to answer. Choose a provider in Settings.".to_string()
-    })?;
+    let chosen = chosen(&settings)
+        .ok_or_else(|| "Nothing is set up to answer. Choose a provider in Settings.".to_string())?;
 
     match what_is_missing(&chosen) {
         Some(missing) => Err(missing),
@@ -506,8 +501,7 @@ fn chosen(settings: &crate::preferences::Ai) -> Option<Provider> {
 fn what_is_missing(chosen: &Provider) -> Option<String> {
     if chosen.wire == provider::Wire::ClaudeCode {
         return crate::ai::claude_code::locate().is_none().then(|| {
-            "Claude Code is not installed, or not somewhere Sill can find it."
-                .to_string()
+            "Claude Code is not installed, or not somewhere Sill can find it.".to_string()
         });
     }
 

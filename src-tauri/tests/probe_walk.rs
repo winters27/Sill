@@ -4,9 +4,24 @@
 fn measure() {
     let root = std::env::var("ROOT").unwrap();
     let skip = [
-        "node_modules", "target", ".git", "dist", "build", ".svelte-kit",
-        "__pycache__", ".next", ".cargo", ".rustup", ".gradle", ".m2",
-        "AppData", ".venv", "venv", "vendor", ".pnpm-store", ".cache",
+        "node_modules",
+        "target",
+        ".git",
+        "dist",
+        "build",
+        ".svelte-kit",
+        "__pycache__",
+        ".next",
+        ".cargo",
+        ".rustup",
+        ".gradle",
+        ".m2",
+        "AppData",
+        ".venv",
+        "venv",
+        "vendor",
+        ".pnpm-store",
+        ".cache",
     ];
 
     for (label, respect) in [("raw", false), ("gitignore + noise", true)] {
@@ -55,19 +70,36 @@ fn ranking_cost() {
 
     let root = std::env::var("ROOT").unwrap();
     let skip = [
-        "node_modules", "target", ".git", "dist", "build", ".svelte-kit",
-        "__pycache__", ".next", ".cargo", ".rustup", ".gradle", ".m2",
-        "AppData", ".venv", "venv", "vendor", ".pnpm-store", ".cache",
+        "node_modules",
+        "target",
+        ".git",
+        "dist",
+        "build",
+        ".svelte-kit",
+        "__pycache__",
+        ".next",
+        ".cargo",
+        ".rustup",
+        ".gradle",
+        ".m2",
+        "AppData",
+        ".venv",
+        "venv",
+        "vendor",
+        ".pnpm-store",
+        ".cache",
     ];
 
     let mut builder = ignore::WalkBuilder::new(&root);
     builder
-        .hidden(true).git_ignore(true).git_global(true).git_exclude(true).ignore(true)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .ignore(true)
         .follow_links(false)
         .threads(8)
-        .filter_entry(move |e| {
-            !e.file_name().to_str().is_some_and(|n| skip.contains(&n))
-        });
+        .filter_entry(move |e| !e.file_name().to_str().is_some_and(|n| skip.contains(&n)));
 
     let records: Vec<CommandRecord> = builder
         .build()
@@ -100,8 +132,13 @@ fn ranking_cost() {
     for query in ["r", "re", "reg", "regi", "registry", "registry.rs"] {
         let start = std::time::Instant::now();
         let found = registry::search_excluding(
-            records.iter(), query, &Frecency::default(), &Aliases::default(),
-            1_756_000_000, 60, Excluded::none(),
+            records.iter(),
+            query,
+            &Frecency::default(),
+            &Aliases::default(),
+            1_756_000_000,
+            60,
+            Excluded::none(),
         );
         println!(
             "  {query:>12} -> {:>5} hits in {:>5} ms",
@@ -119,14 +156,34 @@ fn bucket_selectivity() {
 
     let root = std::env::var("ROOT").unwrap();
     let skip = [
-        "node_modules", "target", ".git", "dist", "build", ".svelte-kit",
-        "__pycache__", ".next", ".cargo", ".rustup", ".gradle", ".m2",
-        "AppData", ".venv", "venv", "vendor", ".pnpm-store", ".cache",
+        "node_modules",
+        "target",
+        ".git",
+        "dist",
+        "build",
+        ".svelte-kit",
+        "__pycache__",
+        ".next",
+        ".cargo",
+        ".rustup",
+        ".gradle",
+        ".m2",
+        "AppData",
+        ".venv",
+        "venv",
+        "vendor",
+        ".pnpm-store",
+        ".cache",
     ];
     let mut builder = ignore::WalkBuilder::new(&root);
     builder
-        .hidden(true).git_ignore(true).git_global(true).git_exclude(true).ignore(true)
-        .follow_links(false).threads(8)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .ignore(true)
+        .follow_links(false)
+        .threads(8)
         .filter_entry(move |e| !e.file_name().to_str().is_some_and(|n| skip.contains(&n)));
 
     let names: Vec<String> = builder
@@ -142,8 +199,7 @@ fn bucket_selectivity() {
         let mut seen: Vec<char> = Vec::new();
         let chars: Vec<char> = name.chars().collect();
         for (at, &ch) in chars.iter().enumerate() {
-            let starts = at == 0
-                || matches!(chars[at - 1], ' ' | '-' | '_' | '.' | '/' | ':');
+            let starts = at == 0 || matches!(chars[at - 1], ' ' | '-' | '_' | '.' | '/' | ':');
             if starts && !seen.contains(&ch) {
                 seen.push(ch);
             }
@@ -159,9 +215,15 @@ fn bucket_selectivity() {
 
     println!("corpus {total} files. Worst first characters:");
     for (n, ch) in rows.iter().take(8) {
-        println!("  {ch:?} -> {n:>6} candidates ({:>4.1}% of the corpus)", *n as f64 * 100.0 / total as f64);
+        println!(
+            "  {ch:?} -> {n:>6} candidates ({:>4.1}% of the corpus)",
+            *n as f64 * 100.0 / total as f64
+        );
     }
     let sum: usize = rows.iter().map(|(n, _)| n).sum();
-    println!("  average bucket {:.0} ({:.1}%)", sum as f64 / rows.len() as f64,
-             sum as f64 * 100.0 / (rows.len() * total) as f64);
+    println!(
+        "  average bucket {:.0} ({:.1}%)",
+        sum as f64 / rows.len() as f64,
+        sum as f64 * 100.0 / (rows.len() * total) as f64
+    );
 }

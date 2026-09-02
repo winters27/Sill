@@ -183,7 +183,12 @@ mod tests {
     use super::*;
 
     fn work() -> Rect {
-        Rect { x: 0, y: 0, width: 1920, height: 1040 }
+        Rect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1040,
+        }
     }
 
     fn window(id: isize, app: &str, title: &str) -> Window {
@@ -195,7 +200,12 @@ mod tests {
             pid: 1,
             minimized: false,
             maximized: false,
-            rect: Rect { x: 0, y: 0, width: 800, height: 600 },
+            rect: Rect {
+                x: 0,
+                y: 0,
+                width: 800,
+                height: 600,
+            },
             monitor: 0,
         }
     }
@@ -204,7 +214,12 @@ mod tests {
         Placed {
             app: app.to_string(),
             title: title.to_string(),
-            rect: Rect { x, y: 0, width: 800, height: 600 },
+            rect: Rect {
+                x,
+                y: 0,
+                width: 800,
+                height: 600,
+            },
             work: work(),
             maximized: false,
             path: String::new(),
@@ -260,7 +275,10 @@ mod tests {
     fn a_program_that_is_not_running_is_skipped_rather_than_guessed_at() {
         let profile = Profile {
             name: "Work".into(),
-            windows: vec![saved("Photoshop", "Untitled", 0), saved("Code", "sill", 100)],
+            windows: vec![
+                saved("Photoshop", "Untitled", 0),
+                saved("Code", "sill", 100),
+            ],
         };
 
         let moves = plan(&profile, &[window(3, "Code", "sill")], &[work()]);
@@ -278,14 +296,24 @@ mod tests {
             windows: vec![Placed {
                 app: "Code".into(),
                 title: "sill".into(),
-                rect: Rect { x: 960, y: 0, width: 960, height: 1040 },
+                rect: Rect {
+                    x: 960,
+                    y: 0,
+                    width: 960,
+                    height: 1040,
+                },
                 work: work(),
                 maximized: false,
                 path: String::new(),
             }],
         };
 
-        let narrow = Rect { x: 0, y: 0, width: 1280, height: 720 };
+        let narrow = Rect {
+            x: 0,
+            y: 0,
+            width: 1280,
+            height: 720,
+        };
         let moves = plan(&profile, &[window(1, "Code", "sill")], &[narrow]);
 
         let (_, rect, _) = moves[0];
@@ -310,7 +338,7 @@ mod tests {
     }
 
     mod what_has_to_be_started {
-            use super::*;
+        use super::*;
 
         fn with_path(app: &str, path: &str) -> Placed {
             Placed {

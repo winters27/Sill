@@ -263,9 +263,8 @@ pub fn since_process_start() -> Option<Duration> {
         .ok()?
         .as_nanos();
 
-    now.checked_sub(started).map(|nanos| {
-        Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX))
-    })
+    now.checked_sub(started)
+        .map(|nanos| Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX)))
 }
 
 #[cfg(not(windows))]

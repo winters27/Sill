@@ -21,7 +21,9 @@ fn rank_the_real_index() {
     let records: Vec<CommandRecord> = serde_json::from_str(&raw).unwrap();
     eprintln!("index: {} entries", records.len());
 
-    for query in ["tada", "note", "term", "disc", "steam", "strm", "sett", "clip"] {
+    for query in [
+        "tada", "note", "term", "disc", "steam", "strm", "sett", "clip",
+    ] {
         let found = registry::search_excluding(
             records.iter(),
             query,

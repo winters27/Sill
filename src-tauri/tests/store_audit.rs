@@ -76,7 +76,9 @@ async fn the_most_installed_extensions_install_and_say_what_they_needed() {
     // Delete it by hand to force a clean run:
     //   rm -rf "$TEMP/sill-store-audit"
 
-    let catalog = catalog::load(&root, false).await.expect("the store answers");
+    let catalog = catalog::load(&root, false)
+        .await
+        .expect("the store answers");
 
     let mut wanted: Vec<Listing> = catalog
         .listings

@@ -35,9 +35,22 @@ fn command(id: &str, title: &str) -> CommandRecord {
 /// A corpus the size of a real index, with names that look like real names.
 fn corpus(n: usize) -> Vec<CommandRecord> {
     const WORDS: [&str; 16] = [
-        "Visual", "Studio", "Code", "Chrome", "Terminal", "Settings", "Manager",
-        "Editor", "Player", "Viewer", "Control", "Panel", "Network", "Display",
-        "Recovery", "Diagnostics",
+        "Visual",
+        "Studio",
+        "Code",
+        "Chrome",
+        "Terminal",
+        "Settings",
+        "Manager",
+        "Editor",
+        "Player",
+        "Viewer",
+        "Control",
+        "Panel",
+        "Network",
+        "Display",
+        "Recovery",
+        "Diagnostics",
     ];
 
     (0..n)
@@ -244,7 +257,7 @@ fn measured() {
 mod the_store {
     use super::*;
 
-    use sill_lib::store::{self, catalog::Catalog, Listing, ListedCommand, Query};
+    use sill_lib::store::{self, catalog::Catalog, ListedCommand, Listing, Query};
 
     /// A catalogue the size of the real one, with strings the length of real
     /// ones.
@@ -254,7 +267,12 @@ mod the_store {
     /// look free.
     fn catalogue(n: usize) -> Catalog {
         const CATEGORIES: [&str; 6] = [
-            "Developer Tools", "Productivity", "Media", "Web", "System", "AI Extensions",
+            "Developer Tools",
+            "Productivity",
+            "Media",
+            "Web",
+            "System",
+            "AI Extensions",
         ];
 
         let listings = (0..n)
@@ -262,10 +280,9 @@ mod the_store {
                 name: format!("extension-number-{i}"),
                 folder: format!("extensions/extension-number-{i}"),
                 title: format!("Extension Number {i}"),
-                description:
-                    "Does a useful thing without opening a browser, and says so at about \
+                description: "Does a useful thing without opening a browser, and says so at about \
                      the length a real store listing says it at."
-                        .to_string(),
+                    .to_string(),
                 author: format!("author{}", i % 400),
                 categories: vec![CATEGORIES[i % CATEGORIES.len()].to_string()],
                 platforms: vec!["macOS".to_string(), "Windows".to_string()],
@@ -278,7 +295,7 @@ mod the_store {
                         title: format!("Command {c}"),
                         description: "Copies the result to the clipboard.".to_string(),
                         mode: "view".to_string(),
-                        })
+                    })
                     .collect(),
             })
             .collect();
@@ -314,7 +331,10 @@ mod the_store {
 
         for query in ["e", "ex", "ext", "extension", "extension number 9", ""] {
             browse_us(&catalog, query);
-            let best = (0..3).map(|_| browse_us(&catalog, query)).min().unwrap_or(0);
+            let best = (0..3)
+                .map(|_| browse_us(&catalog, query))
+                .min()
+                .unwrap_or(0);
 
             println!(
                 "  browse {query:>20?} -> {best:>6} us  (budget {})",

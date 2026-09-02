@@ -164,7 +164,14 @@ pub fn likely_destinations(recent: Vec<String>, beside: &Path) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    let standard = ["Desktop", "Downloads", "Documents", "Pictures", "Music", "Videos"];
+    let standard = [
+        "Desktop",
+        "Downloads",
+        "Documents",
+        "Pictures",
+        "Music",
+        "Videos",
+    ];
 
     let home = std::env::var("USERPROFILE")
         .ok()
@@ -266,10 +273,7 @@ pub fn move_to(path: &Path, folder: &Path) -> Result<PathBuf, String> {
     // A folder cannot go inside itself, and this is the check that stops the
     // copy below walking into its own output.
     if path.is_dir() && folder.starts_with(path) {
-        return Err(format!(
-            "{} cannot go inside itself",
-            name_of(path)
-        ));
+        return Err(format!("{} cannot go inside itself", name_of(path)));
     }
 
     if target.exists() {
@@ -582,10 +586,7 @@ mod tests {
             std::fs::create_dir_all(&used).expect("made");
             std::fs::create_dir_all(dir.join("aaa-alphabetically-first")).expect("made");
 
-            let offered = likely_destinations(
-                vec![used.to_string_lossy().to_string()],
-                &file,
-            );
+            let offered = likely_destinations(vec![used.to_string_lossy().to_string()], &file);
 
             assert_eq!(offered.first().map(String::as_str), used.to_str());
         }
@@ -601,10 +602,7 @@ mod tests {
             std::fs::create_dir_all(&both).expect("made");
 
             // Once as a folder used before, and once as a folder beside it.
-            let offered = likely_destinations(
-                vec![both.to_string_lossy().to_string()],
-                &file,
-            );
+            let offered = likely_destinations(vec![both.to_string_lossy().to_string()], &file);
 
             let times = offered
                 .iter()
@@ -628,7 +626,9 @@ mod tests {
             );
 
             assert!(
-                !offered.iter().any(|folder| folder.ends_with("never-existed")),
+                !offered
+                    .iter()
+                    .any(|folder| folder.ends_with("never-existed")),
                 "{offered:?}",
             );
         }
@@ -766,7 +766,10 @@ mod tests {
             copy_across(&from, &to).expect("copies");
 
             assert_eq!(std::fs::read(to.join("top.txt")).expect("read"), b"1");
-            assert_eq!(std::fs::read(to.join("a").join("mid.txt")).expect("read"), b"2");
+            assert_eq!(
+                std::fs::read(to.join("a").join("mid.txt")).expect("read"),
+                b"2"
+            );
             assert_eq!(
                 std::fs::read(to.join("a").join("b").join("deep.txt")).expect("read"),
                 b"3",
@@ -849,7 +852,9 @@ mod tests {
 
         #[test]
         fn the_characters_a_path_is_made_of_are_refused() {
-            for bad in [r"a\b", "a/b", "a:b", "a*b", "a?b", "a\"b", "a<b", "a>b", "a|b"] {
+            for bad in [
+                r"a\b", "a/b", "a:b", "a*b", "a?b", "a\"b", "a<b", "a>b", "a|b",
+            ] {
                 assert!(usable_name(bad).is_err(), "{bad:?} was allowed");
             }
         }
@@ -1083,16 +1088,24 @@ mod checksums {
         assert_eq!(looks_like_checksum(&"a".repeat(32)), Some(Checksum::Md5));
         assert_eq!(looks_like_checksum(&"a".repeat(40)), Some(Checksum::Sha1));
         assert_eq!(looks_like_checksum(SHA256), Some(Checksum::Sha256));
-        assert_eq!(looks_like_checksum(&"f".repeat(128)), Some(Checksum::Sha512));
+        assert_eq!(
+            looks_like_checksum(&"f".repeat(128)),
+            Some(Checksum::Sha512)
+        );
     }
 
     /// A hash copied off a page brings whitespace with it, and some tools
     /// print it in spaced groups.
     #[test]
     fn whitespace_around_it_and_inside_it_is_ignored() {
-        assert_eq!(looks_like_checksum(&format!("  {SHA256}\n")), Some(Checksum::Sha256));
         assert_eq!(
-            looks_like_checksum("ba7816bf 8f01cfea 414140de 5dae2223 b00361a3 96177a9c b410ff61 f20015ad"),
+            looks_like_checksum(&format!("  {SHA256}\n")),
+            Some(Checksum::Sha256)
+        );
+        assert_eq!(
+            looks_like_checksum(
+                "ba7816bf 8f01cfea 414140de 5dae2223 b00361a3 96177a9c b410ff61 f20015ad"
+            ),
             Some(Checksum::Sha256),
         );
     }

@@ -26,7 +26,9 @@ use crate::object::{Object, ObjectKind};
 /// tedious enough that the card stops being read, which is the way an
 /// approval prompt actually fails.
 pub fn needs_asking(capabilities: &[Capability]) -> bool {
-    capabilities.iter().any(|capability| touching(capability).is_some())
+    capabilities
+        .iter()
+        .any(|capability| touching(capability).is_some())
 }
 
 /// What the card says the action is about to do.
@@ -88,8 +90,9 @@ fn touching(capability: &Capability) -> Option<&'static str> {
 /// on disk: a switch, a window, a piece of loose text.
 pub fn object_for(target: &str, named: Option<&str>) -> Result<Object, String> {
     let kind = match named.map(str::trim).filter(|named| !named.is_empty()) {
-        Some(named) => kind_named(named)
-            .ok_or_else(|| format!("Sill has no kind called {named}."))?,
+        Some(named) => {
+            kind_named(named).ok_or_else(|| format!("Sill has no kind called {named}."))?
+        }
         None => on_disk(target).ok_or_else(|| {
             format!(
                 "There is nothing at {target}, so say what kind of thing it is: \

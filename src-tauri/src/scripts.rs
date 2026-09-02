@@ -128,7 +128,9 @@ fn fields(header: &str) -> Vec<(String, String)> {
     let mut found = Vec::new();
 
     for line in header.lines() {
-        let Some(at) = line.find(MARKER) else { continue };
+        let Some(at) = line.find(MARKER) else {
+            continue;
+        };
         let rest = &line[at + MARKER.len()..];
 
         let mut parts = rest.splitn(2, char::is_whitespace);
@@ -166,8 +168,12 @@ pub fn describe(path: &Path, header: &str) -> Option<Script> {
     // argument1 through argument3, and a header that jumps from 1 to 3 is a
     // mistake to stop at rather than a hole to fill with a blank.
     for n in 1..=3 {
-        let Some(raw) = value(&format!("argument{n}")) else { break };
-        let Ok(parsed) = serde_json::from_str::<Argument>(&raw) else { break };
+        let Some(raw) = value(&format!("argument{n}")) else {
+            break;
+        };
+        let Ok(parsed) = serde_json::from_str::<Argument>(&raw) else {
+            break;
+        };
         arguments.push(parsed);
     }
 
@@ -331,7 +337,11 @@ echo "hello $1"
         /// something they deliberately hid.
         #[test]
         fn an_unknown_mode_is_refused_rather_than_defaulted() {
-            assert!(describe(Path::new("go.sh"), "# @raycast.title A\n# @raycast.mode loud").is_none());
+            assert!(describe(
+                Path::new("go.sh"),
+                "# @raycast.title A\n# @raycast.mode loud"
+            )
+            .is_none());
         }
 
         /// A perfectly good header on a file nothing can run is still not a
@@ -385,13 +395,19 @@ echo "hello $1"
 ",
             ));
 
-            assert_eq!(asks(&script), vec!["argument 1".to_string(), "to".to_string()]);
+            assert_eq!(
+                asks(&script),
+                vec!["argument 1".to_string(), "to".to_string()]
+            );
         }
 
         #[test]
         fn a_script_declaring_none_asks_nothing() {
-            assert!(asks(&with("# @raycast.title A
-# @raycast.mode silent")).is_empty());
+            assert!(asks(&with(
+                "# @raycast.title A
+# @raycast.mode silent"
+            ))
+            .is_empty());
         }
     }
 
@@ -420,7 +436,12 @@ echo "hello $1"
 
         let found = scan(&[dir.clone()]);
 
-        assert_eq!(found.len(), 1, "found {:?}", found.iter().map(|s| &s.title).collect::<Vec<_>>());
+        assert_eq!(
+            found.len(),
+            1,
+            "found {:?}",
+            found.iter().map(|s| &s.title).collect::<Vec<_>>()
+        );
         assert_eq!(found[0].title, "Say hello");
 
         let _ = std::fs::remove_dir_all(&dir);

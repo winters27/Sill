@@ -131,8 +131,14 @@ mod tests {
         // The literal `?` and `=` survive; the ampersand between the words does
         // not, or it would end the parameter early and the search would be for
         // "rust" alone.
-        assert!(!url.ends_with("rust & go"), "the words were not escaped: {url}");
-        assert!(url.contains("%26"), "the ampersand was left to end the parameter: {url}");
+        assert!(
+            !url.ends_with("rust & go"),
+            "the words were not escaped: {url}"
+        );
+        assert!(
+            url.contains("%26"),
+            "the ampersand was left to end the parameter: {url}"
+        );
     }
 
     #[test]
@@ -201,7 +207,10 @@ mod settings_reach_the_window {
 
         assert_eq!(section.get("enabled").and_then(|v| v.as_bool()), Some(true));
         assert!(section.get("engine").is_some(), "no engine: {section:?}");
-        assert!(section.get("customUrl").is_some(), "no customUrl: {section:?}");
+        assert!(
+            section.get("customUrl").is_some(),
+            "no customUrl: {section:?}"
+        );
     }
 
     /// The screenshot settings, likewise. Nested structs have bypassed the
@@ -217,12 +226,18 @@ mod settings_reach_the_window {
             .unwrap_or_else(|| panic!("no screenshot key, only: {:?}", keys(&json)));
 
         assert_eq!(section.get("after").and_then(|v| v.as_str()), Some("copy"));
-        assert_eq!(section.get("clickAWindow").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            section.get("clickAWindow").and_then(|v| v.as_bool()),
+            Some(true)
+        );
         assert!(section.get("tool").is_some(), "no tool: {section:?}");
         assert_eq!(section.get("stepFrom").and_then(|v| v.as_u64()), Some(1));
 
         let hotkey = json.get("hotkey").expect("hotkey");
-        assert!(hotkey.get("capture").is_some(), "no capture key: {hotkey:?}");
+        assert!(
+            hotkey.get("capture").is_some(),
+            "no capture key: {hotkey:?}"
+        );
         assert!(
             hotkey.get("captureScreen").is_some(),
             "no whole-screen capture key: {hotkey:?}",
@@ -238,7 +253,10 @@ mod settings_reach_the_window {
             .get("browsers")
             .unwrap_or_else(|| panic!("no browsers key, only: {:?}", keys(&json)));
 
-        assert_eq!(section.get("enabled").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            section.get("enabled").and_then(|v| v.as_bool()),
+            Some(false)
+        );
     }
 
     fn keys(json: &serde_json::Value) -> Vec<String> {

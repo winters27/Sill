@@ -490,12 +490,10 @@ impl Catalog {
         // first, then the shorter name, then something stable so two equally
         // good answers do not swap places between keystrokes.
         scored.sort_unstable_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then_with(|| a.1.cmp(&b.1))
-                .then_with(|| {
-                    self.path(&self.entries[a.2 as usize])
-                        .cmp(self.path(&self.entries[b.2 as usize]))
-                })
+            a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then_with(|| {
+                self.path(&self.entries[a.2 as usize])
+                    .cmp(self.path(&self.entries[b.2 as usize]))
+            })
         });
         scored.truncate(limit);
 
@@ -705,7 +703,9 @@ impl Catalog {
         }
 
         let arena = take_u32(&raw, &mut at)? as usize;
-        let paths = std::str::from_utf8(raw.get(at..at + arena)?).ok()?.to_string();
+        let paths = std::str::from_utf8(raw.get(at..at + arena)?)
+            .ok()?
+            .to_string();
         at += arena;
 
         let count = take_u32(&raw, &mut at)? as usize;
@@ -896,7 +896,11 @@ mod tests {
             (r"C:\p\unrelated.bin", false),
         ]);
 
-        let found: Vec<String> = all.search("re", 10, &[]).into_iter().map(|f| f.name).collect();
+        let found: Vec<String> = all
+            .search("re", 10, &[])
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
 
         assert_eq!(found.len(), 4, "{found:?}");
         assert!(found.iter().all(|name| name != "unrelated.bin"));
@@ -913,8 +917,12 @@ mod tests {
     fn an_empty_query_finds_nothing_rather_than_everything() {
         // The root list is not a file listing, and forty thousand rows is not
         // an answer to a question nobody asked.
-        assert!(catalog(&[(r"C:\p\a.txt", false)]).search("", 10, &[]).is_empty());
-        assert!(catalog(&[(r"C:\p\a.txt", false)]).search("   ", 10, &[]).is_empty());
+        assert!(catalog(&[(r"C:\p\a.txt", false)])
+            .search("", 10, &[])
+            .is_empty());
+        assert!(catalog(&[(r"C:\p\a.txt", false)])
+            .search("   ", 10, &[])
+            .is_empty());
     }
 
     #[test]
@@ -1036,7 +1044,10 @@ mod tests {
         let whole = std::fs::read(&file).unwrap();
         for cut in [whole.len() / 3, whole.len() / 2, whole.len() - 1] {
             std::fs::write(&file, &whole[..cut]).unwrap();
-            assert!(Catalog::load(&file, &roots).is_none(), "survived a cut at {cut}");
+            assert!(
+                Catalog::load(&file, &roots).is_none(),
+                "survived a cut at {cut}"
+            );
         }
 
         std::fs::remove_dir_all(&dir).ok();
@@ -1096,9 +1107,7 @@ mod tests {
         // and `$Recycle.Bin` in the other. Neither spelling matched the folder
         // on disk, so one of the two entries had never done anything.
         for name in SYSTEM {
-            let clash = NOISE
-                .iter()
-                .any(|other| other.eq_ignore_ascii_case(name));
+            let clash = NOISE.iter().any(|other| other.eq_ignore_ascii_case(name));
 
             assert!(!clash, "{name} is in both lists");
         }
@@ -1167,7 +1176,13 @@ mod tests {
     #[test]
     fn narrowing_reads_a_folder_however_it_was_typed() {
         // Settings take whatever somebody types. All of these mean `C:\work`.
-        for written in [r"C:\work", "C:/work", r"C:\work\", r"c:\WORK", "  C:/work  "] {
+        for written in [
+            r"C:\work",
+            "C:/work",
+            r"C:\work\",
+            r"c:\WORK",
+            "  C:/work  ",
+        ] {
             let found = narrowed(&[written]);
 
             assert_eq!(found.len(), 2, "{written:?} gave {found:?}");

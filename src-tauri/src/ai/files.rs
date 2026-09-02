@@ -217,7 +217,10 @@ mod tests {
 
             let refused = read(&a_file("huge.png", &huge)).expect_err("refused");
             assert!(refused.contains("MB"), "no size in it: {refused}");
-            assert!(!refused.contains("4194304"), "it said bytes at a person: {refused}");
+            assert!(
+                !refused.contains("4194304"),
+                "it said bytes at a person: {refused}"
+            );
         }
 
         /// Text is cut rather than refused, because the first hundred thousand
@@ -228,7 +231,11 @@ mod tests {
             let long = "a".repeat(MOST_TEXT * 2);
             let attached = read(&a_file("long.txt", long.as_bytes())).expect("text");
             assert_eq!(attached.body.chars().count(), MOST_TEXT);
-            assert_eq!(attached.bytes, MOST_TEXT * 2, "but it still says how big it was");
+            assert_eq!(
+                attached.bytes,
+                MOST_TEXT * 2,
+                "but it still says how big it was"
+            );
         }
     }
 

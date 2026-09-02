@@ -399,7 +399,10 @@ impl Chat {
     /// less than deciding when to do it would.
     pub fn save(&self, dir: &std::path::Path) {
         // Never over a file nobody read. See the field this reads.
-        if !self.read_the_file.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self
+            .read_the_file
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             crate::say!("not saving conversations: they were never loaded");
             return;
         }
@@ -613,7 +616,13 @@ async fn over_http(
             // Said before the tool runs rather than after. Reading the screen
             // takes a moment, and a window showing nothing during it looks
             // like a window that has stopped.
-            let _ = app.emit(USING, &Step { tool: name.clone(), subject: subject_of(call) });
+            let _ = app.emit(
+                USING,
+                &Step {
+                    tool: name.clone(),
+                    subject: subject_of(call),
+                },
+            );
 
             let arguments: serde_json::Value =
                 serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
@@ -638,17 +647,10 @@ async fn over_http(
 
     // One more, with no tools, so a model that kept calling them still ends
     // with words rather than with nothing.
-    let said = super::openai::ask(
-        &client,
-        provider,
-        &conversation,
-        None,
-        &give_up,
-        |piece| {
-            whole.push_str(&piece);
-            let _ = app.emit(SAID, &piece);
-        },
-    )
+    let said = super::openai::ask(&client, provider, &conversation, None, &give_up, |piece| {
+        whole.push_str(&piece);
+        let _ = app.emit(SAID, &piece);
+    })
     .await?;
 
     Ok(if whole.is_empty() { said.text } else { whole })
@@ -689,11 +691,7 @@ async fn the_toolset(
     app: &tauri::AppHandle,
     data_dir: &std::path::Path,
 ) -> Option<super::mcp::Config> {
-    let reachable = match app
-        .state::<super::mcp::link::Link>()
-        .reachable(app)
-        .await
-    {
+    let reachable = match app.state::<super::mcp::link::Link>().reachable(app).await {
         Ok(reachable) => reachable,
         Err(why) => {
             crate::log::write(&format!("[ai] no tools for Claude Code: {why}"));
@@ -755,7 +753,9 @@ async fn through_the_cli(
     command
         .args(super::claude_code::arguments(
             chat.session().as_deref(),
-            Some(&provider.model).filter(|m| !m.is_empty()).map(|m| m.as_str()),
+            Some(&provider.model)
+                .filter(|m| !m.is_empty())
+                .map(|m| m.as_str()),
             tools.as_ref().map(super::mcp::Config::path),
         ))
         // The reason is in `claude_code.rs`: a session that is not bare runs
@@ -812,11 +812,11 @@ async fn through_the_cli(
 
     match failure {
         Some(why) => Err(why),
-        None if whole.trim().is_empty() => {
-            Err("Claude Code answered with nothing. It may need signing in: run \
+        None if whole.trim().is_empty() => Err(
+            "Claude Code answered with nothing. It may need signing in: run \
                  `claude` once in a terminal."
-                .to_string())
-        }
+                .to_string(),
+        ),
         None => Ok(whole),
     }
 }

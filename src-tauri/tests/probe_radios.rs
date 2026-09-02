@@ -9,7 +9,11 @@ fn report_radios() {
     println!("{} radio(s)", found.len());
 
     for radio in &found {
-        println!("   {:10} {}", radio.name, if radio.on { "on" } else { "off" });
+        println!(
+            "   {:10} {}",
+            radio.name,
+            if radio.on { "on" } else { "off" }
+        );
     }
 }
 
@@ -31,13 +35,21 @@ fn switching_takes_effect_and_can_be_put_back() {
 
     sill_lib::radios::set_radio("bluetooth", !was).expect("switches");
     let during = sill_lib::radios::radios();
-    let now = during.iter().find(|r| r.kind == "bluetooth").expect("still there").on;
+    let now = during
+        .iter()
+        .find(|r| r.kind == "bluetooth")
+        .expect("still there")
+        .on;
     println!("now {}", if now { "on" } else { "off" });
 
     // Put back before asserting, so a failure does not leave it off.
     sill_lib::radios::set_radio("bluetooth", was).expect("puts it back");
     let after = sill_lib::radios::radios();
-    let restored = after.iter().find(|r| r.kind == "bluetooth").expect("still there").on;
+    let restored = after
+        .iter()
+        .find(|r| r.kind == "bluetooth")
+        .expect("still there")
+        .on;
     println!("put back to {}", if restored { "on" } else { "off" });
 
     assert_eq!(now, !was, "the switch did not take effect");

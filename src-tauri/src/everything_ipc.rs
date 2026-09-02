@@ -507,7 +507,8 @@ mod tests {
 
         // The sender that came back is the live one, and answering it reaches
         // the caller.
-        keep.send(Vec::new()).expect("the reply channel is still open");
+        keep.send(Vec::new())
+            .expect("the reply channel is still open");
         assert!(reply.try_recv().is_ok());
     }
 
@@ -532,11 +533,13 @@ mod tests {
 
         let (query, _, _, _, _) = newest(rx.recv().expect("queued"), &rx);
 
-        assert_eq!(query, "*.md", "the first question is still the one that runs");
+        assert_eq!(
+            query, "*.md",
+            "the first question is still the one that runs"
+        );
         assert!(
             reply.try_recv().is_err(),
             "it was answered early, so its search never happened"
         );
     }
 }
-

@@ -13,8 +13,8 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::bridge::{Alert, Bridge, Clip};
-use super::rpc::RpcError;
 use super::permission::{self, Permits};
+use super::rpc::RpcError;
 use super::storage::Storage;
 
 /// Something the extension wants the UI to do.
@@ -313,9 +313,8 @@ impl ApiLayer {
                 // address with no handler is an ordinary state of a machine,
                 // not a fault in the extension that asked about it.
                 match found {
-                    Some(app) => serde_json::to_value(app).map_err(|err| {
-                        RpcError::internal(format!("could not describe it: {err}"))
-                    }),
+                    Some(app) => serde_json::to_value(app)
+                        .map_err(|err| RpcError::internal(format!("could not describe it: {err}"))),
                     None => Ok(Value::Null),
                 }
             }

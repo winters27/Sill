@@ -96,7 +96,10 @@ mod tests {
     use super::*;
 
     fn profile(name: &str) -> Profile {
-        Profile { name: name.to_string(), windows: Vec::new() }
+        Profile {
+            name: name.to_string(),
+            windows: Vec::new(),
+        }
     }
 
     /// Saving again is how a workspace is adjusted, so it replaces.

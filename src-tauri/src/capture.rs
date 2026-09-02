@@ -103,11 +103,15 @@ pub fn thumbnail(shot: &Shot, most: i32) -> Shot {
     for y in 0..height {
         // The block of source rows this output row covers.
         let from_y = (y * shot.height) / height;
-        let to_y = (((y + 1) * shot.height) / height).max(from_y + 1).min(shot.height);
+        let to_y = (((y + 1) * shot.height) / height)
+            .max(from_y + 1)
+            .min(shot.height);
 
         for x in 0..width {
             let from_x = (x * shot.width) / width;
-            let to_x = (((x + 1) * shot.width) / width).max(from_x + 1).min(shot.width);
+            let to_x = (((x + 1) * shot.width) / width)
+                .max(from_x + 1)
+                .min(shot.width);
 
             let mut totals = [0u32; 4];
             let mut counted = 0u32;
@@ -221,7 +225,18 @@ pub fn region(left: i32, top: i32, width: i32, height: i32) -> Result<Shot, Stri
 
         let previous = SelectObject(memory, HGDIOBJ(bitmap.0));
 
-        let copied = BitBlt(memory, 0, 0, width, height, Some(screen), left, top, SRCCOPY).is_ok();
+        let copied = BitBlt(
+            memory,
+            0,
+            0,
+            width,
+            height,
+            Some(screen),
+            left,
+            top,
+            SRCCOPY,
+        )
+        .is_ok();
 
         let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
 

@@ -203,7 +203,10 @@ mod platform {
                         super::name_for(&declared, &path)
                     },
                     volume: volume.GetMasterVolume().unwrap_or(1.0),
-                    muted: volume.GetMute().map(|muted| muted.as_bool()).unwrap_or(false),
+                    muted: volume
+                        .GetMute()
+                        .map(|muted| muted.as_bool())
+                        .unwrap_or(false),
                     id,
                     path,
                 })
@@ -365,14 +368,20 @@ mod tests {
     #[test]
     fn a_resource_reference_is_not_a_name() {
         assert_eq!(
-            name_for(r"@%SystemRoot%\System32\AudioSrv.Dll,-202", r"C:\x\chrome.exe"),
+            name_for(
+                r"@%SystemRoot%\System32\AudioSrv.Dll,-202",
+                r"C:\x\chrome.exe"
+            ),
             "Chrome",
         );
     }
 
     #[test]
     fn an_empty_declaration_falls_back_to_the_program() {
-        assert_eq!(name_for("", r"C:\Program Files\Firefox\firefox.exe"), "Firefox");
+        assert_eq!(
+            name_for("", r"C:\Program Files\Firefox\firefox.exe"),
+            "Firefox"
+        );
         assert_eq!(name_for("   ", r"C:\x\obs64.exe"), "Obs64");
     }
 

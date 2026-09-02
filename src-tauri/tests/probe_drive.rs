@@ -6,10 +6,22 @@ fn measure() {
     let noise = sill_lib::catalog::NOISE;
     // Skipped only where a drive begins, not everywhere.
     let system = [
-        "Windows", "Program Files", "Program Files (x86)", "ProgramData",
-        "$Recycle.Bin", "System Volume Information", "Recovery", "PerfLogs",
-        "Config.Msi", "Documents and Settings", "inetpub", "MSOCache",
-        "$WinREAgent", "OneDriveTemp", "Intel", "PerfBoost",
+        "Windows",
+        "Program Files",
+        "Program Files (x86)",
+        "ProgramData",
+        "$Recycle.Bin",
+        "System Volume Information",
+        "Recovery",
+        "PerfLogs",
+        "Config.Msi",
+        "Documents and Settings",
+        "inetpub",
+        "MSOCache",
+        "$WinREAgent",
+        "OneDriveTemp",
+        "Intel",
+        "PerfBoost",
     ];
 
     let start = std::time::Instant::now();
@@ -18,10 +30,17 @@ fn measure() {
 
     let mut builder = ignore::WalkBuilder::new(&root);
     builder
-        .git_ignore(true).git_global(true).git_exclude(true).ignore(true)
-        .hidden(true).follow_links(false).threads(6)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .ignore(true)
+        .hidden(true)
+        .follow_links(false)
+        .threads(6)
         .filter_entry(move |e| {
-            let Some(name) = e.file_name().to_str() else { return false };
+            let Some(name) = e.file_name().to_str() else {
+                return false;
+            };
             if noise.contains(&name) {
                 return false;
             }

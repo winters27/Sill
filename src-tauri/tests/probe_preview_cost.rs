@@ -13,20 +13,32 @@
 #[ignore = "photographs windows open on this machine"]
 fn a_preview_is_cheap_enough_to_take_while_arrowing() {
     let windows = sill_lib::windowing::list();
-    let visible: Vec<_> = windows.into_iter().filter(|w| !w.minimized).take(5).collect();
+    let visible: Vec<_> = windows
+        .into_iter()
+        .filter(|w| !w.minimized)
+        .take(5)
+        .collect();
 
     if visible.is_empty() {
         println!("nothing open to photograph");
         return;
     }
 
-    println!("{:<34} {:>7} {:>7} {:>9}", "window", "capture", "shrink", "encode");
+    println!(
+        "{:<34} {:>7} {:>7} {:>9}",
+        "window", "capture", "shrink", "encode"
+    );
 
     for window in &visible {
         let start = std::time::Instant::now();
         let Ok(shot) = sill_lib::capture::window(
             window.id,
-            (window.rect.x, window.rect.y, window.rect.width, window.rect.height),
+            (
+                window.rect.x,
+                window.rect.y,
+                window.rect.width,
+                window.rect.height,
+            ),
         ) else {
             println!("{:<34} refused", &window.app);
             continue;

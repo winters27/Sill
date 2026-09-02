@@ -286,8 +286,16 @@ fn command_icon(command: &str) -> Option<String> {
 
         "easeofaccess" => "Magnify.exe",
 
-        "windowsupdate" | "windowsdefender" | "backup" | "recovery" | "troubleshoot"
-        | "activation" | "findmydevice" | "developers" | "windowsinsider" | "delivery"
+        "windowsupdate"
+        | "windowsdefender"
+        | "backup"
+        | "recovery"
+        | "troubleshoot"
+        | "activation"
+        | "findmydevice"
+        | "developers"
+        | "windowsinsider"
+        | "delivery"
         | "storagerecommendations" => "wscui.cpl",
 
         // Cortana and Windows Search are one section, and the indexer is the
@@ -535,7 +543,10 @@ mod tests {
             let webcam = icon_of("ms-settings:privacy-webcam");
             let microphone = icon_of("ms-settings:privacy-microphone");
 
-            assert!(webcam.is_some(), "the webcam privacy page has no mark at all");
+            assert!(
+                webcam.is_some(),
+                "the webcam privacy page has no mark at all"
+            );
             assert_eq!(
                 webcam, microphone,
                 "two pages of the same section were drawn differently",
@@ -576,8 +587,10 @@ mod tests {
         /// The whole point: most of the catalog should not look alike.
         #[test]
         fn the_catalog_is_not_all_one_picture() {
-            let marks: std::collections::HashSet<String> =
-                load().into_iter().filter_map(|record| record.icon).collect();
+            let marks: std::collections::HashSet<String> = load()
+                .into_iter()
+                .filter_map(|record| record.icon)
+                .collect();
 
             assert!(
                 marks.len() >= 20,
@@ -658,8 +671,9 @@ mod tests {
         let rows = load();
 
         assert!(
-            !rows.iter().any(|r| r.entrypoint == "mmc.exe"
-                && r.title.starts_with("Ip Security")),
+            !rows
+                .iter()
+                .any(|r| r.entrypoint == "mmc.exe" && r.title.starts_with("Ip Security")),
             "a page with no console file is still being offered",
         );
     }
@@ -675,7 +689,10 @@ mod tests {
 
         for (command, name) in [
             ("ms-settings:bluetooth", "Devices"),
-            ("ms-settings:windowsupdate", "Windows Update Check For Updates"),
+            (
+                "ms-settings:windowsupdate",
+                "Windows Update Check For Updates",
+            ),
         ] {
             let page = rows
                 .iter()
@@ -689,7 +706,6 @@ mod tests {
             );
         }
     }
-
 
     #[test]
     fn pascal_case_becomes_words() {

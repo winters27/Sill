@@ -177,7 +177,10 @@ pub fn match_keyword<'a>(
     candidates.sort_by_key(|snippet| std::cmp::Reverse(snippet.keyword.trim().chars().count()));
 
     // The common case, and the one that must not pay for the other.
-    if candidates.first().is_some_and(|best| best.only_in.is_empty()) {
+    if candidates
+        .first()
+        .is_some_and(|best| best.only_in.is_empty())
+    {
         return candidates.into_iter().next();
     }
 
@@ -401,7 +404,10 @@ mod tests {
             });
 
             assert!(found.is_some());
-            assert!(!asked, "the foreground program was read for an unlimited snippet");
+            assert!(
+                !asked,
+                "the foreground program was read for an unlimited snippet"
+            );
         }
 
         /// Nothing is asked when nothing matched either, which is every

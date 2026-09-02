@@ -25,9 +25,7 @@ pub struct Radio {
 #[cfg(windows)]
 mod platform {
     use super::Radio;
-    use windows::Devices::Radios::{
-        Radio as WinRadio, RadioAccessStatus, RadioKind, RadioState,
-    };
+    use windows::Devices::Radios::{Radio as WinRadio, RadioAccessStatus, RadioKind, RadioState};
 
     /// The kinds worth a row.
     ///
@@ -86,7 +84,9 @@ mod platform {
         let mut touched = false;
 
         for radio in found.into_iter() {
-            let Ok(radio_kind) = radio.Kind() else { continue };
+            let Ok(radio_kind) = radio.Kind() else {
+                continue;
+            };
             if named(radio_kind) != Some(kind) {
                 continue;
             }
@@ -103,10 +103,16 @@ mod platform {
             match status {
                 RadioAccessStatus::Allowed => touched = true,
                 RadioAccessStatus::DeniedByUser => {
-                    return Err(format!("Windows is not letting Sill change the {}", label(kind)))
+                    return Err(format!(
+                        "Windows is not letting Sill change the {}",
+                        label(kind)
+                    ))
                 }
                 RadioAccessStatus::DeniedBySystem => {
-                    return Err(format!("this machine does not allow the {} to be changed", label(kind)))
+                    return Err(format!(
+                        "this machine does not allow the {} to be changed",
+                        label(kind)
+                    ))
                 }
                 _ => {}
             }

@@ -355,9 +355,7 @@ fn is_local(host: &str) -> bool {
 
     if let Ok(address) = host.parse::<std::net::IpAddr>() {
         return match address {
-            std::net::IpAddr::V4(v4) => {
-                v4.is_loopback() || v4.is_private() || v4.is_link_local()
-            }
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
             std::net::IpAddr::V6(v6) => {
                 // Loopback, or a unique local address, which is IPv6's private
                 // range and is every address beginning fc or fd.
@@ -532,7 +530,10 @@ mod tests {
         /// with nothing would draw an empty chip.
         #[test]
         fn an_alias_that_is_not_in_the_list_is_still_shown() {
-            assert_eq!(short_model(Wire::ClaudeCode, "something-new"), "something-new");
+            assert_eq!(
+                short_model(Wire::ClaudeCode, "something-new"),
+                "something-new"
+            );
         }
     }
 
@@ -542,10 +543,7 @@ mod tests {
         /// Two adapters, and only one service needs the second.
         #[test]
         fn nearly_everything_speaks_the_same_shape() {
-            let odd = KNOWN
-                .iter()
-                .filter(|k| k.wire != Wire::OpenAi)
-                .count();
+            let odd = KNOWN.iter().filter(|k| k.wire != Wire::OpenAi).count();
 
             // Anthropic's own format, and the CLI. Everything else is one
             // adapter, and a third exception should be argued for rather than
@@ -632,8 +630,8 @@ mod tests {
         fn everything_whose_models_are_the_same_everywhere_names_one() {
             for known in KNOWN {
                 let host = strip_scheme(known.base_url).map(|(_, host)| host);
-                let decided_elsewhere = known.wire == Wire::ClaudeCode
-                    || host.is_some_and(is_local);
+                let decided_elsewhere =
+                    known.wire == Wire::ClaudeCode || host.is_some_and(is_local);
 
                 assert_eq!(
                     known.model.is_empty(),

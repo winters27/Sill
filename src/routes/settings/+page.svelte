@@ -974,7 +974,7 @@
           {:else if active === "snippets"}
             <SnippetsPanel prefs={p} {commit} />
           {:else if active === "shortcuts"}
-            <ShortcutsPanel prefs={p} commit={commitWith} />
+            <ShortcutsPanel prefs={p} commit={commitWith} {conflicts} />
           {:else if active === "quicklinks"}
             <QuicklinksPanel />
           {:else if active === "emoji"}

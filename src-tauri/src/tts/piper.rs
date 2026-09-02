@@ -125,7 +125,10 @@ pub fn exe(app: &AppHandle) -> PathBuf {
 /// Where one voice's two files live.
 fn voice_files(app: &AppHandle, id: &str) -> (PathBuf, PathBuf) {
     let dir = home(app).join("voices");
-    (dir.join(format!("{id}.onnx")), dir.join(format!("{id}.onnx.json")))
+    (
+        dir.join(format!("{id}.onnx")),
+        dir.join(format!("{id}.onnx.json")),
+    )
 }
 
 /// Whether the engine is unpacked and this voice is present.
@@ -139,7 +142,9 @@ pub fn is_installed(app: &AppHandle, id: &str) -> bool {
 
 /// Where the Windows build of Piper is fetched from.
 pub fn engine_url() -> String {
-    format!("https://github.com/rhasspy/piper/releases/download/{PIPER_TAG}/piper_windows_amd64.zip")
+    format!(
+        "https://github.com/rhasspy/piper/releases/download/{PIPER_TAG}/piper_windows_amd64.zip"
+    )
 }
 
 /// Where one voice's model and its config are fetched from.
@@ -178,7 +183,11 @@ pub async fn install(
         crate::dictation::fetch::download_to(&client, &engine_url(), &archive, |done, total| {
             // The engine is the larger half of the job, so it is given the
             // larger half of the bar.
-            let share = if total > 0 { done as f64 / total as f64 } else { 0.0 };
+            let share = if total > 0 {
+                done as f64 / total as f64
+            } else {
+                0.0
+            };
             progress(share * 0.7, "Fetching the speech engine");
         })
         .await
@@ -199,7 +208,11 @@ pub async fn install(
 
     progress(0.7, "Downloading the voice");
     crate::dictation::fetch::download_to(&client, &model_url, &model, |done, total| {
-        let share = if total > 0 { done as f64 / total as f64 } else { 0.0 };
+        let share = if total > 0 {
+            done as f64 / total as f64
+        } else {
+            0.0
+        };
         progress(0.7 + share * 0.28, "Downloading the voice");
     })
     .await
@@ -301,7 +314,12 @@ pub async fn speak(app: &AppHandle, voice_id: &str, text: &str) -> Result<Vec<u8
 }
 
 #[cfg(windows)]
-fn run(exe: &std::path::Path, model: &std::path::Path, out: &std::path::Path, text: &str) -> Result<(), String> {
+fn run(
+    exe: &std::path::Path,
+    model: &std::path::Path,
+    out: &std::path::Path,
+    text: &str,
+) -> Result<(), String> {
     use std::io::Write;
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -353,7 +371,12 @@ fn run(exe: &std::path::Path, model: &std::path::Path, out: &std::path::Path, te
 }
 
 #[cfg(not(windows))]
-fn run(_exe: &std::path::Path, _model: &std::path::Path, _out: &std::path::Path, _text: &str) -> Result<(), String> {
+fn run(
+    _exe: &std::path::Path,
+    _model: &std::path::Path,
+    _out: &std::path::Path,
+    _text: &str,
+) -> Result<(), String> {
     Err("the downloaded voice is Windows only".to_string())
 }
 
@@ -386,13 +409,19 @@ mod tests {
         for voice in VOICES {
             let (model, config) = voice_urls(voice);
             assert!(model.ends_with(&format!("{}.onnx", voice.id)), "{model}");
-            assert!(config.ends_with(&format!("{}.onnx.json", voice.id)), "{config}");
+            assert!(
+                config.ends_with(&format!("{}.onnx.json", voice.id)),
+                "{config}"
+            );
         }
     }
 
     #[test]
     fn the_default_voice_is_one_that_is_offered() {
-        assert!(voice(DEFAULT_VOICE).is_some(), "{DEFAULT_VOICE} is not in the list");
+        assert!(
+            voice(DEFAULT_VOICE).is_some(),
+            "{DEFAULT_VOICE} is not in the list"
+        );
     }
 
     #[test]
@@ -408,6 +437,9 @@ mod tests {
     fn the_engine_comes_from_the_mit_release_rather_than_the_gpl_one() {
         let url = engine_url();
         assert!(url.contains("rhasspy/piper"), "{url}");
-        assert!(!url.contains("piper1-gpl"), "the GPL build needs Python: {url}");
+        assert!(
+            !url.contains("piper1-gpl"),
+            "the GPL build needs Python: {url}"
+        );
     }
 }

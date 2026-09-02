@@ -40,7 +40,7 @@ mod platform {
     use super::Output;
     use windows::core::{interface, IUnknown, IUnknown_Vtbl, GUID, HRESULT, PCWSTR};
     use windows::Win32::Media::Audio::{
-        eConsole, eCommunications, eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator,
+        eCommunications, eConsole, eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator,
         DEVICE_STATE_ACTIVE,
     };
     use windows::Win32::System::Com::{

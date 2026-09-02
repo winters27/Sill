@@ -83,10 +83,8 @@ pub fn parse_event(line: &str) -> Event {
         // A token, which is the only thing a chat window is really waiting for.
         "stream_event" => {
             let delta = value.pointer("/event/delta");
-            let is_text = delta
-                .and_then(|d| d.get("type"))
-                .and_then(|t| t.as_str())
-                == Some("text_delta");
+            let is_text =
+                delta.and_then(|d| d.get("type")).and_then(|t| t.as_str()) == Some("text_delta");
 
             match delta.and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
                 Some(text) if is_text => Event::Text(text.to_string()),
@@ -340,7 +338,10 @@ fn bundled_with_the_desktop_app(appdata: &Path) -> Vec<PathBuf> {
         .flatten()
         .filter_map(|found| {
             let name = found.file_name().to_string_lossy().to_string();
-            let numbered: Vec<u32> = name.split('.').filter_map(|part| part.parse().ok()).collect();
+            let numbered: Vec<u32> = name
+                .split('.')
+                .filter_map(|part| part.parse().ok())
+                .collect();
 
             // Anything that is not a version number is not an install: the
             // directory has held caches and lock files beside them.
@@ -398,7 +399,11 @@ mod tests {
                 .map(|path| path.to_string_lossy().replace("\\", "/"))
                 .collect();
 
-            for expected in [".local/bin/claude", ".claude/local/claude", "npm/claude.cmd"] {
+            for expected in [
+                ".local/bin/claude",
+                ".claude/local/claude",
+                "npm/claude.cmd",
+            ] {
                 assert!(
                     text.iter().any(|path| path.contains(expected)),
                     "nothing looks in {expected}: {text:?}",
@@ -502,7 +507,10 @@ mod tests {
         /// which is the one thing this path exists for.
         #[test]
         fn it_is_never_asked_in_bare_mode() {
-            for args in [plain(None, None), arguments(None, None, Some(Path::new("m.json")))] {
+            for args in [
+                plain(None, None),
+                arguments(None, None, Some(Path::new("m.json"))),
+            ] {
                 assert!(
                     !args.iter().any(|a| a == "--bare"),
                     "bare mode would skip the subscription: {args:?}",
@@ -514,7 +522,12 @@ mod tests {
         fn it_streams_rather_than_waiting_for_the_whole_answer() {
             let args = plain(None, None);
 
-            for wanted in ["-p", "stream-json", "--verbose", "--include-partial-messages"] {
+            for wanted in [
+                "-p",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+            ] {
                 assert!(args.iter().any(|a| a == wanted), "{wanted} is missing");
             }
         }
@@ -524,7 +537,10 @@ mod tests {
         /// nothing the CLI brings with it is ever named.
         #[test]
         fn nothing_is_allowed_to_run_on_this_machine() {
-            for args in [plain(None, None), arguments(None, None, Some(Path::new("m.json")))] {
+            for args in [
+                plain(None, None),
+                arguments(None, None, Some(Path::new("m.json"))),
+            ] {
                 let at = args.iter().position(|a| a == "--permission-mode");
                 assert_eq!(at.map(|at| args[at + 1].as_str()), Some("dontAsk"));
 
@@ -569,7 +585,11 @@ mod tests {
         use super::*;
 
         fn with_tools() -> Vec<String> {
-            arguments(Some("abc-123"), Some("opus"), Some(Path::new("C:/x/mcp.json")))
+            arguments(
+                Some("abc-123"),
+                Some("opus"),
+                Some(Path::new("C:/x/mcp.json")),
+            )
         }
 
         /// The whole reason this path had no tools until now.
@@ -604,7 +624,10 @@ mod tests {
 
             for tool in crate::ai::tools::CATALOGUE {
                 let expected = format!("mcp__sill__{}", tool.name);
-                assert!(allowed.contains(&expected.as_str()), "{expected} is not allowed");
+                assert!(
+                    allowed.contains(&expected.as_str()),
+                    "{expected} is not allowed"
+                );
             }
 
             assert_eq!(allowed.len(), crate::ai::tools::CATALOGUE.len());
@@ -618,7 +641,11 @@ mod tests {
             let args = with_tools();
 
             let at = args.iter().position(|a| a == "--allowedTools").unwrap();
-            assert!(args[at + 1].contains(','), "{:?} is not one argument", args[at + 1]);
+            assert!(
+                args[at + 1].contains(','),
+                "{:?} is not one argument",
+                args[at + 1]
+            );
 
             let resumed = args.iter().position(|a| a == "--resume");
             assert_eq!(resumed.map(|at| args[at + 1].as_str()), Some("abc-123"));
@@ -633,7 +660,10 @@ mod tests {
             let args = arguments(None, None, None);
 
             for never in ["--mcp-config", "--strict-mcp-config", "--allowedTools"] {
-                assert!(!args.iter().any(|a| a == never), "{never} is there: {args:?}");
+                assert!(
+                    !args.iter().any(|a| a == never),
+                    "{never} is there: {args:?}"
+                );
             }
         }
     }
@@ -689,7 +719,8 @@ mod tests {
 
         #[test]
         fn a_token_comes_out_as_text() {
-            let line = r#"{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"Hello"}}}"#;
+            let line =
+                r#"{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"Hello"}}}"#;
             assert_eq!(parse_event(line), Event::Text("Hello".into()));
         }
 

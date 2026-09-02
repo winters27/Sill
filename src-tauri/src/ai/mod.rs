@@ -12,8 +12,8 @@
 pub mod acting;
 pub mod approval;
 pub mod chat;
-pub mod files;
 pub mod claude_code;
+pub mod files;
 pub mod mcp;
 pub mod openai;
 pub mod provider;

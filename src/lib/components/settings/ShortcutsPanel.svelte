@@ -20,9 +20,17 @@
   interface Props {
     prefs: Preferences;
     commit: (next: Preferences) => void;
+    /**
+     * Accelerators Windows refused, from the same list the hotkey rows use.
+     *
+     * A shortcut another application already owns registers as an error and
+     * then looks exactly like one that works: the row shows the key, the key
+     * does nothing. These rows had no way to say so at all.
+     */
+    conflicts: string[];
   }
 
-  let { prefs, commit }: Props = $props();
+  let { prefs, commit, conflicts }: Props = $props();
 
   /**
    * The keys worth offering as a hyper key.
@@ -252,11 +260,14 @@
   {#each bindings as binding, at (at)}
     <Row
       title={textActions.find((a) => a.id === binding.action)?.title ?? binding.action}
-      description="Runs on {describe(binding.source)}"
+      description={binding.accelerator && conflicts.includes(binding.accelerator)
+        ? "Another application already has this combination, so it does nothing. Choose a different one."
+        : `Runs on ${describe(binding.source)}`}
     >
       <div class="controls">
         <button
           class="key"
+          class:taken={!!binding.accelerator && conflicts.includes(binding.accelerator)}
           class:recording={recording === at}
           onclick={() => (recording = recording === at ? null : at)}
           onkeydown={(e) => recording === at && record(e, at)}
@@ -423,6 +434,12 @@
     border: 1px solid var(--hairline);
     border-radius: var(--radius-md);
     cursor: pointer;
+  }
+
+  /* The same red the hotkey rows use for a key another application owns. */
+  .key.taken {
+    color: var(--accent-red);
+    border-color: var(--accent-red);
   }
 
   .key.recording {

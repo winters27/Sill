@@ -35,8 +35,7 @@ pub const STEP: u8 = 10;
 /// Two values, and both matter: `AppsUseLightTheme` is what applications read,
 /// and `SystemUsesLightTheme` is the taskbar and the start menu. Setting only
 /// the first is the common mistake and leaves a machine half switched.
-const THEME_KEY: &str =
-    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+const THEME_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 
 // ---------------------------------------------------------------- reading
 
@@ -70,7 +69,11 @@ pub fn muted() -> Option<bool> {
 pub fn dark() -> Option<bool> {
     // Nothing set is light, which is the Windows default, and is what a
     // machine that has never been changed reports.
-    Some(read_theme("AppsUseLightTheme").map(|light| light == 0).unwrap_or(false))
+    Some(
+        read_theme("AppsUseLightTheme")
+            .map(|light| light == 0)
+            .unwrap_or(false),
+    )
 }
 
 #[cfg(not(windows))]
@@ -284,15 +287,15 @@ pub(crate) fn is_windows_client() -> bool {
         .take_while(|unit| *unit != 0)
         .collect();
 
-    HSTRING::from_wide(&wide).to_string().eq_ignore_ascii_case("client")
+    HSTRING::from_wide(&wide)
+        .to_string()
+        .eq_ignore_ascii_case("client")
 }
 
 #[cfg(windows)]
 fn read_theme(name: &str) -> Option<u32> {
     use windows::core::{w, PCWSTR};
-    use windows::Win32::System::Registry::{
-        RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD,
-    };
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 
     let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
     let mut value: u32 = 0;
@@ -524,7 +527,6 @@ mod tests {
         set_dark(before).expect("put back");
         assert_eq!(dark(), Some(before));
     }
-
 }
 
 /// What the switches are set to right now.

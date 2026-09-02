@@ -292,9 +292,7 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value) -> Value {
         "read_selection" => read_selection(app),
         "read_screen" => read_screen(),
         "what_can_be_done" => what_can_be_done(app, &text("target"), &text("kind")),
-        "run_action" => {
-            run_action(app, &text("action"), &text("target"), &text("kind")).await
-        }
+        "run_action" => run_action(app, &text("action"), &text("target"), &text("kind")).await,
         other => json!({ "error": format!("Sill has no tool called {other}.") }),
     }
 }
@@ -384,7 +382,10 @@ fn read_file(path: &str) -> Value {
 
     // Enough replacement characters means it was never text. A model handed
     // the bytes of a PNG as a string will try to reason about them.
-    let noise = text.chars().filter(|c| *c == char::REPLACEMENT_CHARACTER).count();
+    let noise = text
+        .chars()
+        .filter(|c| *c == char::REPLACEMENT_CHARACTER)
+        .count();
     if noise > text.chars().count() / 20 {
         return json!({
             "error": format!("{} is not a text file.", path.display()),
@@ -745,7 +746,11 @@ mod tests {
             for tool in CATALOGUE {
                 let schema = (tool.schema)();
                 assert_eq!(schema["type"], "object", "{} is not an object", tool.name);
-                assert!(schema.get("properties").is_some(), "{} has no properties", tool.name);
+                assert!(
+                    schema.get("properties").is_some(),
+                    "{} has no properties",
+                    tool.name
+                );
             }
         }
 
@@ -805,9 +810,15 @@ mod tests {
         /// about them, and it has no way to tell that it should not.
         #[test]
         fn something_that_is_not_text_says_so() {
-            let path = a_file("picture.png", &[0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe, 0xfd]);
+            let path = a_file(
+                "picture.png",
+                &[0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe, 0xfd],
+            );
             let said = read_file(&path.to_string_lossy());
-            assert!(said["error"].as_str().unwrap_or_default().contains("not a text file"));
+            assert!(said["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("not a text file"));
         }
 
         /// The answer is pasted into the conversation and paid for on every
@@ -870,7 +881,10 @@ mod tests {
             }
 
             let said = list_directory(&dir.to_string_lossy());
-            assert_eq!(said["entries"].as_array().expect("entries").len(), MOST_ROWS);
+            assert_eq!(
+                said["entries"].as_array().expect("entries").len(),
+                MOST_ROWS
+            );
         }
     }
 }

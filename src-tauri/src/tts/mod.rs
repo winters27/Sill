@@ -236,10 +236,14 @@ mod tests {
         assert!(looks_like_wav(&wav_header()));
 
         // What an endpoint that refused actually answers with.
-        assert!(!looks_like_wav(br#"{"error":{"message":"Incorrect API key"}}"#));
+        assert!(!looks_like_wav(
+            br#"{"error":{"message":"Incorrect API key"}}"#
+        ));
         assert!(!looks_like_wav(b"<!DOCTYPE html><html>502 Bad Gateway"));
         // An MP3, which is what a provider returns when the format was ignored.
-        assert!(!looks_like_wav(&[0xFF, 0xFB, 0x90, 0x44, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert!(!looks_like_wav(&[
+            0xFF, 0xFB, 0x90, 0x44, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        ]));
         assert!(!looks_like_wav(b""));
     }
 

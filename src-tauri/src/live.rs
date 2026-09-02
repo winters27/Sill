@@ -115,7 +115,12 @@ mod tests {
 
     #[test]
     fn it_says_the_three_numbers_somebody_opened_it_for() {
-        let said = machine(&reading(12.4, 8 * 1024 * 1024 * 1024, 16 * 1024 * 1024 * 1024, 827 * 1024 * 1024));
+        let said = machine(&reading(
+            12.4,
+            8 * 1024 * 1024 * 1024,
+            16 * 1024 * 1024 * 1024,
+            827 * 1024 * 1024,
+        ));
 
         assert!(said.contains("CPU 12%"), "{said}");
         assert!(said.contains("RAM 50%"), "{said}");
@@ -144,7 +149,9 @@ mod tests {
         let id = machine_row();
 
         assert!(
-            crate::registry::builtins().iter().any(|record| record.id == id),
+            crate::registry::builtins()
+                .iter()
+                .any(|record| record.id == id),
             "the machine row updates {id}, which is not in the registry",
         );
     }

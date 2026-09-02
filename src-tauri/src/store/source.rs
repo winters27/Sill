@@ -128,7 +128,11 @@ pub fn under(folder: &str, path: &str) -> Option<PathBuf> {
     let mut out = PathBuf::new();
 
     for part in relative.split('/') {
-        if part.is_empty() || part == "." || part == ".." || part.contains('\\') || part.contains(':')
+        if part.is_empty()
+            || part == "."
+            || part == ".."
+            || part.contains('\\')
+            || part.contains(':')
         {
             return None;
         }
@@ -479,7 +483,11 @@ mod tests {
 
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "extensions/demo/package.json");
-        assert_eq!(directories, vec!["b".to_string()], "metadata is skipped, and so is the symlink");
+        assert_eq!(
+            directories,
+            vec!["b".to_string()],
+            "metadata is skipped, and so is the symlink"
+        );
     }
 
     #[test]

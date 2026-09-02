@@ -11,7 +11,10 @@ fn it_says_something_out_loud() {
     let voice = Sapi::default();
     let start = std::time::Instant::now();
     voice.aloud("Sill can read this out loud.").expect("spoke");
-    println!("  Speak returned in {} ms (async, so it is still talking)", start.elapsed().as_millis());
+    println!(
+        "  Speak returned in {} ms (async, so it is still talking)",
+        start.elapsed().as_millis()
+    );
     std::thread::sleep(std::time::Duration::from_millis(2500));
     voice.stop().expect("stopped");
     println!("  stopped cleanly");

@@ -52,11 +52,7 @@ fn permitted_windows(dir: &Path) -> BTreeSet<String> {
         };
 
         if let Some(windows) = value.get("windows").and_then(|w| w.as_array()) {
-            out.extend(
-                windows
-                    .iter()
-                    .filter_map(|w| w.as_str().map(str::to_owned)),
-            );
+            out.extend(windows.iter().filter_map(|w| w.as_str().map(str::to_owned)));
         }
     }
 
@@ -67,8 +63,8 @@ fn permitted_windows(dir: &Path) -> BTreeSet<String> {
 fn every_declared_window_can_invoke() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
 
-    let conf = std::fs::read_to_string(root.join("tauri.conf.json"))
-        .expect("tauri.conf.json is readable");
+    let conf =
+        std::fs::read_to_string(root.join("tauri.conf.json")).expect("tauri.conf.json is readable");
     let conf: serde_json::Value =
         serde_json::from_str(&conf).expect("tauri.conf.json is valid JSON");
 
@@ -224,7 +220,10 @@ fn every_window_an_approval_card_can_appear_in_exists() {
     real.extend(built_at_runtime(&root.join("src")));
 
     let surfaces = sill_lib::ai::approval::SURFACES;
-    assert!(!surfaces.is_empty(), "a card would have nowhere to appear at all");
+    assert!(
+        !surfaces.is_empty(),
+        "a card would have nowhere to appear at all"
+    );
 
     let missing: Vec<&&str> = surfaces
         .iter()

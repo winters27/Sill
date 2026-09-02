@@ -333,6 +333,42 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Every place a hotkey is registered records whether it took.
+ *
+ * Windows refuses a combination another application already owns, and there is
+ * no second sign: the accelerator string is still in the preferences, the row
+ * still shows it, and the key does nothing. The settings window can only mark
+ * the row if the failure reached `HotkeyConflicts`, and for per-command
+ * shortcuts it never did, so those rows were incapable of being right. On this
+ * machine the summon key itself had been refused for weeks with nothing but a
+ * log line to say so.
+ *
+ * Registration lives in two files, so this checks both rather than the one
+ * that happens to be correct today.
+ */
+{
+  for (const file of ["src-tauri/src/lib.rs", "src-tauri/src/bindings.rs"]) {
+    const text = readFileSync(file, "utf8");
+    const registrations = Array.from(text.matchAll(/\.on_shortcut\(/g));
+
+    for (const at of registrations) {
+      // The result is recorded near the call, before or just after whatever
+      // logs it. A whole file's worth of slack would let an unrelated
+      // registration borrow another's `note`.
+      const nearby = text.slice(at.index, at.index + 1600);
+      if (nearby.includes("conflicts.note(")) continue;
+
+      fail(
+        file,
+        lineOf(text, at.index),
+        "a hotkey is registered here and the result never reaches `HotkeyConflicts`, " +
+          "so a key another application owns will look bound and do nothing",
+      );
+    }
+  }
+}
+
+/*
  * Every custom property a component reads is one the theme defines.
  *
  * A `var(--nope)` with no fallback is not an error anywhere: the declaration

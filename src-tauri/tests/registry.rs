@@ -1999,9 +1999,8 @@ fn launching_something_does_not_drag_in_emoji() {
     // launch a program, and not one of them is asking for a picture. Measured
     // against the real set of nearly two thousand: every one comes back empty.
     for typed in [
-        "code", "chrome", "term", "settings", "explorer", "obs", "python",
-        "git", "docker", "slack", "word", "excel", "calc", "edge", "zoom",
-        "teams", "photo", "spot",
+        "code", "chrome", "term", "settings", "explorer", "obs", "python", "git", "docker",
+        "slack", "word", "excel", "calc", "edge", "zoom", "teams", "photo", "spot",
     ] {
         let found = volunteered(typed);
         assert!(found.is_empty(), "{typed:?} dragged in {found:?}");
@@ -2068,7 +2067,10 @@ fn a_result_says_whether_the_query_named_it() {
 
     let found = search(&corpus, "chrome", &Frecency::default(), NOW, 50);
     let named: Vec<registry::SearchResult> = found.into_iter().map(Into::into).collect();
-    assert!(named[0].strong, "typing the name did not count as naming it");
+    assert!(
+        named[0].strong,
+        "typing the name did not count as naming it"
+    );
 
     // Two letters that happen to sit next to each other in a longer word.
     let found = search(&corpus, "gc", &Frecency::default(), NOW, 50);
@@ -2105,7 +2107,11 @@ fn a_query_the_index_only_half_recognises_has_no_strong_results() {
     // anything a person installs, so nothing in an index should claim it, and
     // the emoji somebody plainly meant has to be able to get above the noise.
     let corpus = vec![
-        command("sill:dictation", "Dictation and transcripts", "Sill Settings"),
+        command(
+            "sill:dictation",
+            "Dictation and transcripts",
+            "Sill Settings",
+        ),
         command("app:notepad", "Notepad", "Application"),
         command("app:task", "Task Manager", "Application"),
     ];
@@ -2119,7 +2125,6 @@ fn a_query_the_index_only_half_recognises_has_no_strong_results() {
         results.iter().map(|r| &r.title).collect::<Vec<_>>()
     );
 }
-
 
 // ------------------------------------------- where a scattered match may start
 
@@ -2234,7 +2239,10 @@ fn the_widest_jump_is_what_counts_and_not_the_distance_covered() {
     assert!(found.contains(&"app:streamnook".to_string()), "{found:?}");
 
     let found = ids(&search(&corpus, "tada", &Frecency::default(), NOW, 50));
-    assert!(found.is_empty(), "a seven-character jump matched: {found:?}");
+    assert!(
+        found.is_empty(),
+        "a seven-character jump matched: {found:?}"
+    );
 }
 
 #[test]
@@ -2308,7 +2316,14 @@ mod a_switch_is_reached_first {
             switch(
                 "sill:system.audio.output:speakers",
                 "Speakers",
-                &["audio", "sound", "output", "speakers", "headphones", "device"],
+                &[
+                    "audio",
+                    "sound",
+                    "output",
+                    "speakers",
+                    "headphones",
+                    "device",
+                ],
             ),
         ];
 
@@ -2641,7 +2656,10 @@ fn the_way_a_switch_is_set_survives_being_narrowed_for_the_window() {
     );
 
     // And the path the switcher takes, which does not rank.
-    assert_eq!(registry::SearchResult::from_record(record).toggle, Some(true));
+    assert_eq!(
+        registry::SearchResult::from_record(record).toggle,
+        Some(true)
+    );
 }
 
 /// The index has to hold each id once, whichever way it arrived.
@@ -2662,7 +2680,11 @@ mod one_id_per_row {
         let out = registry::one_per_id(vec![
             command("app:terminal", "Terminal", "Applications"),
             command("app:browser", "Browser", "Applications"),
-            command("app:terminal", "Terminal, from somewhere else", "Applications"),
+            command(
+                "app:terminal",
+                "Terminal, from somewhere else",
+                "Applications",
+            ),
         ]);
 
         let titles: Vec<&str> = out.iter().map(|r| r.title.as_str()).collect();
@@ -2710,8 +2732,16 @@ mod the_store_is_findable {
     #[test]
     fn the_words_somebody_would_actually_type_find_it() {
         for query in [
-            "store", "extension", "extensions", "extension store", "browse",
-            "install", "marketplace", "raycast", "plugin", "discover",
+            "store",
+            "extension",
+            "extensions",
+            "extension store",
+            "browse",
+            "install",
+            "marketplace",
+            "raycast",
+            "plugin",
+            "discover",
         ] {
             let titles = found(query);
             assert!(
@@ -2723,7 +2753,13 @@ mod the_store_is_findable {
 
     #[test]
     fn updating_is_findable_by_the_words_that_mean_updating() {
-        for query in ["update", "updates", "upgrade", "outdated", "update extensions"] {
+        for query in [
+            "update",
+            "updates",
+            "upgrade",
+            "outdated",
+            "update extensions",
+        ] {
             let titles = found(query);
             assert!(
                 titles.iter().any(|t| t == "Update Extensions"),
@@ -2848,8 +2884,14 @@ mod text_recognition_is_findable {
         // nothing put them together. A phrase now matches when every word of
         // it lands somewhere on the row.
         for query in [
-            "ocr", "read", "text", "scan", "picture", "screenshot",
-            "extract text", "read text",
+            "ocr",
+            "read",
+            "text",
+            "scan",
+            "picture",
+            "screenshot",
+            "extract text",
+            "read text",
         ] {
             let titles = found(query);
             assert!(
@@ -2891,7 +2933,10 @@ mod sills_own_settings_are_findable {
             &Aliases::default(),
             NOW,
             60,
-            Excluded { terms: &[], ids: &[] },
+            Excluded {
+                terms: &[],
+                ids: &[],
+            },
         )
         .into_iter()
         .map(|hit| hit.command.title.clone())
@@ -2954,7 +2999,10 @@ mod a_switch_answers_to_its_own_name {
         assert!(wifi.contains("Wi-Fi"), "\"wifi\" gave {wifi:?}");
 
         let bluetooth = best(&commands, "bluetooth").unwrap_or_default();
-        assert!(bluetooth.contains("Bluetooth"), "\"bluetooth\" gave {bluetooth:?}");
+        assert!(
+            bluetooth.contains("Bluetooth"),
+            "\"bluetooth\" gave {bluetooth:?}"
+        );
     }
 }
 
@@ -3057,9 +3105,8 @@ fn saving_the_ranking_history_leaves_nothing_half_written_behind() {
     frecency.record("code", NOW);
     frecency.save(&path).expect("saved");
 
-    let back: Frecency =
-        serde_json::from_str(&std::fs::read_to_string(&path).expect("readable"))
-            .expect("the saved file parses");
+    let back: Frecency = serde_json::from_str(&std::fs::read_to_string(&path).expect("readable"))
+        .expect("the saved file parses");
     assert_eq!(back.len(), 1);
 
     assert!(
@@ -3069,12 +3116,17 @@ fn saving_the_ranking_history_leaves_nothing_half_written_behind() {
 
     // Twice, because the rename has to land on a file that already exists.
     frecency.record("other", NOW);
-    frecency.save(&path).expect("saved again over the previous file");
+    frecency
+        .save(&path)
+        .expect("saved again over the previous file");
 
-    let back: Frecency =
-        serde_json::from_str(&std::fs::read_to_string(&path).expect("readable"))
-            .expect("the second save parses");
-    assert_eq!(back.len(), 2, "the second save replaced rather than appended");
+    let back: Frecency = serde_json::from_str(&std::fs::read_to_string(&path).expect("readable"))
+        .expect("the second save parses");
+    assert_eq!(
+        back.len(),
+        2,
+        "the second save replaced rather than appended"
+    );
 }
 
 /// A window competing on merit, not on which list it was appended to.
@@ -3089,7 +3141,13 @@ fn saving_the_ranking_history_leaves_nothing_half_written_behind() {
 #[test]
 fn an_exact_window_title_outranks_a_scattered_command_match() {
     let mut crowd: Vec<CommandRecord> = (0..200)
-        .map(|n| command(&format!("app:{n}"), &format!("Notes Editor Update {n}"), "Apps"))
+        .map(|n| {
+            command(
+                &format!("app:{n}"),
+                &format!("Notes Editor Update {n}"),
+                "Apps",
+            )
+        })
         .collect();
 
     // The window, last in the corpus exactly as an appended list would be.

@@ -115,12 +115,11 @@ fn take(id: isize) -> Option<String> {
     )
     .ok()?;
 
-    let png = crate::capture::thumbnail(&shot, LONGEST_SIDE).to_png().ok()?;
+    let png = crate::capture::thumbnail(&shot, LONGEST_SIDE)
+        .to_png()
+        .ok()?;
 
-    Some(format!(
-        "data:image/png;base64,{}",
-        base64_of(&png),
-    ))
+    Some(format!("data:image/png;base64,{}", base64_of(&png),))
 }
 
 fn base64_of(bytes: &[u8]) -> String {

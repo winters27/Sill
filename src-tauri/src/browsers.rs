@@ -69,16 +69,76 @@ struct Known {
 /// that happens to use the same file name. Saying what is being read is the
 /// honest version, and adding one is a line.
 const KNOWN: &[Known] = &[
-    Known { name: "Chrome", family: Family::Chromium, base: Base::Local, path: r"Google\Chrome\User Data", exe: "chrome.exe" },
-    Known { name: "Edge", family: Family::Chromium, base: Base::Local, path: r"Microsoft\Edge\User Data", exe: "msedge.exe" },
-    Known { name: "Brave", family: Family::Chromium, base: Base::Local, path: r"BraveSoftware\Brave-Browser\User Data", exe: "brave.exe" },
-    Known { name: "Vivaldi", family: Family::Chromium, base: Base::Local, path: r"Vivaldi\User Data", exe: "vivaldi.exe" },
-    Known { name: "Chromium", family: Family::Chromium, base: Base::Local, path: r"Chromium\User Data", exe: "chrome.exe" },
-    Known { name: "Opera", family: Family::Chromium, base: Base::Roaming, path: r"Opera Software\Opera Stable", exe: "opera.exe" },
-    Known { name: "Firefox", family: Family::Firefox, base: Base::Roaming, path: r"Mozilla\Firefox\Profiles", exe: "firefox.exe" },
-    Known { name: "Zen", family: Family::Firefox, base: Base::Roaming, path: r"zen\Profiles", exe: "zen.exe" },
-    Known { name: "Librewolf", family: Family::Firefox, base: Base::Roaming, path: r"librewolf\Profiles", exe: "librewolf.exe" },
-    Known { name: "Waterfox", family: Family::Firefox, base: Base::Roaming, path: r"Waterfox\Profiles", exe: "waterfox.exe" },
+    Known {
+        name: "Chrome",
+        family: Family::Chromium,
+        base: Base::Local,
+        path: r"Google\Chrome\User Data",
+        exe: "chrome.exe",
+    },
+    Known {
+        name: "Edge",
+        family: Family::Chromium,
+        base: Base::Local,
+        path: r"Microsoft\Edge\User Data",
+        exe: "msedge.exe",
+    },
+    Known {
+        name: "Brave",
+        family: Family::Chromium,
+        base: Base::Local,
+        path: r"BraveSoftware\Brave-Browser\User Data",
+        exe: "brave.exe",
+    },
+    Known {
+        name: "Vivaldi",
+        family: Family::Chromium,
+        base: Base::Local,
+        path: r"Vivaldi\User Data",
+        exe: "vivaldi.exe",
+    },
+    Known {
+        name: "Chromium",
+        family: Family::Chromium,
+        base: Base::Local,
+        path: r"Chromium\User Data",
+        exe: "chrome.exe",
+    },
+    Known {
+        name: "Opera",
+        family: Family::Chromium,
+        base: Base::Roaming,
+        path: r"Opera Software\Opera Stable",
+        exe: "opera.exe",
+    },
+    Known {
+        name: "Firefox",
+        family: Family::Firefox,
+        base: Base::Roaming,
+        path: r"Mozilla\Firefox\Profiles",
+        exe: "firefox.exe",
+    },
+    Known {
+        name: "Zen",
+        family: Family::Firefox,
+        base: Base::Roaming,
+        path: r"zen\Profiles",
+        exe: "zen.exe",
+    },
+    Known {
+        name: "Librewolf",
+        family: Family::Firefox,
+        base: Base::Roaming,
+        path: r"librewolf\Profiles",
+        exe: "librewolf.exe",
+    },
+    Known {
+        name: "Waterfox",
+        family: Family::Firefox,
+        base: Base::Roaming,
+        path: r"Waterfox\Profiles",
+        exe: "waterfox.exe",
+    },
 ];
 
 /// One profile of one browser, and the files it keeps.
@@ -126,7 +186,10 @@ pub struct Want {
 
 impl Default for Want {
     fn default() -> Self {
-        Self { history: true, bookmarks: true }
+        Self {
+            history: true,
+            bookmarks: true,
+        }
     }
 }
 
@@ -234,7 +297,11 @@ pub fn readable_copy(source: &Path, into: &Path, stale_after: Duration) -> Optio
     // Two browsers both call the file `History`, and every Firefox profile
     // calls it `places.sqlite`, so the name alone is not enough to tell copies
     // apart. The path they came from is.
-    let copy = into.join(format!("{}-{}", short_hash(&source.to_string_lossy()), file_name(source)));
+    let copy = into.join(format!(
+        "{}-{}",
+        short_hash(&source.to_string_lossy()),
+        file_name(source)
+    ));
 
     if fresh_enough(&copy, stale_after) {
         return Some(copy);
@@ -428,7 +495,10 @@ fn walk_bookmarks(
 
     match node.get("type").and_then(|t| t.as_str()) {
         Some("url") => {
-            let title = node.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+            let title = node
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or_default();
             let url = node.get("url").and_then(|u| u.as_str()).unwrap_or_default();
 
             if url.is_empty() {
@@ -437,7 +507,11 @@ fn walk_bookmarks(
 
             if title.to_lowercase().contains(needle) || url.to_lowercase().contains(needle) {
                 out.push(Hit {
-                    title: if title.is_empty() { url.to_string() } else { title.to_string() },
+                    title: if title.is_empty() {
+                        url.to_string()
+                    } else {
+                        title.to_string()
+                    },
                     url: url.to_string(),
                     browser: browser.to_string(),
                     bookmark: true,
@@ -460,7 +534,10 @@ fn walk_bookmarks(
 /// Everything one profile knows that matches.
 fn from_profile(profile: &Profile, query: &str, want: Want, scratch: &Path) -> Vec<Hit> {
     let pattern = like(query);
-    let icon = profile.program.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let icon = profile
+        .program
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned());
     let icon = icon.as_deref();
     let mut out = Vec::new();
 
@@ -851,7 +928,11 @@ fn client_name(root: windows::Win32::System::Registry::HKEY, key: &str) -> Optio
 /// The program a registered browser runs.
 #[cfg(windows)]
 fn client_command(root: windows::Win32::System::Registry::HKEY, key: &str) -> Option<PathBuf> {
-    let command = read_string(root, &format!(r"{BROWSER_CLIENTS}\{key}\shell\open\command"), "")?;
+    let command = read_string(
+        root,
+        &format!(r"{BROWSER_CLIENTS}\{key}\shell\open\command"),
+        "",
+    )?;
     let path = PathBuf::from(unquote(&command));
 
     path.is_file().then_some(path)
@@ -1123,7 +1204,10 @@ mod tests {
         fn folders_are_not_offered_as_pages() {
             let found = chromium_bookmarks(&written("folders"), "reading", "Test", None);
 
-            assert!(found.is_empty(), "a folder was returned as a page: {found:?}");
+            assert!(
+                found.is_empty(),
+                "a folder was returned as a page: {found:?}"
+            );
         }
 
         #[test]
@@ -1202,10 +1286,16 @@ mod tests {
             let it = profile(Family::Chromium, &dir);
 
             let by_title = from_profile(&it, "GitHub", Want::default(), &dir.join("copies"));
-            assert!(!by_title.is_empty(), "nothing matched a title that is there");
+            assert!(
+                !by_title.is_empty(),
+                "nothing matched a title that is there"
+            );
 
             let by_url = from_profile(&it, "rust-lang", Want::default(), &dir.join("copies"));
-            assert!(!by_url.is_empty(), "nothing matched an address that is there");
+            assert!(
+                !by_url.is_empty(),
+                "nothing matched an address that is there"
+            );
         }
 
         /// A page can be stored with no title, and an empty row is unusable.
@@ -1214,7 +1304,12 @@ mod tests {
             let dir = scratch("chromium-untitled");
             let it = profile(Family::Chromium, &dir);
 
-            let found = from_profile(&it, "untitled.example", Want::default(), &dir.join("copies"));
+            let found = from_profile(
+                &it,
+                "untitled.example",
+                Want::default(),
+                &dir.join("copies"),
+            );
 
             assert_eq!(found.len(), 1);
             assert_eq!(found[0].title, "https://untitled.example");
@@ -1240,7 +1335,10 @@ mod tests {
 
             let found = from_profile(&it, "Saved Page", Want::default(), &dir.join("copies"));
 
-            assert!(found.iter().any(|h| h.bookmark), "the bookmark was not marked: {found:?}");
+            assert!(
+                found.iter().any(|h| h.bookmark),
+                "the bookmark was not marked: {found:?}"
+            );
         }
 
         /// Turning one off has to actually stop reading it.
@@ -1252,11 +1350,17 @@ mod tests {
             let found = from_profile(
                 &it,
                 "GitHub",
-                Want { history: false, bookmarks: true },
+                Want {
+                    history: false,
+                    bookmarks: true,
+                },
                 &dir.join("copies"),
             );
 
-            assert!(found.is_empty(), "history came back with history switched off: {found:?}");
+            assert!(
+                found.is_empty(),
+                "history came back with history switched off: {found:?}"
+            );
         }
 
         /// The original is somebody else's file and is never opened.
@@ -1333,8 +1437,10 @@ mod tests {
             std::fs::write(two.join("places.sqlite"), b"two").expect("written");
 
             let into = dir.join("copies");
-            let first = readable_copy(&one.join("places.sqlite"), &into, STALE_AFTER).expect("a copy");
-            let second = readable_copy(&two.join("places.sqlite"), &into, STALE_AFTER).expect("a copy");
+            let first =
+                readable_copy(&one.join("places.sqlite"), &into, STALE_AFTER).expect("a copy");
+            let second =
+                readable_copy(&two.join("places.sqlite"), &into, STALE_AFTER).expect("a copy");
 
             assert_ne!(first, second);
             assert_eq!(std::fs::read(&first).expect("read back"), b"one");
@@ -1385,7 +1491,9 @@ mod tests {
         fn a_source_that_is_not_there_gives_nothing() {
             let dir = scratch("copy-absent");
 
-            assert!(readable_copy(&dir.join("nothing"), &dir.join("copies"), STALE_AFTER).is_none());
+            assert!(
+                readable_copy(&dir.join("nothing"), &dir.join("copies"), STALE_AFTER).is_none()
+            );
         }
     }
 
@@ -1404,7 +1512,10 @@ mod tests {
         #[test]
         fn wanting_neither_reads_nothing() {
             let dir = scratch("search-neither");
-            let want = Want { history: false, bookmarks: false };
+            let want = Want {
+                history: false,
+                bookmarks: false,
+            };
 
             assert!(search("github", 10, want, &dir).is_empty());
             assert!(!dir.join("copies").exists(), "a copy was taken anyway");

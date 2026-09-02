@@ -141,7 +141,11 @@ pub fn parse(text: &str) -> Result<Vec<Quicklink>, String> {
 /// **Nothing is ever removed.** An import adds and replaces; a link that is
 /// here and not in the file stays. Somebody importing a colleague's file
 /// should not lose their own.
-pub fn merge(existing: &[Quicklink], incoming: Vec<Quicklink>, now: i64) -> (Vec<Quicklink>, Summary) {
+pub fn merge(
+    existing: &[Quicklink],
+    incoming: Vec<Quicklink>,
+    now: i64,
+) -> (Vec<Quicklink>, Summary) {
     let mut out = existing.to_vec();
     let mut summary = Summary::default();
 
@@ -153,9 +157,9 @@ pub fn merge(existing: &[Quicklink], incoming: Vec<Quicklink>, now: i64) -> (Vec
 
         // No id, or an id nothing here uses: is it here word for word anyway?
         let identical = already.is_none()
-            && out.iter().any(|held| {
-                held.link == arriving.link && held.name == arriving.name
-            });
+            && out
+                .iter()
+                .any(|held| held.link == arriving.link && held.name == arriving.name);
 
         if identical {
             summary.skipped += 1;
@@ -261,10 +265,9 @@ mod tests {
 
     #[test]
     fn a_file_from_another_tool_reads() {
-        let read = parse(
-            r#"[{"title": "Search the docs", "url": "https://example.com/?q={query}"}]"#,
-        )
-        .expect("reads");
+        let read =
+            parse(r#"[{"title": "Search the docs", "url": "https://example.com/?q={query}"}]"#)
+                .expect("reads");
 
         assert_eq!(read.len(), 1);
         assert_eq!(read[0].name, "Search the docs");
@@ -368,7 +371,10 @@ mod tests {
 
         assert_eq!(summary.keywords_taken, 1);
         assert_eq!(after.len(), 2);
-        assert_eq!(after[0].keyword, "d", "the one already here lost its keyword");
+        assert_eq!(
+            after[0].keyword, "d",
+            "the one already here lost its keyword"
+        );
         assert_eq!(after[1].keyword, "");
     }
 
@@ -397,7 +403,11 @@ mod tests {
             link("two", "Also mine", "a", "https://also.example"),
         ];
 
-        let (after, _) = merge(&here, vec![link("three", "Theirs", "t", "https://x.example")], NOW);
+        let (after, _) = merge(
+            &here,
+            vec![link("three", "Theirs", "t", "https://x.example")],
+            NOW,
+        );
 
         assert_eq!(after.len(), 3);
         assert!(after.iter().any(|held| held.id == "one"));

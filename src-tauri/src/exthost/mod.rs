@@ -7,11 +7,11 @@
 //! `postMessage`.
 
 pub mod api;
-pub mod grants;
-pub mod permission;
 pub mod bridge;
 pub mod framing;
+pub mod grants;
 pub mod manager;
+pub mod permission;
 pub mod rpc;
 pub mod storage;
 

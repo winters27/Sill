@@ -364,8 +364,7 @@ pub fn undo(ctx: &ActionCtx, undo: &Undo) -> Result<String, String> {
                 return Ok(format!("{name} was already gone"));
             }
 
-            std::fs::remove_file(path)
-                .map_err(|err| format!("could not remove {name}: {err}"))?;
+            std::fs::remove_file(path).map_err(|err| format!("could not remove {name}: {err}"))?;
 
             Ok(format!("{name} removed"))
         }
@@ -380,9 +379,10 @@ pub fn undo(ctx: &ActionCtx, undo: &Undo) -> Result<String, String> {
                 std::path::Path::new(back_to),
             )?;
 
-            Ok(format!("{name} put back in {}", crate::files_ops::name_of(
-                landed.parent().unwrap_or(&landed)
-            )))
+            Ok(format!(
+                "{name} put back in {}",
+                crate::files_ops::name_of(landed.parent().unwrap_or(&landed))
+            ))
         }
 
         Undo::RestoreWindow {

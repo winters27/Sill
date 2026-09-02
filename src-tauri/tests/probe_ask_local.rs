@@ -31,12 +31,7 @@ async fn a_local_model_answers_and_the_answer_arrives_in_pieces() {
         .expect("a client");
 
     // Nothing listening is a skip, not a failure.
-    if client
-        .get(format!("{BASE}/models"))
-        .send()
-        .await
-        .is_err()
-    {
+    if client.get(format!("{BASE}/models")).send().await.is_err() {
         println!("nothing is listening on {BASE}, so there is nothing to ask");
         return;
     }
@@ -80,7 +75,10 @@ async fn a_local_model_answers_and_the_answer_arrives_in_pieces() {
 
     let answer: String = pieces.concat();
 
-    println!("first piece after {:?}", first_piece_after.unwrap_or_default());
+    println!(
+        "first piece after {:?}",
+        first_piece_after.unwrap_or_default()
+    );
     println!("{} pieces in {:?}", pieces.len(), started.elapsed());
     println!("answer: {}", answer.trim());
 
@@ -123,9 +121,16 @@ async fn a_model_that_is_not_installed_says_which_one() {
         ..Provider::default()
     };
 
-    let refused = openai::ask(&client, &provider, &[Message::user("hello")], None, &|| false, |_| {})
-        .await
-        .expect_err("a model that is not there cannot answer");
+    let refused = openai::ask(
+        &client,
+        &provider,
+        &[Message::user("hello")],
+        None,
+        &|| false,
+        |_| {},
+    )
+    .await
+    .expect_err("a model that is not there cannot answer");
 
     println!("it said: {refused}");
 

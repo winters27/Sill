@@ -351,7 +351,10 @@ mod tests {
             assert!(halt.stopped(first));
 
             let second = halt.mark();
-            assert!(!halt.stopped(second), "the next turn started already stopped");
+            assert!(
+                !halt.stopped(second),
+                "the next turn started already stopped"
+            );
         }
 
         #[test]

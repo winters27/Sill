@@ -297,12 +297,11 @@ fn a_file_can_be_acted_on_and_not_only_opened() {
     for kind in [ObjectKind::File, ObjectKind::Folder] {
         let offered: Vec<&str> = registry.for_kind(kind).iter().map(|a| a.id()).collect();
 
-        for wanted in [
-            "sill.copyPath",
-            "sill.file.terminal",
-            "sill.file.recycle",
-        ] {
-            assert!(offered.contains(&wanted), "{kind:?} cannot {wanted}: {offered:?}");
+        for wanted in ["sill.copyPath", "sill.file.terminal", "sill.file.recycle"] {
+            assert!(
+                offered.contains(&wanted),
+                "{kind:?} cannot {wanted}: {offered:?}"
+            );
         }
     }
 }
@@ -583,8 +582,12 @@ fn the_recycle_bin_is_the_last_thing_offered_for_a_file() {
     let offered = registry.for_kind(ObjectKind::File);
 
     let last = offered.last().expect("a file has actions");
-    assert_eq!(last.id(), "sill.file.recycle", "offered: {:?}",
-        offered.iter().map(|a| a.title()).collect::<Vec<_>>());
+    assert_eq!(
+        last.id(),
+        "sill.file.recycle",
+        "offered: {:?}",
+        offered.iter().map(|a| a.title()).collect::<Vec<_>>()
+    );
 }
 
 /// A program's own volume is a kind of thing with a full set of actions.
@@ -621,7 +624,10 @@ mod a_program_has_more_than_one_volume_action {
             "sill.audio.session.half",
             "sill.audio.session.full",
         ] {
-            assert!(offered.contains(&wanted), "{wanted} is not offered: {offered:?}");
+            assert!(
+                offered.contains(&wanted),
+                "{wanted} is not offered: {offered:?}"
+            );
         }
     }
 

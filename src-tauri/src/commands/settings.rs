@@ -1,8 +1,8 @@
 //! Reading and writing Sill's own preferences, and the window that edits them.
 
 use crate::{
-    apply_autostart, apply_dictation, apply_tray, apply_window_size, rebind_capture,
-    rebind_summon, rebind_switcher, same_dictation,
+    apply_autostart, apply_dictation, apply_tray, apply_window_size, rebind_capture, rebind_summon,
+    rebind_switcher, same_dictation,
 };
 
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -125,14 +125,16 @@ pub(crate) async fn set_preferences(
         );
     }
 
+    // Read when focus is lost rather than wired once, so this one takes
+    // effect now instead of at the next start. See `DismissOnBlur`.
+    if let Some(blur) = app.try_state::<crate::DismissOnBlur>() {
+        blur.set(prefs.hotkey.dismiss_on_blur);
+    }
+
     if previous.appearance.backdrop != prefs.appearance.backdrop
         || previous.appearance.tint_alpha != prefs.appearance.tint_alpha
     {
-        crate::apply_backdrops(
-            &app,
-            prefs.appearance.backdrop,
-            prefs.appearance.tint_alpha,
-        );
+        crate::apply_backdrops(&app, prefs.appearance.backdrop, prefs.appearance.tint_alpha);
     }
 
     // The launcher window re-reads whatever it renders from.

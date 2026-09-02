@@ -44,7 +44,11 @@ fn report_section_icons() {
             .map(|uri| format!("{} bytes", uri.len()))
             .unwrap_or_else(|| "NO ICON".to_string());
 
-        println!("{icon:22} {size:>12}  {} pages   e.g. {}", pages.len(), pages[0]);
+        println!(
+            "{icon:22} {size:>12}  {} pages   e.g. {}",
+            pages.len(),
+            pages[0]
+        );
     }
 }
 
@@ -95,8 +99,12 @@ fn the_bluetooth_switch_is_not_wearing_a_warning_triangle() {
     let triangle = triangle.expect("the warning triangle to compare against");
 
     for row in sill_lib::registry::builtins() {
-        let Some(icon) = row.icon.as_deref() else { continue };
-        let Some(drawn) = sill_lib::icons::icon_data_uri(icon) else { continue };
+        let Some(icon) = row.icon.as_deref() else {
+            continue;
+        };
+        let Some(drawn) = sill_lib::icons::icon_data_uri(icon) else {
+            continue;
+        };
 
         assert_ne!(
             drawn, triangle,
@@ -128,10 +136,19 @@ fn compare_candidates() {
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
 
     let candidates = [
-        "SearchIndexer.exe", "SearchApp.exe", "SearchFilterHost.exe",
-        "desk.cpl", "main.cpl", "PhoneExperienceHost.exe", "WFS.exe",
-        "SecurityHealthSystray.exe", "wscui.cpl", "powercfg.cpl",
-        "SystemPropertiesRemote.exe", "rstrui.exe", "OneDriveSetup.exe",
+        "SearchIndexer.exe",
+        "SearchApp.exe",
+        "SearchFilterHost.exe",
+        "desk.cpl",
+        "main.cpl",
+        "PhoneExperienceHost.exe",
+        "WFS.exe",
+        "SecurityHealthSystray.exe",
+        "wscui.cpl",
+        "powercfg.cpl",
+        "SystemPropertiesRemote.exe",
+        "rstrui.exe",
+        "OneDriveSetup.exe",
     ];
 
     for name in candidates {

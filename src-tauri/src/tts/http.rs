@@ -134,7 +134,11 @@ mod tests {
         let body = "<!DOCTYPE html>".to_string() + &"x".repeat(5_000);
         let said = said_why(reqwest::StatusCode::BAD_GATEWAY, body.as_bytes());
 
-        assert!(said.len() < 300, "an error page should not be quoted whole: {}", said.len());
+        assert!(
+            said.len() < 300,
+            "an error page should not be quoted whole: {}",
+            said.len()
+        );
         assert!(said.contains("502"));
     }
 

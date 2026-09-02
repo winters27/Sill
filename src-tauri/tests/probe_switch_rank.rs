@@ -30,8 +30,15 @@ fn where_the_switches_land() {
     eprintln!("{} entries\n", records.len());
 
     for query in [
-        "wifi", "wi-fi", "bluetooth", "mute", "dark mode", "volume",
-        "audio output", "speakers", "lock",
+        "wifi",
+        "wi-fi",
+        "bluetooth",
+        "mute",
+        "dark mode",
+        "volume",
+        "audio output",
+        "speakers",
+        "lock",
     ] {
         let found = registry::search_excluding(
             records.iter(),
@@ -84,8 +91,14 @@ fn what_ordinary_queries_return() {
     let records = registry::one_per_id(records);
 
     for query in [
-        "visual studio", "task manager", "control panel", "device manager",
-        "open settings", "the file", "new folder", "sound",
+        "visual studio",
+        "task manager",
+        "control panel",
+        "device manager",
+        "open settings",
+        "the file",
+        "new folder",
+        "sound",
     ] {
         let found = registry::search_excluding(
             records.iter(),

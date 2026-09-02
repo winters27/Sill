@@ -57,7 +57,11 @@ impl Running {
     }
 
     fn stop(&self, job: &str) -> bool {
-        let held = self.jobs.lock().ok().and_then(|jobs| jobs.get(job).cloned());
+        let held = self
+            .jobs
+            .lock()
+            .ok()
+            .and_then(|jobs| jobs.get(job).cloned());
 
         match held {
             Some(stop) => {

@@ -64,9 +64,10 @@ async fn a_real_extension_installs_from_the_store() {
     );
 
     assert!(
-        catalog.listings.iter().all(|listing| {
-            listing.platforms.is_empty() || listing.declares_windows()
-        }),
+        catalog
+            .listings
+            .iter()
+            .all(|listing| { listing.platforms.is_empty() || listing.declares_windows() }),
         "an extension that names macOS and not Windows reached the catalogue"
     );
 
@@ -148,7 +149,11 @@ async fn a_real_extension_installs_from_the_store() {
     for reach in &prepared.capabilities {
         println!(
             "  {} {} ({})",
-            if reach.mediated { "via Sill  " } else { "direct    " },
+            if reach.mediated {
+                "via Sill  "
+            } else {
+                "direct    "
+            },
             reach.title,
             reach.seen_in.join(", ")
         );
@@ -190,7 +195,9 @@ async fn a_real_extension_installs_from_the_store() {
     // The index, which is what the launcher searches.
     let index = sill_lib::registry::load_index(&home.join("index.json"));
     assert!(
-        index.iter().any(|record| record.id == "uuid-generator:generateV7"),
+        index
+            .iter()
+            .any(|record| record.id == "uuid-generator:generateV7"),
         "the index does not list the command that was built"
     );
 
@@ -216,10 +223,19 @@ async fn a_real_extension_installs_from_the_store() {
 
     // ---------------------------------------------------------- and removal
     let pins = sill_lib::store::pins(&home);
-    assert!(pins.contains_key(EXTENSION), "the pin is found by the name the store uses");
+    assert!(
+        pins.contains_key(EXTENSION),
+        "the pin is found by the name the store uses"
+    );
 
-    println!("\nrun it with:\n  node scripts/run-extension.mjs {} {EXTENSION} --no-view\n",
-        installed.join("generateV7.js").display().to_string().replace('\\', "/"));
+    println!(
+        "\nrun it with:\n  node scripts/run-extension.mjs {} {EXTENSION} --no-view\n",
+        installed
+            .join("generateV7.js")
+            .display()
+            .to_string()
+            .replace('\\', "/")
+    );
 }
 
 /// Removing takes the directory and the index entries together.
@@ -236,8 +252,12 @@ fn removing_an_extension_takes_its_commands_out_of_the_index() {
     std::fs::create_dir_all(home.join("demo")).expect("a directory to remove");
     std::fs::create_dir_all(home.join("other")).expect("one to leave alone");
 
-    sill_lib::store::write_origin(&home, "demo", &Origin::store("demo", "extensions/demo", "sha", Vec::new(), 0))
-        .expect("an origin");
+    sill_lib::store::write_origin(
+        &home,
+        "demo",
+        &Origin::store("demo", "extensions/demo", "sha", Vec::new(), 0),
+    )
+    .expect("an origin");
 
     let index = r#"[
         {"id":"demo:run","extension":"demo","extensionTitle":"Demo","command":"run",

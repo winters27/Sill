@@ -252,7 +252,9 @@ pub fn tree_of(root: u32) -> std::collections::HashSet<u32> {
         let mut at = pid;
 
         for _ in 0..64 {
-            let Some(&parent) = parents.get(&at) else { break };
+            let Some(&parent) = parents.get(&at) else {
+                break;
+            };
 
             if parent == root || found.contains(&parent) {
                 found.insert(pid);
@@ -341,9 +343,19 @@ mod tests {
 
     #[test]
     fn a_name_is_the_last_segment_however_the_path_is_written() {
-        assert_eq!(file_name_of(r"C:\Program Files\App\app.exe").as_deref(), Some("app.exe"));
-        assert_eq!(file_name_of("app.exe").as_deref(), Some("app.exe"), "no separator at all");
-        assert_eq!(file_name_of("C:/mixed/slashes/app.exe").as_deref(), Some("app.exe"));
+        assert_eq!(
+            file_name_of(r"C:\Program Files\App\app.exe").as_deref(),
+            Some("app.exe")
+        );
+        assert_eq!(
+            file_name_of("app.exe").as_deref(),
+            Some("app.exe"),
+            "no separator at all"
+        );
+        assert_eq!(
+            file_name_of("C:/mixed/slashes/app.exe").as_deref(),
+            Some("app.exe")
+        );
     }
 
     #[test]
