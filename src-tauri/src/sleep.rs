@@ -140,7 +140,7 @@ pub fn sleep_soon(window: &WebviewWindow) {
             return;
         }
 
-        suspend(&label, &window);
+        suspend(&label, &window, armed);
     });
 }
 
@@ -189,10 +189,26 @@ the first time: the same build suspended on one run and not the next, and the
 difference was what the page happened to be doing.
 */
 #[cfg(windows)]
-fn suspend(label: &str, window: &WebviewWindow) {
+fn suspend(label: &str, window: &WebviewWindow, armed: u64) {
     let label = label.to_string();
+    let watched = window.clone();
 
-    let _ = window.with_webview(|webview| {
+    let _ = window.with_webview(move |webview| {
+        /*
+         * Asked again, here, on the webview's own thread.
+         *
+         * `with_webview` hands this closure to that thread and returns, so
+         * everything checked before it is a statement about the past.
+         * Summoning in the gap meant `SetIsVisible(false)` on a window
+         * somebody was looking at: the launcher would be up, focused, and
+         * invisible. The gap is small and the window it opens is exactly
+         * twenty seconds after a dismissal, which is a perfectly ordinary
+         * moment to come back.
+         */
+        if generation(&label) != armed || watched.is_visible().unwrap_or(false) {
+            return;
+        }
+
         let controller = webview.controller();
 
         unsafe {
@@ -230,7 +246,7 @@ fn suspend(label: &str, window: &WebviewWindow) {
 }
 
 #[cfg(not(windows))]
-fn suspend(_label: &str, _window: &WebviewWindow) {}
+fn suspend(_label: &str, _window: &WebviewWindow, _armed: u64) {}
 
 #[cfg(test)]
 mod tests {
