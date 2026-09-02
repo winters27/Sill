@@ -82,6 +82,24 @@ fn generation(label: &str) -> u64 {
         .unwrap_or(0)
 }
 
+/// Claims the next generation for a window that is being put away.
+///
+/// Arming bumps the count, the same way waking does, so **only the newest
+/// timer for a window ever acts**. Two arrive for one dismissal: `summon::hide`
+/// arms one and the focus handler arms another as focus leaves, and both used
+/// to run. The log said so, twice: `main suspended` on the same millisecond,
+/// from two threads that had both slept twenty seconds for the same window.
+fn arm(label: &str) -> u64 {
+    GENERATIONS
+        .lock()
+        .map(|mut all| {
+            let next = all.get(label).copied().unwrap_or(0) + 1;
+            all.insert(label.to_string(), next);
+            next
+        })
+        .unwrap_or(0)
+}
+
 /// Arms the sleep. Called on dismissal, returns immediately.
 pub fn sleep_soon(window: &WebviewWindow) {
     /*
@@ -106,7 +124,7 @@ pub fn sleep_soon(window: &WebviewWindow) {
     let _ = window.emit("sill://hidden", ());
 
     let label = window.label().to_string();
-    let armed = generation(&label);
+    let armed = arm(&label);
     let window = window.clone();
 
     std::thread::spawn(move || {
@@ -261,6 +279,48 @@ mod tests {
             generation("main"),
             armed,
             "the launcher's pending sleep was cancelled"
+        );
+    }
+}
+
+#[cfg(test)]
+mod arming {
+    use super::{arm, generation};
+
+    /// Two timers for one dismissal leave only the newer one armed.
+    ///
+    /// Both `summon::hide` and the focus handler arm a sleep when the launcher
+    /// goes away, so two threads sleep twenty seconds for the same window. The
+    /// log said so, twice, on the same millisecond.
+    #[test]
+    fn only_the_newest_timer_for_a_window_acts() {
+        let first = arm("test-window");
+        let second = arm("test-window");
+
+        assert_ne!(first, second);
+        assert_eq!(generation("test-window"), second);
+        assert_ne!(
+            generation("test-window"),
+            first,
+            "the older timer would still fire"
+        );
+    }
+
+    /// One window's dismissal does not disarm another's.
+    ///
+    /// Sill has two windows that come and go independently, and a shared count
+    /// would let opening the tray menu disarm the launcher's pending sleep,
+    /// which is the one that matters.
+    #[test]
+    fn windows_are_armed_independently() {
+        let launcher = arm("independent-main");
+        arm("independent-tray");
+        arm("independent-tray");
+
+        assert_eq!(
+            generation("independent-main"),
+            launcher,
+            "another window's dismissal disarmed this one"
         );
     }
 }
