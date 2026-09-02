@@ -131,6 +131,78 @@ function Measure-Cpu($Tree, [int]$Seconds) {
     }
 }
 
+# How often the application wakes up, which CPU time does not show.
+#
+# A thread that wakes, looks at a flag and goes back to sleep costs almost no
+# processor time and is exactly the kind of idle cost that hides: two of them
+# ran for as long as dictation was switched on and neither moved the CPU
+# reading. Context switches are what "woke up" actually looks like.
+#
+# Reported per thread as well as in total, because the total is far too noisy
+# to see one thread in: three runs of the same build gave 2,386, 3,173 and
+# 4,398 a minute while the threads in question accounted for about 330.
+function Measure-Wakeups($Tree, [int]$Seconds) {
+    $ids = @{}
+    foreach ($p in $Tree) { $ids[[int]$p.ProcessId] = $true }
+
+    function Snapshot {
+        $by = @{}
+        foreach ($t in Get-CimInstance Win32_PerfRawData_PerfProc_Thread) {
+            if ($ids.ContainsKey([int]$t.IDProcess)) {
+                $by["$($t.IDProcess)/$($t.IDThread)"] = [int64]$t.ContextSwitchesPersec
+            }
+        }
+        return $by
+    }
+
+    $before = Snapshot
+    Start-Sleep -Seconds $Seconds
+    $after = Snapshot
+
+    $deltas = @()
+    $total = 0
+    foreach ($key in $after.Keys) {
+        if (-not $before.ContainsKey($key)) { continue }
+        $moved = $after[$key] - $before[$key]
+        $total += $moved
+        if ($moved -gt 0) { $deltas += [pscustomobject]@{ Thread = $key; Switches = $moved } }
+    }
+
+    $perMinute = [int]($total * 60 / $Seconds)
+    $busiest = ($deltas | Sort-Object Switches -Descending | Select-Object -First 1)
+
+    return [pscustomobject]@{
+        PerMinute = $perMinute
+        Busiest   = if ($busiest) { [int]($busiest.Switches * 60 / $Seconds) } else { 0 }
+        Threads   = @($deltas).Count
+    }
+}
+
+# The settings that change what any of this means.
+#
+# Not pinned, because pinning would measure a machine nobody has. Reported
+# instead, so two runs can be compared knowingly: a widget pinned to the chin,
+# dictation switched on and file indexing enabled each add work that is
+# supposed to be there.
+function Write-Settings {
+    $path = Join-Path $env:APPDATA 'app.winters.sill\preferences.json'
+    if (-not (Test-Path $path)) {
+        Write-Output 'preferences: none yet, so these are the defaults'
+        return
+    }
+
+    try {
+        $p = Get-Content $path -Raw | ConvertFrom-Json
+        '{0,-24} {1}' -f 'file indexing:', $p.files.index
+        '{0,-24} {1}' -f 'clipboard history:', $p.clipboard.enabled
+        '{0,-24} {1}' -f 'dictation:', $p.dictation.enabled
+        '{0,-24} {1}' -f 'snippet expansion:', $p.snippets.expandKeywords
+        '{0,-24} {1}' -f 'pinned widgets:', ($p.widgets.pinned -join ', ')
+    } catch {
+        Write-Output "preferences: could not be read ($_)"
+    }
+}
+
 function Write-Snapshot($Tree, [string]$When) {
     $private = ($Tree | Measure-Object -Property PrivatePageCount -Sum).Sum / 1MB
     $working = ($Tree | Measure-Object -Property WorkingSetSize -Sum).Sum / 1MB
@@ -149,6 +221,8 @@ function Write-Snapshot($Tree, [string]$When) {
 
 Write-Output "Sill idle measurement [$Label]"
 Write-Output "binary: $Exe"
+Write-Output ''
+Write-Settings
 
 Start-Process -FilePath $Exe | Out-Null
 Start-Sleep -Seconds 5
@@ -170,6 +244,9 @@ Write-Snapshot $tree "steady state (+$([int](($SettleSeconds + $SteadySeconds) /
 $cpu = Measure-Cpu $tree $SampleSeconds
 foreach ($row in $cpu.Rows) { '  {0,-16} {1,7:N1} ms' -f $row.Role, $row.Ms }
 'idle CPU {0:N2}% of one core' -f $cpu.Percent
+
+$woke = Measure-Wakeups $tree $SampleSeconds
+'wakeups {0:N0} a minute across {1} threads, busiest {2:N0}' -f $woke.PerMinute, $woke.Threads, $woke.Busiest
 
 Write-Output ''
 Write-Output "Leaving PID $root running. Stop it with: Stop-Process -Id $root"

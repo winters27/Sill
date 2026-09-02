@@ -59,6 +59,15 @@ outside the code.
 | What | Measured |
 | --- | --- |
 | Whole application, idle, all processes | 281 MB private at the time of the audit |
+| Whole application, a minute after startup | 228.6 MB private, 89.0 MB set |
+| Working set, before and after the renderers suspend | 488.1 MB then 89.0 MB |
+| Idle CPU at steady state, whole tree | 0.00% of one core |
+| Wakeups at rest, whole tree | 1,740 a minute across 7 threads, busiest 819 |
+| Hidden but not yet suspended, first 15 s | 0.9 to 1.3% of one core |
+| Hidden and suspended, next 45 s | 0.2 to 0.5% of one core |
+| Cold start to the hotkey answering | 465 ms best, 505 mean over five runs |
+| Clipboard listing, 135 entries | 11 KB of text |
+| Finding Node once | about 40 ms |
 | Rust core before the file index existed | 11.3 MB private |
 | Rust core with a whole drive indexed | 41 MB private |
 | File index, home folder | 49,402 entries, 1.3 s to walk, 5.8 MB on disk |
@@ -66,6 +75,24 @@ outside the code.
 | File search, one query | 3 to 10 ms |
 | Extension host, resident with nothing loaded | 0, it is not started until an extension is |
 | Rust core while a home folder is being written to | 3.4 s of processor per 30 s, about a tenth of one core |
+
+### What the idle numbers are worth
+
+The working set falling from 488 MB to 89 MB is the renderers suspending
+twenty seconds after the launcher is put away, and it is the single largest
+number in this document. It is also the one that was silently not happening
+until 2026-09-02: `TrySuspend` refuses while the page is busy, and a widget
+polling once a second kept the whole renderer awake. Anything that starts
+polling again undoes it, which is why the hidden rows above are measured
+separately from the idle ones.
+
+**Wakeups are measured because CPU time does not show them.** A thread that
+wakes, looks at a flag and goes back to sleep costs almost nothing and is
+exactly the kind of cost that hides: two of them ran for as long as dictation
+was switched on and neither moved the CPU reading. The whole-tree number is too
+noisy to see one thread in, which is why the busiest thread is reported beside
+it: three runs of the same build gave 2,386, 3,173 and 4,398 a minute while the
+threads in question accounted for about 330.
 
 ## Where the numbers came from
 
@@ -75,6 +102,15 @@ never run in a build and never slow one down.
 ```bash
 cargo test --release --manifest-path src-tauri/Cargo.toml --test budgets measured -- --ignored --nocapture
 ```
+
+```powershell
+powershell -File scripts/measure-idle.ps1 -Label after
+```
+
+That one reports the settings that change what it means, rather than pinning
+them: file indexing, clipboard history, dictation, snippet expansion and which
+widgets are pinned each add work that is supposed to be there, and a
+measurement of a machine nobody has is not worth taking.
 
 ```bash
 ROOT="C:/Users/you" cargo test --release --manifest-path src-tauri/Cargo.toml --test probe_catalog -- --ignored --nocapture
