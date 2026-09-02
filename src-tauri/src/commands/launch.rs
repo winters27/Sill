@@ -54,11 +54,15 @@ pub(crate) async fn launch_command(
             registry.frecency.record_query(query, &id, now);
             registry.frecency.remember(query);
         }
-        let path = registry.frecency_path.clone();
-        if let Err(err) = registry.frecency.save(&path) {
-            // Losing ranking history is not worth failing a launch over.
-            crate::say!("could not save frecency: {err}");
-        }
+        /*
+         * Written after the lock is released, not under it.
+         *
+         * This runs on every launch and the next keystroke's search waits on
+         * the same lock, so the disk was in the path of typing. The copy is of
+         * the ranking history alone, which is a map of counts and timestamps,
+         * not of the index beside it.
+         */
+        save_frecency_soon(&registry.frecency, &registry.frecency_path);
         record
     };
 
@@ -262,6 +266,32 @@ pub(crate) async fn perform_builtin(
     }
 }
 
+/**
+Writes the ranking history without holding anything up.
+
+Serialised here, where the caller still holds the lock and the data is
+therefore consistent, and written on the blocking pool where a slow disk is
+nobody's problem. Serialising is microseconds; the write is what varies, and it
+used to happen on the lock the next keystroke needs.
+
+Losing a launch's ranking is not worth failing the launch over, which is why
+this reports and returns rather than propagating.
+*/
+fn save_frecency_soon(frecency: &crate::registry::Frecency, path: &std::path::Path) {
+    let Ok(text) = serde_json::to_string(frecency) else {
+        crate::say!("could not serialise the ranking history");
+        return;
+    };
+
+    let path = path.to_path_buf();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(err) = crate::registry::Frecency::write(&path, &text) {
+            crate::say!("could not save frecency: {err}");
+        }
+    });
+}
+
 /// An object the window is pointing at.
 ///
 /// The window echoes back the fields Rust already sent it in a search result
@@ -370,11 +400,9 @@ pub(crate) async fn move_path(
 
         registry.frecency.record(&format!("{MOVED_TO}{folder}"), now);
 
-        let saved = registry.frecency_path.clone();
-        if let Err(err) = registry.frecency.save(&saved) {
-            // Losing which folder was used is not worth failing a move over.
-            crate::say!("could not save frecency: {err}");
-        }
+        // Off the lock, like every other write of this file. Losing which
+        // folder was used is not worth failing a move over either.
+        save_frecency_soon(&registry.frecency, &registry.frecency_path);
     }
 
     /*
@@ -614,10 +642,7 @@ pub(crate) async fn record_use(
         }
     }
 
-    let path = registry.frecency_path.clone();
-    if let Err(err) = registry.frecency.save(&path) {
-        crate::say!("could not save frecency: {err}");
-    }
+    save_frecency_soon(&registry.frecency, &registry.frecency_path);
 
     Ok(())
 }

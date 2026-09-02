@@ -327,11 +327,38 @@ pub fn load_cache(path: &Path) -> Vec<CommandRecord> {
 
 /// Writes the index for the next start.
 pub fn save_cache(path: &Path, commands: &[CommandRecord]) -> std::io::Result<()> {
+    match cache_text(commands) {
+        Some(text) => write_cache(path, &text),
+        None => Ok(()),
+    }
+}
+
+/// The index as text, ready to be written by somebody who is not holding a lock.
+///
+/// `None` when it will not serialise, which is not a thing that happens and is
+/// still not worth writing an empty cache over: a missing cache costs a slower
+/// next start, and an empty one would be read as an index with nothing in it.
+pub fn cache_text(commands: &[CommandRecord]) -> Option<String> {
+    serde_json::to_string(commands).ok()
+}
+
+/// Puts an already-serialised index on disk.
+///
+/// Staged and renamed. Half a megabyte written in place is half a megabyte of
+/// window in which the file is neither the old index nor the new one, and what
+/// is read back from a torn one is an empty root list on the next start.
+pub fn write_cache(path: &Path, text: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let text = serde_json::to_string(commands).unwrap_or_else(|_| "[]".into());
-    std::fs::write(path, text)
+
+    let staging = path.with_extension("json.partial");
+    std::fs::write(&staging, text)?;
+    if let Err(err) = std::fs::rename(&staging, path) {
+        let _ = std::fs::remove_file(&staging);
+        return Err(err);
+    }
+    Ok(())
 }
 
 /// Where the scanned index is cached, given the app's data directory.
@@ -1345,12 +1372,47 @@ impl Frecency {
             .unwrap_or_default()
     }
 
+    /**
+    Writes the ranking history.
+
+    Compact rather than pretty, and staged rather than written in place.
+
+    Pretty printing put a newline and an indent around every one of what can be
+    thousands of entries, and this is written on **every launch**, on the
+    registry lock, with the next keystroke waiting behind it. Nobody reads this
+    file by hand; the one that people do read, `preferences.json`, is still
+    printed properly.
+
+    Staged and renamed for the same reason preferences are: an interrupted
+    write left a truncated file, and a truncated file parses as nothing, which
+    silently resets everybody's ranking to "never launched".
+    */
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let text = serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into());
-        std::fs::write(path, text)
+
+        let text = serde_json::to_string(self).unwrap_or_else(|_| "{}".into());
+        Self::write(path, &text)
+    }
+
+    /// Puts already-serialised history on disk.
+    ///
+    /// Split from `save` so a caller holding a lock can serialise under it and
+    /// write outside it, which is what `launch_command` does: the write used to
+    /// happen on the lock the next keystroke waits for.
+    pub fn write(path: &Path, text: &str) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let staging = path.with_extension("json.partial");
+        std::fs::write(&staging, text)?;
+        if let Err(err) = std::fs::rename(&staging, path) {
+            let _ = std::fs::remove_file(&staging);
+            return Err(err);
+        }
+        Ok(())
     }
 
     /// How many distinct entries have ever been launched.

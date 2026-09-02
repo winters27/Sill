@@ -134,13 +134,28 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
         registry.frecency_path = frecency_path;
         registry.aliases = aliases;
 
-        if let Err(err) = registry::save_cache(&cache_path, &registry.commands) {
-            // A missing cache only costs a slower next start.
-            crate::say!("could not write the index cache: {err}");
-        }
+        /*
+         * Serialised under the lock, written outside it.
+         *
+         * The index is what the search reads, so it has to be turned into text
+         * while nothing can change it. Putting it on disk is a different
+         * matter: this runs after every scan, and the whole index is well over
+         * half a megabyte of JSON, which is a long time to hold the lock the
+         * first keystroke after startup is waiting for.
+         */
+        let text = registry::cache_text(&registry.commands);
 
         let total = registry.commands.len();
         drop(registry);
+
+        if let Some(text) = text {
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(err) = registry::write_cache(&cache_path, &text) {
+                    // A missing cache only costs a slower next start.
+                    crate::say!("could not write the index cache: {err}");
+                }
+            });
+        }
 
         println!("[sill] indexed {total} entries");
 

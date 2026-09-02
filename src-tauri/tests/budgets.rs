@@ -100,8 +100,26 @@ fn rank(corpus: &[CommandRecord], query: &str) -> u128 {
 /// spread is noise, and the sixteen-core run is the slowest of them. What a
 /// build agent has less of is single-core speed and exclusive use of it.
 fn per_keystroke_us() -> u128 {
+    /*
+     * The debug number has headroom because a full `cargo test` is itself a
+     * busy machine.
+     *
+     * Cargo runs test binaries in parallel, so these time themselves while
+     * everything else in the suite is competing for the same cores. Measured
+     * both ways on the same machine: the store browse takes 23 to 30 ms when
+     * run alone and 61.5 ms during a full run, which failed a 60 ms budget
+     * while nothing about the code had changed.
+     *
+     * The note at the top of this file already says a budget tight enough to
+     * fail on a busy machine is one somebody switches off. This is that,
+     * applied to the number rather than only written down. What the budget is
+     * for is a change of *kind*: something that grew a clone per candidate
+     * goes to seconds and still fails this by an order of magnitude. Release
+     * stays tight, because release is the build the claim is about and it is
+     * the one measured in `docs/budgets.md`.
+     */
     let measured_here = if cfg!(debug_assertions) {
-        60_000
+        150_000
     } else {
         20_000
     };

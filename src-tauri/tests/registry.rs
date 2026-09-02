@@ -3031,3 +3031,48 @@ mod a_program_volume_row {
         assert!(row.id.starts_with("audio-session:"));
     }
 }
+
+/// Saving the ranking history leaves nothing behind and reads back whole.
+///
+/// The reason it is staged and renamed is that it is written on **every
+/// launch**, so an interrupted write is not a remote possibility: it is
+/// whatever was in flight when the machine went down. A truncated JSON file
+/// parses as nothing, and nothing means the root list is ordered as though the
+/// user had never launched anything.
+///
+/// **What this test does not prove is the atomicity itself.** Interrupting a
+/// write at the right instant is not something a test can arrange here, and an
+/// earlier version of this test looked like it proved it and did not: it wrote
+/// the torn bytes to the staging path, which of course leaves the real file
+/// alone whether or not anything is staged. It passed with the staging removed.
+/// What is asserted is the part that is observable: the content survives a
+/// round trip and no half-written file is left lying next to it.
+#[test]
+fn saving_the_ranking_history_leaves_nothing_half_written_behind() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("frecency.json");
+
+    let mut frecency = Frecency::default();
+    frecency.record("code", NOW);
+    frecency.record("code", NOW);
+    frecency.save(&path).expect("saved");
+
+    let back: Frecency =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("readable"))
+            .expect("the saved file parses");
+    assert_eq!(back.len(), 1);
+
+    assert!(
+        !path.with_extension("json.partial").exists(),
+        "the staging file outlived the save, so the next reader sees two files          and one of them is a half-written copy of the other"
+    );
+
+    // Twice, because the rename has to land on a file that already exists.
+    frecency.record("other", NOW);
+    frecency.save(&path).expect("saved again over the previous file");
+
+    let back: Frecency =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("readable"))
+            .expect("the second save parses");
+    assert_eq!(back.len(), 2, "the second save replaced rather than appended");
+}
