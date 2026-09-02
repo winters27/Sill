@@ -34,7 +34,7 @@
     light: "radial-gradient(120% 90% at 25% 15%, #e8e4dc, #b9b2a6 75%)",
   } as const;
 
-  const THEMES = ["winters-glass", "oilslick", "graphite", "ember", "moss"] as const;
+  const THEMES = ["winters-glass", "oilslick", "graphite", "ember", "moss", "aberration"] as const;
 
   let wall = $state<keyof typeof WALLS>("dark");
   let theme = $state<(typeof THEMES)[number]>("winters-glass");

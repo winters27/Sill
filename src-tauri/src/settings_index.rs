@@ -134,7 +134,7 @@ pub const SETTINGS: &[Setting] = &[
         "appearance",
         "Appearance",
         "Theme",
-        "colour color palette accent oilslick graphite ember moss chroma gradient dark",
+        "colour color palette accent oilslick graphite ember moss aberration \n         chromatic prism fringe chroma gradient dark",
     ),
     s(
         "appearance",

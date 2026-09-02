@@ -152,6 +152,7 @@
       <option value="graphite">graphite</option>
       <option value="ember">ember</option>
       <option value="moss">moss</option>
+      <option value="aberration">aberration</option>
     </select>
   </div>
 

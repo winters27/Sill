@@ -196,7 +196,7 @@
    */
   /** Themes that paint a chroma wash. A slider for a theme with none is a
       control that visibly does nothing, which is worse than no control. */
-  const CHROMATIC: Theme[] = ["oilslick"];
+  const CHROMATIC: Theme[] = ["oilslick", "aberration"];
 
   type SourceKey = Exclude<keyof Preferences["sources"], "excluded" | "hidden">;
 

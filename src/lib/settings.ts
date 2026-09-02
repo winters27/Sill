@@ -57,7 +57,13 @@ export interface Hotkey {
  * The ids are the `[data-theme]` values in `theme.css`, so a new theme is a
  * block there plus a variant here plus a variant in Rust, and nothing else.
  */
-export type Theme = "winters-glass" | "oilslick" | "graphite" | "ember" | "moss";
+export type Theme =
+  | "winters-glass"
+  | "oilslick"
+  | "graphite"
+  | "ember"
+  | "moss"
+  | "aberration";
 
 /**
  * Which screen the launcher comes up on.

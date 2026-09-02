@@ -540,15 +540,46 @@ export function performBuiltin(
  * Cached here as well as in Rust: a row re-renders on every keystroke while
  * filtering, and an await per row per frame would be a lot of IPC for an
  * answer that cannot change.
+ *
+ * ## What is not cached
+ *
+ * A failure. It used to be, because the `catch` produced a resolved promise
+ * that went straight into the map, so a file that was locked for a moment, or
+ * an executable being replaced by an installer as the list was drawn, had no
+ * icon for the rest of the session and no way to try again.
+ *
+ * ## Why it is bounded
+ *
+ * Rust holds the same answers, so this is a second copy of them, and each one
+ * is a data URI of a few kilobytes. Unbounded, it grows towards one entry for
+ * every application on the machine whether or not any of them is on screen.
+ * The oldest go first, which for a launcher is the right end: what somebody is
+ * looking at now is what they asked for most recently.
  */
+const ICONS_KEPT = 400;
+
 const iconCache = new Map<string, Promise<string | null>>();
 
 export function appIcon(path: string): Promise<string | null> {
-  let pending = iconCache.get(path);
-  if (!pending) {
-    pending = invoke<string | null>("app_icon", { path }).catch(() => null);
-    iconCache.set(path, pending);
+  const held = iconCache.get(path);
+  if (held) return held;
+
+  const pending = invoke<string | null>("app_icon", { path }).catch(() => {
+    // Forgotten rather than remembered as "no icon", so the next row that
+    // asks tries again.
+    iconCache.delete(path);
+    return null;
+  });
+
+  iconCache.set(path, pending);
+
+  // A `Map` iterates in insertion order, so the first key is the oldest.
+  while (iconCache.size > ICONS_KEPT) {
+    const oldest = iconCache.keys().next();
+    if (oldest.done) break;
+    iconCache.delete(oldest.value);
   }
+
   return pending;
 }
 

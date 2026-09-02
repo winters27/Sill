@@ -49,6 +49,26 @@ pub struct Entry {
     pub rich: bool,
 }
 
+/// How much of an entry a listing carries.
+///
+/// The window draws one line of it. Two hundred characters is comfortably more
+/// than a line at any width the launcher can be, and short enough that four
+/// hundred of them are a payload rather than a document.
+const PREVIEW_CHARS: usize = 200;
+
+/// The first line's worth of an entry.
+///
+/// By characters rather than bytes, so a multi-byte character is never cut in
+/// half: a listing full of replacement characters is worse than one that shows
+/// slightly less.
+pub fn preview_of(text: &str) -> String {
+    if text.chars().count() <= PREVIEW_CHARS {
+        return text.to_string();
+    }
+
+    text.chars().take(PREVIEW_CHARS).collect()
+}
+
 pub struct Store {
     connection: Connection,
 }
@@ -303,6 +323,9 @@ impl Store {
     /// orders by relevance instead. Two different orderings on purpose: with
     /// no query the useful answer is "what did I just copy", and with one it
     /// is "which entry matches best".
+    ///
+    /// The `text` that comes back is a preview. See the truncation at the end
+    /// and `preview_of`.
     pub fn search(
         &self,
         query: &str,
@@ -345,6 +368,24 @@ impl Store {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             mapped
         };
+
+        /*
+         * A listing carries a line, not the whole entry.
+         *
+         * Four hundred rows go to the window on every keystroke in this view,
+         * and an entry can be a megabyte: measured on this machine, with a
+         * history of only 135 entries, the listing was **274 KB of text**
+         * before anything else was added to it. The window drew the first
+         * line of each and threw the rest away.
+         *
+         * Truncated here rather than in SQL so the rule is in one place and
+         * the tests can see it. `bytes` already says how big the real thing
+         * is, and whoever wants the whole thing asks for the entry by id,
+         * which is what the preview pane already does.
+         */
+        for row in rows.iter_mut() {
+            row.text = preview_of(&row.text);
+        }
 
         rows.shrink_to_fit();
         Ok(rows)
@@ -984,5 +1025,64 @@ mod tests {
             store.get(id).expect("reads").expect("exists").text.len(),
             5_000_000
         );
+    }
+
+    /// A listing carries a line; the whole entry is asked for by id.
+    ///
+    /// Four hundred rows go to the window on every keystroke in this view, and
+    /// an entry can be a megabyte. Measured on this machine, with a history of
+    /// only 135 entries, the listing was 274 KB of text before anything else
+    /// was added to it, and the window drew the first line of each.
+    #[test]
+    fn a_listing_carries_a_preview_and_the_entry_carries_everything() {
+        let (_dir, store) = store();
+        let long = "a".repeat(5_000);
+        add(&store, &long, NOW);
+
+        let listed = store.search("", None, 10).expect("searches");
+        assert_eq!(listed.len(), 1);
+        assert!(
+            listed[0].text.chars().count() < 300,
+            "the listing carried {} characters",
+            listed[0].text.chars().count()
+        );
+
+        let whole = store
+            .get(listed[0].id)
+            .expect("reads")
+            .expect("the entry is there");
+        assert_eq!(
+            whole.text.chars().count(),
+            5_000,
+            "asking by id no longer gives the whole entry"
+        );
+    }
+
+    /// And a short entry is untouched, so nothing shows an ellipsis it earned.
+    #[test]
+    fn a_short_entry_is_left_alone() {
+        let (_dir, store) = store();
+        add(&store, "the quick brown fox", NOW);
+
+        let listed = store.search("", None, 10).expect("searches");
+
+        assert_eq!(listed[0].text, "the quick brown fox");
+    }
+
+    /// The cut is by character, so a multi-byte character is never halved.
+    ///
+    /// A listing full of replacement characters is worse than one that shows
+    /// slightly less.
+    #[test]
+    fn the_preview_never_cuts_a_character_in_half() {
+        let text = "😀".repeat(400);
+
+        let cut = super::preview_of(&text);
+
+        assert!(
+            cut.chars().all(|c| c == '😀'),
+            "a character was cut in half"
+        );
+        assert_eq!(cut.chars().count(), 200);
     }
 }

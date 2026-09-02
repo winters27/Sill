@@ -22,6 +22,7 @@
     { id: "graphite", name: "Graphite", note: "No hue anywhere" },
     { id: "ember", name: "Ember", note: "Warm black, amber accent" },
     { id: "moss", name: "Moss", note: "Cool green" },
+    { id: "aberration", name: "Aberration", note: "Warm and cool fringes, like a lens" },
   ];
 </script>
 
@@ -128,8 +129,9 @@
    * Everything in it is painted by the card's own `data-theme`, so what it
    * shows is the theme actually doing its job rather than a legend for it:
    * the matched letters take the accent, the selected row takes the accent
-   * wash, and Oilslick's chroma paints across the surface at the strength
-   * the slider in Appearance has set.
+   * wash, and a chroma theme paints across the surface at the strength the
+   * slider in Appearance has set. The gradients are sized in percentages, so
+   * a card shows the same layout the window does rather than a crop of it.
    */
   .swatch {
     display: flex;

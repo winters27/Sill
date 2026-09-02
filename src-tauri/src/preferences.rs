@@ -162,6 +162,12 @@ pub enum Theme {
     Ember,
     /// Cool green, slightly warmer canvas than the default.
     Moss,
+    /// Neutral canvas with a warm fringe down one edge and a cool one down
+    /// the other, the way a lens that cannot focus every wavelength at one
+    /// point renders a high-contrast edge. The second theme with a chroma
+    /// wash, and the only one whose colour lives at the edges rather than
+    /// the middle.
+    Aberration,
 }
 
 /// Which face the interface is set in.
@@ -234,7 +240,7 @@ pub struct Appearance {
     pub theme: Theme,
     /// How strongly a theme's chroma wash is painted, 0 to 2.
     ///
-    /// Only Oilslick has one. A multiplier rather than a set of alphas so the
+    /// Only Oilslick and Aberration have one. A multiplier rather than a set of alphas so the
     /// relationship between the three washes is fixed and only their weight
     /// moves: tuning them independently is how an iridescent sheen turns into
     /// three coloured blobs.

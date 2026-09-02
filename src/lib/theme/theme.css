@@ -607,6 +607,71 @@
     );
 }
 
+/*
+ * Aberration.
+ *
+ * Lateral chromatic aberration: a lens that cannot focus every wavelength at
+ * the same point, so a high-contrast edge picks up a warm fringe on one side
+ * and a cool one on the other. Warm and cool on OPPOSING edges is the whole
+ * giveaway, and it is the same family as an RGB channel split.
+ *
+ * The effect is zero on the optical axis and grows outward, so this is built
+ * the opposite way round to Oilslick: the middle of the window is close to
+ * neutral and the colour lives at the edges. Measured over the settings
+ * window, saturation runs 0.15 at the centre against 0.40 and 0.48 at the two
+ * sides, and the red-minus-blue bias is +8.4 on the left against -9.1 on the
+ * right. That opposition is the theme; without it this is just two tinted
+ * corners.
+ *
+ * > [!IMPORTANT] Hold the LUMINANCE flat and let hue do the work
+ * > A linear warm-to-cool ramp across the window was tried first and is the
+ * > more obvious way to write this. It measured 0.75x centre-to-corner, which
+ * > is an inverse vignette: the edges read as brighter, not merely as tinted,
+ * > and a bright rim on a transparent window looks like a glow leak rather
+ * > than an optical effect. Two opposed radial lobes land at 0.97x, so the
+ * > surface stays even and only the colour moves. Oilslick is 1.33x in the
+ * > other direction and also reads as seamless, so flat is not the target;
+ * > brighter EDGES specifically is what fails.
+ *
+ * > [!CAUTION] Two hues of equal weight is normally the failure mode
+ * > Oilslick's notes record that competing hues never read as one material.
+ * > The exception is when the placement itself carries a model somebody
+ * > already knows: warm against cool on opposite sides is a lens, and the eye
+ * > accepts it as one thing. It only survives because the transition passes
+ * > through neutral, so the two never meet as a boundary.
+ *
+ * The vertical pair is green against magenta, the other axis of an RGB split,
+ * and is deliberately subordinate at 0.06 against the horizontal pair's 0.15
+ * and 0.17. Its whole job is to keep the middle of the window from being dead
+ * neutral: it lifts centre saturation from 0.11 to 0.15 and costs 0.05x of
+ * luminance flatness. Three layers, none below 0.06, because seven thin ones
+ * is what produced visible dither grain in Oilslick.
+ */
+[data-theme="aberration"] {
+  --core-background: #0b0b0d;
+  --core-secondary-background: #191820;
+  --core-accent: #8ec9dd;
+  --accent-hover: #a5d6e7;
+  --accent-bright: #c4e7f2;
+  --accent-rgb: 142, 201, 221;
+
+  --chroma:
+    linear-gradient(
+      180deg,
+      rgba(0, 46, 22, calc(0.06 * var(--chroma-strength))) 0%,
+      transparent 50%,
+      rgba(48, 0, 46, calc(0.06 * var(--chroma-strength))) 100%
+    ),
+    radial-gradient(ellipse 78% 130% at 96% 50%,
+      rgba(0, 26, 68, calc(0.15 * var(--chroma-strength))) 0%,
+      rgba(0, 34, 52, calc(0.083 * var(--chroma-strength))) 45%,
+      transparent 100%),
+    radial-gradient(ellipse 78% 130% at 4% 50%,
+      rgba(92, 26, 0, calc(0.17 * var(--chroma-strength))) 0%,
+      rgba(58, 32, 0, calc(0.094 * var(--chroma-strength))) 45%,
+      transparent 100%);
+}
+
 /* No hue anywhere, accent included. */
 [data-theme="graphite"] {
   --core-background: #0c0c0c;

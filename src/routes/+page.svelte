@@ -31,7 +31,7 @@
   import WidgetBoard from "$lib/widgets/Board.svelte";
   import WidgetChin from "$lib/widgets/Chin.svelte";
   import { actionFor, collectActions, isRunnable } from "$lib/exthost/actions";
-  import { clipboardMerge } from "$lib/clipboard";
+  import { clipboardEntry, clipboardMerge } from "$lib/clipboard";
   import {
     chordFrom,
     navigationChords,
@@ -2134,13 +2134,25 @@
         const entry = clipboardView?.selection();
         if (!entry) return;
 
+        /*
+         * The whole entry, asked for by id.
+         *
+         * A listing carries a preview rather than the text, because four
+         * hundred rows of it went to the window on every keystroke. So the
+         * row in hand is not what an action should be given: transforming a
+         * preview and copying the result back would quietly truncate what
+         * somebody had saved.
+         */
+        const whole = await clipboardEntry(entry.id);
+        const text = whole?.text ?? entry.text;
+
         try {
           const outcome = await runObjectAction(action.tag.slice("Sill.Action:".length), {
             id: String(entry.id),
             mode: "clipboard",
-            target: entry.text,
+            target: text,
             // The row's own text, trimmed to something a status line can hold.
-            title: entry.text.slice(0, 40),
+            title: text.slice(0, 40),
           });
           status = outcome.message;
           lastUndo = outcome.undoneBy ?? null;
@@ -4623,8 +4635,8 @@
       var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
       var(--surface-base)
     );
-    /* Chroma above the tint. `none` in every theme but Oilslick, and `none`
-       is a valid layer, so there is no conditional here. */
+    /* Chroma above the tint. `none` in the themes that paint no wash, and
+       `none` is a valid layer, so there is no conditional here. */
     background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
     border-radius: var(--radius-window);
     /* No border: DWM already clips the window to this radius, so a border here
