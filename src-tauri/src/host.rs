@@ -68,7 +68,39 @@ pub(crate) const NO_NODE: &str =
 /// desktop application does not inherit the shell's `PATH` on Windows in the
 /// way a terminal does, and a Node installed while Sill was running is not in
 /// the environment Sill started with.
+/// Where Node was found, once it has been.
+///
+/// Looking costs a process: `which` runs `node --version` and waits for it,
+/// because `PATHEXT`, shims and store aliases make walking `PATH` by hand
+/// wrong in ways that only show up on somebody else's computer. That is a
+/// reasonable price to pay once and an unreasonable one to pay on **every cold
+/// activation, under the host lock**, and again on every store readiness
+/// check.
+///
+/// Only a positive answer is kept. Somebody can install Node while Sill is
+/// open, and the store is exactly where they would try again afterwards, so a
+/// "no" has to stay askable. A "yes" that later becomes wrong shows up as a
+/// spawn failure with a message that names the file, which is the same thing
+/// that would have happened anyway.
+static FOUND: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
 pub(crate) fn node_exe() -> Option<PathBuf> {
+    if let Some(known) = FOUND.lock().ok().and_then(|held| held.clone()) {
+        return Some(known);
+    }
+
+    let found = look_for_node();
+
+    if let Some(path) = found.as_ref() {
+        if let Ok(mut held) = FOUND.lock() {
+            *held = Some(path.clone());
+        }
+    }
+
+    found
+}
+
+fn look_for_node() -> Option<PathBuf> {
     if which("node").is_some() {
         return Some(PathBuf::from("node"));
     }
@@ -336,4 +368,42 @@ pub(crate) fn forward_events(app: AppHandle, mut events: mpsc::UnboundedReceiver
             }
         }
     });
+}
+
+#[cfg(test)]
+mod finding_node {
+    /// Looking for Node runs a process, so it is looked for once.
+    ///
+    /// `which` runs `node --version` and waits for it, because `PATHEXT`,
+    /// shims and store aliases make walking `PATH` by hand wrong in ways that
+    /// only show up on somebody else's computer. That was paid on every cold
+    /// activation, **under the host lock**, and on every store readiness
+    /// check.
+    ///
+    /// Timed rather than counted: there is no seam to count calls through
+    /// without inventing one, and the thing that matters is that the second
+    /// answer does not cost a process.
+    #[test]
+    fn the_second_answer_costs_nothing() {
+        let first = std::time::Instant::now();
+        let found = super::node_exe();
+        let looking = first.elapsed();
+
+        if found.is_none() {
+            // No Node on this machine, so there is nothing cached and nothing
+            // to assert. Not a failure: the negative answer is deliberately
+            // not remembered, so that installing Node and trying again works.
+            return;
+        }
+
+        let again = std::time::Instant::now();
+        let _ = super::node_exe();
+        let remembering = again.elapsed();
+
+        assert!(
+            remembering < looking / 4 || remembering < std::time::Duration::from_millis(1),
+            "the second answer took {remembering:?} against {looking:?} for the first, \
+             which is not a remembered answer"
+        );
+    }
 }
