@@ -59,6 +59,14 @@ export interface Hotkey {
  */
 export type Theme = "winters-glass" | "oilslick" | "graphite" | "ember" | "moss";
 
+/**
+ * Which screen the launcher comes up on.
+ *
+ * It used to be centred once at startup and never moved, so on two monitors
+ * it always appeared on the primary one however far away that was.
+ */
+export type SummonOn = "cursor" | "activeWindow" | "primary";
+
 export interface Appearance {
   backdrop: Backdrop;
   theme: Theme;
@@ -68,6 +76,7 @@ export interface Appearance {
   tintAlpha: number;
   visibleRows: number;
   windowWidth: number;
+  summonOn: SummonOn;
 }
 
 export interface Sources {

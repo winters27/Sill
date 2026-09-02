@@ -131,6 +131,18 @@ fn worth_returning_to(window_pid: u32, our_pid: u32) -> bool {
 }
 
 /// Records whatever currently has focus, so it can be restored on dismissal.
+/// The window that had focus before the launcher took it.
+///
+/// Read by placement, which needs the screen that window was on. Only ever
+/// handed straight back to Win32, so a handle that has since closed is the
+/// caller's problem to survive rather than something to check here.
+#[cfg(windows)]
+pub(crate) fn previous_foreground() -> Option<isize> {
+    *PREVIOUS_FOREGROUND
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn remember_foreground() {
     #[cfg(windows)]
     {
@@ -236,6 +248,18 @@ pub fn show(window: &WebviewWindow) {
     }
 
     remember_foreground();
+
+    /*
+     * Placed before it is shown, so it appears where it belongs rather than
+     * appearing and then moving. After `remember_foreground`, because placing
+     * by the active window needs the window that was active a moment ago.
+     */
+    if let Some(placement) = window
+        .app_handle()
+        .try_state::<crate::placement::Placement>()
+    {
+        crate::placement::centre_for_summon(window, placement.get());
+    }
 
     // Before the window goes up, so the renderer is awake by the time there is
     // something to paint. Ordinarily there is nothing to wake and this costs a

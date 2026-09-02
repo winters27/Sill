@@ -202,6 +202,30 @@ pub enum Backdrop {
     None,
 }
 
+/// Which screen the launcher appears on.
+///
+/// A choice rather than a rule, because the right answer depends on how
+/// somebody works. The window used to be centred once at startup and never
+/// moved again, so it always came up on the primary monitor however far away
+/// that was, and a display change could leave it off every screen entirely.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SummonOn {
+    /// The screen the mouse is on. The default, and what most launchers do:
+    /// the pointer is the cheapest available guess at where somebody is
+    /// looking, and it is right whenever they reached for the keyboard from
+    /// whatever they were just clicking.
+    Cursor,
+    /// The screen holding the window that had focus.
+    ///
+    /// Better than the cursor for anybody who leaves the mouse parked on one
+    /// screen and works on another, which is the ordinary arrangement with a
+    /// portrait second monitor.
+    ActiveWindow,
+    /// Always the primary screen, which is what it did before.
+    Primary,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Appearance {
@@ -225,6 +249,8 @@ pub struct Appearance {
     pub visible_rows: u32,
     /// Launcher width in pixels.
     pub window_width: u32,
+    /// Which screen it comes up on.
+    pub summon_on: SummonOn,
 }
 
 impl Default for Appearance {
@@ -238,6 +264,7 @@ impl Default for Appearance {
             tint_alpha: 232,
             visible_rows: 10,
             window_width: 750,
+            summon_on: SummonOn::Cursor,
         }
     }
 }

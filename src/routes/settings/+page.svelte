@@ -949,6 +949,27 @@
                 />
               {/snippet}
             </Row>
+            <Row
+              title="Where it appears"
+              description="With more than one screen, the launcher used to always come up on the primary one. It now follows this on every summon, which is also what brings it back if a display change left it off-screen."
+            >
+              {#snippet control()}
+                <Select
+                  value={p.appearance.summonOn}
+                  options={[
+                    { value: "cursor", label: "Screen with the mouse" },
+                    { value: "activeWindow", label: "Screen you were working on" },
+                    { value: "primary", label: "Primary screen" },
+                  ]}
+                  onchange={(next) => {
+                    if (!prefs) return;
+                    p.appearance.summonOn = next as typeof p.appearance.summonOn;
+                    void commit();
+                  }}
+                  ariaLabel="Where it appears"
+                />
+              {/snippet}
+            </Row>
             <Row title="Window width" description="How wide the launcher sits, in pixels.">
               {#snippet control()}
                 <Slider

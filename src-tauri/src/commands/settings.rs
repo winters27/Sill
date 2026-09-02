@@ -125,6 +125,12 @@ pub(crate) async fn set_preferences(
         );
     }
 
+    // Read on every summon rather than at startup, so moving this takes the
+    // launcher to the other screen now.
+    if let Some(placement) = app.try_state::<crate::placement::Placement>() {
+        placement.set(prefs.appearance.summon_on);
+    }
+
     // Read when focus is lost rather than wired once, so this one takes
     // effect now instead of at the next start. See `DismissOnBlur`.
     if let Some(blur) = app.try_state::<crate::DismissOnBlur>() {

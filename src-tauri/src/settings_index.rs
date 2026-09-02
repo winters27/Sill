@@ -172,6 +172,12 @@ pub const SETTINGS: &[Setting] = &[
         "Window width",
         "width size window",
     ),
+    s(
+        "appearance",
+        "Appearance",
+        "Where it appears",
+        "monitor screen display second multiple cursor mouse primary",
+    ),
     // ----------------------------------------------------------------- ask
     s(
         "ai",

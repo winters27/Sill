@@ -33,6 +33,7 @@ pub mod meter;
 pub mod navigation;
 pub mod object;
 pub mod ocr;
+pub mod placement;
 pub mod preferences;
 pub mod previews;
 pub mod processes;
@@ -475,7 +476,15 @@ pub(crate) fn apply_window_size(app: &AppHandle, appearance: &preferences::Appea
         return;
     }
 
-    let _ = window.center();
+    // Centred by the same rule a summon uses, rather than by `center()`, which
+    // always means the primary screen. Changing the row count while the
+    // launcher is up on the second monitor used to throw it back to the first.
+    match app.try_state::<placement::Placement>() {
+        Some(placement) => placement::centre_for_summon(&window, placement.get()),
+        None => {
+            let _ = window.center();
+        }
+    }
 }
 
 /// Whether two dictation settings differ in a way the hook cares about.
@@ -1209,6 +1218,12 @@ pub fn run() {
             apply_autostart(&handle, prefs.general.open_at_login);
             watch_focus(&handle, prefs.hotkey.dismiss_on_blur);
             report_summon_trouble(&handle, &prefs.hotkey.summon);
+
+            // Read on every summon, from a synchronous path, so it is kept as
+            // an atomic rather than behind the preferences lock.
+            let placement = placement::Placement::default();
+            placement.set(prefs.appearance.summon_on);
+            app.manage(placement);
 
             // Dictation holds a low-level keyboard hook and, when local, a
             // whisper server process. Both are managed state so they live
