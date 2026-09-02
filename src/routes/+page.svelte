@@ -14,7 +14,7 @@
   import Markdown from "$lib/components/Markdown.svelte";
   import Steps from "$lib/components/Steps.svelte";
   import { LISTBOX, isBrowsing, isListMode, merged, optionId } from "$lib/results";
-  import { isTyping, typedInto } from "$lib/typing";
+  import { deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import {
     behaviourOf,
     drawsItsOwn,
@@ -691,7 +691,11 @@
           title: "Delete",
           tag: "Sill.ClipboardDelete",
           props: {},
-          shortcut: { modifiers: [], key: "delete" },
+          // Ctrl, because the search field has focus and a bare Delete while
+          // filtering used to destroy the row under the cursor instead of the
+          // character being typed. With nothing typed the bare key still
+          // works; the panel advertises the one that always does.
+          shortcut: { modifiers: ["ctrl"], key: "delete" },
         },
         // What can be done to the text itself, from the same registry the
         // root list draws from. Paste, pin, filter and delete above act on
@@ -1882,8 +1886,14 @@
    */
   let navKeys = $state<Record<string, MoveKey>>({});
 
-  /** How far a screenful moves. Matches the rows the window shows at once. */
-  const PAGE = 8;
+  /**
+   * How far a screenful moves.
+   *
+   * The rows the window actually shows, not a number that used to match them.
+   * It was fixed at eight while the setting ranges from four to sixteen, so
+   * Page Down moved two screens at one end and half of one at the other.
+   */
+  const page = $derived(prefs?.appearance.visibleRows ?? 8);
 
   /**
    * Past queries, and how far back through them the user has walked.
@@ -2974,7 +2984,7 @@
      * it is not on the action panel alone: a list somebody opened to tidy up
      * wants tidying with one key rather than two.
      */
-    if (mode === "conversations" && event.key === "Delete") {
+    if (mode === "conversations" && deleteMeansTheRow(event, query)) {
       event.preventDefault();
       const row = conversationRows[selected];
       if (row) void forgetConversation(row.entrypoint);
@@ -3019,24 +3029,23 @@
       return;
     }
 
-    // Ctrl+K is the action menu, matching Raycast's Cmd+K.
-    if (event.key.toLowerCase() === "k" && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
-      if (actions.length) {
-        panelOpen = !panelOpen;
-        // A fresh panel is an unfiltered one.
-        panelFilter = "";
-        panelSelected = 0;
-      } else {
-        // Never silent: if there is nothing to show, say so, otherwise a
-        // working key press is indistinguishable from a dead one.
-        status = "no actions here";
-      }
-      return;
-    }
-
-    // While the panel is open it owns the keyboard.
+    /*
+     * While the panel is open it owns the keyboard.
+     *
+     * Except for the chord that opened it, which closes it again. That used to
+     * be a hardcoded Ctrl+K ahead of everything, which is what made the vim
+     * preset a lie: Rust binds Ctrl+K to Previous under vim and says so in a
+     * comment, and the window took the key anyway. The chord is asked for
+     * here, so whatever the preset says opens the panel also closes it, and
+     * Alt+Enter works for the first time.
+     */
     if (panelOpen) {
+      if (chordFrom(event) && navKeys[chordFrom(event)!] === "actions") {
+        event.preventDefault();
+        panelOpen = false;
+        return;
+      }
+
       // Nothing to move through, so the arrows would divide by zero.
       const count = Math.max(1, shownActions.length);
 
@@ -3128,7 +3137,7 @@
         void mergePicked(NEWLINE);
         return;
       }
-      if (event.key === "Delete") {
+      if (deleteMeansTheRow(event, query)) {
         event.preventDefault();
         void clipboardView?.remove();
         return;
@@ -3181,10 +3190,10 @@
         if (count) selected = (selected - 1 + count) % count;
         break;
       case "pageDown":
-        if (count) selected = Math.min(count - 1, selected + PAGE);
+        if (count) selected = Math.min(count - 1, selected + page);
         break;
       case "pageUp":
-        if (count) selected = Math.max(0, selected - PAGE);
+        if (count) selected = Math.max(0, selected - page);
         break;
       case "first":
         selected = 0;
@@ -3204,7 +3213,13 @@
       case "actions":
         if (actions.length) {
           panelOpen = true;
+          // A fresh panel is an unfiltered one.
+          panelFilter = "";
           panelSelected = 0;
+        } else {
+          // Never silent: with nothing to show, say so, or a working key
+          // press is indistinguishable from a dead one.
+          status = "no actions here";
         }
         break;
       case "back":

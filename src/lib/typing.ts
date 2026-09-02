@@ -67,3 +67,23 @@ export function typedInto(field: Field, key: string): { value: string; caret: nu
     caret: start + key.length,
   };
 }
+
+/**
+ * Whether Delete means the row under the cursor rather than a character.
+ *
+ * The clipboard and the conversation list both remove the selected row on
+ * Delete, and both have a search field that holds focus the whole time. So
+ * somebody filtering a list, pressing Delete to remove a character they just
+ * typed, destroyed a saved conversation or a clipboard entry instead. No
+ * confirmation, and for a conversation no undo.
+ *
+ * With nothing typed there is no character to delete, so the key can only mean
+ * the row. With something typed it is text editing, and Ctrl+Delete is how to
+ * say you meant the row after all. The action panel advertises the chord that
+ * always works, which is where somebody who does not know this reads it.
+ */
+export function deleteMeansTheRow(event: Keystroke, typed: string): boolean {
+  if (event.key !== "Delete") return false;
+
+  return event.ctrlKey || event.metaKey || typed.length === 0;
+}

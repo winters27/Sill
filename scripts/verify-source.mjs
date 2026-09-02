@@ -333,6 +333,35 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * The launcher window does not decide what Ctrl+K means.
+ *
+ * `navigation.rs` resolves every movement chord, presets and overrides
+ * included, and it binds Ctrl+K to Previous under vim on purpose: the comment
+ * on `Move::Actions` says so and offers Alt+Enter as the alternative. The
+ * window tested for Ctrl+K itself, before consulting the map, so a vim user
+ * got the action panel and the preset was a lie in the one place it was
+ * documented not to be.
+ *
+ * Narrow on purpose: this is one key that was hardcoded, not a rule about
+ * every chord. Adding it back is the mistake worth catching.
+ */
+{
+  const PAGE = "src/routes/+page.svelte";
+  const text = readFileSync(PAGE, "utf8");
+  const hardcoded = /["']k["']\s*&&\s*\(?\s*event\.(ctrl|meta)Key/;
+  const found = text.match(hardcoded);
+
+  if (found) {
+    fail(
+      PAGE,
+      lineOf(text, found.index),
+      "Ctrl+K is decided here rather than by the chord map, so a preset that " +
+        "binds it to something else is ignored and the settings screen lies",
+    );
+  }
+}
+
+/*
  * Every place a hotkey is registered records whether it took.
  *
  * Windows refuses a combination another application already owns, and there is

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isTyping, typedInto } from "./typing";
+import { deleteMeansTheRow, isTyping, typedInto } from "./typing";
 
 const press = (key: string, held: Partial<Record<"ctrlKey" | "altKey" | "metaKey", boolean>> = {}) => ({
   key,
@@ -69,5 +69,29 @@ describe("putting a character into the field", () => {
       value: "abXf",
       caret: 3,
     });
+  });
+});
+
+describe("deciding what Delete destroys", () => {
+  it("removes the row when nothing is typed", () => {
+    expect(deleteMeansTheRow(press("Delete"), "")).toBe(true);
+  });
+
+  /**
+   * The bug. Filtering the clipboard for "invoice" and pressing Delete to fix
+   * a typo removed the entry under the cursor, with no confirmation.
+   */
+  it("edits the text when something is typed", () => {
+    expect(deleteMeansTheRow(press("Delete"), "invoice")).toBe(false);
+  });
+
+  it("removes the row on Ctrl+Delete whatever is typed", () => {
+    expect(deleteMeansTheRow(press("Delete", { ctrlKey: true }), "invoice")).toBe(true);
+    expect(deleteMeansTheRow(press("Delete", { metaKey: true }), "invoice")).toBe(true);
+  });
+
+  it("is not any other key", () => {
+    expect(deleteMeansTheRow(press("Backspace"), "")).toBe(false);
+    expect(deleteMeansTheRow(press("d", { ctrlKey: true }), "")).toBe(false);
   });
 });
