@@ -52,7 +52,7 @@
     appearance: none;
     border-radius: var(--radius-pill);
     background: var(--fill-3);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--well);
     outline: none;
     cursor: pointer;
   }
@@ -63,10 +63,8 @@
     height: 14px;
     border-radius: 50%;
     background: var(--core-accent);
-    box-shadow:
-      0 1px 3px rgba(0, 0, 0, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.25);
-    transition: transform 0.15s var(--ease);
+    box-shadow: var(--elevation-2), var(--bevel-top);
+    transition: transform var(--motion-state) var(--ease);
   }
 
   input[type="range"]:hover::-webkit-slider-thumb {
@@ -74,8 +72,6 @@
   }
 
   input[type="range"]:focus-visible {
-    box-shadow:
-      inset 0 1px 2px rgba(0, 0, 0, 0.3),
-      0 0 0 2px var(--hairline-strong);
+    box-shadow: var(--well), var(--halo);
   }
 </style>

@@ -62,6 +62,6 @@
   /* Between, never at the ends, so the strip does not grow a rule against the
      status text on one side or the Escape hint on the other. */
   .one + .one {
-    box-shadow: inset 1px 0 0 var(--hairline);
+    box-shadow: var(--ring-left);
   }
 </style>

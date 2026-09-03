@@ -26,10 +26,18 @@
  * or a spacing value is chosen; every component reads them by name.
  *
  * That is enforced rather than hoped for. `scripts/verify-source.mjs` fails
- * the build if a `.svelte` file writes a literal `font-size: <n>px` or reaches
- * for `rgba(var(--accent-rgb), a)` directly, because both of those are how the
- * system decayed the first time: 16 distinct font sizes across 101 sites, and
- * 74 inline accent alphas at 21 different opacities.
+ * the build if a `.svelte` file writes a literal colour, duration, z-index,
+ * spacing, radius, shadow or font size anywhere the browser will parse as CSS,
+ * because that is how the system decayed the first time and the second: 16
+ * distinct font sizes across 101 sites, 74 inline accent alphas at 21 opacities,
+ * and then 350 more literals in the categories the first rule did not cover,
+ * including 101 transitions running at six speeds for what turned out to be
+ * three ideas.
+ *
+ * What a component may still write is a measurement of itself: the width of
+ * one panel, the height of one thumbnail, a 1px border. Those have no scale to
+ * belong to, and a value used once cannot drift away from anything. The guard
+ * says which is which and why.
  *
  * ---------------------------------------------------------------------------
  * THE ONE RULE ABOUT COLOUR
@@ -79,8 +87,6 @@
   /* Core. Neutral near-black; nothing here is blue. */
   --core-background: #0c0c0d;
   --core-secondary-background: #1a1a1b;
-  --core-foreground: #ffffff;
-  --core-border: rgba(151, 177, 185, 0.2);
 
   /* The accent is a desaturated blue-grey, not a saturated blue. */
   --core-accent: #97b1b9;
@@ -88,25 +94,53 @@
   --accent-bright: #c8e0e8;
   --accent-rgb: 151, 177, 185;
 
-  /* Vicinae's accent slots, kept so ported themes still resolve. */
+  /*
+   * Vicinae's accent slots, and only the ones something reads.
+   *
+   * Nine were declared here on the reasoning that a ported theme should find
+   * every slot it might set. `magenta`, `purple` and `cyan` were read by
+   * nothing at all, which makes a slot a definition rather than a
+   * compatibility guarantee: a theme that sets one no rule consumes changes
+   * nothing whether it is declared here or not. The schema itself is
+   * documented at the top of this file, which is where a porter looks; what
+   * stays here is what draws. `orange` went for a second reason, that it held
+   * the same `#eab308` as `yellow`, so the palette offered two names for one
+   * colour and the interface duly used both for one meaning.
+   *
+   * Three more went with them, and those were worse than merely unread:
+   * `--surface`, `--surface-hover` and `--surface-active` were
+   * `rgba(var(--accent-rgb), 0.15/0.25/0.35)`, three tinted surfaces, which is
+   * exactly what THE ONE RULE ABOVE forbids. Leaving a ready-made accent wash
+   * lying around named `--surface-hover` is an invitation to break the rule
+   * while believing you are following it.
+   */
   --accent-blue: #6b9dff;
   --accent-green: #22c55e;
-  --accent-magenta: #d2a6ff;
-  --accent-orange: #eab308;
-  --accent-purple: #d2a6ff;
   --accent-red: #ef4444;
   --accent-red-rgb: 239, 68, 68;
   --accent-yellow: #eab308;
-  --accent-cyan: #c8e0e8;
-
-  /* Surfaces, as alpha over whatever is behind. Vicinae schema. */
-  --surface: rgba(var(--accent-rgb), 0.15);
-  --surface-hover: rgba(var(--accent-rgb), 0.25);
-  --surface-active: rgba(var(--accent-rgb), 0.35);
 
   --list-selection-background: rgba(var(--accent-rgb), 0.16);
-  --list-selection-secondary-background: rgba(var(--accent-rgb), 0.1);
   --grid-item-background: #1a1a1b;
+
+  /*
+   * ---- Status ------------------------------------------------------------
+   *
+   * What a control MEANS, separately from which colour says it.
+   *
+   * `--accent-red` was doing this job under its palette name in fourteen
+   * files, and its fill was written inline at three different alphas (0.14,
+   * 0.15, 0.2) because nothing named the one that was meant. A row that
+   * deletes something and a row that reports a failed drive are the same
+   * colour for the same reason, and neither of them is "red": they are
+   * dangerous and they are wrong, and the palette answers that question
+   * downstream.
+   */
+  --danger: var(--accent-red);
+  --danger-fill: rgba(var(--accent-red-rgb), 0.15);
+  --warning: var(--accent-yellow);
+  --success: var(--accent-green);
+  --info: var(--accent-blue);
 
   /*
    * ---- The neutral ramp -------------------------------------------------
@@ -151,12 +185,51 @@
   --text-4: rgba(255, 255, 255, 0.26);
 
   /* Fills and lines. Neutral, so a hover state never tints. */
+  /* Under `--fill-1`, and it earns a step of its own: six panels wanted a
+     surface that is present but not yet a hover, and each wrote 0.02 inline
+     because the scale did not reach that far down. */
+  --fill-0: rgba(255, 255, 255, 0.02);
   --fill-1: rgba(255, 255, 255, 0.04);
   --fill-2: rgba(255, 255, 255, 0.07);
   --fill-3: rgba(255, 255, 255, 0.1);
+  /* The top of the ramp, for a control that must read as an object on a
+     surface that is not ours: the keycap drawn over a screenshot, the lit
+     edge of a slider thumb. */
+  --fill-4: rgba(255, 255, 255, 0.16);
+  --fill-5: rgba(255, 255, 255, 0.25);
   --hairline: rgba(255, 255, 255, 0.07);
   --hairline-strong: rgba(255, 255, 255, 0.12);
   --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+
+  /*
+   * Shade, which is the same ramp pointed the other way.
+   *
+   * `--fill-*` lifts a surface off the page. These press one into it, or lay
+   * a scrim over content that is not ours to tint at all: the dimmed desktop
+   * behind a screen capture, the ground under a readout drawn on top of
+   * somebody's screenshot. Neutral black for the same reason the fills are
+   * neutral white, and separate from the fills because the two are never
+   * interchangeable: lightening a scrim does not dim anything.
+   */
+  --shade-1: rgba(0, 0, 0, 0.22);
+  --shade-2: rgba(0, 0, 0, 0.45);
+  --shade-3: rgba(0, 0, 0, 0.55);
+  --shade-4: rgba(0, 0, 0, 0.75);
+  --shade-5: rgba(0, 0, 0, 0.86);
+
+  /*
+   * ---- Opacity ----------------------------------------------------------
+   *
+   * Three states an element can be in, rather than a numeric ramp. What an
+   * opacity is usually saying is one of these, and saying it by name is what
+   * keeps a disabled control looking the same as the last disabled control.
+   *
+   * 0 and 1 are deliberately absent. They are not design values, they are the
+   * two ends of an animation, and naming them would only add a lookup.
+   */
+  --opacity-disabled: 0.5;
+  --opacity-muted: 0.6;
+  --opacity-faint: 0.25;
 
 
   /*
@@ -248,8 +321,6 @@
    */
   --bevel-tile: inset 1px 1px 0 0 rgba(255, 255, 255, 0.1),
     inset -1px -1px 0 0 rgba(0, 0, 0, 0.18);
-  --bevel-hero: inset 1px 1px 0 0 rgba(255, 255, 255, 0.14),
-    inset -1px -1px 0 0 rgba(0, 0, 0, 0.22), 0 4px 10px rgba(0, 0, 0, 0.18);
 
   /*
    * The window gets the light catch only, not the full tile bevel.
@@ -266,7 +337,102 @@
   --catch: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
 
   --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
-  --sheen-hover: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.028));
+
+  /*
+   * ---- Rings --------------------------------------------------------------
+   *
+   * A ring is a border drawn as a shadow, and the difference matters: it costs
+   * no layout, so it can appear on hover or on focus without moving the pixel
+   * next to it. `inset 0 0 0 1px var(--hairline)` was written out by hand
+   * forty-seven times across twenty-eight files, which is a recipe, not a
+   * decision, and a recipe copied forty-seven times is one somebody eventually
+   * copies wrong.
+   *
+   * Three weights, matching the line ramp, plus the accent forms. `--ring-*`
+   * sits inside the element's own box; `--ring-outside-*` sits beyond it, and
+   * that is the whole difference between a control that keeps its size and one
+   * that visibly grows.
+   */
+  --ring: inset 0 0 0 1px var(--hairline);
+  --ring-strong: inset 0 0 0 1px var(--hairline-strong);
+  --ring-bright: inset 0 0 0 1px var(--fill-5);
+  --ring-shade: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+  --ring-accent: inset 0 0 0 1px var(--accent);
+  --ring-accent-faint: inset 0 0 0 1px var(--accent-line);
+  --ring-fill: inset 0 0 0 1px var(--fill-3);
+  --ring-fill-soft: inset 0 0 0 1px var(--fill-2);
+  --ring-outside: 0 0 0 1px var(--hairline);
+  --ring-outside-strong: 0 0 0 1px var(--hairline-strong);
+
+  /* One edge rather than four, for a strip that abuts something instead of
+     sitting inside it: the chin against the list, a row against the one above
+     it. A shadow rather than a border so the strip keeps its stated height. */
+  --ring-top: inset 0 1px 0 var(--hairline);
+  --ring-left: inset 1px 0 0 var(--hairline);
+
+  /* The lit top edge of a small physical object, a slider thumb or a knob.
+     Light falls from above in this interface, so it is only ever the top. */
+  --bevel-top: inset 0 1px 0 var(--fill-5);
+
+  /*
+   * Two pixels, which is what says CHOSEN rather than merely outlined.
+   *
+   * `--ring-swatch` names its colour rather than the accent alias on purpose:
+   * a theme card is rendered by the theme it is offering, so the ring has to
+   * resolve inside that subtree and show you the palette you would be picking.
+   */
+  --ring-selected: inset 0 0 0 2px var(--accent-line);
+  --ring-swatch: inset 0 0 0 2px var(--core-accent);
+
+  /*
+   * Focus, which is one of the four things the accent is for.
+   *
+   * Outside the box by default: a focus ring that grew inward would eat the
+   * first two pixels of whatever it is drawing attention to. The inset form is
+   * for the one case where there is no room outside, a control flush against
+   * the edge of its container.
+   */
+  --focus-ring: 0 0 0 2px var(--accent);
+  --focus-ring-inset: inset 0 0 0 2px var(--accent);
+
+  /*
+   * A ring that stands two pixels clear of the control, in the colour of
+   * whatever the control is sitting on.
+   *
+   * That gap is what a coloured swatch needs: an accent ring drawn flush
+   * against a coloured circle reads as part of the circle, and the ink colour
+   * somebody is choosing stops being the thing they can see. The gap has to be
+   * the surface, and the surface is different in the settings window and on the
+   * markup toolbar, so the surface is the variable and the recipe stays one
+   * recipe. Two files had written this out separately and already disagreed.
+   */
+  --ring-gap: var(--core-secondary-background);
+  --focus-ring-gapped: 0 0 0 2px var(--ring-gap), 0 0 0 3px var(--accent);
+
+  /* A soft halo, not the accent, for a control that has keyboard focus but is
+     not itself an affirmative state. */
+  --halo: 0 0 0 2px var(--hairline-strong);
+
+  /*
+   * ---- Elevation ----------------------------------------------------------
+   *
+   * How far off the page something sits, and nothing else. A shadow's blur,
+   * spread and alpha have to move together to read as one height; tuning them
+   * one component at a time is how six popovers end up floating at six
+   * different distances.
+   *
+   * `--well` is the same idea inverted. A slider track and a segmented
+   * control's groove are not raised objects, they are holes, and a hole is a
+   * shadow cast inward from its own top edge.
+   */
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elevation-2: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --elevation-thumb: 0 1px 1px rgba(0, 0, 0, 0.22);
+  --elevation-pill: 0 10px 30px -8px rgba(0, 0, 0, 0.7);
+  --elevation-popover: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --elevation-menu: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+  --elevation-window: 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+  --well: inset 0 1px 2px rgba(0, 0, 0, 0.3);
 
   /* StreamNook's spring. Slightly overshoots, which reads as physical. */
   --ease: cubic-bezier(0.175, 0.885, 0.32, 1.25);
@@ -292,12 +458,30 @@
    */
   --motion-enter: 150ms;
   --motion-exit: 100ms;
-  /** Something already on screen changing: a hover, a selection. */
+  /**
+   * Something already on screen changing: a hover, a selection.
+   *
+   * This one token replaced 0.12s, 0.14s, 0.15s, 0.16s, 0.18s and 0.22s,
+   * ninety-five declarations of the same idea at six speeds. Nobody chose six
+   * speeds; each file chose one, reasonably, without seeing the other five.
+   * The row itself was the slowest of them at 0.22s, which is why a hover in
+   * the list lagged a hover in settings by a tenth of a second.
+   */
   --motion-state: 120ms;
+  /** Something travelling from one place to another: a thumb sliding across
+      its track, a panel moving into view. Longer than a state change because
+      the eye is following it rather than just noticing it. */
+  --motion-travel: 220ms;
+  /** A measured value easing to a new reading, so a gauge does not jump. */
+  --motion-reading: 1s;
 
-  /* Decelerate on the way in, accelerate on the way out. */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  /*
+   * Loops. These say work is happening, which means they are read rather than
+   * felt, and a loop short enough to feel quick reads as agitation instead.
+   */
+  --motion-pulse: 1.4s;
+  --motion-pulse-slow: 2.4s;
+
 
   /*
    * ---- Radius -----------------------------------------------------------
@@ -324,6 +508,9 @@
   --radius-lg: 12px;
   --radius-md: 8px;
   --radius-sm: 5px;
+  /* Barely a corner. For something small enough that `--radius-sm` would read
+     as a lozenge: an inline code span, a two-pixel progress bar. */
+  --radius-xs: 3px;
   --radius-pill: 999px;
 
   /*
@@ -336,12 +523,63 @@
   --chin-height: 40px;
 
   /*
+   * ---- Controls and icon tiles -------------------------------------------
+   *
+   * A control's height is a design value, not a measurement somebody takes
+   * per component. 30px was written into twelve files: menu rows, the emoji
+   * grid's cells, a select, the markup toolbar's buttons. They are all the
+   * same control at the same height and none of them knew about the others.
+   *
+   * The icon tile is the square an icon is drawn in, which is separate from
+   * the icon's own size: a 26px tile holds a 26px application icon and also
+   * holds a 16px glyph centred in it, and the tile is what keeps a list of
+   * mixed sources from looking ragged.
+   */
+  --control-height: 30px;
+  --icon-tile: 26px;
+  --icon-tile-sm: 20px;
+  --icon-tile-xs: 16px;
+
+  /*
+   * ---- Layers -------------------------------------------------------------
+   *
+   * Four numbers, in two pairs, because everything that stacks in this app is
+   * a thing over a scrim that swallows the click behind it.
+   *
+   * The two pairs are ten apart rather than adjacent, and that gap is the
+   * point: a menu opened from the chin has to cover an action panel that is
+   * already open, so the pairs cannot be interleaved by accident. `--z-raised`
+   * is for a sibling lifted above its own neighbours, like the label that has
+   * to sit over a segmented control's sliding thumb.
+   */
+  --z-raised: 1;
+  --z-panel-scrim: 10;
+  --z-panel: 11;
+  --z-menu-scrim: 20;
+  --z-menu: 21;
+
+  /*
    * ---- Spacing ----------------------------------------------------------
    *
    * A 4px base. Before this there were about forty distinct padding
    * shorthands in the frontend, every one of them chosen by feel.
+   *
+   * Three steps under the base, because the scale did not reach where the
+   * interface actually needed to go and thirty-odd declarations went on
+   * writing 1, 2 and 3px anyway. The gap between two keycaps and the inner
+   * padding of a count chip are genuinely smaller than a quarter of the base,
+   * and a scale that stops short of them is a scale the interface routes
+   * around. Named rather than numbered, since a quarter of a step has no
+   * honest number in a scheme where `--space-1` means one step.
    */
+  --space-hair: 1px;
+  --space-half: 2px;
+  --space-snug: 3px;
   --space-1: 4px;
+  /* Between the first and second step. One chip on the capture overlay wants
+     it and nothing else does, but an off-scale literal in a component is
+     precisely what this file exists to prevent. */
+  --space-cozy: 6px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
@@ -420,9 +658,27 @@
 
   --track-tight: -0.01em;
   --track-title: -0.015em;
-  --track-display: -0.02em;
   --track-label: 0.06em;
   --track-micro: 0.02em;
+
+  /*
+   * ---- The two colours that are not the theme's to choose ------------------
+   *
+   * A theme moves the canvas and the accent. These two answer to something
+   * else and would be wrong in every palette if they followed it.
+   *
+   * The close button's red is Windows' own value, copied so that Sill's title
+   * bar behaves like every other window on the desktop. Somebody reaching for
+   * the corner of a window is not reading a palette, they are using a muscle
+   * memory the operating system trained, and an Ember-tinted close button
+   * would be a worse button for being more consistent with the app.
+   *
+   * A switch knob is a physical object with a light on it. It is off-white
+   * rather than `--text-1` because pure white on a dark ground reads as
+   * emissive, and the thing being drawn is plastic.
+   */
+  --titlebar-close: #c42b1c;
+  --knob: #f4f5f6;
 
   /* Line boxes stated in px, not as ratios, so a row's height does not move
      when the interface face changes. Satoshi, Inter and Segoe UI Variable all
@@ -851,10 +1107,17 @@ body {
   /*
    * Scoped, never `all`, and backdrop-filter is never animated: transitioning
    * it on state change is the WebView2 flicker bug.
+   *
+   * A row hovering and a row being selected are the definition of `something
+   * already on screen changing`, so the row takes the state token like
+   * everything else. It used to be the slowest thing in the interface at
+   * 0.22s, a tenth of a second behind an identical hover in settings, and the
+   * list is the surface where that lag is felt most because it is the one the
+   * arrow keys are moving through.
    */
   transition:
-    background-color 0.22s var(--ease),
-    box-shadow 0.22s var(--ease);
+    background-color var(--motion-state) var(--ease),
+    box-shadow var(--motion-state) var(--ease);
 }
 
 .sill-row:hover:not(.selected) {
@@ -943,7 +1206,7 @@ body {
 .sill-empty img {
   width: 32px;
   height: 32px;
-  opacity: 0.22;
+  opacity: var(--opacity-faint);
   -webkit-user-drag: none;
 }
 
@@ -977,7 +1240,7 @@ body {
 .sill-setting {
   padding: var(--space-3) var(--space-4);
   background: transparent;
-  transition: background-color 0.1s linear;
+  transition: background-color var(--motion-state) linear;
 }
 
 .sill-setting:hover {
@@ -1006,5 +1269,5 @@ body {
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
-  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+  box-shadow: var(--elevation-menu);
 }

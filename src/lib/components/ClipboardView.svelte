@@ -690,7 +690,7 @@
 
   .keep {
     flex: none;
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     font: inherit;
     font-size: var(--text-label);
     color: var(--text-1);
@@ -717,7 +717,7 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     font: inherit;
     font-size: var(--text-label);
     color: var(--text-1);
@@ -745,11 +745,11 @@
     place-items: center;
     width: 15px;
     height: 15px;
-    margin-right: 2px;
+    margin-right: var(--space-half);
     font-size: var(--text-micro);
     font-weight: var(--weight-strong);
     font-variant-numeric: tabular-nums;
-    color: var(--core-background, #fff);
+    color: var(--core-background);
     background: var(--accent-bright);
     border-radius: 50%;
   }
@@ -797,7 +797,7 @@
     font: inherit;
     font-size: var(--text-meta);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease);
+    transition: background-color var(--motion-state) var(--ease);
   }
 
   .trigger:hover {
@@ -807,14 +807,14 @@
   .scrim {
     position: fixed;
     inset: 0;
-    z-index: 20;
+    z-index: var(--z-menu-scrim);
   }
 
   .menu {
     position: absolute;
     top: 30px;
     right: 0;
-    z-index: 21;
+    z-index: var(--z-menu);
     width: 168px;
     padding: var(--space-1);
   }
@@ -833,7 +833,9 @@
     font-size: var(--text-body);
     text-align: left;
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .option:hover {
@@ -886,8 +888,8 @@
     border-radius: var(--radius-md);
     cursor: default;
     transition:
-      background-color 0.18s var(--ease),
-      box-shadow 0.18s var(--ease);
+      background-color var(--motion-state) var(--ease),
+      box-shadow var(--motion-state) var(--ease);
   }
 
   .row:hover:not(.selected) {
@@ -902,7 +904,7 @@
   .mark {
     display: grid;
     place-items: center;
-    width: 16px;
+    width: var(--icon-tile-xs);
     flex: none;
     color: var(--text-3);
   }
@@ -972,7 +974,7 @@
     border-radius: var(--radius-sm);
     /* A screenshot of a white page needs an edge or it bleeds into the
        window; a dark one needs nothing, and this gives both the same one. */
-    box-shadow: 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring-outside);
   }
 
   .colour {
@@ -982,16 +984,16 @@
     min-height: 120px;
     /* A preview panel is a card, not a row. */
     border-radius: var(--radius-lg);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+    box-shadow: var(--ring-strong);
   }
 
   .colour span {
     padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-pill);
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--shade-3);
     font-family: var(--font-mono);
     font-size: var(--text-meta);
-    color: #fff;
+    color: var(--text-1);
   }
 
   .facts {

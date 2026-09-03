@@ -102,9 +102,9 @@
    * you picked" everywhere else in Sill, and a gauge is not a selection.
    */
   function tone(percent: number): string {
-    if (percent >= 85) return "var(--accent-red)";
-    if (percent >= 60) return "var(--accent-orange)";
-    return "var(--accent-green)";
+    if (percent >= 85) return "var(--danger)";
+    if (percent >= 60) return "var(--warning)";
+    return "var(--success)";
   }
 
   function gb(bytes: number): string {
@@ -275,7 +275,7 @@
     min-width: 0;
     /* Lines the list up with the tops of the rings rather than with the tile,
        so the two columns read as one row of content. */
-    padding-top: 2px;
+    padding-top: var(--space-half);
   }
 
   .heading {
@@ -293,7 +293,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: var(--space-half);
   }
 
   /* One cell, two children, both centred in it. */
@@ -329,7 +329,7 @@
     stroke-linecap: round;
     /* Matched to the poll, so the arc glides rather than stepping. */
     transition:
-      stroke-dashoffset 1s linear,
+      stroke-dashoffset var(--motion-reading) linear,
       stroke var(--motion-enter) ease;
   }
 
@@ -342,7 +342,7 @@
   }
 
   .unit {
-    padding-left: 1px;
+    padding-left: var(--space-hair);
     color: var(--text-3);
     font-size: var(--text-body);
     font-weight: var(--weight-body);
@@ -369,7 +369,7 @@
    */
   .trace {
     width: 100%;
-    height: 26px;
+    height: var(--icon-tile);
     /* Non-uniform scaling means a stroke width in user units would come out
        stretched, so it is given in pixels instead. */
     vector-effect: non-scaling-stroke;
@@ -422,9 +422,9 @@
     display: block;
     height: 100%;
     border-radius: var(--radius-pill);
-    background: var(--accent-green);
-    opacity: 0.5;
-    transition: width 1s linear;
+    background: var(--success);
+    opacity: var(--opacity-disabled);
+    transition: width var(--motion-reading) linear;
   }
 
   .cost {

@@ -103,7 +103,7 @@
   .section {
     display: flex;
     align-items: flex-end;
-    height: 30px;
+    height: var(--control-height);
     padding: 0 var(--space-3) var(--space-2);
     font-size: var(--text-group);
     font-weight: var(--weight-medium);

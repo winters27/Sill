@@ -812,7 +812,7 @@
     font-size: var(--text-meta);
     font-weight: var(--weight-medium);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease);
+    transition: background-color var(--motion-state) var(--ease);
   }
 
   .fresh:hover:not(:disabled) {
@@ -820,7 +820,7 @@
   }
 
   .fresh:disabled {
-    opacity: 0.5;
+    opacity: var(--opacity-disabled);
     cursor: default;
   }
 
@@ -830,7 +830,7 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-half);
   }
 
   .row {
@@ -853,7 +853,7 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: var(--space-hair);
     padding: var(--space-2);
     border: 0;
     background: transparent;
@@ -900,7 +900,9 @@
     color: var(--text-3);
     cursor: pointer;
     opacity: 0;
-    transition: opacity 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      opacity var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .row:hover .bin,
@@ -909,7 +911,7 @@
   }
 
   .bin:hover {
-    color: var(--accent-red);
+    color: var(--danger);
   }
 
   .nothing {
@@ -947,7 +949,7 @@
     padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
     background: var(--accent-fill);
-    box-shadow: inset 0 0 0 1px var(--accent-line);
+    box-shadow: var(--ring-accent-faint);
   }
 
   .asked p {
@@ -970,7 +972,7 @@
     padding: var(--space-3);
     border-radius: var(--radius-lg);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--accent-line);
+    box-shadow: var(--ring-accent-faint);
   }
 
   .wants {
@@ -1012,7 +1014,9 @@
     font: inherit;
     font-size: var(--text-meta);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .answers button:hover {
@@ -1071,7 +1075,7 @@
 
   .dots::after {
     content: "";
-    animation: thinking 1.4s steps(4, end) infinite;
+    animation: thinking var(--motion-pulse) steps(4, end) infinite;
   }
 
   @keyframes thinking {
@@ -1099,7 +1103,7 @@
   .trouble {
     align-self: flex-start;
     margin: 0;
-    color: var(--accent-red);
+    color: var(--danger);
     font-size: var(--text-meta);
   }
 
@@ -1112,7 +1116,7 @@
    * screenshot is looking at the screenshot, not at where to put it.
    */
   .hovering {
-    box-shadow: var(--bevel-window), inset 0 0 0 2px var(--accent);
+    box-shadow: var(--bevel-window), var(--focus-ring-inset);
   }
 
   .composer {
@@ -1141,17 +1145,17 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    padding: 3px var(--space-1) 3px var(--space-2);
+    padding: var(--space-snug) var(--space-1) var(--space-snug) var(--space-2);
     border-radius: var(--radius-pill);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     font-size: var(--text-meta);
   }
 
   /* The picture itself, so what is attached is recognisable rather than named. */
   .thumb {
-    width: 20px;
-    height: 20px;
+    width: var(--icon-tile-sm);
+    height: var(--icon-tile-sm);
     border-radius: var(--radius-sm);
     object-fit: cover;
   }
@@ -1190,7 +1194,7 @@
 
   .attach {
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-2);
   }
 
@@ -1233,7 +1237,7 @@
   }
 
   .paper {
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     border-radius: var(--radius-sm);
     background: var(--fill-2);
     color: var(--text-1);
@@ -1252,7 +1256,7 @@
     gap: var(--space-1);
     margin-top: var(--space-2);
     opacity: 0;
-    transition: opacity 0.15s var(--ease);
+    transition: opacity var(--motion-state) var(--ease);
   }
 
   .said:hover .afters,
@@ -1261,7 +1265,7 @@
   }
 
   .afters button {
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -1269,7 +1273,9 @@
     font: inherit;
     font-size: var(--text-micro);
     cursor: pointer;
-    transition: color 0.15s var(--ease), background-color 0.15s var(--ease);
+    transition:
+      color var(--motion-state) var(--ease),
+      background-color var(--motion-state) var(--ease);
   }
 
   .afters button:hover:not(:disabled) {
@@ -1278,7 +1284,7 @@
   }
 
   .afters button:disabled {
-    opacity: 0.5;
+    opacity: var(--opacity-disabled);
     cursor: default;
   }
 
@@ -1296,7 +1302,7 @@
     border: 0;
     border-radius: var(--radius-md);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-1);
     font: inherit;
     font-size: var(--text-body);
@@ -1306,7 +1312,7 @@
   }
 
   textarea:focus {
-    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    box-shadow: var(--ring-strong);
   }
 
   textarea::placeholder {
@@ -1330,14 +1336,14 @@
     border-radius: 50%;
     cursor: pointer;
     transition:
-      background-color 0.15s var(--ease),
-      color 0.15s var(--ease),
-      opacity 0.15s var(--ease);
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease),
+      opacity var(--motion-state) var(--ease);
   }
 
   .round:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px var(--accent);
+    box-shadow: var(--focus-ring);
   }
 
   .send {

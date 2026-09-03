@@ -88,7 +88,9 @@
     background: transparent;
     color: var(--text-2);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .control:hover {
@@ -98,7 +100,7 @@
 
   /* The one control that is destructive gets the one colour that says so. */
   .control.close:hover {
-    background-color: #c42b1c;
-    color: #ffffff;
+    background-color: var(--titlebar-close);
+    color: var(--text-1);
   }
 </style>

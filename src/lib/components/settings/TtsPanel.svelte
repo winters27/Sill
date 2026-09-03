@@ -426,7 +426,7 @@
 
   .pick:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 2px var(--accent-line);
+    box-shadow: var(--ring-selected);
   }
 
   .voice-head {
@@ -437,7 +437,7 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: var(--space-snug);
     min-width: 0;
   }
 
@@ -503,7 +503,7 @@
   .fill {
     height: 100%;
     background: var(--accent);
-    transition: width 120ms linear;
+    transition: width var(--motion-state) linear;
   }
 
   .stage {

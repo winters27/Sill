@@ -153,8 +153,8 @@
     font: inherit;
     cursor: pointer;
     transition:
-      background-color 0.15s var(--ease),
-      color 0.15s var(--ease);
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   button:hover:not(:disabled) {
@@ -174,7 +174,7 @@
   }
 
   .hint {
-    margin: 2px 0 0;
+    margin: var(--space-half) 0 0;
     font-size: var(--text-meta);
     color: var(--text-3);
   }

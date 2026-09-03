@@ -167,7 +167,7 @@
     gap: var(--space-3);
     padding: var(--space-4) var(--space-4);
     border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--fill-0);
     box-shadow: var(--bevel-tile);
   }
 
@@ -193,7 +193,7 @@
   }
 
   .note {
-    margin: var(--space-2) 2px 0;
+    margin: var(--space-2) var(--space-half) 0;
     font-size: var(--text-meta);
     color: var(--text-3);
   }

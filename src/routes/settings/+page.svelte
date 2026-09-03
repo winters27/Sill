@@ -1674,15 +1674,12 @@
     padding: 0;
     border: 0;
     border-radius: 50%;
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.35);
+    box-shadow: var(--ring-shade);
     cursor: default;
   }
 
   .swatch.on {
-    box-shadow:
-      inset 0 0 0 1px rgb(0 0 0 / 0.35),
-      0 0 0 2px var(--core-secondary-background),
-      0 0 0 3px var(--accent);
+    box-shadow: var(--ring-shade), var(--focus-ring-gapped);
   }
 
   /* The browsers this pane is about, shown rather than described. */
@@ -1743,21 +1740,21 @@
     gap: var(--space-2);
     margin: 0 var(--space-3) var(--space-3);
     padding: 0 var(--space-2);
-    height: 30px;
+    height: var(--control-height);
     border-radius: var(--radius-sm);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-3);
     transition:
-      background-color 0.15s var(--ease),
-      box-shadow 0.15s var(--ease);
+      background-color var(--motion-state) var(--ease),
+      box-shadow var(--motion-state) var(--ease);
   }
 
   /* Focus is one of the four things the accent is for, and the only one that
      applies to a text field. */
   .search:focus-within {
     background: var(--fill-2);
-    box-shadow: inset 0 0 0 1px var(--accent-line);
+    box-shadow: var(--ring-accent-faint);
   }
 
   .search input {
@@ -1779,8 +1776,8 @@
   .clear {
     display: grid;
     place-items: center;
-    width: 16px;
-    height: 16px;
+    width: var(--icon-tile-xs);
+    height: var(--icon-tile-xs);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -1826,7 +1823,7 @@
     gap: var(--space-3);
     width: 100%;
     padding: var(--space-1) var(--space-2);
-    margin-bottom: 2px;
+    margin-bottom: var(--space-half);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -1837,8 +1834,8 @@
     text-align: left;
     cursor: pointer;
     transition:
-      background-color 0.15s var(--ease),
-      color 0.15s var(--ease);
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .nav-item:hover {
@@ -1859,7 +1856,7 @@
     gap: var(--space-2);
     width: 100%;
     padding: var(--space-1) var(--space-2);
-    margin-bottom: 2px;
+    margin-bottom: var(--space-half);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -1867,7 +1864,7 @@
     font: inherit;
     text-align: left;
     cursor: pointer;
-    transition: background-color 0.15s var(--ease);
+    transition: background-color var(--motion-state) var(--ease);
   }
 
   .result:hover {
@@ -1889,7 +1886,7 @@
   .result-text {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: var(--space-hair);
     min-width: 0;
   }
 
@@ -2005,8 +2002,8 @@
     letter-spacing: 0.04em;
     cursor: pointer;
     transition:
-      background-color 0.15s var(--ease),
-      color 0.15s var(--ease);
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .recorder:hover {
@@ -2016,8 +2013,8 @@
   /* A key that Windows refused. Stated rather than merely styled: the colour
      is a hint and the description above says what happened. */
   .recorder.taken {
-    color: var(--accent-red);
-    border-color: var(--accent-red);
+    color: var(--danger);
+    border-color: var(--danger);
   }
 
   .recorder.recording {
@@ -2040,7 +2037,7 @@
   .stat {
     padding: var(--space-3) var(--space-3);
     border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--fill-0);
   }
 
   .stat-value {
@@ -2052,7 +2049,7 @@
 
   .stat-label {
     display: block;
-    margin-top: 2px;
+    margin-top: var(--space-half);
     font-size: var(--text-label);
     color: var(--text-3);
   }

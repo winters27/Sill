@@ -162,7 +162,7 @@
     border-radius: var(--radius-md);
     cursor: default;
     /* Scoped, and backdrop-filter is never animated: see the WebView2 note. */
-    transition: background-color 0.22s var(--ease);
+    transition: background-color var(--motion-travel) var(--ease);
   }
 
   .cell:hover:not(.selected) {

@@ -75,7 +75,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: 0 2px var(--space-2);
+    padding: 0 var(--space-half) var(--space-2);
   }
 
   .label {
@@ -100,7 +100,7 @@
     grid-template-columns: repeat(3, 1fr);
     margin-bottom: var(--space-6);
     border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--fill-0);
     overflow: hidden;
   }
 
@@ -137,7 +137,7 @@
   /* The unit rides at the baseline, smaller and quieter, so "12h 17m" reads
      as one number rather than four things. */
   em {
-    margin: 0 var(--space-1) 0 1px;
+    margin: 0 var(--space-1) 0 var(--space-hair);
     font-size: var(--text-query);
     font-style: normal;
     font-weight: 400;

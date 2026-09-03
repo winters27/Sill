@@ -4236,7 +4236,7 @@
     padding: var(--space-3);
     border-radius: var(--radius-md);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-1);
     font-family: var(--font-mono);
     font-size: var(--text-meta);
@@ -4269,19 +4269,19 @@
     align-items: center;
     flex: none;
     gap: var(--space-2);
-    padding: 3px var(--space-2) 3px var(--space-1);
+    padding: var(--space-snug) var(--space-2) var(--space-snug) var(--space-1);
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-2);
     font: inherit;
     font-size: var(--text-meta);
     white-space: nowrap;
     cursor: pointer;
     transition:
-      background-color 0.15s var(--ease),
-      color 0.15s var(--ease);
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .asker:hover {
@@ -4291,7 +4291,7 @@
 
   .asker:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 1px var(--accent);
+    box-shadow: var(--ring-accent);
   }
 
   .asker.unset {
@@ -4343,7 +4343,7 @@
     padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
     background: var(--accent-fill);
-    box-shadow: inset 0 0 0 1px var(--accent-line);
+    box-shadow: var(--ring-accent-faint);
   }
 
   .asked p {
@@ -4430,13 +4430,15 @@
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-2);
     font: inherit;
     font-size: var(--text-meta);
     text-align: left;
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .opener:hover {
@@ -4446,7 +4448,7 @@
 
   .opener:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 1px var(--accent);
+    box-shadow: var(--ring-accent);
   }
 
   /*
@@ -4463,7 +4465,7 @@
     padding: var(--space-3);
     border-radius: var(--radius-lg);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--accent-line);
+    box-shadow: var(--ring-accent-faint);
   }
 
   .wants {
@@ -4507,7 +4509,9 @@
     font: inherit;
     font-size: var(--text-meta);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .answers button:hover {
@@ -4531,7 +4535,7 @@
 
   .answers button:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 1px var(--accent);
+    box-shadow: var(--ring-accent);
   }
 
   /*
@@ -4550,7 +4554,7 @@
 
   .dots::after {
     content: "";
-    animation: thinking 1.4s steps(4, end) infinite;
+    animation: thinking var(--motion-pulse) steps(4, end) infinite;
   }
 
   @keyframes thinking {
@@ -4619,7 +4623,7 @@
     /* The picture is of somebody's window, which may be any colour and may
        end in a flat edge against the launcher's own. A hairline separates the
        two without drawing a frame around it. */
-    box-shadow: 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring-outside);
     object-fit: contain;
   }
 
@@ -4680,8 +4684,8 @@
      on the taskbar is already the right thing to put here. */
   .mark {
     flex: none;
-    width: 26px;
-    height: 26px;
+    width: var(--icon-tile);
+    height: var(--icon-tile);
     -webkit-user-drag: none;
   }
 
@@ -4708,7 +4712,9 @@
     font: inherit;
     font-size: var(--text-meta);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .who-crumb:hover {
@@ -4718,7 +4724,7 @@
 
   .who-crumb:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 1px var(--accent);
+    box-shadow: var(--ring-accent);
   }
 
   .search input {
@@ -4847,7 +4853,7 @@
     display: flex;
     align-items: center;
     flex: none;
-    height: 30px;
+    height: var(--control-height);
     border-radius: var(--radius-lg);
     background: var(--fill-2);
     box-shadow: var(--bevel-tile);
@@ -4867,7 +4873,9 @@
     font-size: var(--text-meta);
     white-space: nowrap;
     cursor: default;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .segment:hover {
@@ -4887,12 +4895,12 @@
   }
 
   .toast[data-style="success"] {
-    color: var(--accent-green);
+    color: var(--success);
   }
   .toast[data-style="failure"] {
-    color: var(--accent-red);
+    color: var(--danger);
   }
   .toast[data-style="animated"] {
-    color: var(--accent-blue);
+    color: var(--info);
   }
 </style>

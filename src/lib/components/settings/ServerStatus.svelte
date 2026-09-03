@@ -135,19 +135,17 @@
   .card {
     padding: var(--space-4) var(--space-4);
     border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--fill-0);
     box-shadow: var(--bevel-tile);
     transition:
-      background-color 0.35s var(--ease),
-      box-shadow 0.35s var(--ease);
+      background-color var(--motion-travel) var(--ease),
+      box-shadow var(--motion-travel) var(--ease);
   }
 
   .card[data-state="running"],
   .card[data-state="working"] {
     background-color: var(--fill-1);
-    box-shadow:
-      var(--bevel-tile),
-      inset 0 0 0 1px var(--fill-3);
+    box-shadow: var(--bevel-tile), var(--ring-fill);
   }
 
   .head {
@@ -168,7 +166,7 @@
     height: 9px;
     border-radius: 50%;
     background: var(--text-3);
-    transition: background-color 0.3s var(--ease);
+    transition: background-color var(--motion-travel) var(--ease);
   }
 
   .card[data-state="ready"] .beacon {
@@ -189,7 +187,7 @@
     inset: -5px;
     border-radius: 50%;
     background: var(--accent-bright);
-    animation: pulse 2.4s ease-out infinite;
+    animation: pulse var(--motion-pulse-slow) ease-out infinite;
   }
 
   @keyframes pulse {
@@ -228,7 +226,7 @@
 
   .detail {
     display: block;
-    margin-top: 2px;
+    margin-top: var(--space-half);
     max-width: 62ch;
     font-size: var(--text-meta);
     line-height: 1.5;
@@ -251,7 +249,7 @@
     height: 100%;
     border-radius: var(--radius-pill);
     background: var(--core-accent);
-    transition: width 0.25s linear;
+    transition: width var(--motion-travel) linear;
   }
 
   .facts {
@@ -275,7 +273,7 @@
   }
 
   dd {
-    margin: 2px 0 0;
+    margin: var(--space-half) 0 0;
     font-size: var(--text-body);
     /* Fixed width digits, so a counter that ticks does not shuffle the row. */
     font-variant-numeric: tabular-nums;

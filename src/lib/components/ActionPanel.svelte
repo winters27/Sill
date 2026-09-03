@@ -127,7 +127,7 @@
   .scrim {
     position: fixed;
     inset: 0;
-    z-index: 10;
+    z-index: var(--z-panel-scrim);
   }
 
   /* Anchored bottom right, above the footer, the way a launcher's action
@@ -137,7 +137,7 @@
     position: fixed;
     right: var(--space-2);
     bottom: 44px;
-    z-index: 11;
+    z-index: var(--z-panel);
     width: 320px;
     max-height: 60vh;
     overflow: hidden;
@@ -173,7 +173,7 @@
     padding: 0 var(--space-2);
     border-radius: var(--radius-md);
     cursor: default;
-    transition: background-color 0.15s var(--ease);
+    transition: background-color var(--motion-state) var(--ease);
   }
 
   .row.selected {
@@ -181,7 +181,7 @@
   }
 
   .row.destructive .title {
-    color: var(--accent-red);
+    color: var(--danger);
   }
 
   .title {

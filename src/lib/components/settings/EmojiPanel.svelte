@@ -92,7 +92,7 @@
   .tones {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: var(--space-half);
   }
 
   /* No border until it is the chosen one. Six bordered swatches read as six
@@ -101,7 +101,7 @@
     display: grid;
     place-items: center;
     width: 30px;
-    height: 30px;
+    height: var(--control-height);
     padding: 0;
     font-size: var(--text-query);
     line-height: 1;

@@ -27,7 +27,9 @@
     font-weight: var(--weight-medium);
     white-space: nowrap;
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   button:hover:not(:disabled) {
@@ -35,15 +37,15 @@
   }
 
   button:disabled {
-    opacity: 0.5;
+    opacity: var(--opacity-disabled);
     cursor: default;
   }
 
   .danger {
-    color: var(--accent-red);
+    color: var(--danger);
   }
 
   .danger:hover:not(:disabled) {
-    background: rgba(var(--accent-red-rgb), 0.14);
+    background: var(--danger-fill);
   }
 </style>

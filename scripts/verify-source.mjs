@@ -51,6 +51,98 @@ const SETTINGS_SURFACE = /[\\/]settings[\\/]/;
 /** The file that owns the look, which cannot use itself. */
 const OWNS_A_CONTROL = /Select\.svelte$/;
 
+/*
+ * The gallery and the mock windows under `src/routes/preview/`.
+ *
+ * A development harness rather than an interface. It paints simulated desktop
+ * wallpapers behind the real components so contrast can be measured against a
+ * pale desktop as well as a dark one, which means its colours are test
+ * fixtures: `#e8e4dc` there is somebody's wallpaper, not a surface Sill draws.
+ * Theming a fixture would defeat the fixture.
+ *
+ * It also ships as a lazy chunk and is meant to be deleted before any release,
+ * so a rule enforced here is churn on code with a known end date.
+ */
+const HARNESS = /[\\/]routes[\\/]preview[\\/]/;
+
+/**
+ * The parts of a component that style it: `<style>` blocks and `style=""`.
+ *
+ * Everything below reads only these, and that boundary is the rule rather than
+ * an implementation detail. A canvas is not a stylesheet: the markup tool sets
+ * `pen.strokeStyle` to pick an ink and computes black-or-white for contrast
+ * against whatever colour it lands on, and an SVG brand mark carries the
+ * vendor's own hex because that hex IS the mark. Those are program data. Only
+ * what the browser parses as CSS answers to the design system.
+ *
+ * Offsets are kept so a failure still points at the right line of the file.
+ */
+function styled(text) {
+  const parts = [];
+
+  for (const m of text.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)) {
+    parts.push([m.index + m[0].indexOf(">") + 1, m[1]]);
+  }
+  for (const m of text.matchAll(/\bstyle="([^"]*)"/g)) {
+    parts.push([m.index + 7, m[1]]);
+  }
+
+  // Comments are prose. Blanked rather than cut so offsets still land.
+  return parts.map(([at, css]) => [
+    at,
+    css.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " ")),
+  ]);
+}
+
+/*
+ * The literals a component may still write, and why each one is allowed.
+ *
+ * "Zero literals" is not literally the target and pretending otherwise would
+ * make the rule dishonest. The failure being guarded against is DRIFT: two
+ * components that agree on a value today and quietly stop agreeing tomorrow. A
+ * value used once cannot drift, so a measurement of one thing stays where it
+ * is measured.
+ *
+ *   A BORDER OR OUTLINE WIDTH. No rule below looks at one. A hairline is one
+ *   device pixel by definition and cannot be anything else; naming it would
+ *   add a lookup to the one number in the system that can never move. 2px is
+ *   the same quantity doubled, which is how a control says it is focused.
+ *
+ *   Any length in `width`, `height`, `top`, `inset`, `transform`,
+ *   `grid-template-columns` and their relatives, EXCEPT where the number
+ *   collides with a named size (below). A settings panel that is 520px wide is
+ *   a measurement of that panel; there is no scale it belongs to, and
+ *   inventing `--panel-wide` would name one thing twice. Where two rules DO
+ *   have to agree on such a number, a component declares its own custom
+ *   property and both read it; `AiPanel.svelte` does that with the label
+ *   column its field grid sets and its action row has to clear.
+ *
+ *   `0`, percentages, `em`, `ch`, `rem`, `fr`, `vh`. Not px and not colours.
+ *
+ *   Opacity. `0` and `1` are the two ends of an animation rather than design
+ *   values, and they are the two most common, so the exception list would be
+ *   longer than the rule and a rule like that teaches people to write
+ *   exceptions. The scale is defined and adopted where a component was saying
+ *   disabled, muted or decorative, which is where naming it buys anything.
+ *
+ *   Anything outside `<style>` and `style=""`. See `styled` above.
+ */
+
+/**
+ * Sizes with one meaning, which is what makes them safe to check by value.
+ *
+ * A control that is 30px tall is the control, every time. A 26px square is the
+ * icon tile, in either dimension. Nothing else on the size scale is checked:
+ * 16px is an icon in one file and a switch knob in the next, and a guard that
+ * cannot tell them apart would be renaming the knob for the sake of a count.
+ */
+const NAMED_SIZE = [
+  [/^(min-|max-)?height$/, "40px", "--row-height"],
+  [/^(min-|max-)?height$/, "60px", "--search-height"],
+  [/^(min-|max-)?height$/, "30px", "--control-height"],
+  [/^(min-|max-)?(width|height)$/, "26px", "--icon-tile"],
+];
+
 let failures = 0;
 
 function fail(file, line, what) {
@@ -143,6 +235,85 @@ for (const file of sources(".")) {
         "inline accent alpha; the accent means selection, match, focus or an " +
           "affirmative state, and each has a named token",
       );
+    }
+
+    /*
+     * Everything else the theme owns: colour, motion, layering, spacing,
+     * radius and elevation.
+     *
+     * The font-size rule above was the first of these and it worked, so this
+     * is the same rule widened to the categories that decayed the same way
+     * while nothing was watching them. The counts when it was written: 64
+     * colour literals, 101 durations across six speeds for what turned out to
+     * be three ideas, 62 spacing values, 74 hand-copied shadows and 8 raw
+     * z-indexes.
+     *
+     * A shadow is in here because it is the sneakiest of them. Nobody chooses
+     * a `0 16px 40px -12px` twice; they copy it, and then one copy gets tuned
+     * and the interface has two heights that were meant to be one.
+     */
+    if (!HARNESS.test(file)) {
+      for (const [at, css] of styled(text)) {
+        const line = (index) => lineOf(text, at + index);
+
+        for (const m of css.matchAll(/#[0-9a-fA-F]{3,8}\b|\brgba?\([^)]*\)|\bhsla?\([^)]*\)/g)) {
+          // `rgba(var(--accent-rgb), a)` has its own message above.
+          if (m[0].includes("var(--")) continue;
+          fail(file, line(m.index), `${m[0]} is a literal colour; every colour has a token`);
+        }
+
+        for (const m of css.matchAll(/\b(transition|animation)(-duration|-delay)?\s*:\s*([^;}]*)/g)) {
+          for (const d of m[3].matchAll(/(?<![\w-])[\d.]+m?s\b/g)) {
+            fail(
+              file,
+              line(m.index),
+              `${m[1]} runs for ${d[0]}; use a --motion-* token so the whole ` +
+                "interface changes state at one speed",
+            );
+          }
+        }
+
+        for (const m of css.matchAll(/\bz-index\s*:\s*(-?\d+)/g)) {
+          fail(
+            file,
+            line(m.index),
+            `z-index ${m[1]} is a bare number, so what it stacks above is only ` +
+              "knowable by reading every other component; use a --z-* token",
+          );
+        }
+
+        for (const m of css.matchAll(
+          /\b(padding|margin|gap|row-gap|column-gap)(-top|-right|-bottom|-left)?\s*:\s*([^;}]*)/g,
+        )) {
+          if (!/[\d.]px/.test(m[3])) continue;
+          fail(file, line(m.index), `${m[1]}${m[2] ?? ""} is in px; use a --space-* token`);
+        }
+
+        for (const m of css.matchAll(/\bborder-radius\s*:\s*([^;}]*)/g)) {
+          if (!/[\d.]px/.test(m[1])) continue;
+          fail(file, line(m.index), "a literal border-radius; use a --radius-* token");
+        }
+
+        for (const m of css.matchAll(/\bbox-shadow\s*:\s*([^;}]*)/g)) {
+          if (!/[\d.]px/.test(m[1])) continue;
+          fail(
+            file,
+            line(m.index),
+            "a hand-written shadow; use a --ring-*, --focus-ring-*, --well or " +
+              "--elevation-* token so two things at one height stay at one height",
+          );
+        }
+
+        for (const m of css.matchAll(/(^|[;{\s])([a-z-]+)\s*:\s*([^;}]*)/g)) {
+          const property = m[2];
+
+          for (const [where, size, token] of NAMED_SIZE) {
+            if (!where.test(property)) continue;
+            if (!new RegExp(`(?<![\\d.])${size}`).test(m[3])) continue;
+            fail(file, line(m.index), `${property}: ${size} is ${token}`);
+          }
+        }
+      }
     }
 
     /*

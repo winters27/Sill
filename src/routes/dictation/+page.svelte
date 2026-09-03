@@ -248,10 +248,8 @@
     min-width: 174px;
     padding: var(--space-2) var(--space-4);
     border-radius: var(--radius-pill);
-    background: rgba(8, 8, 10, 0.86);
-    box-shadow:
-      inset 0 0 0 1px var(--fill-3),
-      0 10px 30px -8px rgba(0, 0, 0, 0.7);
+    background: var(--shade-5);
+    box-shadow: var(--ring-fill), var(--elevation-pill);
   }
 
   .dots {
@@ -270,6 +268,6 @@
 
   /* The one destructive state gets the one colour that says so. */
   .warn {
-    color: var(--accent-red);
+    color: var(--danger);
   }
 </style>

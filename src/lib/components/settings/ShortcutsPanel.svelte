@@ -438,8 +438,8 @@
 
   /* The same red the hotkey rows use for a key another application owns. */
   .key.taken {
-    color: var(--accent-red);
-    border-color: var(--accent-red);
+    color: var(--danger);
+    border-color: var(--danger);
   }
 
   .key.recording {

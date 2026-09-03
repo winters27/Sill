@@ -232,19 +232,21 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    height: 30px;
+    height: var(--control-height);
     padding: 0 var(--space-2);
     border-radius: var(--radius-md);
     font-size: var(--text-body);
     color: var(--text-2);
     cursor: default;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .glyph {
     flex: none;
     color: var(--text-3);
-    transition: color 0.15s var(--ease);
+    transition: color var(--motion-state) var(--ease);
   }
 
   .item.selected {
@@ -260,7 +262,7 @@
      quitting the loudest thing in the menu. */
   .item.danger.selected,
   .item.danger.selected .glyph {
-    color: var(--accent-red);
+    color: var(--danger);
   }
 
   .label {

@@ -516,7 +516,7 @@
     gap: var(--space-3);
     padding: var(--space-4) var(--space-4);
     border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--fill-0);
     box-shadow: var(--bevel-tile);
   }
 
@@ -564,7 +564,7 @@
     padding: var(--space-2);
     border-radius: var(--radius-md);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-1);
     font-size: var(--text-body);
     line-height: 1.5;
@@ -572,7 +572,7 @@
 
   .rich:focus {
     outline: none;
-    box-shadow: inset 0 0 0 1px var(--accent);
+    box-shadow: var(--ring-accent);
   }
 
   .field {
@@ -599,18 +599,18 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-1);
     font: inherit;
     font-size: var(--text-meta);
     outline: none;
     user-select: text;
-    transition: box-shadow 0.15s var(--ease);
+    transition: box-shadow var(--motion-state) var(--ease);
   }
 
   input:focus,
   textarea:focus {
-    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    box-shadow: var(--ring-strong);
   }
 
   input::placeholder,
@@ -638,7 +638,7 @@
   }
 
   .token {
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--fill-2);
@@ -646,7 +646,9 @@
     font-family: var(--font-mono);
     font-size: var(--text-label);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .token:hover {
@@ -677,7 +679,7 @@
   .error {
     margin: 0;
     font-size: var(--text-meta);
-    color: var(--accent-red);
+    color: var(--danger);
   }
 
   .actions {
@@ -697,7 +699,7 @@
   }
 
   .keyword-tag {
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     border-radius: var(--radius-pill);
     background: var(--fill-2);
     font-family: var(--font-mono);
@@ -712,7 +714,7 @@
 
   .transfer {
     margin: 0;
-    padding: 2px 0 var(--space-1);
+    padding: var(--space-half) 0 var(--space-1);
     font-size: var(--text-meta);
     color: var(--text-2);
   }

@@ -579,13 +579,13 @@
    */
   .switch {
     flex: none;
-    width: 26px;
+    width: var(--icon-tile);
     height: 15px;
     position: relative;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--fill-2);
-    box-shadow: inset 0 0 0 1px var(--hairline);
-    transition: background-color 0.16s var(--ease);
+    box-shadow: var(--ring);
+    transition: background-color var(--motion-state) var(--ease);
   }
 
   .switch::after {
@@ -598,8 +598,8 @@
     border-radius: 50%;
     background: var(--text-2);
     transition:
-      transform 0.16s var(--ease),
-      background-color 0.16s var(--ease);
+      transform var(--motion-state) var(--ease),
+      background-color var(--motion-state) var(--ease);
   }
 
   .switch.on {
@@ -659,8 +659,8 @@
   .emoji {
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: var(--icon-tile);
+    height: var(--icon-tile);
     flex: none;
     font-size: var(--glyph-md);
     line-height: 1;
@@ -670,7 +670,7 @@
      competing with the title it sits beside. */
   .alias {
     flex: none;
-    padding: 1px var(--space-1);
+    padding: var(--space-hair) var(--space-1);
     font-size: var(--text-micro);
     font-weight: var(--weight-medium);
     letter-spacing: var(--track-micro);
@@ -706,8 +706,8 @@
   .equals {
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: var(--icon-tile);
+    height: var(--icon-tile);
     flex: none;
     font-family: var(--font-display);
     font-size: var(--glyph-sm);

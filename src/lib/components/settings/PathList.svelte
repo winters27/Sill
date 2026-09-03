@@ -81,19 +81,21 @@
     flex: none;
     display: grid;
     place-items: center;
-    width: 20px;
-    height: 20px;
+    width: var(--icon-tile-sm);
+    height: var(--icon-tile-sm);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-3);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .remove:hover {
-    background-color: rgba(var(--accent-red-rgb), 0.15);
-    color: var(--accent-red);
+    background-color: var(--danger-fill);
+    color: var(--danger);
   }
 
   .empty {
@@ -111,7 +113,7 @@
     font: inherit;
     font-size: var(--text-meta);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease);
+    transition: background-color var(--motion-state) var(--ease);
   }
 
   .add:hover {

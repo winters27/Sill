@@ -87,19 +87,21 @@
   .chip button {
     display: grid;
     place-items: center;
-    width: 16px;
-    height: 16px;
+    width: var(--icon-tile-xs);
+    height: var(--icon-tile-xs);
     border: 0;
     border-radius: 50%;
     background: transparent;
     color: var(--text-3);
     cursor: pointer;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .chip button:hover {
-    background: rgba(var(--accent-red-rgb), 0.2);
-    color: var(--accent-red);
+    background: var(--danger-fill);
+    color: var(--danger);
   }
 
   input {
@@ -109,17 +111,17 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-1);
     font: inherit;
     font-size: var(--text-meta);
     outline: none;
     user-select: text;
-    transition: box-shadow 0.15s var(--ease);
+    transition: box-shadow var(--motion-state) var(--ease);
   }
 
   input:focus {
-    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    box-shadow: var(--ring-strong);
   }
 
   input::placeholder {

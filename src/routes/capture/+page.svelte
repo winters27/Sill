@@ -331,24 +331,24 @@
 
   .dim {
     position: fixed;
-    background: rgb(0 0 0 / 0.45);
+    background: var(--shade-2);
   }
 
   .picked {
     position: fixed;
     /* An outline rather than a border: a border would sit inside the rectangle
        and cover the first pixel of what is being picked. */
-    outline: 1px solid var(--accent, #4a9eff);
+    outline: 1px solid var(--accent);
     /* The selection reads as a hole in the dimming, so it must not be tinted. */
     background: transparent;
   }
 
   .size {
     position: fixed;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: rgb(0 0 0 / 0.75);
-    color: #fff;
+    padding: var(--space-half) var(--space-cozy);
+    border-radius: var(--radius-sm);
+    background: var(--shade-4);
+    color: var(--text-1);
     font: 12px/1.4 system-ui, sans-serif;
     font-variant-numeric: tabular-nums;
     pointer-events: none;
@@ -360,10 +360,10 @@
     left: 50%;
     transform: translateX(-50%);
     margin: 0;
-    padding: 8px 16px;
-    border-radius: 8px;
-    background: rgb(0 0 0 / 0.75);
-    color: #fff;
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-md);
+    background: var(--shade-4);
+    color: var(--text-1);
     font: 13px/1.4 system-ui, sans-serif;
     pointer-events: none;
   }
@@ -381,9 +381,9 @@
    * carries its own colour for the same reason.
    */
   .hint :global(.sill-key) {
-    background: rgb(255 255 255 / 0.16);
+    background: var(--fill-4);
     box-shadow: none;
-    color: #fff;
+    color: var(--text-1);
   }
 
   .status {

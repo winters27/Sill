@@ -916,8 +916,8 @@
     /* Stated, not inherited. The page under this is transparent on purpose so
        the launcher's acrylic reaches it, and an editor that lets the desktop
        through its edges reads as a broken window. */
-    background: var(--core-background, #1b1b1d);
-    color: var(--text-1, #f2f2f7);
+    background: var(--core-background);
+    color: var(--text-1);
   }
 
   header,
@@ -951,7 +951,7 @@
     display: grid;
     place-items: center;
     width: 30px;
-    height: 30px;
+    height: var(--control-height);
     padding: 0;
     border: 0;
     border-radius: var(--radius-md);
@@ -959,8 +959,8 @@
     color: var(--text-2);
     cursor: default;
     transition:
-      background-color 0.12s var(--ease),
-      color 0.12s var(--ease);
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .icon:hover:not(:disabled) {
@@ -970,7 +970,7 @@
 
   .icon.on {
     background: var(--accent);
-    color: var(--core-background, #1b1b1d);
+    color: var(--core-background);
   }
 
   .icon:disabled {
@@ -981,12 +981,12 @@
     display: flex;
     gap: var(--space-2);
     align-items: center;
-    height: 30px;
+    height: var(--control-height);
     padding: 0 var(--space-3);
     border: 0;
     border-radius: var(--radius-md);
     background: var(--accent);
-    color: var(--core-background, #1b1b1d);
+    color: var(--core-background);
     font: inherit;
     font-size: var(--text-meta);
     cursor: default;
@@ -1006,9 +1006,7 @@
     border-radius: var(--radius-md);
     /* The picture's own edge, which a dark screenshot on a dark window
        otherwise does not have. */
-    box-shadow:
-      0 0 0 1px var(--hairline-strong),
-      0 12px 40px rgb(0 0 0 / 0.45);
+    box-shadow: var(--ring-outside-strong), var(--elevation-popover);
     overflow: hidden;
   }
 
@@ -1027,15 +1025,15 @@
     padding: 0;
     border: 0;
     border-radius: 50%;
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.35);
+    box-shadow: var(--ring-shade);
     cursor: default;
   }
 
   .swatch.on {
-    box-shadow:
-      inset 0 0 0 1px rgb(0 0 0 / 0.35),
-      0 0 0 2px var(--core-background, #1b1b1d),
-      0 0 0 3px var(--accent);
+    /* The toolbar is painted in --core-background rather than the settings
+       window's secondary surface, so the ring's gap follows it. */
+    --ring-gap: var(--core-background);
+    box-shadow: var(--ring-shade), var(--focus-ring-gapped);
   }
 
   .weight {
@@ -1070,17 +1068,17 @@
    * bright button, which is the same mistake as writing the key as prose.
    */
   .keep :global(.sill-key.on-accent) {
-    background: rgb(0 0 0 / 0.22);
+    background: var(--shade-1);
     box-shadow: none;
     color: inherit;
   }
 
   .typing {
     position: absolute;
-    padding: 2px 4px;
+    padding: var(--space-half) var(--space-1);
     border: 1px dashed currentColor;
     border-radius: var(--radius-sm);
-    background: rgb(0 0 0 / 0.55);
+    background: var(--shade-3);
     font: inherit;
     outline: none;
   }

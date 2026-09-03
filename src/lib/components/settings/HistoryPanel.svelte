@@ -159,10 +159,10 @@
     gap: var(--space-2);
     width: 260px;
     padding: 0 var(--space-2);
-    height: 30px;
+    height: var(--control-height);
     border-radius: var(--radius-sm);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-3);
   }
 
@@ -206,7 +206,7 @@
   }
 
   .dot {
-    opacity: 0.6;
+    opacity: var(--opacity-muted);
   }
 
   .at {
@@ -216,7 +216,7 @@
   /* Revealed on hover, so a long list is transcripts rather than a wall of
      buttons. They stay reachable by keyboard because focus shows them too. */
   .meta button {
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -226,9 +226,9 @@
     cursor: pointer;
     opacity: 0;
     transition:
-      opacity 0.15s var(--ease),
-      background-color 0.15s var(--ease),
-      color 0.15s var(--ease);
+      opacity var(--motion-state) var(--ease),
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .entry:hover .meta button,
@@ -242,8 +242,8 @@
   }
 
   .meta button.danger:hover {
-    background: rgba(var(--accent-red-rgb), 0.14);
-    color: var(--accent-red);
+    background: var(--danger-fill);
+    color: var(--danger);
   }
 
   .text {
