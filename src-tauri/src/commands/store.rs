@@ -9,10 +9,16 @@
 //! The alternative is the window asking four questions per keystroke, which is
 //! the chatter rule 18 exists to stop.
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::state::PrefsState;
 use crate::store::{self, catalog, install, Browse, Query};
+
+/// What an install says about itself while it runs.
+///
+/// One name, here, because the window listens for it and Rust emits it, and a
+/// string spelled twice is the pair that stops agreeing.
+pub const INSTALL_PROGRESS: &str = "store:install";
 
 /// The GitHub token, if one has been set.
 ///
@@ -188,8 +194,18 @@ pub(crate) async fn store_install(
 
     // Off the UI thread: npm is a subprocess that takes seconds and esbuild is
     // one more per command.
+    //
+    // The progress goes out as an event rather than coming back with the
+    // result, because it is a series of things happening rather than an
+    // answer. Rule 6, and the same shape `dictation::SetupProgress` already
+    // uses for the other download somebody waits on.
+    let reporting = app.clone();
     let done = tauri::async_runtime::spawn_blocking(move || {
-        install::finish(&data_dir, &esbuild, &node, &name)
+        install::finish_reporting(&data_dir, &esbuild, &node, &name, &|progress| {
+            if let Err(err) = reporting.emit(INSTALL_PROGRESS, &progress) {
+                crate::say!("could not say how the install is going: {err}");
+            }
+        })
     })
     .await
     .map_err(|err| format!("the install did not finish: {err}"))??;
@@ -382,6 +398,185 @@ pub(crate) async fn installed_extensions(
             }
         })
         .collect())
+}
+
+// ------------------------------------------------------------- preferences
+
+/// One setting an extension declares, and what it is currently set to.
+///
+/// The declaration and the value together, in one row, because a screen that
+/// draws a control needs both and asking twice would be two calls per setting.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExtensionPreference {
+    /// Which command it belongs to, or empty when the extension declares it.
+    ///
+    /// The scope is the whole difference between one API key serving nine
+    /// commands and nine of them, so it is shown rather than flattened away.
+    pub command: String,
+    /// What the command is called, for the heading the row sits under.
+    pub command_title: String,
+    pub name: String,
+    /// `textfield`, `password`, `checkbox`, `dropdown`, or whatever else a
+    /// manifest wrote. Unknown draws as a text field.
+    pub kind: String,
+    pub title: String,
+    pub description: String,
+    pub required: bool,
+    /// The choices, for a dropdown.
+    pub choices: Vec<crate::extension_install::Choice>,
+    /// What it will answer with as things stand.
+    pub value: serde_json::Value,
+    /// Whether that came from the manifest rather than from somebody.
+    pub is_default: bool,
+}
+
+/// Every setting one installed extension has, with what it is set to.
+///
+/// Read from the index rather than from the manifest, because the manifest is
+/// in a staging directory that was deleted after the build. The declarations
+/// were recorded at install for exactly this.
+///
+/// **A password is never sent.** Its value is sealed on disk and the row says
+/// only whether one is set, because a settings window that can display an API
+/// key is a settings window somebody can read over a shoulder.
+#[tauri::command]
+pub(crate) async fn extension_preferences(
+    app: AppHandle,
+    extension: String,
+) -> Result<Vec<ExtensionPreference>, String> {
+    let data_dir = crate::state::data_dir(&app);
+    let home = store::extensions_home(&data_dir);
+    let held = crate::exthost::preferences::load(&data_dir);
+
+    let mut rows: Vec<ExtensionPreference> = Vec::new();
+
+    for record in crate::registry::load_index(&store::index_file(&home)) {
+        if record.extension != extension {
+            continue;
+        }
+
+        let Some(declared) = record.manifest.as_ref() else {
+            continue;
+        };
+
+        let effective = crate::exthost::preferences::effective(
+            &record.preferences,
+            held.in_scope(&crate::exthost::preferences::extension_scope(&extension)),
+            held.in_scope(&crate::exthost::preferences::command_scope(
+                &extension,
+                &record.command,
+            )),
+        );
+
+        for preference in &declared.preferences {
+            // An extension's own setting is carried on every one of its
+            // commands, so it gets one row rather than nine. A command's own
+            // gets a row per command, which is what it is.
+            let command = if declared.own.contains(&preference.name) {
+                record.command.clone()
+            } else {
+                String::new()
+            };
+
+            if rows
+                .iter()
+                .any(|row| row.command == command && row.name == preference.name)
+            {
+                continue;
+            }
+
+            let set_here = held
+                .in_scope(&if command.is_empty() {
+                    crate::exthost::preferences::extension_scope(&extension)
+                } else {
+                    crate::exthost::preferences::command_scope(&extension, &command)
+                })
+                .and_then(|it| it.get(&preference.name))
+                .is_some();
+
+            let kind = preference
+                .kind
+                .clone()
+                .unwrap_or_else(|| "textfield".into());
+            let secret = kind == "password";
+
+            rows.push(ExtensionPreference {
+                command_title: if command.is_empty() {
+                    String::new()
+                } else {
+                    record.title.clone()
+                },
+                command,
+                name: preference.name.clone(),
+                title: preference
+                    .title
+                    .clone()
+                    .or_else(|| preference.label.clone())
+                    .unwrap_or_else(|| preference.name.clone()),
+                description: preference.description.clone().unwrap_or_default(),
+                required: preference.required,
+                choices: preference.data.clone(),
+                // A secret is reported as set or not, never as itself.
+                value: if secret {
+                    serde_json::Value::Bool(set_here)
+                } else {
+                    effective
+                        .get(&preference.name)
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null)
+                },
+                is_default: !set_here,
+                kind,
+            });
+        }
+    }
+
+    Ok(rows)
+}
+
+/// Sets one, or clears it when the value is empty.
+///
+/// Written straight through to disk rather than held. There is no in-memory
+/// copy of this to keep in step, which is one fewer thing that can disagree,
+/// and a settings screen that saves on change is what the rest of this window
+/// already does.
+#[tauri::command]
+pub(crate) async fn set_extension_preference(
+    app: AppHandle,
+    extension: String,
+    command: String,
+    name: String,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let data_dir = crate::state::data_dir(&app);
+    let home = store::extensions_home(&data_dir);
+
+    // The declaration decides whether this is a secret, so it is looked up
+    // rather than trusted from the window: a window that could say "this is
+    // not a password" is a window that could ask for one to be stored in the
+    // clear.
+    let declared: Vec<crate::extension_install::Preference> =
+        crate::registry::load_index(&store::index_file(&home))
+            .into_iter()
+            .filter(|record| record.extension == extension)
+            .filter_map(|record| record.manifest)
+            .flat_map(|declared| declared.preferences)
+            .collect();
+
+    if !declared.iter().any(|it| it.name == name) {
+        return Err(format!("{extension} has no setting called {name}"));
+    }
+
+    let scope = if command.is_empty() {
+        crate::exthost::preferences::extension_scope(&extension)
+    } else {
+        crate::exthost::preferences::command_scope(&extension, &command)
+    };
+
+    let mut held = crate::exthost::preferences::load(&data_dir);
+    held.set(&scope, &name, value, &declared);
+    crate::exthost::preferences::save(&data_dir, &held)
 }
 
 /// Gives one permission to one extension.

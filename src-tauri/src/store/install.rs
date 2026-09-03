@@ -61,8 +61,11 @@ pub fn staging_home(data_dir: &Path) -> PathBuf {
 /// this allows a little more than that and nothing that navigates.
 pub fn safe_name(name: &str) -> Option<&str> {
     let ok = !name.is_empty()
-        && name != "."
-        && name != ".."
+        // No leading dot, which rules out `.` and `..` and one more thing: an
+        // install builds into `.<name>.installing` beside its destination, and
+        // `pins` skips dot-prefixed directories because of it. A store slug
+        // that could begin with a dot would make that skip a lie.
+        && !name.starts_with('.')
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
@@ -202,6 +205,18 @@ pub struct Preparation {
     pub packages: Vec<String>,
     /// Settings it will ask for that hold a credential.
     pub secrets: Vec<String>,
+    /// Said when it asks for a newer `@raycast/api` than Sill implements.
+    ///
+    /// A warning rather than a refusal: the version an extension pins is the
+    /// one its author had installed, not a list of what it uses. What it buys
+    /// is that "a function is undefined" has an explanation somebody saw
+    /// before they installed it.
+    pub api_warning: Option<String>,
+    /// The commands Sill will refuse to install, one sentence each.
+    ///
+    /// On the screen that asks, because an extension whose menu bar command is
+    /// dropped installs three of its four and looks half broken otherwise.
+    pub refused: Vec<String>,
     /// The sentence that says what none of this enforces.
     pub not_enforced: &'static str,
 }
@@ -316,8 +331,38 @@ pub async fn prepare(
         capabilities,
         packages: packages_in(&manifest),
         secrets: secrets_in(&manifest),
+        api_warning: api_warning_for(&manifest),
+        refused: refused_in(&manifest),
         not_enforced: capability::NOT_ENFORCED,
     })
+}
+
+/// What the fetched manifest says about `@raycast/api`, judged.
+///
+/// Read out of the fetched `package.json` rather than the catalogue, for the
+/// reason `commands_in` is: this is the file about to be built, and the
+/// catalogue is a description of it that can be a commit or two behind.
+pub fn api_warning_for(manifest: &Value) -> Option<String> {
+    let declared = manifest
+        .get("dependencies")
+        .and_then(|it| it.get("@raycast/api"))
+        .and_then(Value::as_str)?;
+
+    crate::extension_install::api_ahead_of_sill(
+        Some(declared),
+        crate::extension_install::RAYCAST_API_LEVEL,
+    )
+}
+
+/// The commands the install will refuse, said before it happens.
+pub fn refused_in(manifest: &Value) -> Vec<String> {
+    commands_in(manifest)
+        .into_iter()
+        .filter_map(|command| {
+            crate::extension_install::why_not_runnable(&command.mode)
+                .map(|because| format!("{}: {because}", command.name))
+        })
+        .collect()
 }
 
 /// Throws away what [`prepare`] staged.
@@ -407,32 +452,54 @@ fn npm_cli(node: &Path) -> Result<PathBuf, String> {
     ))
 }
 
+/// How long npm gets before Sill stops waiting for it.
+///
+/// The one call here that reaches the network, and the only step of an install
+/// that can wait forever on something outside this machine. Measured, npm for
+/// `uuid-generator` is 110 packages in two seconds; the extensions with the
+/// largest trees are tens of seconds on a cold cache. Five minutes is not a
+/// budget, it is the point past which nothing is coming.
+///
+/// It matters because there was no limit at all. `output()` waits for the
+/// child's pipes to close, and a registry that accepts a connection and then
+/// says nothing gives an install with no end: the window says "Installing"
+/// until somebody quits Sill.
+pub const NPM_DEADLINE: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Installs the staged extension's dependencies.
 #[cfg(windows)]
-fn npm_install(node: &Path, staged: &Path) -> Result<(), String> {
+fn npm_install(
+    node: &Path,
+    staged: &Path,
+    report: crate::extension_install::Report<'_>,
+) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     let cli = npm_cli(node)?;
     let args = npm_args(staged.join("package-lock.json").is_file());
 
-    let output = std::process::Command::new(node)
+    let mut command = std::process::Command::new(node);
+    command
         .arg(&cli)
         .args(&args)
         .current_dir(staged)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|err| format!("could not run npm: {err}"))?;
+        .creation_flags(CREATE_NO_WINDOW);
 
-    if output.status.success() {
+    let ran = crate::bounded::run(&mut command, NPM_DEADLINE, &mut |line| {
+        report(crate::extension_install::Progress::Dependencies {
+            said: line.to_string(),
+        })
+    })?;
+
+    if ran.ok {
         return Ok(());
     }
 
     // npm's own message is the useful one, the same bargain
     // `extension_install::bundle` makes with esbuild's: "could not resolve the
     // dependency tree" names the problem and "the install failed" does not.
-    let said = String::from_utf8_lossy(&output.stderr);
-    let said = said.trim();
+    let said = ran.said.trim();
 
     Err(if said.is_empty() {
         "npm refused to install this extension's dependencies and said nothing".to_string()
@@ -466,6 +533,23 @@ pub struct Done {
 /// running it, which is a process this must not spawn per install.
 #[cfg(windows)]
 pub fn finish(data_dir: &Path, esbuild: &Path, node: &Path, name: &str) -> Result<Done, String> {
+    finish_reporting(data_dir, esbuild, node, name, &|_| {})
+}
+
+/// The same, saying what it is doing while it does it.
+///
+/// npm and esbuild are the whole of the wait and neither said anything until
+/// it finished, so a large extension was one word and a spinner for a minute
+/// and a half. Their own output is the content worth showing: npm names the
+/// package it is fetching, esbuild names the file it is on.
+#[cfg(windows)]
+pub fn finish_reporting(
+    data_dir: &Path,
+    esbuild: &Path,
+    node: &Path,
+    name: &str,
+    report: crate::extension_install::Report<'_>,
+) -> Result<Done, String> {
     let name = safe_name(name).ok_or_else(|| format!("{name} is not a name this can install"))?;
 
     let home = staging_home(data_dir);
@@ -478,10 +562,11 @@ pub fn finish(data_dir: &Path, esbuild: &Path, node: &Path, name: &str) -> Resul
     let origin = super::origin_of(&home, name)
         .ok_or_else(|| "Nothing recorded what was staged. Fetch it again.".to_string())?;
 
-    npm_install(node, &staged)?;
+    npm_install(node, &staged, report)?;
 
     let home = super::extensions_home(data_dir);
-    let installed = crate::extension_install::install_into(esbuild, &home, &staged, &origin)?;
+    let installed =
+        crate::extension_install::install_into_reporting(esbuild, &home, &staged, &origin, report)?;
 
     /*
      * What the built bundles actually require, added to what the source said.
@@ -558,15 +643,47 @@ fn bundled_requirements(directory: &Path) -> Vec<String> {
     found
 }
 
-/// Removes an installed extension and its commands.
+/// Removes an installed extension, its commands, and everything it saved.
 ///
 /// A store you can install from and not remove from is not one anybody should
-/// trust. Both halves matter: the directory holds the bundles and the index is
-/// what the launcher searches, and leaving either behind leaves an extension
-/// that is half gone.
-pub fn uninstall(data_dir: &Path, extension: &str) -> Result<bool, String> {
+/// trust. Three parts and every one of them matters: the directory holds the
+/// bundles, the index is what the launcher searches, and `LocalStorage` holds
+/// whatever the extension wrote there.
+///
+/// **The third is the one that was missing, and it is not tidiness.** An
+/// extension's `LocalStorage` is where it keeps an API token, a search
+/// history, a list of what somebody looked at. Removing the extension and
+/// leaving that behind keeps a person's data on their machine after they asked
+/// for the thing that collected it to go, and reinstalling later hands it
+/// straight back to code they have not agreed to since.
+///
+/// The store is passed in rather than opened here. It is a file the running
+/// application already has open, and a second connection to it would be a
+/// second answer to what an extension's storage is.
+pub fn uninstall(
+    data_dir: &Path,
+    storage: &crate::exthost::Storage,
+    extension: &str,
+) -> Result<bool, String> {
     let extension =
         safe_name(extension).ok_or_else(|| format!("{extension} is not an extension name"))?;
+
+    // Before the files, so an extension whose bundles refuse to go does not
+    // keep its data as well. The directory going is the recoverable half.
+    storage
+        .clear(extension)
+        .map_err(|err| format!("could not clear what {extension} had saved: {err}"))?;
+
+    // The same argument, for the other two places an extension leaves things:
+    // what somebody typed into its settings, which for half the store is an
+    // API key, and the folder it was given to write files in.
+    let mut preferences = crate::exthost::preferences::load(data_dir);
+    if preferences.forget(extension) {
+        crate::exthost::preferences::save(data_dir, &preferences)?;
+    }
+    let _ = std::fs::remove_dir_all(crate::exthost::preferences::support_path(
+        data_dir, extension,
+    ));
 
     let home = super::extensions_home(data_dir);
     let directory = home.join(extension);
@@ -578,13 +695,19 @@ pub fn uninstall(data_dir: &Path, extension: &str) -> Result<bool, String> {
     }
 
     let index = super::index_file(&home);
-    let kept =
-        crate::extension_install::without_extension(crate::registry::load_index(&index), extension);
+    let listed = crate::registry::load_index(&index);
+    let before = listed.len();
+    let kept = crate::extension_install::without_extension(listed, extension);
 
-    let written = serde_json::to_string_pretty(&kept)
-        .map_err(|err| format!("could not write the extension index: {err}"))?;
-    std::fs::write(&index, format!("{written}\n"))
-        .map_err(|err| format!("could not write {}: {err}", index.display()))?;
+    // Only when something actually left it. Rewriting otherwise means a
+    // machine with no extensions at all fails to remove one that is already
+    // gone, because there is no directory to write the file into.
+    if kept.len() != before {
+        let written = serde_json::to_string_pretty(&kept)
+            .map_err(|err| format!("could not write the extension index: {err}"))?;
+        std::fs::write(&index, format!("{written}\n"))
+            .map_err(|err| format!("could not write {}: {err}", index.display()))?;
+    }
 
     Ok(had)
 }
@@ -728,5 +851,159 @@ mod tests {
     fn a_lock_file_decides_whether_the_install_is_reproducible() {
         assert_eq!(npm_args(true)[0], "ci");
         assert_eq!(npm_args(false)[0], "install");
+    }
+
+    /// The build directory an install renames into place.
+    #[test]
+    fn a_name_that_could_hide_among_the_build_directories_is_refused() {
+        for hidden in [".demo", ".demo.installing"] {
+            assert_eq!(
+                safe_name(hidden),
+                None,
+                "{hidden} was accepted, and `pins` skips anything dot-prefixed"
+            );
+        }
+    }
+
+    /// Said before the install rather than found after it.
+    #[test]
+    fn a_manifest_asking_for_a_newer_api_is_reported() {
+        let ahead = manifest(r#"{"dependencies":{"@raycast/api":"^1.400.0"}}"#);
+        let said = api_warning_for(&ahead).expect("it is ahead of Sill");
+        assert!(said.contains("1.400.0"), "{said}");
+
+        assert_eq!(
+            api_warning_for(&manifest(r#"{"dependencies":{"@raycast/api":"^1.50.0"}}"#)),
+            None
+        );
+        assert_eq!(api_warning_for(&manifest("{}")), None);
+    }
+
+    #[test]
+    fn the_commands_that_will_not_be_installed_are_named_on_the_screen() {
+        let parsed = manifest(
+            r#"{"commands":[
+                {"name":"a","mode":"view"},
+                {"name":"b","mode":"menu-bar"}
+            ]}"#,
+        );
+
+        let refused = refused_in(&parsed);
+        assert_eq!(refused.len(), 1);
+        assert!(refused[0].starts_with("b:"), "{}", refused[0]);
+    }
+}
+
+/// Removing an extension, and what it leaves.
+///
+/// Its own module because these touch the disk and a storage database, where
+/// everything above is a function over values.
+#[cfg(all(test, windows))]
+mod removing {
+    use super::*;
+    use serde_json::json;
+
+    /// Makes an installed extension without building one.
+    ///
+    /// The bundles are not the subject here. What is, is that the three places
+    /// an extension leaves something all get emptied.
+    fn pretend_installed(root: &Path, name: &str) {
+        let home = super::super::extensions_home(root);
+        std::fs::create_dir_all(home.join(name)).expect("a directory");
+        std::fs::write(home.join(name).join("run.js"), "1;").expect("a bundle");
+
+        super::super::write_origin(
+            &home,
+            name,
+            &Origin::store(name, &format!("extensions/{name}"), "sha", Vec::new(), 0),
+        )
+        .expect("an origin");
+
+        let index = format!(
+            r#"[{{"id":"{name}:run","extension":"{name}","extensionTitle":"{name}",
+                 "command":"run","title":"Run","mode":"view","entrypoint":"{name}/run.js"}}]"#
+        );
+        std::fs::write(super::super::index_file(&home), index).expect("an index");
+    }
+
+    /// **The security half of `P4-06`.**
+    ///
+    /// `LocalStorage` is where an extension keeps an API token, a search
+    /// history, a list of what somebody looked at. Removing the extension and
+    /// leaving that behind keeps a person's data after they asked for the
+    /// thing that collected it to go, and hands it back to the next install
+    /// under the same name.
+    #[test]
+    fn removing_an_extension_empties_what_it_had_saved() {
+        let scratch = tempfile::tempdir().expect("a temp directory");
+        let root = scratch.path();
+        pretend_installed(root, "demo");
+
+        let storage = crate::exthost::Storage::memory().expect("a store");
+        storage
+            .set("demo", "token", &json!("sk-live-abcdef"))
+            .expect("saved");
+        storage
+            .set("other", "token", &json!("not this one"))
+            .expect("saved");
+
+        uninstall(root, &storage, "demo").expect("it is removed");
+
+        assert_eq!(
+            storage.get("demo", "token"),
+            serde_json::Value::Null,
+            "an extension's saved token outlived the extension"
+        );
+        assert_eq!(
+            storage.get("other", "token"),
+            json!("not this one"),
+            "and removing one extension emptied another's storage"
+        );
+    }
+
+    /// The other two places somebody's data ends up.
+    #[test]
+    fn removing_an_extension_takes_its_settings_and_its_support_folder() {
+        let scratch = tempfile::tempdir().expect("a temp directory");
+        let root = scratch.path();
+        pretend_installed(root, "demo");
+        pretend_installed(root, "demo-two");
+
+        let declared: Vec<crate::extension_install::Preference> =
+            serde_json::from_str(r#"[{ "name": "host", "type": "textfield" }]"#).unwrap();
+
+        let mut held = crate::exthost::preferences::Values::default();
+        held.set("demo", "host", json!("example.test"), &declared);
+        held.set("demo:run", "host", json!("also this"), &declared);
+        held.set("demo-two", "host", json!("kept"), &declared);
+        crate::exthost::preferences::save(root, &held).expect("saved");
+
+        let support = crate::exthost::preferences::support_path(root, "demo");
+        std::fs::create_dir_all(&support).expect("a support folder");
+        std::fs::write(support.join("cache.db"), b"data").expect("something in it");
+
+        let storage = crate::exthost::Storage::memory().expect("a store");
+        uninstall(root, &storage, "demo").expect("it is removed");
+
+        let after = crate::exthost::preferences::load(root);
+        assert!(after.in_scope("demo").is_none(), "its settings stayed");
+        assert!(
+            after.in_scope("demo:run").is_none(),
+            "and so did its command's"
+        );
+        assert!(
+            after.in_scope("demo-two").is_some(),
+            "an extension whose name begins with the removed one's went too"
+        );
+        assert!(!support.exists(), "the folder it wrote files in stayed");
+    }
+
+    /// Removing something already gone is the end state somebody asked for.
+    #[test]
+    fn removing_what_is_not_installed_is_not_a_failure() {
+        let scratch = tempfile::tempdir().expect("a temp directory");
+        let storage = crate::exthost::Storage::memory().expect("a store");
+
+        assert_eq!(uninstall(scratch.path(), &storage, "absent"), Ok(false));
     }
 }

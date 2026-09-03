@@ -800,6 +800,41 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * The Raycast API level, in the two files that both claim it.
+ *
+ * The worker tells every extension `environment.raycastVersion`, and the
+ * installer refuses nothing but warns when a manifest asks for something
+ * newer than that. Those are the same claim written twice, in a Rust constant
+ * and a TypeScript literal, with nothing making them agree.
+ *
+ * Drift here is silent and one-directional. Raising the number in the worker
+ * and not in Rust leaves the install screen warning about versions Sill now
+ * implements; raising it in Rust and not in the worker tells every extension
+ * it is running somewhere older than it is, and extensions branch on that.
+ */
+{
+  const WORKER = "host/src/worker/worker.ts";
+  const INSTALL = "src-tauri/src/extension_install.rs";
+
+  const said = readFileSync(WORKER, "utf8").match(/raycastVersion:\s*"([\d.]+)"/);
+  const declared = readFileSync(INSTALL, "utf8").match(
+    /RAYCAST_API_LEVEL: &str = "([\d.]+)"/,
+  );
+
+  if (!said) fail(WORKER, null, "no `raycastVersion`, which RAYCAST_API_LEVEL mirrors");
+  else if (!declared) {
+    fail(INSTALL, null, "no `RAYCAST_API_LEVEL`, which mirrors the worker's raycastVersion");
+  } else if (said[1] !== declared[1]) {
+    fail(
+      INSTALL,
+      null,
+      `RAYCAST_API_LEVEL is ${declared[1]} and the worker tells extensions ` +
+        `${said[1]}. One of them is lying to somebody about what Sill implements`,
+    );
+  }
+}
+
+/*
  * Every built-in the extension host performs is one that names a permission.
  *
  * `perform_builtin` does for an extension what the extension cannot do for

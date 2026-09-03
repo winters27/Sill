@@ -33,6 +33,7 @@ fn rank_the_real_index() {
             1_756_000_000,
             registry::SEARCH_LIMIT,
             Excluded::none(),
+            &[],
         );
         eprintln!("\n{query:?}: {} match at all", found.len());
         for r in found.iter().take(5) {

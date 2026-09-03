@@ -27,6 +27,7 @@ fn command(id: &str, title: &str) -> CommandRecord {
         icon: None,
         panel: None,
         preferences: serde_json::Value::Null,
+        manifest: None,
         toggle: None,
     }
 }
@@ -40,6 +41,7 @@ fn titles(query: &str, records: &[CommandRecord], ranking: &Frecency) -> Vec<Str
         NOW,
         registry::SEARCH_LIMIT,
         Excluded::none(),
+        &[],
     )
     .into_iter()
     .map(|found| found.command.title)

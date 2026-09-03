@@ -231,6 +231,15 @@ pub struct Origin {
     /// settings long after they have forgotten.
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Which Sill extension API the copy that installed this promised.
+    ///
+    /// Zero for everything installed before the number existed, which is the
+    /// honest reading: nobody wrote it down. It is here rather than derived
+    /// because it is a fact about the build that produced these bundles, and a
+    /// later Sill that changes what an extension may rely on can then tell an
+    /// old install apart from one of its own instead of assuming.
+    #[serde(default)]
+    pub api: u32,
     pub installed_at: i64,
 }
 
@@ -245,6 +254,7 @@ impl Origin {
             // asked on the card the first time it reaches for something, which
             // is the path that already existed.
             capabilities: Vec::new(),
+            api: crate::extension_install::SILL_API_VERSION,
             installed_at: at,
         }
     }
@@ -262,6 +272,7 @@ impl Origin {
             path: folder.to_string(),
             listing: listing.to_string(),
             capabilities,
+            api: crate::extension_install::SILL_API_VERSION,
             installed_at: at,
         }
     }
@@ -323,6 +334,13 @@ pub fn pins(home: &std::path::Path) -> std::collections::HashMap<String, Origin>
         .filter(|entry| entry.path().is_dir())
         .filter_map(|entry| {
             let directory = entry.file_name().to_string_lossy().into_owned();
+            // An install builds into `.<name>.installing` beside its
+            // destination, and for the moment that exists it holds a complete
+            // origin. Nothing dot-prefixed is an installed extension: the
+            // names come from `safe_name`, which allows no leading dot.
+            if directory.starts_with('.') {
+                return None;
+            }
             let origin = origin_of(home, &directory)?;
             let key = if origin.listing.is_empty() {
                 directory
@@ -340,15 +358,24 @@ pub fn write_origin(
     extension: &str,
     origin: &Origin,
 ) -> Result<(), String> {
-    let dir = home.join(extension);
-    std::fs::create_dir_all(&dir)
+    write_origin_into(&home.join(extension), origin)
+}
+
+/// The same, into a directory that is not named after the extension.
+///
+/// An install builds into `.<name>.installing` and renames it into place, so
+/// the origin has to be written before the directory has its final name. It is
+/// written before the swap on purpose: what lands is then complete, and an
+/// extension in the index always has something saying where it came from.
+pub fn write_origin_into(dir: &std::path::Path, origin: &Origin) -> Result<(), String> {
+    std::fs::create_dir_all(dir)
         .map_err(|err| format!("could not make {}: {err}", dir.display()))?;
 
     let text = serde_json::to_string_pretty(origin)
         .map_err(|err| format!("could not describe the install: {err}"))?;
 
     std::fs::write(dir.join(ORIGIN_FILE), format!("{text}\n"))
-        .map_err(|err| format!("could not record where {extension} came from: {err}"))
+        .map_err(|err| format!("could not record where this came from: {err}"))
 }
 
 // ------------------------------------------------------------------- browse

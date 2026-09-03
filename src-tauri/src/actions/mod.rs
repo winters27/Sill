@@ -220,16 +220,47 @@ impl Action for RunExtensionCommand {
             .cloned()
             .ok_or_else(|| format!("no such command: {}", object.id))?;
 
-        // The manifest decides. A no-view command runs and exits without ever
-        // rendering, so loading it as a view leaves the window waiting for a
-        // tree that never arrives.
-        //
-        // A mode the type does not know is loaded as a view, which is the same
-        // thing this did when the test was written by hand here. What changed
-        // is that the store asks the same function and reports an unknown mode
-        // as unrunnable rather than installing it.
-        let mode = crate::exthost::CommandMode::from_manifest(&record.mode)
-            .unwrap_or(crate::exthost::CommandMode::View);
+        // The manifest decides, and a mode this cannot name is refused rather
+        // than loaded as a view. It used to fall through to `View`, so a
+        // `menu-bar` command left the window waiting for a tree that never
+        // arrives. Installing now refuses those, so reaching this is an index
+        // written by an older Sill, and saying so is better than hanging.
+        let mode = crate::exthost::CommandMode::from_manifest(&record.mode).ok_or_else(|| {
+            match crate::extension_install::why_not_runnable(&record.mode) {
+                Some(because) => format!("{} cannot run here: {because}.", object.title),
+                None => format!("{} cannot run here.", object.title),
+            }
+        })?;
+
+        let data_dir = crate::state::data_dir(&ctx.app);
+        let declared = record.manifest.clone().unwrap_or_default();
+
+        // What the manifest defaults to, under what somebody set in Settings.
+        let held = crate::exthost::preferences::load(&data_dir);
+        let preferences = crate::exthost::preferences::effective(
+            &record.preferences,
+            held.in_scope(&crate::exthost::preferences::extension_scope(
+                &record.extension,
+            )),
+            held.in_scope(&crate::exthost::preferences::command_scope(
+                &record.extension,
+                &record.command,
+            )),
+        );
+
+        // Raycast refuses to start a command whose required preference is
+        // unset and names it. Sill was starting it, and the extension threw on
+        // an undefined in its first line, which reads as the extension being
+        // broken rather than as a setting nobody has filled in.
+        let missing =
+            crate::exthost::preferences::missing_required(&declared.preferences, &preferences);
+        if !missing.is_empty() {
+            return Err(format!(
+                "{} needs {} before it can run. Set it in Settings, under Extensions.",
+                object.title,
+                missing.join(" and ")
+            ));
+        }
 
         let hosts = ctx.app.state::<crate::state::HostState>();
         let host = crate::host::host_of(&ctx.app, &hosts).await?;
@@ -239,8 +270,31 @@ impl Action for RunExtensionCommand {
             &record.extension,
             &record.command,
             mode,
-            record.preferences.clone(),
+            preferences,
         );
+
+        // Both were the empty string, so `environment.assetsPath` pointed at
+        // nothing and an extension reading an icon out of its own assets found
+        // no such file. The support folder is made here rather than at install
+        // because an update clears the installed directory and this must
+        // survive one.
+        let home = crate::store::extensions_home(&data_dir);
+        let assets = home.join(&record.extension).join("assets");
+        if assets.is_dir() {
+            opts.assets_path = assets.to_string_lossy().replace('\\', "/");
+        }
+
+        let support = crate::exthost::preferences::support_path(&data_dir, &record.extension);
+        if std::fs::create_dir_all(&support).is_ok() {
+            opts.support_path = support.to_string_lossy().replace('\\', "/");
+        }
+
+        // What the command declared it wants typed. Nothing collects them yet,
+        // so every one is absent, and absent is `""` rather than missing: an
+        // extension destructuring `props.arguments` and passing the result to
+        // a search is the ordinary shape, and `undefined` there is a crash
+        // where an empty string is an empty search.
+        opts.arguments = crate::exthost::LoadOptions::blank_arguments(&declared.arguments);
 
         opts.capabilities = crate::exthost::grants::for_extension(&ctx.app, &record.extension);
 
@@ -1896,8 +1950,18 @@ impl Action for RemoveExtension {
         let data_dir = crate::state::data_dir(&ctx.app);
         let name = extension.clone();
 
+        // The one `LocalStorage` the application has open, so what an
+        // extension saved goes with it rather than waiting on disk for the
+        // next thing installed under the same name.
+        let storage = ctx
+            .app
+            .state::<crate::state::HostState>()
+            .api
+            .storage()
+            .clone();
+
         let had = tauri::async_runtime::spawn_blocking(move || {
-            crate::store::install::uninstall(&data_dir, &name)
+            crate::store::install::uninstall(&data_dir, &storage, &name)
         })
         .await
         .map_err(|err| format!("the removal did not finish: {err}"))??;

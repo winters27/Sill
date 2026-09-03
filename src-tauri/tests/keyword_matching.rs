@@ -22,6 +22,7 @@ fn record(title: &str, keywords: &[&str]) -> CommandRecord {
         icon: None,
         panel: None,
         preferences: serde_json::Value::Null,
+        manifest: None,
         toggle: None,
     }
 }

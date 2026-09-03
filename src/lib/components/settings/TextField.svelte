@@ -8,7 +8,17 @@
    */
   interface Props {
     value: string;
-    oninput: (value: string) => void;
+    oninput?: (value: string) => void;
+    /**
+     * Called when the field is left or Enter is pressed, rather than per key.
+     *
+     * For a field whose every keystroke should not be written: an extension's
+     * API key saved on `input` is one write per character and a half-typed
+     * token stored between them. A debounce would be the other answer, and a
+     * debounce has to be flushed on unmount, which is how a setting gets lost
+     * in a window that can be closed at any moment.
+     */
+    onchange?: (value: string) => void;
     placeholder?: string;
     /** Fills the row rather than taking its natural width. */
     full?: boolean;
@@ -23,6 +33,7 @@
   let {
     value,
     oninput,
+    onchange,
     placeholder,
     full = false,
     disabled = false,
@@ -42,7 +53,8 @@
   aria-label={ariaLabel}
   spellcheck="false"
   autocomplete="off"
-  oninput={(event) => oninput(event.currentTarget.value)}
+  oninput={(event) => oninput?.(event.currentTarget.value)}
+  onchange={(event) => onchange?.(event.currentTarget.value)}
 />
 
 <style>

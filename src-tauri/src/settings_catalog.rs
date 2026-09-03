@@ -471,6 +471,7 @@ pub fn load() -> Vec<CommandRecord> {
                 panel: None,
                 // Only extension commands carry any.
                 preferences: serde_json::Value::Null,
+                manifest: None,
             }
         })
         .collect()

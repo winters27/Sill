@@ -61,6 +61,46 @@ pub struct CommandRecord {
     /// the index cache.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub preferences: serde_json::Value,
+    /// What an extension's manifest declared, for the rows that came from one.
+    ///
+    /// `None` for everything else, which is nearly every row in the index: a
+    /// thousand applications, the settings, the emoji. One optional field
+    /// rather than two empty vectors, so a row that is not an extension says
+    /// so once and a field added here later is one line at each of the sixteen
+    /// places a record is built rather than two.
+    ///
+    /// Boxed because it is absent almost always and the index is held in
+    /// memory; an empty `Option<Box<_>>` is a pointer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<Box<Declared>>,
+}
+
+/// The parts of a manifest a running command still needs.
+///
+/// `CommandRecord::preferences` is what `getPreferenceValues()` answers with;
+/// this is the declaration behind it, and a screen that lets somebody change
+/// one needs the whole thing: the type decides which control to draw,
+/// `required` decides whether an empty field is a problem, and `title` is what
+/// to call it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Declared {
+    /// Every setting this command has, the extension's own first.
+    pub preferences: Vec<crate::extension_install::Preference>,
+    /// Which of those the command declared itself.
+    ///
+    /// The list above is merged, and once merged there is no telling an
+    /// extension-wide API key from one command's own page size. The difference
+    /// decides where a value is stored: an extension's is set once and read by
+    /// every command, and a command's belongs to that command. Names rather
+    /// than a flag on each preference, so the type stays the manifest's shape.
+    pub own: Vec<String>,
+    /// What the command asks for before it starts.
+    ///
+    /// Raycast collects these in the launcher's own bar and hands them to the
+    /// command as `props.arguments`. Recorded here because the manifest is
+    /// read once, at install, and the launcher cannot go back for it.
+    pub arguments: Vec<crate::extension_install::Argument>,
 }
 
 /// A command plus why it placed where it did.
@@ -267,6 +307,7 @@ fn app_entry(
         panel: None,
         // Only extension commands carry any.
         preferences: serde_json::Value::Null,
+        manifest: None,
     }
 }
 
@@ -1033,6 +1074,7 @@ fn system_switch(
         toggle: None,
         panel: None,
         preferences: serde_json::Value::Null,
+        manifest: None,
     }
 }
 
@@ -1118,6 +1160,7 @@ fn builtin(id: &str, panel: &str, title: &str, subtitle: &str, keywords: &[&str]
         panel: Some(panel.to_string()),
         // Only extension commands carry any.
         preferences: serde_json::Value::Null,
+        manifest: None,
     }
 }
 
@@ -1150,6 +1193,7 @@ pub fn destination_record(folder: &str) -> CommandRecord {
         toggle: None,
         panel: None,
         preferences: serde_json::Value::Null,
+        manifest: None,
     }
 }
 
@@ -1195,6 +1239,7 @@ pub fn process_record(process: &crate::processes::Process) -> CommandRecord {
         toggle: None,
         panel: None,
         preferences: serde_json::Value::Null,
+        manifest: None,
     }
 }
 
@@ -1222,6 +1267,7 @@ pub fn audio_session_record(session: &crate::app_volume::Session) -> CommandReco
         toggle: Some(!session.muted),
         panel: None,
         preferences: serde_json::Value::Null,
+        manifest: None,
     }
 }
 
@@ -1267,6 +1313,7 @@ pub fn script_record(script: &crate::scripts::Script) -> CommandRecord {
         toggle: None,
         panel: script.icon.is_none().then(|| "scripts".to_string()),
         preferences: serde_json::Value::Null,
+        manifest: None,
     }
 }
 
@@ -1309,6 +1356,7 @@ pub fn quicklink_record(
         panel: Some("quicklinks".to_string()),
         // Only extension commands carry any.
         preferences: serde_json::Value::Null,
+        manifest: None,
     }
 }
 
@@ -1354,6 +1402,7 @@ pub fn snippet_record(snippet: &crate::snippets::store::Snippet) -> CommandRecor
         panel: None,
         // Only extension commands carry any.
         preferences: serde_json::Value::Null,
+        manifest: None,
     }
 }
 
@@ -1390,6 +1439,7 @@ pub fn conversation_record(id: &str, title: &str, said: &str) -> CommandRecord {
         // owns.
         panel: Some("ai".to_string()),
         preferences: serde_json::Value::Null,
+        manifest: None,
     }
 }
 
@@ -1415,6 +1465,7 @@ pub fn answer_record(text: &str, input: &str) -> RankedCommand {
             panel: None,
             // Only extension commands carry any.
             preferences: serde_json::Value::Null,
+            manifest: None,
         },
         score: i64::MAX,
         matched: Vec::new(),
@@ -2116,6 +2167,7 @@ mod word_runs {
             icon: None,
             panel: None,
             preferences: serde_json::Value::Null,
+            manifest: None,
             toggle: None,
         }
     }
@@ -2977,6 +3029,7 @@ mod on_disk {
             icon: None,
             panel: None,
             preferences: serde_json::Value::Null,
+            manifest: None,
             toggle: None,
         }
     }
@@ -3163,6 +3216,7 @@ mod pinned_rows {
             icon: None,
             panel: None,
             preferences: serde_json::Value::Null,
+            manifest: None,
             toggle: None,
         })
         .collect()

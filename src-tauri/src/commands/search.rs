@@ -1096,6 +1096,7 @@ mod tests {
                 icon: None,
                 panel: None,
                 preferences: serde_json::Value::Null,
+                manifest: None,
                 toggle: None,
             },
         }

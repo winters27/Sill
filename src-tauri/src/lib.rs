@@ -8,6 +8,7 @@ pub mod apps;
 pub mod apps_watch;
 pub mod audio;
 pub mod bindings;
+pub mod bounded;
 pub mod browsers;
 pub mod calculator;
 pub mod capture;
@@ -1720,6 +1721,8 @@ pub fn run() {
             commands::store::store_pins,
             commands::store::installed_extensions,
             commands::store::grant_extension_permission,
+            commands::store::extension_preferences,
+            commands::store::set_extension_preference,
             commands::store::store_ready,
             commands::launch::perform_builtin,
             commands::system::app_icon,

@@ -93,6 +93,7 @@ pub fn records(file: &Path) -> Vec<crate::registry::CommandRecord> {
                 toggle: None,
                 panel: None,
                 preferences: serde_json::Value::Null,
+                manifest: None,
             }
         })
         .collect()

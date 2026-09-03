@@ -13,9 +13,11 @@
    * what comes back, which is the same division the root list already keeps.
    */
   import { onMount, untrack } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
   import {
     ago,
     installs,
+    progressLine,
     shortRevision,
     storeBrowse,
     storeDiscard,
@@ -23,7 +25,9 @@
     storePrepare,
     storeReady,
     weight,
+    INSTALL_PROGRESS,
     type Browse,
+    type InstallProgress,
     type Preparation,
     type StoreRow,
   } from "$lib/store";
@@ -110,6 +114,19 @@
    * pressing Enter looked like pressing a dead key for several seconds.
    */
   let workingOn = $state<string | null>(null);
+  /**
+   * The latest thing the install said about itself.
+   *
+   * npm and esbuild are the whole of the wait and neither said anything until
+   * it finished, so a large extension was one word and a spinner for a minute
+   * and a half. Their own output is the content: npm names the package it is
+   * fetching, esbuild names the file it is on.
+   *
+   * Kept beside `working` rather than folded into it, so the word stays put
+   * and only the detail after it changes. A line that replaces itself entirely
+   * several times a second reads as a fault.
+   */
+  let detail = $state("");
 
   const rows = $derived(browse?.rows ?? []);
   const current = $derived(rows[selected] ?? null);
@@ -250,6 +267,17 @@
 
   onMount(() => {
     void storeReady().then((answer) => (ready = answer));
+
+    // Rust says how an install is going as it goes. Subscribed for the life of
+    // the view rather than for the length of one install: attaching a listener
+    // per install would race the first line, which arrives before `invoke`
+    // has returned anything at all.
+    const listening = listen<InstallProgress>(INSTALL_PROGRESS, (event) => {
+      const line = progressLine(event.payload);
+      if (line) detail = line;
+    });
+
+    return () => void listening.then((stop) => stop());
   });
 
   /**
@@ -357,10 +385,16 @@
 
     working = "Installing";
     workingOn = asked.name;
+    detail = "";
 
     try {
       const done = await storeInstall(asked.name);
-      onstatus(`Installed ${done.title}. Find it by typing ${done.commands[0] ?? done.title}.`);
+      const refused = done.refused.length
+        ? ` ${done.refused.length} command${done.refused.length === 1 ? "" : "s"} could not be installed.`
+        : "";
+      onstatus(
+        `Installed ${done.title}. Find it by typing ${done.commands[0] ?? done.title}.${refused}`,
+      );
       onchanged();
       // Clearing this is what puts the list back and reloads it, so the row
       // that was just installed says so. Reloading here as well would run the
@@ -387,6 +421,7 @@
     } finally {
       working = null;
       workingOn = null;
+      detail = "";
     }
   }
 
@@ -477,7 +512,22 @@
             </li>
           {/each}
         </ul>
+        <!--
+          Said before the install rather than found afterwards. An extension
+          whose menu bar command is dropped installs three of its four, and
+          without this the missing one reads as the install half working.
+        -->
+        {#if deciding.refused.length}
+          <p class="quiet">
+            {deciding.refused.length}
+            {deciding.refused.length === 1 ? "command is" : "commands are"} not installed at all.
+          </p>
+        {/if}
       </section>
+
+      {#if deciding.apiWarning}
+        <p class="warning">{deciding.apiWarning}</p>
+      {/if}
 
       <p class="warning">{deciding.notEnforced}</p>
 
@@ -599,7 +649,7 @@
                   <!-- The row says what is happening to it. Anything slower
                        than a keystroke has to be visible where the eye
                        already is, not only in the status bar. -->
-                  <span class="busy">{working}…</span>
+                  <span class="busy">{detail || `${working}…`}</span>
                 {:else}
                   <span>{installs(row.downloads)} installs</span>
                   {#if row.installed?.outdated}
@@ -672,7 +722,7 @@
     <div class="foot">
       <span class="keys">
         {#if working}
-          <span class="busy">{working} {current?.title ?? ""}…</span>
+          <span class="busy">{detail || `${working} ${current?.title ?? ""}…`}</span>
         {:else}
           <span><b>Enter</b> {current ? verb(current) : "install"}</span>
           {#if current?.installed}

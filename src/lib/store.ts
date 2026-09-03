@@ -96,6 +96,10 @@ export interface Preparation {
   capabilities: Reached[];
   packages: string[];
   secrets: string[];
+  /** Said when it asks for a newer `@raycast/api` than Sill implements. */
+  apiWarning: string | null;
+  /** The commands Sill will refuse to install, one sentence each. */
+  refused: string[];
   notEnforced: string;
 }
 
@@ -103,7 +107,38 @@ export interface Done {
   extension: string;
   title: string;
   commands: string[];
+  /** The commands that were refused, one sentence each. */
+  refused: string[];
   revision: string;
+}
+
+/**
+ * How far along an install is, as Rust says it.
+ *
+ * npm and esbuild are the whole of the wait, and neither said anything until
+ * it finished. Their own output is the content worth showing: npm names the
+ * package it is fetching, esbuild names the file it is on.
+ */
+export type InstallProgress =
+  | { stage: "dependencies"; said: string }
+  | { stage: "building"; command: string; done: number; total: number }
+  | { stage: "bundling"; said: string };
+
+/** The event Rust emits it on. Spelled once, here. */
+export const INSTALL_PROGRESS = "store:install";
+
+/** One line for the window, or nothing when there is nothing worth saying. */
+export function progressLine(progress: InstallProgress): string {
+  if (progress.stage === "building") {
+    return `Building ${progress.command} (${progress.done} of ${progress.total})`;
+  }
+
+  // npm and esbuild both print blank lines and progress bars. A line of
+  // punctuation is worse than the word that was already there.
+  const said = progress.said.trim();
+  if (said.length < 3) return "";
+
+  return progress.stage === "dependencies" ? `Dependencies: ${said}` : said;
 }
 
 /** Where one installed extension came from. */
@@ -223,6 +258,45 @@ export function grantPermission(extension: string, capability: string): Promise<
 /** Takes one back. The extension is asked again next time it tries. */
 export function revokePermission(extension: string, capability: string): Promise<void> {
   return invoke("revoke_extension_grant", { extension, capability });
+}
+
+/** One setting an extension declares, and what it is currently set to. */
+export interface ExtensionPreference {
+  /** Which command it belongs to, or empty when the extension declares it. */
+  command: string;
+  commandTitle: string;
+  name: string;
+  /** `textfield`, `password`, `checkbox`, `dropdown`, or anything else. */
+  kind: string;
+  title: string;
+  description: string;
+  required: boolean;
+  choices: { title: string; value: unknown }[];
+  /**
+   * What it answers with as things stand.
+   *
+   * For a `password` this is a boolean saying whether one is set, never the
+   * value: a settings window that can display an API key is one somebody can
+   * read over a shoulder.
+   */
+  value: unknown;
+  /** Whether that came from the manifest rather than from somebody. */
+  isDefault: boolean;
+}
+
+/** Everything one installed extension can be told, and what it has been. */
+export function extensionPreferences(extension: string): Promise<ExtensionPreference[]> {
+  return invoke<ExtensionPreference[]>("extension_preferences", { extension });
+}
+
+/** Sets one. An empty value puts the manifest's default back. */
+export function setExtensionPreference(
+  extension: string,
+  command: string,
+  name: string,
+  value: unknown,
+): Promise<void> {
+  return invoke("set_extension_preference", { extension, command, name, value });
 }
 
 /**
