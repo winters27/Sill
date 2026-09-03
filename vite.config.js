@@ -1,7 +1,10 @@
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 
-// @ts-expect-error process is a nodejs global
+// `process` is a Node global, available here because this config is run by
+// Vite rather than shipped to the browser. It used to carry a
+// `@ts-expect-error`, which became an error itself once the Node types
+// arrived through the lockfile and the line stopped failing.
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
