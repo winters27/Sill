@@ -116,31 +116,41 @@ pub(crate) async fn run_script(
     let script = crate::scripts::read(std::path::Path::new(&path))
         .ok_or_else(|| format!("{path} is not a script command"))?;
 
-    let seconds = app
+    let prefs = app
         .try_state::<crate::state::PrefsState>()
         .map(|prefs| prefs.inner.clone());
 
-    let timeout = match seconds {
+    let (timeout, allowed) = match &prefs {
         Some(prefs) => {
-            std::time::Duration::from_secs(prefs.lock().await.scripts.timeout_seconds.max(1))
+            let held = prefs.lock().await;
+            (
+                std::time::Duration::from_secs(held.scripts.timeout_seconds.max(1)),
+                held.scripts.elevated.clone(),
+            )
         }
-        None => crate::shell::DEFAULT_TIMEOUT,
+        None => (crate::shell::DEFAULT_TIMEOUT, Vec::new()),
     };
+
+    // Before the job is made, so a script that cannot run answers the caller
+    // rather than starting a job that reports a failure by event a moment
+    // later. The window has somewhere to show this; a job it has not been
+    // told about yet does not.
+    let plan = crate::scripts::plan(&script, &allowed)?;
 
     let stop = Stop::new();
     let job = app.state::<Running>().start(stop.clone());
 
     let running = job.clone();
     let title = script.title.clone();
-    let folder = script.path.parent().map(std::path::Path::to_path_buf);
 
     tauri::async_runtime::spawn(async move {
         let ran = crate::shell::run(
-            script.shell,
-            &path,
-            &args,
-            folder.as_deref(),
-            timeout,
+            &crate::shell::Setup::new(script.shell, &path)
+                .with(&args)
+                .in_folder(&plan.directory)
+                .and_environment(&plan.environment)
+                .within(timeout)
+                .as_administrator(plan.elevated),
             &stop,
         )
         .await;

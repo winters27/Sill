@@ -141,6 +141,12 @@ fn kind_named(named: &str) -> Option<ObjectKind> {
         "url" => ObjectKind::Url,
         "file" => ObjectKind::File,
         "folder" => ObjectKind::Folder,
+        // A script is a path like a file is, and without this the model could
+        // see `sill.script.run` in the registry and had no way to name
+        // anything it applied to: `on_disk` calls a `.ps1` a file, and Run is
+        // not an action a file accepts. It is the only kind here that is a
+        // path and still needs saying, which is why it is the exception.
+        "script" => ObjectKind::Script,
         _ => return None,
     })
 }
@@ -148,7 +154,10 @@ fn kind_named(named: &str) -> Option<ObjectKind> {
 /// What to call it when reporting what happened.
 fn title_for(target: &str, kind: ObjectKind) -> String {
     match kind {
-        ObjectKind::File | ObjectKind::Folder => std::path::Path::new(target)
+        // A script is named by its file too. Reporting "C:\\Users\\...\\deploy.ps1
+        // was started" where "deploy.ps1 was started" would do puts a path in
+        // a sentence and the useful half at the end of it.
+        ObjectKind::File | ObjectKind::Folder | ObjectKind::Script => std::path::Path::new(target)
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| target.to_string()),
@@ -264,6 +273,22 @@ mod tests {
             let object = object_for("system.mute", Some("systemControl")).expect("an object");
             assert_eq!(object.kind, ObjectKind::SystemControl);
             assert_eq!(object.target, "system.mute");
+        }
+
+        /// A script is on disk and still has to be named.
+        ///
+        /// The one exception to "a path names itself": `on_disk` calls a
+        /// `.ps1` a file, and Run is not something a plain file accepts. Until
+        /// the model could say this word, `sill.script.run` was in the
+        /// registry with nothing the model could point it at.
+        #[test]
+        fn a_script_is_a_kind_the_model_may_name() {
+            let path = a_file("deploy.ps1");
+            let object = object_for(&path.to_string_lossy(), Some("script")).expect("an object");
+
+            assert_eq!(object.kind, ObjectKind::Script);
+            assert_eq!(object.title, "sill-acting-deploy.ps1");
+            assert_eq!(object.target, path.to_string_lossy());
         }
 
         #[test]

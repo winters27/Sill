@@ -691,6 +691,20 @@ pub struct Scripts {
     pub folders: Vec<String>,
     /// How long a script runs before it is stopped, in seconds.
     pub timeout_seconds: u64,
+    /// The scripts allowed to ask Windows for administrator rights, by path.
+    ///
+    /// **Named one file at a time, and only from here.** A script's own header
+    /// can ask for administrator rights and never grant them: a header is
+    /// somebody else's writing, and the UAC prompt Windows shows names
+    /// `powershell.exe` rather than the file, so there is nothing on that
+    /// dialog to decide with. This list is the deciding, made in advance, by
+    /// the person, about one script. Nothing writes it but the settings
+    /// window: not a script, not an extension, not the model.
+    ///
+    /// Empty by default, and a folder is never a member. Allowing a folder
+    /// would mean allowing every file dropped into it afterwards, which is
+    /// the grant this list exists to avoid.
+    pub elevated: Vec<String>,
 }
 
 impl Default for Scripts {
@@ -699,6 +713,7 @@ impl Default for Scripts {
             enabled: true,
             folders: Vec::new(),
             timeout_seconds: 60,
+            elevated: Vec::new(),
         }
     }
 }

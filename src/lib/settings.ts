@@ -296,6 +296,8 @@ export interface Scripts {
   enabled: boolean;
   folders: string[];
   timeoutSeconds: number;
+  /** The scripts allowed to ask Windows for administrator rights, by path. */
+  elevated: string[];
 }
 
 /** One key standing in for four modifiers. */

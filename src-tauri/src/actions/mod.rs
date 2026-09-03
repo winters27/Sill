@@ -2939,12 +2939,12 @@ impl Action for RunScript {
         let script = crate::scripts::read(&path)
             .ok_or_else(|| format!("{} is no longer a script command", object.title))?;
 
-        let seconds = ctx
+        let prefs = ctx
             .app
             .try_state::<crate::state::PrefsState>()
             .map(|prefs| prefs.inner.clone());
 
-        let timeout = match seconds {
+        let timeout = match &prefs {
             Some(prefs) => {
                 std::time::Duration::from_secs(prefs.lock().await.scripts.timeout_seconds.max(1))
             }
@@ -2952,36 +2952,102 @@ impl Action for RunScript {
         };
 
         /*
-         * Not yet run with arguments, and it says so rather than running.
+         * The answer the caller gave, as the script's first argument.
          *
-         * A script that declares a required argument is written expecting one,
-         * and running it with none does whatever the script does when its
-         * first parameter is empty. That is somebody else's code deciding what
-         * an empty string means, which for a script called "Delete branch" is
-         * not a guess worth making on their behalf.
+         * This used to refuse outright, which made every script declaring a
+         * required argument reachable from the launcher window and from
+         * nowhere else: no key could be bound to one, and the model could not
+         * run one. Both of those carry an answer already, a `Binding` in the
+         * field it was recorded with and a tool call in its `argument`, so
+         * the only thing missing was somewhere here to put it.
          *
-         * Arguments reach a quicklink through the launcher's argument mode and
-         * `launch_command` rather than through the action registry, so wiring
-         * this is that path, not another one here.
+         * Still refused when nothing was given. A script that declares a
+         * required argument is written expecting one, and running it with an
+         * empty string is somebody else's code deciding what empty means,
+         * which for a script called "Delete branch" is not a guess worth
+         * making on their behalf.
          */
-        if script.needs_argument {
-            return Err(format!(
-                "{} asks for something to be typed first, which Sill cannot pass to a script yet",
-                script.title,
-            ));
-        }
+        let args = given(&script, ctx.argument())?;
+
+        let allowed = match &prefs {
+            Some(prefs) => prefs.lock().await.scripts.elevated.clone(),
+            None => Vec::new(),
+        };
+
+        // Where it runs, what it runs with, and whether Windows is going to be
+        // asked for administrator rights. One decision, shared with the
+        // launcher's own path, so the two cannot answer it differently.
+        let plan = crate::scripts::plan(&script, &allowed)?;
 
         let ran = crate::shell::run(
-            script.shell,
-            &object.target,
-            &[],
-            path.parent(),
-            timeout,
+            &crate::shell::Setup::new(script.shell, &object.target)
+                .with(&args)
+                .in_folder(&plan.directory)
+                .and_environment(&plan.environment)
+                .within(timeout)
+                .as_administrator(plan.elevated),
             &crate::shell::Stop::never(),
         )
         .await?;
 
         Ok(outcome_of(&script, &ran))
+    }
+}
+
+/**
+What an action run hands a script, from the one answer it was given.
+
+Its own function, and that is the point of it. This is the whole of what makes
+a script reachable by anything but the launcher window, and [`ActionCtx`] holds
+a concrete `AppHandle`, so `RunScript::run` cannot be called from a test at
+all. This can be, and the behaviour worth testing is all here.
+
+It used to be a flat refusal: a script declaring a required argument could be
+run from the window and from nowhere else, because no key could carry the
+answer and the model had nowhere to put one. Both of them carry an answer
+already, a `Binding` in the field it was recorded with and a tool call in its
+`argument`; the only thing missing was somewhere here to receive it.
+
+**One answer, and only the first argument.** `ActionCtx` carries one, because
+renaming and moving each ask exactly one thing. So a script whose second or
+third argument is required cannot be run this way, and it says so rather than
+being handed one answer and two blanks, which is somebody else's code deciding
+what an empty string means.
+*/
+fn given(script: &crate::scripts::Script, argument: Option<&str>) -> Result<Vec<String>, String> {
+    let asks = crate::scripts::asks(script);
+
+    let beyond: Vec<&str> = script
+        .arguments
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, declared)| !declared.optional)
+        .map(|(at, _)| asks.get(at).map(String::as_str).unwrap_or("something"))
+        .collect();
+
+    if !beyond.is_empty() {
+        return Err(format!(
+            "{} also asks for {}, and an action can be given one answer; run it from the launcher",
+            script.title,
+            beyond.join(" and "),
+        ));
+    }
+
+    if let Some(said) = argument {
+        return Ok(vec![said.to_string()]);
+    }
+
+    match script.arguments.first().filter(|first| !first.optional) {
+        // Refused rather than run empty. A script that declares a required
+        // argument is written expecting one, and "Delete branch" with an empty
+        // branch is not a guess worth making on somebody's behalf.
+        Some(_) => Err(format!(
+            "{} needs {} to be given to it, and nothing was",
+            script.title,
+            asks.first().map(String::as_str).unwrap_or("something"),
+        )),
+        None => Ok(Vec::new()),
     }
 }
 
@@ -3000,6 +3066,12 @@ fn outcome_of(script: &crate::scripts::Script, ran: &crate::shell::Ran) -> Outco
     let said = match ran.ended {
         Ended::TimedOut => format!("{title} was stopped after running too long"),
         Ended::Cancelled => format!("{title} was stopped"),
+        // Deliberately not "Ran". Sill handed it to Windows and has no exit
+        // code, no output and no way to stop it, and a sentence in the past
+        // tense would be claiming to know it worked.
+        Ended::Started => {
+            format!("{title} was started as administrator. Sill cannot see what it does")
+        }
         Ended::Finished if ran.code != Some(0) => {
             // The last line of stderr is nearly always the actual complaint,
             // and the rest is a stack. Somebody wants the complaint.
@@ -3056,6 +3128,9 @@ mod running_a_script {
             author: None,
             arguments: Vec::new(),
             needs_argument: false,
+            directory: None,
+            environment: Vec::new(),
+            wants_admin: false,
         }
     }
 
@@ -3136,6 +3211,98 @@ mod running_a_script {
                 outcome_of(&script(quiet), &ran(Some(0), Ended::Finished, stdout, "")).text,
                 None,
                 "{quiet:?} passed output on",
+            );
+        }
+    }
+
+    /// An elevated start must never read as a run that finished.
+    ///
+    /// There is no exit code, no output and no way to stop it, so "Ran Deploy"
+    /// would be claiming to know something Sill was never told.
+    #[test]
+    fn an_elevated_start_does_not_claim_it_worked() {
+        let outcome = outcome_of(
+            &script(Mode::FullOutput),
+            &ran(None, Ended::Started, "", ""),
+        );
+
+        assert!(
+            outcome.message.contains("started as administrator"),
+            "it said {:?}",
+            outcome.message,
+        );
+        assert_eq!(outcome.text, None, "it offered output it never had");
+    }
+
+    /// What makes a script reachable by a key and by the model.
+    mod the_answer_it_is_given {
+        use super::*;
+        use crate::scripts::Argument;
+
+        fn asking(arguments: Vec<Argument>) -> Script {
+            Script {
+                needs_argument: arguments.iter().any(|one| !one.optional),
+                arguments,
+                ..script(Mode::Silent)
+            }
+        }
+
+        fn argument(placeholder: &str, optional: bool) -> Argument {
+            Argument {
+                placeholder: placeholder.to_string(),
+                optional,
+                percent_encoded: false,
+            }
+        }
+
+        #[test]
+        fn a_script_that_asks_nothing_is_run_with_nothing() {
+            assert_eq!(given(&asking(Vec::new()), None), Ok(Vec::new()));
+        }
+
+        /// The change this is here for. A key recorded with an answer, or a
+        /// model that gave one, now reaches a script that asks for one.
+        #[test]
+        fn an_answer_becomes_the_scripts_first_argument() {
+            assert_eq!(
+                given(&asking(vec![argument("branch", false)]), Some("main")),
+                Ok(vec!["main".to_string()]),
+            );
+        }
+
+        /// Still refused with nothing, and it says what it wanted in the
+        /// author's own word rather than "argument 1".
+        #[test]
+        fn a_required_argument_with_no_answer_says_what_it_wanted() {
+            let why = given(&asking(vec![argument("branch", false)]), None).expect_err("refused");
+
+            assert!(why.contains("branch"), "it said {why}");
+            assert!(why.contains("Deploy"), "it did not name the script: {why}");
+        }
+
+        #[test]
+        fn an_optional_argument_does_not_stop_it() {
+            assert_eq!(
+                given(&asking(vec![argument("branch", true)]), None),
+                Ok(Vec::new()),
+            );
+        }
+
+        /// One answer is all a context carries, so a script that needs two
+        /// says so rather than being handed one and a blank.
+        #[test]
+        fn a_second_required_argument_cannot_be_answered_this_way() {
+            let script = asking(vec![argument("from", false), argument("to", false)]);
+
+            let why = given(&script, Some("main")).expect_err("refused");
+
+            assert!(
+                why.contains("to"),
+                "it did not name the one it cannot fill: {why}"
+            );
+            assert!(
+                why.contains("launcher"),
+                "it did not say where it can be run: {why}"
             );
         }
     }
