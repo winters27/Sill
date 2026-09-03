@@ -34,13 +34,31 @@ kind that is not a page and that people genuinely keep as a quicklink.
 `ms-settings` is what the Windows settings catalogue opens with, and it is a
 handler that only ever shows a settings page.
 
-Anything else, including an application's own protocol such as `obsidian://`
-or `slack://`, is refused. That is a real restriction on quicklinks and it is
-deliberate: an application protocol handler is an arbitrary program invoked
-with an argument, and Sill cannot tell which of those on a given machine is a
-text editor and which is a shell.
+Then three applications, named one at a time because they were asked for:
+`obsidian`, `vscode` and `slack`. A quicklink to a note, a repository or a
+channel is most of what a launcher is for, and refusing them made the feature
+worse in a way nobody was asking to be protected from.
+
+What that costs is worth being plain about. An application protocol handler is
+a program invoked with an argument, so each name here trusts that program to
+handle a hostile argument sensibly. They are named individually rather than by
+a rule such as "any installed handler", because that rule is what turns the
+list back into a deny-list of the handlers somebody has already noticed. Adding
+a fourth is a one-line change and a deliberate one.
+
+**Where a hostile argument would come from** is the thing to watch. A quicklink
+somebody typed is their own business. `import_quicklinks` reads a file, and a
+file can come from anywhere; that path is the reason this list is short.
 */
-const OPENABLE: &[&str] = &["http", "https", "mailto", "ms-settings"];
+const OPENABLE: &[&str] = &[
+    "http",
+    "https",
+    "mailto",
+    "ms-settings",
+    "obsidian",
+    "vscode",
+    "slack",
+];
 
 /**
 The scheme of `target`, if it has one at all.
@@ -374,13 +392,47 @@ mod tests {
             assert!(target("").is_err());
         }
 
-        /// An application's own protocol is an arbitrary program with an
-        /// argument. Refused on purpose, and this says so out loud so that
-        /// loosening it has to be a decision.
+        /// The three applications that were asked for, and no others.
+        ///
+        /// An application protocol handler is a program invoked with an
+        /// argument, so each of these trusts that program with a hostile one.
+        /// They are named one at a time for that reason, and this test is what
+        /// makes adding a fourth a decision rather than a side effect.
         #[test]
-        fn an_application_protocol_is_refused() {
-            assert!(url("obsidian://open?vault=Brain").is_err());
-            assert!(url("slack://channel?id=x").is_err());
+        fn the_named_applications_open_and_others_do_not() {
+            for allowed in [
+                "obsidian://open?vault=Brain",
+                "vscode://file/C:/Sill/src-tauri/src/reach.rs",
+                "slack://channel?id=x",
+            ] {
+                assert!(url(allowed).is_ok(), "{allowed} should open");
+            }
+
+            // Not a judgement on these programs. They are simply not on the
+            // list, which is what an allow-list means.
+            for refused in [
+                "steam://run/730",
+                "zoommtg://zoom.us/join?confno=1",
+                "itms-apps://",
+                "ms-msdt:/id",
+                "search-ms:query=x",
+            ] {
+                assert!(url(refused).is_err(), "{refused} should be refused");
+            }
+        }
+
+        /// Widening the list did not widen it to the dangerous ones.
+        #[test]
+        fn the_addresses_that_run_code_are_still_refused() {
+            for refused in [
+                "javascript:alert(1)",
+                "data:text/html,<script>alert(1)</script>",
+                "vbscript:msgbox(1)",
+                "file:///C:/Windows/System32/cmd.exe",
+                "JaVaScRiPt:alert(1)",
+            ] {
+                assert!(url(refused).is_err(), "{refused} should be refused");
+            }
         }
     }
 
