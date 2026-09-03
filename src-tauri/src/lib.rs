@@ -60,6 +60,7 @@ pub mod taps;
 pub mod text;
 pub mod timing;
 pub mod tts;
+pub mod utilities;
 pub mod weather;
 pub mod websearch;
 pub mod windowing;
