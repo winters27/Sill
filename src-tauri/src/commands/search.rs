@@ -84,7 +84,7 @@ pub(crate) async fn search_commands(
     let windows = if query.trim().is_empty() {
         Vec::new()
     } else {
-        windowing::recent_records()
+        windowing::recent_records(&app.state::<crate::state::Fresh<Vec<registry::CommandRecord>>>())
     };
 
     // Chained, not collected: both sides are borrowed and nothing is copied.
@@ -115,7 +115,7 @@ pub(crate) async fn search_commands(
      * many.
      */
     if results.iter().any(|hit| hit.command.mode == "system") {
-        let live = crate::system::live();
+        let live = crate::system::live(&app.state::<crate::state::Fresh<crate::system::Live>>());
 
         for hit in results.iter_mut() {
             if hit.command.mode == "system" {
@@ -181,10 +181,11 @@ pub(crate) async fn search_commands(
 #[tauri::command]
 pub(crate) async fn system_states(
     state: State<'_, RegistryState>,
+    switches: State<'_, crate::state::Fresh<crate::system::Live>>,
     ids: Vec<String>,
 ) -> Result<Vec<Option<bool>>, String> {
     let index = state.index();
-    let live = crate::system::live();
+    let live = crate::system::live(&switches);
 
     Ok(crate::system::states_for(
         index
@@ -269,13 +270,20 @@ pub(crate) fn timings(timings: State<'_, crate::timing::Timings>) -> crate::timi
 /// own row instead, so it costs nothing until somebody wants it.
 #[tauri::command]
 pub(crate) async fn search_app_volume(
+    app: AppHandle,
     state: State<'_, RegistryState>,
     query: String,
 ) -> Result<Vec<registry::SearchResult>, String> {
-    // Blocking: a COM apartment and an enumeration of the audio engine.
-    let sessions = tokio::task::spawn_blocking(crate::app_volume::sessions)
-        .await
-        .unwrap_or_default();
+    // Blocking: a COM apartment and an enumeration of the audio engine. The
+    // handle is cloned in rather than a `State` borrowed, because the reading
+    // happens on a thread that outlives this call.
+    let sessions = tokio::task::spawn_blocking(move || {
+        crate::app_volume::sessions(
+            &app.state::<crate::state::Fresh<Vec<crate::app_volume::Session>>>(),
+        )
+    })
+    .await
+    .unwrap_or_default();
 
     let records: Vec<registry::CommandRecord> = sessions
         .into_iter()

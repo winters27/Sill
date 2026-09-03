@@ -549,25 +549,22 @@ pub struct Live {
 /// and typing "bluetooth" is eight of them. Nothing here changes faster than a
 /// person can notice, and pressing a switch refreshes it regardless, so a
 /// second is generous.
-const FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(1);
-
-static LAST: std::sync::Mutex<Option<(std::time::Instant, Live)>> = std::sync::Mutex::new(None);
+pub const FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// The current state of every switch, read at most once a second.
 ///
 /// Lazily: nothing calls this unless a system row is actually about to be
 /// shown, so a search that matches no switch costs nothing at all.
-pub fn live() -> Live {
-    // Recovered rather than propagated: the lock is held across COM and
-    // registry reads, and a poisoned cache must not panic every later search.
-    let mut held = LAST.lock().unwrap_or_else(|e| e.into_inner());
+pub fn live(switches: &crate::state::Fresh<Live>) -> Live {
+    switches.get(read_the_switches)
+}
 
-    if let Some((taken, state)) = held.as_ref() {
-        if taken.elapsed() < FRESH_FOR {
-            return state.clone();
-        }
-    }
-
+/// The state of every switch, asked of the machine.
+///
+/// Its own function so [`live`] is the caching and this is the reading, which
+/// is the split that let three copies of the same six lines become one
+/// `Fresh`.
+fn read_the_switches() -> Live {
     let radios = crate::radios::radios();
     let state = Live {
         muted: muted().unwrap_or(false),
@@ -581,7 +578,6 @@ pub fn live() -> Live {
             .unwrap_or_default(),
     };
 
-    *held = Some((std::time::Instant::now(), state.clone()));
     state
 }
 
@@ -665,8 +661,6 @@ pub fn states_for<'a>(
 /// Called after a switch is pressed. Without it the row would show what it was
 /// a moment ago for up to a second, which is exactly the moment somebody is
 /// looking at it.
-pub fn forget_live() {
-    if let Ok(mut held) = LAST.lock() {
-        *held = None;
-    }
+pub fn forget_live(switches: &crate::state::Fresh<Live>) {
+    switches.forget();
 }

@@ -110,7 +110,10 @@ pub(crate) async fn launch_command(
      * one the action's own dismiss decision used a moment earlier.
      */
     let toggle = if record.mode == "system" {
-        crate::system::toggle_state(&record.entrypoint, &crate::system::live())
+        crate::system::toggle_state(
+            &record.entrypoint,
+            &crate::system::live(&app.state::<crate::state::Fresh<crate::system::Live>>()),
+        )
     } else {
         None
     };

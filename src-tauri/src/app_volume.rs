@@ -290,26 +290,11 @@ pub use platform::{set_muted, set_volume};
  *
  * The same shape as the switch reading in `system`, and for the same reason.
  */
-const FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(1);
-
-static LAST: std::sync::Mutex<Option<(std::time::Instant, Vec<Session>)>> =
-    std::sync::Mutex::new(None);
+pub const FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Every program that has a volume of its own, read at most once a second.
-pub fn sessions() -> Vec<Session> {
-    // Recovered rather than propagated, for the reason `system::live` gives:
-    // the lock spans COM calls and this runs on the search path.
-    let mut held = LAST.lock().unwrap_or_else(|e| e.into_inner());
-
-    if let Some((taken, list)) = held.as_ref() {
-        if taken.elapsed() < FRESH_FOR {
-            return list.clone();
-        }
-    }
-
-    let list = platform::sessions();
-    *held = Some((std::time::Instant::now(), list.clone()));
-    list
+pub fn sessions(playing: &crate::state::Fresh<Vec<Session>>) -> Vec<Session> {
+    playing.get(platform::sessions)
 }
 
 /// Throws the list away, so the next reading is taken fresh.
@@ -317,10 +302,8 @@ pub fn sessions() -> Vec<Session> {
 /// Called after something has been changed. Without it a row would show what
 /// it was a moment ago for up to a second, which is exactly the moment
 /// somebody is looking at the row they just pressed.
-pub fn forget_sessions() {
-    if let Ok(mut held) = LAST.lock() {
-        *held = None;
-    }
+pub fn forget_sessions(playing: &crate::state::Fresh<Vec<Session>>) {
+    playing.forget();
 }
 
 /// What to call a session in a row.

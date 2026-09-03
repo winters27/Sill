@@ -46,6 +46,72 @@ pub(crate) struct HostState {
     pub(crate) node: Arc<std::sync::Mutex<Option<PathBuf>>>,
 }
 
+/// A reading of the machine, reused for a moment.
+///
+/// ## Why this exists
+///
+/// Three things Sill asks Windows about are expensive enough to matter on a
+/// keystroke and stable enough that asking again immediately is waste: the
+/// state of the switches (a WinRT call per radio), the programs currently
+/// playing sound, and the open windows. Typing "bluetooth" is eight
+/// keystrokes and was eight enumerations.
+///
+/// Each had its own `static Mutex<Option<(Instant, T)>>` with its own copy of
+/// the same six lines. Rule 2 refuses the statics, and three copies of one
+/// idea is its own reason: the staleness rule is now in one place with tests,
+/// and each reading is a managed service that a test can hand a fresh one of.
+///
+/// ## Why the reading is taken under the lock
+///
+/// Two callers arriving together would otherwise both find nothing and both
+/// enumerate. Holding it means the second waits for the first and then reads
+/// what it produced, which is the answer it wanted anyway.
+pub struct Fresh<T> {
+    held: std::sync::Mutex<Option<(std::time::Instant, T)>>,
+    good_for: std::time::Duration,
+}
+
+impl<T: Clone> Fresh<T> {
+    pub fn new(good_for: std::time::Duration) -> Self {
+        Self {
+            held: std::sync::Mutex::new(None),
+            good_for,
+        }
+    }
+
+    /// The last reading if it is recent enough, or a new one.
+    ///
+    /// Poisoning is recovered from rather than propagated: the lock is held
+    /// across whatever `take` does, which is COM and registry calls, and a
+    /// poisoned cache must not panic every later search. The worst a recovered
+    /// lock holds is a stale reading, which the next call past the window
+    /// replaces.
+    pub fn get(&self, take: impl FnOnce() -> T) -> T {
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+
+        if let Some((taken, reading)) = held.as_ref() {
+            if taken.elapsed() < self.good_for {
+                return reading.clone();
+            }
+        }
+
+        let reading = take();
+        *held = Some((std::time::Instant::now(), reading.clone()));
+        reading
+    }
+
+    /// Throws the last reading away.
+    ///
+    /// For the moment something is known to have changed: pressing a switch
+    /// changes what the switches say, and waiting out the window would show
+    /// the old answer on the row that was just pressed.
+    pub fn forget(&self) {
+        if let Ok(mut held) = self.held.lock() {
+            *held = None;
+        }
+    }
+}
+
 /// The user's own preferences.
 #[derive(Clone)]
 pub(crate) struct PrefsState {

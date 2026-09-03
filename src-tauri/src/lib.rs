@@ -1108,6 +1108,20 @@ fn manage_before_windows(app: &tauri::App) {
     app.manage(icons::Icons::new(Some(data_dir.join("icons.json"))));
 
     /*
+     * Readings of the machine that are reused for a moment.
+     *
+     * Each was a `static` with its own copy of the same six lines. Typing
+     * "bluetooth" is eight keystrokes and was eight enumerations of the radios.
+     */
+    app.manage(state::Fresh::<system::Live>::new(system::FRESH_FOR));
+    app.manage(state::Fresh::<Vec<registry::CommandRecord>>::new(
+        windowing::FRESH_FOR,
+    ));
+    app.manage(state::Fresh::<Vec<app_volume::Session>>::new(
+        app_volume::FRESH_FOR,
+    ));
+
+    /*
      * The file index's container, empty, whether or not anything will fill it.
      *
      * It used to be managed only when there were folders to index, which made

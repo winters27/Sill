@@ -440,7 +440,7 @@ impl Action for ToggleSystem {
 
         // The reading is a second stale otherwise, and a second is exactly how
         // long somebody looks at a switch they just pressed.
-        crate::system::forget_live();
+        crate::system::forget_live(&ctx.app.state::<crate::state::Fresh<crate::system::Live>>());
 
         /*
          * A switch stays on screen. A one-shot gets out of the way.
@@ -451,7 +451,8 @@ impl Action for ToggleSystem {
          * at. Locking the screen is not, and neither is nudging the volume
          * away from the launcher.
          */
-        if crate::system::toggle_state(&object.target, &crate::system::live()).is_none() {
+        let switches = ctx.app.state::<crate::state::Fresh<crate::system::Live>>();
+        if crate::system::toggle_state(&object.target, &crate::system::live(&switches)).is_none() {
             crate::dismiss_main(&ctx.app);
         }
 
@@ -482,19 +483,26 @@ const SESSION_STEP: f32 = 0.1;
 /// Shared by the four that move the slider, so they cannot drift on what a
 /// step is, on rounding, or on what to say afterwards.
 async fn nudge(
-    // Unused, and taken anyway so all five of these read the same. A capture
-    // or an undo would want it and the signature should not have to change.
-    _ctx: &ActionCtx,
+    // Used now: the list of what is playing is a service rather than a static,
+    // so nudging a volume needs the handle to say the reading is stale.
+    ctx: &ActionCtx,
     object: &Object,
     to: impl Fn(f32) -> f32 + Send + 'static,
 ) -> Result<Outcome, String> {
     let id = object.target.clone();
 
+    // Cloned rather than borrowed: the reading happens on a blocking thread
+    // that outlives this call, so a `State` borrowed from `ctx` cannot go with
+    // it.
+    let app = ctx.app.clone();
+
     let level = tokio::task::spawn_blocking(move || {
-        let now = crate::app_volume::sessions()
-            .into_iter()
-            .find(|session| session.id == id)
-            .ok_or_else(|| "that program is not playing anything any more".to_string())?;
+        let now = crate::app_volume::sessions(
+            &app.state::<crate::state::Fresh<Vec<crate::app_volume::Session>>>(),
+        )
+        .into_iter()
+        .find(|session| session.id == id)
+        .ok_or_else(|| "that program is not playing anything any more".to_string())?;
 
         let level = to(now.volume).clamp(0.0, 1.0);
         crate::app_volume::set_volume(&id, level)?;
@@ -510,7 +518,10 @@ async fn nudge(
     .await
     .map_err(|err| format!("could not reach the sound system: {err}"))??;
 
-    crate::app_volume::forget_sessions();
+    crate::app_volume::forget_sessions(
+        &ctx.app
+            .state::<crate::state::Fresh<Vec<crate::app_volume::Session>>>(),
+    );
 
     Ok(Outcome::done(format!(
         "{} at {}%",
@@ -543,16 +554,21 @@ impl Action for ToggleSessionMute {
         self.accepts(kind)
     }
 
-    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
         let id = object.target.clone();
+
+        // Cloned rather than borrowed, for the reason `nudge` gives.
+        let app = ctx.app.clone();
 
         // Read and invert rather than being told which way to go. The row was
         // drawn a moment ago and something else may have changed it since.
         let muted = tokio::task::spawn_blocking(move || {
-            let now = crate::app_volume::sessions()
-                .into_iter()
-                .find(|session| session.id == id)
-                .ok_or_else(|| "that program is not playing anything any more".to_string())?;
+            let now = crate::app_volume::sessions(
+                &app.state::<crate::state::Fresh<Vec<crate::app_volume::Session>>>(),
+            )
+            .into_iter()
+            .find(|session| session.id == id)
+            .ok_or_else(|| "that program is not playing anything any more".to_string())?;
 
             crate::app_volume::set_muted(&id, !now.muted)?;
             Ok::<bool, String>(!now.muted)
@@ -560,7 +576,10 @@ impl Action for ToggleSessionMute {
         .await
         .map_err(|err| format!("could not reach the sound system: {err}"))??;
 
-        crate::app_volume::forget_sessions();
+        crate::app_volume::forget_sessions(
+            &ctx.app
+                .state::<crate::state::Fresh<Vec<crate::app_volume::Session>>>(),
+        );
 
         Ok(Outcome::done(format!(
             "{} is {}",

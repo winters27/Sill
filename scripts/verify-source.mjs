@@ -386,13 +386,9 @@ else if (Number(css[1]) !== Number(rust[1])) {
      * P2-07 and they are not fixed yet. Named here so the count cannot grow
      * quietly while they wait.
      */
-    "app_volume.rs": ["LAST"],
     "commands/store.rs": ["WATCHING"],
     "everything_ipc.rs": ["QUERIES"],
-    "icons.rs": ["CACHE"],
     "sleep.rs": ["GENERATIONS"],
-    "system.rs": ["LAST"],
-    "windowing.rs": ["LAST"],
   };
 
   const held = /^\s*static\s+([A-Z][A-Z0-9_]*)\s*:/gm;

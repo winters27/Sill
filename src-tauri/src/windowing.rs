@@ -830,10 +830,7 @@ pub use platform::{
 /// per character, short enough that a window opened while the launcher is up
 /// is findable by the time anybody has finished typing its name. The same
 /// bargain, and the same number, `system::live` makes for switches.
-const FRESH_FOR: std::time::Duration = std::time::Duration::from_millis(1000);
-
-static LAST: std::sync::Mutex<Option<(std::time::Instant, Vec<crate::registry::CommandRecord>)>> =
-    std::sync::Mutex::new(None);
+pub const FRESH_FOR: std::time::Duration = std::time::Duration::from_millis(1000);
 
 /**
 The open windows, enumerated at most once a second.
@@ -847,18 +844,10 @@ The switcher deliberately does not use this: it is opened on purpose, its whole
 value is that the first row is the window you were just in, and a second-old
 Z-order is exactly the thing it must not show.
 */
-pub fn recent_records() -> Vec<crate::registry::CommandRecord> {
-    let mut held = LAST.lock().unwrap_or_else(|e| e.into_inner());
-
-    if let Some((taken, records)) = held.as_ref() {
-        if taken.elapsed() < FRESH_FOR {
-            return records.clone();
-        }
-    }
-
-    let records = records();
-    *held = Some((std::time::Instant::now(), records.clone()));
-    records
+pub fn recent_records(
+    windows: &crate::state::Fresh<Vec<crate::registry::CommandRecord>>,
+) -> Vec<crate::registry::CommandRecord> {
+    windows.get(records)
 }
 
 pub fn records() -> Vec<crate::registry::CommandRecord> {

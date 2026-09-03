@@ -288,7 +288,7 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value) -> Value {
         "list_directory" => list_directory(&text("path")),
         "read_clipboard" => read_clipboard(app, &text("query")),
         "list_windows" => list_windows(),
-        "system_state" => system_state(),
+        "system_state" => system_state(app),
         "read_selection" => read_selection(app),
         "read_screen" => read_screen(),
         "what_can_be_done" => what_can_be_done(app, &text("target"), &text("kind")),
@@ -458,9 +458,9 @@ fn list_windows() -> Value {
     json!({ "found": found.len(), "windows": found })
 }
 
-fn system_state() -> Value {
+fn system_state(app: &tauri::AppHandle) -> Value {
     let state = crate::system::state();
-    let live = crate::system::live();
+    let live = crate::system::live(&app.state::<crate::state::Fresh<crate::system::Live>>());
 
     json!({
         "volume_percent": state.volume,
