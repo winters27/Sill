@@ -13,6 +13,8 @@
   import Toggle from "../Toggle.svelte";
   import Segmented from "./Segmented.svelte";
   import Select from "./Select.svelte";
+  import Instead from "../Instead.svelte";
+  import { standing } from "$lib/instead";
   import { actionsFor, searchCommands, type ActionInfo } from "$lib/exthost/commands";
   import { chordFrom, navigationKeys, type NavigationKey } from "$lib/settings";
   import type { Binding, BindingSource, Preferences, TapModifier } from "$lib/settings";
@@ -47,7 +49,6 @@
     { value: "165", label: "Right Alt" },
     { value: "163", label: "Right Ctrl" },
   ];
-
 
   const bindings = $derived(prefs.bindings ?? []);
 
@@ -306,11 +307,12 @@
     </Row>
   {/each}
 
-  {#if bindings.length === 0}
-    <p class="empty">
-      No shortcuts yet. One that upper-cases the selection is a good first one.
-    </p>
-  {/if}
+  <Instead
+    tone={standing({ failed: false, loading: false, count: bindings.length })}
+    inline
+    headline="No shortcuts yet"
+    hint="One that upper-cases the selection is a good first one."
+  />
 
   <Row
     title="Put the result back"
@@ -445,14 +447,6 @@
   .key.recording {
     color: var(--accent-bright);
     border-color: var(--accent-bright);
-  }
-
-
-  .empty {
-    margin: 0;
-    padding: var(--space-1) 0 var(--space-2);
-    font-size: var(--text-meta);
-    color: var(--text-2);
   }
 
   .foot {

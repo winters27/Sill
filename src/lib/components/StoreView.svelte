@@ -29,6 +29,8 @@
     type StoreRow,
   } from "$lib/store";
   import StoreIcon from "./StoreIcon.svelte";
+  import Instead from "./Instead.svelte";
+  import { couldNot, noMatch, standing } from "$lib/instead";
   import type { Preferences } from "$lib/settings";
 
   interface Props {
@@ -109,6 +111,44 @@
    */
   const windowsOnly = $derived(prefs?.store.windowsOnly ?? true);
 
+  const showing = $derived(standing({ failed: failed !== null, loading, count: rows.length }));
+
+  /**
+   * What the list says when it has no rows, in the reader's terms.
+   *
+   * All three used to be one grey paragraph in one class, so a store that
+   * could not be reached, a store still being read and a shelf with nothing on
+   * it were the same picture and only the words told them apart. `failed` also
+   * carried whatever Rust threw, which is the request that failed rather than
+   * the errand somebody was on.
+   */
+  const saying = $derived(
+    showing === "failed"
+      ? couldNot("reach the extension store")
+      : showing === "loading"
+        ? "Reading the extension store"
+        : query
+          ? noMatch(query, "extensions")
+          : "Nothing here",
+  );
+
+  /**
+   * The second line, when there is one worth having.
+   *
+   * The hidden count is the reason the shelf looks emptier than it is, so it
+   * belongs under the sentence that says the shelf is empty rather than beside
+   * it. A failure gets the one thing a reader can actually do about it.
+   */
+  const alsoSaying = $derived.by(() => {
+    if (showing === "failed") return "Check the connection and search again.";
+    if (showing !== "empty") return "";
+
+    const hidden = browse?.hidden ?? 0;
+    return hidden && windowsOnly
+      ? `${hidden} are hidden because they do not say they run on Windows.`
+      : "";
+  });
+
   /**
    * Which browse the rows on screen belong to.
    *
@@ -148,6 +188,10 @@
       failed = null;
     } catch (err) {
       if (asked !== generation) return;
+      // Kept as the reason, said to the reader as the errand. The console is
+      // where the reason belongs: nobody browsing a store can act on a fetch
+      // error, and the pane already offers the one thing they can do.
+      console.error("[sill] could not reach the extension store", err);
       failed = `${err}`;
       browse = null;
     } finally {
@@ -226,7 +270,9 @@
   export async function refresh() {
     onstatus("Fetching the extension store");
     await load(true);
-    onstatus(failed ?? `${browse?.total ?? 0} extensions`);
+    // The same sentence the pane shows, rather than the raw refusal. Two
+    // surfaces reporting one failure in two vocabularies reads as two failures.
+    onstatus(failed ? couldNot("reach the extension store") : `${browse?.total ?? 0} extensions`);
   }
 
   /** Moves through All, Installed and Updates. */
@@ -466,18 +512,7 @@
 
     <div class="pane">
       <div class="list sill-scrolls" role="presentation">
-        {#if failed}
-          <p class="quiet pad">{failed}</p>
-        {:else if loading && !rows.length}
-          <p class="quiet pad">Loading the extension store</p>
-        {:else if !rows.length}
-          <p class="quiet pad">
-            Nothing here.
-            {#if browse?.hidden && windowsOnly}
-              {browse.hidden} are hidden because they do not say they run on Windows.
-            {/if}
-          </p>
-        {/if}
+        <Instead tone={showing} inline headline={saying} hint={alsoSaying} />
 
         {#each rows as row, index (row.name)}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -759,8 +794,11 @@
     color: var(--accent);
   }
 
+  /* Says why a row cannot be installed here, which is a fact somebody has to
+     read before they stop trying. --text-4 is declared decorative-only and
+     this is not decoration. */
   .blocked {
-    color: var(--text-4);
+    color: var(--text-3);
   }
 
   .head {
@@ -805,10 +843,6 @@
     line-height: var(--line-meta);
   }
 
-  .pad {
-    padding: var(--space-3);
-  }
-
   .cta {
     margin: var(--space-4) 0 0;
     color: var(--text-2);
@@ -831,11 +865,11 @@
   }
 
   .commands li.unrunnable {
-    color: var(--text-4);
+    color: var(--text-3);
   }
 
   .tag {
-    color: var(--text-4);
+    color: var(--text-3);
     font-size: var(--text-micro);
   }
 
@@ -853,7 +887,9 @@
     align-items: center;
     padding: var(--space-1) var(--space-3);
     border-top: 1px solid var(--hairline);
-    color: var(--text-4);
+    /* The keys this screen answers to. The quietest step that is still meant
+       to be read, rather than the one that is not. */
+    color: var(--text-3);
     font-size: var(--text-micro);
   }
 
@@ -919,7 +955,7 @@
   }
 
   .where {
-    color: var(--text-4);
+    color: var(--text-3);
     font-size: var(--text-micro);
   }
 
@@ -927,7 +963,7 @@
      the extension: whether Sill is in the way of it at all. */
   .unseen {
     margin-left: var(--space-2);
-    color: var(--text-4);
+    color: var(--text-3);
     font-size: var(--text-micro);
   }
 
@@ -965,8 +1001,11 @@
     background: var(--accent-fill-strong);
   }
 
+  /* Disabled is a state with a token of its own. Fading the label to the
+     decorative step said the same thing by accident and said it differently
+     from every other disabled control in the application. */
   .decide-actions button:disabled {
-    color: var(--text-4);
+    opacity: var(--opacity-disabled);
     cursor: default;
   }
 </style>

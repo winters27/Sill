@@ -171,9 +171,10 @@
     white-space: nowrap;
   }
 
+  /* Today's high and low. Half of what a weather widget is for. */
   .range {
     flex: none;
-    color: var(--text-4);
+    color: var(--text-3);
     font-size: var(--text-meta);
     font-variant-numeric: tabular-nums;
   }

@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { ElementNode, ViewTree } from "$lib/exthost/tree";
+  import Instead from "./Instead.svelte";
+  import { standing } from "$lib/instead";
 
   interface Props {
     tree: ViewTree;
@@ -113,13 +115,11 @@
     {/each}
   </div>
 
-  {#if cells.length === 0}
-    <div class="sill-empty">
-      <img src="/sill.png" alt="" width="32" height="32" draggable="false" />
-      <span class="headline">Nothing to show</span>
-      <span class="hint">This command returned an empty grid.</span>
-    </div>
-  {/if}
+  <Instead
+    tone={standing({ failed: false, loading: false, count: cells.length })}
+    headline="Nothing to show"
+    hint="This command returned an empty grid."
+  />
 </div>
 
 <style>
@@ -162,15 +162,27 @@
     border-radius: var(--radius-md);
     cursor: default;
     /* Scoped, and backdrop-filter is never animated: see the WebView2 note. */
-    transition: background-color var(--motion-travel) var(--ease);
+    transition:
+      background-color var(--motion-travel) var(--ease),
+      box-shadow var(--motion-state) var(--ease);
   }
 
   .cell:hover:not(.selected) {
     background-color: var(--fill-1);
   }
 
+  /*
+   * The same pair a selected row takes: the accent wash and one light catch.
+   *
+   * `--catch` is a single 1px inset on the top edge, which is not the double
+   * frame the note above refuses. That note was about `--bevel-tile`, which
+   * has an edge on every side and is already on the tile inside. Without the
+   * catch a selected cell was the one selected thing in Sill lit differently
+   * from every other, and a grid beside a list showed the difference.
+   */
   .cell.selected {
     background-color: var(--accent-fill);
+    box-shadow: var(--catch);
   }
 
   .tile {

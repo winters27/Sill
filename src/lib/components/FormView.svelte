@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { ElementNode, ViewTree } from "$lib/exthost/tree";
+  import Instead from "./Instead.svelte";
+  import { standing } from "$lib/instead";
 
   interface Props {
     tree: ViewTree;
@@ -132,13 +134,11 @@
     {/if}
   {/each}
 
-  {#if fields.length === 0}
-    <div class="sill-empty">
-      <img src="/sill.png" alt="" width="32" height="32" draggable="false" />
-      <span class="headline">This form has no fields</span>
-      <span class="hint">The extension declared a form with nothing in it.</span>
-    </div>
-  {/if}
+  <Instead
+    tone={standing({ failed: false, loading: false, count: fields.length })}
+    headline="This form has no fields"
+    hint="The extension declared a form with nothing in it."
+  />
 </div>
 
 <style>

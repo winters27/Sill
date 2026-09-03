@@ -4,6 +4,8 @@
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import Section from "./Section.svelte";
   import Button from "./Button.svelte";
+  import Instead from "../Instead.svelte";
+  import { noMatch } from "$lib/instead";
   import {
     clearDictationHistory,
     dictationHistory,
@@ -120,11 +122,12 @@
   </div>
 
   {#if shown.length === 0}
-    <p class="empty">
-      {entries.length === 0
-        ? "Nothing dictated yet. Every transcript will appear here."
-        : "No transcript matches that."}
-    </p>
+    <Instead
+      tone="empty"
+      inline
+      headline={entries.length === 0 ? "Nothing dictated yet" : noMatch(filter, "transcripts")}
+      hint={entries.length === 0 ? "Every transcript will appear here." : ""}
+    />
   {:else}
     <div class="sill-card">
       {#each shown as entry (entry.at)}
@@ -254,14 +257,5 @@
     font-size: var(--text-body);
     line-height: 1.55;
     color: var(--text-1);
-  }
-
-  .empty {
-    margin: 0;
-    padding: var(--space-5) 0;
-    max-width: 56ch;
-    font-size: var(--text-body);
-    line-height: 1.7;
-    color: var(--text-2);
   }
 </style>

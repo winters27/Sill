@@ -1,5 +1,36 @@
 <script lang="ts">
-  import { appIcon } from "$lib/exthost/commands";
+  /**
+   * The icon on a row, and the tile it sits in.
+   *
+   * ## The flash, and why it is gone
+   *
+   * This asked for its icon in an effect and drew the lettered tile until the
+   * answer came back, so every row began as a letter and became a picture.
+   * Typing makes new rows on every keystroke and nearly all of them are
+   * applications that were on screen a moment ago, which made it a flash per
+   * row per keystroke for icons the window already had in hand.
+   *
+   * Two halves fix it, and neither of them is a fade:
+   *
+   * 1. **An answer already held is read without waiting.** `knownIcon` is
+   *    synchronous, so a path resolved earlier this session paints its icon on
+   *    the first frame. This is the case that was happening constantly.
+   * 2. **An answer not yet held reserves the tile instead of guessing.** The
+   *    slot is drawn empty until the shell answers. A letter shown before the
+   *    answer is information the window does not have yet, and replacing it a
+   *    frame later is the part that catches the eye.
+   *
+   * The letter is not gone. It is what a row shows once the answer is known to
+   * be "no icon", which is a fact rather than a placeholder, and for a path
+   * the shell cannot answer for at all that is known without asking, so those
+   * rows are lettered from the first frame as they always were.
+   *
+   * The other fix the audit offered was to send icons with the search results.
+   * Refused: the empty-query payload is 36.9 KB against a 40 KB budget, and a
+   * data URI per row is a few kilobytes each, so a screen of results would
+   * several times over the budget for a picture most rows already have.
+   */
+  import { appIcon, hasShellIcon, knownIcon } from "$lib/exthost/commands";
 
   interface Props {
     /** A real file the shell can read an icon from, when there is one. */
@@ -12,21 +43,29 @@
 
   let { path, label, resolvable }: Props = $props();
 
-  let src = $state<string | null>(null);
+  const askable = $derived(hasShellIcon(path, resolvable));
 
-  // Extension commands have no icon of their own yet, so only applications
-  // are worth asking the shell about. A packaged app is identified by an
-  // AppUserModelID rather than a file, and the shell cannot make an icon out
-  // of that, so those fall through to the lettered tile.
+  /** What is known about this path without waiting for anything. */
+  const held = $derived(askable ? knownIcon(path) : { uri: null });
+
+  /** What arrived while this row was on screen, and which path it was for. */
+  let arrived = $state<{ path: string; uri: string | null } | null>(null);
+
+  /**
+   * The answer, or `undefined` while there is not one.
+   *
+   * `null` inside it is an answer: this has no icon, draw the letter.
+   */
+  const answer = $derived(
+    held ?? (arrived?.path === path ? { uri: arrived.uri } : undefined),
+  );
+
   $effect(() => {
-    if (!resolvable || !path || path.startsWith("shell:AppsFolder")) {
-      src = null;
-      return;
-    }
+    if (!askable || held) return;
 
     let cancelled = false;
     void appIcon(path).then((uri) => {
-      if (!cancelled) src = uri;
+      if (!cancelled) arrived = { path, uri };
     });
 
     return () => {
@@ -37,10 +76,10 @@
   const initial = $derived((label.trim()[0] ?? "?").toUpperCase());
 </script>
 
-<span class="icon" class:has-image={src !== null}>
-  {#if src}
-    <img {src} alt="" />
-  {:else}
+<span class="icon" class:lettered={answer !== undefined && !answer.uri}>
+  {#if answer?.uri}
+    <img src={answer.uri} alt="" />
+  {:else if answer}
     <span class="initial">{initial}</span>
   {/if}
 </span>
@@ -67,9 +106,17 @@
     overflow: hidden;
   }
 
-  /* The placeholder is a tile; a real icon sits on nothing, because most
-     already carry their own shape and background. */
-  .icon:not(.has-image) {
+  /*
+   * The letter is a tile; a real icon sits on nothing, because most already
+   * carry their own shape and background.
+   *
+   * Keyed on the letter rather than on the absence of an image, which is the
+   * difference between the two. A row waiting for an answer holds the slot open
+   * and draws nothing in it, so the icon lands on the ground it will keep. Read
+   * the other way round, the tile appeared under every row and then vanished
+   * from most of them, which is the flash a second time in a quieter colour.
+   */
+  .icon.lettered {
     background-color: var(--fill-2);
     box-shadow: var(--bevel-tile);
   }

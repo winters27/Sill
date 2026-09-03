@@ -143,6 +143,30 @@ const NAMED_SIZE = [
   [/^(min-|max-)?(width|height)$/, "26px", "--icon-tile"],
 ];
 
+/**
+ * The things that really are decoration, so may wear `--text-4`.
+ *
+ * Placeholders are allowed by shape rather than by name, because their
+ * selector says what they are. These two do not, so each is named with why.
+ * Adding a third should take an argument.
+ */
+const DECORATIVE = {
+  /*
+   * The Escape hint under the launcher's footer, which the token's own comment
+   * in `theme.css` names as the second thing it is for. Escape is the key
+   * nobody needs reminding of, so the reminder is deliberately at the edge of
+   * being noticed.
+   */
+  "src/routes/+page.svelte": [".escape"],
+
+  /*
+   * The pin on a widget tile, which is a glyph rather than words. It is
+   * invisible until the tile is hovered and goes to `--text-1` the moment the
+   * pointer is on it, so at no point is somebody reading a 0.26 alpha.
+   */
+  "src/lib/widgets/Board.svelte": [".pin"],
+};
+
 let failures = 0;
 
 function fail(file, line, what) {
@@ -313,6 +337,115 @@ for (const file of sources(".")) {
             fail(file, line(m.index), `${property}: ${size} is ${token}`);
           }
         }
+
+        /*
+         * The decorative text step, colouring something that has to be read.
+         *
+         * `--text-4` is declared in `theme.css` as decorative only: placeholder
+         * text and the Escape hint, never information. It is white at alpha
+         * 0.26, which against the page tint over a pale desktop is nowhere near
+         * the contrast small text needs, and the token's own comment says the
+         * small-text threshold is not the bar it is measured against **because
+         * nothing readable is supposed to be wearing it**.
+         *
+         * Twelve places were. A store row saying why it cannot be installed, an
+         * extension command saying Sill has nowhere to run it, the keys the
+         * store answers to, the amount of memory behind a percentage, today's
+         * high and low, the key a tray item is bound to. Every one of them is
+         * the fact its element exists to carry, drawn in the step reserved for
+         * things nobody needs to read.
+         *
+         * The declaration is checked rather than the token, because the
+         * declaration is where the choice was made and the selector above it
+         * says what the choice was made about.
+         *
+         * A view rolling its own empty or loading state is caught in the same
+         * pass, for the same reason: the selector is where it shows. Eleven
+         * views wrote one, in three designs, and `ActionPanel` drew two of its
+         * own at once for months because `actions.length === 0` is true in both
+         * of the branches that tested it and neither branch was wrong.
+         * `components/Instead.svelte` is the one recipe now.
+         */
+        for (const at of css.matchAll(/\{/g)) {
+          const from = Math.max(
+            css.lastIndexOf("}", at.index),
+            css.lastIndexOf("{", at.index - 1),
+          );
+          const selector = css.slice(from + 1, at.index).trim();
+          const body = css.slice(at.index, css.indexOf("}", at.index));
+
+          // Not a selector: an at-rule's prelude, or a nested block's parent.
+          if (selector.startsWith("@") || selector === "") continue;
+
+          const named = /(^|[\s,>+~])\.(empty|loading)\b/.exec(selector);
+          if (named) {
+            fail(
+              file,
+              line(at.index),
+              `a \`.${named[2]}\` rule of its own; empty, loading and failed ` +
+                "states are `components/Instead.svelte`, so the three stay one " +
+                "design and a view cannot draw two of them at once",
+            );
+          }
+
+          if (!/color\s*:\s*var\(\s*--text-4\s*\)/.test(body)) continue;
+
+          // A placeholder is what the token is for, and it is the one use that
+          // says so in its own selector.
+          if (/::(-\w+-input-)?placeholder/.test(selector)) continue;
+          if ((DECORATIVE[file.replace(/\\/g, "/")] ?? []).includes(selector)) continue;
+
+          fail(
+            file,
+            line(at.index),
+            `\`${selector}\` is coloured --text-4, which theme.css reserves for ` +
+              "decoration. If a reader has to read it, --text-3 is the quietest " +
+              "step that is still meant to be read; if they do not, name it in " +
+              "DECORATIVE in this check with the reason",
+          );
+        }
+      }
+    }
+
+    /*
+     * A popover with nothing behind it.
+     *
+     * `.sill-menu` is the surface: a deep ground, a blur and one hairline. A
+     * popover without it is transparent, and what shows through is whatever it
+     * was opened over, so the labels sit directly on the rows underneath and
+     * wash out. The clipboard view had two popovers four lines apart, opened by
+     * two buttons in the same bar; the kind one had the class and the
+     * collections one did not, and nothing said so because a transparent menu
+     * still lays out, still highlights and still works.
+     *
+     * `role="menu"` is what is checked because that is what a popover claims to
+     * be. The exceptions are menus that are a whole window, which paint the
+     * window's own surface instead and would be wearing two.
+     */
+    const OWN_WINDOW = /[\\/]traymenu[\\/]/;
+
+    if (!OWN_WINDOW.test(file)) {
+      for (const at of text.matchAll(/\srole="menu"/g)) {
+        const opens = text.lastIndexOf("<", at.index);
+
+        // The end of the opening tag, skipping any `>` inside an attribute
+        // expression: `onclick={() => ...}` is full of them.
+        let depth = 0;
+        let closes = opens;
+        for (; closes < text.length; closes += 1) {
+          if (text[closes] === "{") depth += 1;
+          else if (text[closes] === "}") depth -= 1;
+          else if (text[closes] === ">" && depth === 0) break;
+        }
+
+        if (text.slice(opens, closes).includes("sill-menu")) continue;
+
+        fail(
+          file,
+          lineOf(text, at.index),
+          "a popover with no surface; add the sill-menu class, or it is " +
+            "transparent and the rows underneath show through its labels",
+        );
       }
     }
 

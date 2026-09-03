@@ -1,5 +1,7 @@
 <script lang="ts">
   import { groupActions, isRunnable, shortcutKeys, type ActionEntry } from "$lib/exthost/actions";
+  import { noMatch, standing } from "$lib/instead";
+  import Instead from "./Instead.svelte";
   import { popover } from "$lib/motion";
 
   interface Props {
@@ -48,6 +50,22 @@
   function indexOf(action: ActionEntry): number {
     return actions.findIndex((a) => a.id === action.id);
   }
+
+  /*
+   * One state, drawn once.
+   *
+   * This panel used to test `actions.length === 0` twice, once above the list
+   * and once below it, so an empty panel drew "Nothing matches" and "No
+   * actions" at the same time and the two sentences contradicted each other.
+   * Both tests were true, both were reasonable on their own, and nothing could
+   * fail: an empty panel is a rare screen and neither branch was wrong.
+   *
+   * Deriving the standing is what makes that shape impossible rather than
+   * merely fixed, because one value cannot be two of them.
+   */
+  const showing = $derived(
+    standing({ failed: false, loading: false, count: actions.length }),
+  );
 </script>
 
 <!-- Click-away closes, which is why the backdrop covers the whole window. -->
@@ -79,10 +97,6 @@
   {/if}
 
   <div class="scroll">
-    {#if actions.length === 0}
-      <div class="empty">Nothing matches {filter}</div>
-    {/if}
-
     {#each groups as group, g (g)}
       {#if group.section}
         <div class="section">{group.section}</div>
@@ -117,9 +131,14 @@
       {/each}
     {/each}
 
-    {#if actions.length === 0}
-      <div class="empty">No actions</div>
-    {/if}
+    <!-- Inline rather than the pane recipe: this popover is about as tall as
+         the mark and the space around it would be on their own. -->
+    <Instead
+      tone={showing}
+      inline
+      headline={filter ? noMatch(filter, "actions") : "No actions"}
+      hint={filter ? "" : "Nothing here can be done to this row."}
+    />
   </div>
 </div>
 
@@ -227,12 +246,5 @@
     font-size: var(--text-meta);
     font-weight: var(--weight-medium);
     color: var(--text-3);
-  }
-
-  .empty {
-    padding: var(--space-5) var(--space-2);
-    text-align: center;
-    color: var(--text-3);
-    font-size: var(--text-body);
   }
 </style>

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
+  import Instead from "../Instead.svelte";
+  import { standing } from "$lib/instead";
 
   interface Props {
     paths: string[];
@@ -38,9 +40,12 @@
     </div>
   {/each}
 
-  {#if paths.length === 0}
-    <p class="empty">Searching everywhere Everything indexes.</p>
-  {/if}
+  <Instead
+    tone={standing({ failed: false, loading: false, count: paths.length })}
+    inline
+    headline="No folders chosen"
+    hint="Sill is searching everywhere Everything indexes."
+  />
 
   <button class="add" onclick={add}>Add a folder…</button>
 </div>
@@ -96,12 +101,6 @@
   .remove:hover {
     background-color: var(--danger-fill);
     color: var(--danger);
-  }
-
-  .empty {
-    margin: 0;
-    font-size: var(--text-meta);
-    color: var(--text-3);
   }
 
   .add {

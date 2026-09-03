@@ -1182,46 +1182,13 @@ body {
 }
 
 /*
- * Empty and loading states, designed rather than written.
+ * Empty, loading and failed states live in `components/Instead.svelte`.
  *
- * A bare centred string is a placeholder, not a finished state. Every one of
- * these gets the mark, a headline and an optional hint, so an empty list looks
- * like a considered answer instead of a view that failed to load.
- *
- * No spinner anywhere: the launcher is meant to feel instant, and a spinner
- * advertises that it is not.
+ * They were `.sill-empty` here, which five views applied and six more ignored
+ * in favour of a paragraph of their own. A class is an invitation to copy four
+ * of its five lines; a component is not, and the tone a view is in is a
+ * decision it now has to make rather than one it can leave out.
  */
-.sill-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  flex: 1;
-  min-height: 132px;
-  padding: var(--space-6) var(--space-4);
-  text-align: center;
-}
-
-.sill-empty img {
-  width: 32px;
-  height: 32px;
-  opacity: var(--opacity-faint);
-  -webkit-user-drag: none;
-}
-
-.sill-empty .headline {
-  font-size: var(--text-body);
-  font-weight: var(--weight-medium);
-  color: var(--text-2);
-}
-
-.sill-empty .hint {
-  max-width: 46ch;
-  font-size: var(--text-meta);
-  line-height: 1.6;
-  color: var(--text-3);
-}
 
 /*
  * Settings card, from StreamNook's .settings-card.

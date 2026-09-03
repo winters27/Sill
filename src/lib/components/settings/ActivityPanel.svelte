@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import Section from "./Section.svelte";
   import Button from "./Button.svelte";
+  import Instead from "../Instead.svelte";
 
   type Done = {
     id: number;
@@ -66,10 +67,12 @@
   description="This run only. An undo describes a change rather than holding what changed, and a window or a clipboard from before a restart is not there to be put back."
 >
   {#if entries.length === 0}
-    <p class="empty">
-      Nothing yet. Anything you run from the launcher shows up here, and
-      whatever can be taken back says so.
-    </p>
+    <Instead
+      tone="empty"
+      inline
+      headline="Nothing yet"
+      hint="Anything you run from the launcher shows up here, and whatever can be taken back says so."
+    />
   {:else}
     <ul class="log">
       {#each entries as entry (entry.id)}
@@ -104,7 +107,6 @@
 </Section>
 
 <style>
-  .empty,
   .note {
     margin: 0;
     padding: var(--space-2) 0;

@@ -354,8 +354,11 @@
     font-size: var(--text-meta);
   }
 
+  /* The amount behind the percentage, which is the number somebody is
+     actually looking for. A reading nobody can read is a widget drawn for
+     nothing. */
   .under {
-    color: var(--text-4);
+    color: var(--text-3);
     font-size: var(--text-label);
     font-variant-numeric: tabular-nums;
   }
@@ -438,7 +441,7 @@
     margin: 0;
     margin-top: auto;
     padding-top: var(--space-2);
-    color: var(--text-4);
+    color: var(--text-3);
     font-size: var(--text-label);
   }
 

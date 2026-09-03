@@ -277,10 +277,12 @@
     min-width: var(--space-2);
   }
 
+  /* The key a menu item answers to, which is the whole reason it is drawn
+     beside the label. */
   .hint {
     flex: none;
     font-size: var(--text-meta);
-    color: var(--text-4);
+    color: var(--text-3);
   }
 
   .rule {
