@@ -106,7 +106,12 @@
         <circle cx="11" cy="11" r="7" />
         <path d="m20 20-3.5-3.5" stroke-linecap="round" />
       </svg>
-      <input bind:value={filter} placeholder="Search transcripts" spellcheck="false" />
+      <input
+        bind:value={filter}
+        placeholder="Search transcripts"
+        aria-label="Search transcripts"
+        spellcheck="false"
+      />
     </div>
 
     {#if status}<span class="status">{status}</span>{/if}

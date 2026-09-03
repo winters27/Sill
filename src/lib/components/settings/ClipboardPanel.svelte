@@ -91,6 +91,7 @@
   >
     {#snippet control()}
       <Segmented
+        label="Keep history for"
         value={String(prefs.clipboard.retainDays)}
         options={RETENTION}
         onchange={(next) => {
@@ -108,6 +109,7 @@
   >
     {#snippet control()}
       <Segmented
+        label="Things that look like passwords"
         value={prefs.clipboard.secrets}
         options={SECRETS}
         onchange={(next) => {

@@ -210,3 +210,39 @@ export function handlesItsOwnEscape(mode: string): boolean {
 export function hasRowActions(mode: string): boolean {
   return behaviourOf(mode)?.actions ?? false;
 }
+
+/**
+ * Whether what is on screen is a listbox somebody can arrow through.
+ *
+ * The mode alone cannot answer it. Five components draw a `role="listbox"`
+ * between them, and one of those is an extension's own tree: the same
+ * `command` mode is a list, a grid, a form or a page of prose depending on
+ * what the extension rendered, and only the first two are something to arrow
+ * through. `tree` is that tag, and it is ignored for every mode whose rows do
+ * not come from an extension.
+ *
+ * This is the question the search field asks before it calls itself a
+ * combobox. It used to be `rows === "commands"`, which is the root list and
+ * nothing else, so the clipboard, the store, the conversation list and every
+ * extension list left a screen reader silent while somebody walked them.
+ */
+export function showsAListbox(mode: string, tree?: string): boolean {
+  switch (behaviourOf(mode)?.rows) {
+    // The root list, under whichever mode is filling it.
+    case "commands":
+      return true;
+
+    // A view that counts its own rows: the clipboard, the store, the
+    // conversation list. Each draws a listbox of its own.
+    case "own":
+      return true;
+
+    // An extension's tree, which is a listbox only when it rendered one.
+    case "items":
+      return tree === "List" || tree === "Grid";
+
+    // The field holds a name rather than a filter, or the mode is not one.
+    default:
+      return false;
+  }
+}

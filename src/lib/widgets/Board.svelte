@@ -4,6 +4,7 @@
   import Machine from "./Machine.svelte";
   import { WIDGETS } from "./registry";
   import type { Preferences } from "$lib/settings";
+  import { hint } from "$lib/hint";
 
   interface Props {
     prefs: Preferences | null;
@@ -43,7 +44,7 @@
       <button
         class="pin"
         class:on={pinned.has(widget.id)}
-        title={pinned.has(widget.id) ? "Unpin from the launcher" : "Pin to the launcher"}
+        use:hint={pinned.has(widget.id) ? "Unpin from the launcher" : "Pin to the launcher"}
         aria-label={pinned.has(widget.id) ? `Unpin ${widget.name}` : `Pin ${widget.name}`}
         aria-pressed={pinned.has(widget.id)}
         tabindex="-1"

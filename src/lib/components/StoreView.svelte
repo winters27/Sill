@@ -31,6 +31,8 @@
   import StoreIcon from "./StoreIcon.svelte";
   import Instead from "./Instead.svelte";
   import { couldNot, noMatch, standing } from "$lib/instead";
+  import { LISTBOX, optionId } from "$lib/results";
+  import { hint } from "$lib/hint";
   import type { Preferences } from "$lib/settings";
 
   interface Props {
@@ -414,7 +416,7 @@
                 <span class="what">
                   {reach.title}
                   {#if !reach.mediated}
-                    <span class="unseen" title="Sill is not in the way of this one"
+                    <span class="unseen" use:hint={"Sill is not in the way of this one"}
                       >Sill never sees this</span
                     >
                   {/if}
@@ -488,19 +490,33 @@
         Raycast adds appears here without anybody adding it.
       -->
       <div class="chips sill-scrolls">
-        <button class:on={scope === "all"} onclick={() => (scope = "all")}>All</button>
-        <button class:on={scope === "installed"} onclick={() => (scope = "installed")}>
+        <!-- `aria-pressed` rather than a colour alone. Which chip is on is
+             drawn with a fill, and a fill is the one thing a screen reader
+             cannot see. -->
+        <button aria-pressed={scope === "all"} class:on={scope === "all"} onclick={() => (scope = "all")}>All</button>
+        <button
+          aria-pressed={scope === "installed"}
+          class:on={scope === "installed"}
+          onclick={() => (scope = "installed")}
+        >
           Installed
         </button>
-        <button class:on={scope === "updates"} onclick={() => (scope = "updates")}>
+        <button
+          aria-pressed={scope === "updates"}
+          class:on={scope === "updates"}
+          onclick={() => (scope = "updates")}
+        >
           Updates{browse?.updates ? ` ${browse.updates}` : ""}
         </button>
 
         <span class="divider"></span>
 
-        <button class:on={category === null} onclick={() => (category = null)}>Any</button>
+        <button aria-pressed={category === null} class:on={category === null} onclick={() => (category = null)}>
+          Any
+        </button>
         {#each browse?.categories ?? [] as one (one.name)}
           <button
+            aria-pressed={category === one.name}
             class:on={category === one.name}
             onclick={() => (category = category === one.name ? null : one.name)}
           >
@@ -511,17 +527,39 @@
     </div>
 
     <div class="pane">
-      <div class="list sill-scrolls" role="presentation">
+      <!--
+        A list of extensions is a list, and it was not one.
+
+        This was `role="presentation"` over rows with no role, no id and no key
+        handler, with two a11y warnings silenced to keep it that way. So the
+        launcher's field announced itself and then said nothing while somebody
+        arrowed down the store, and Enter worked only because the window was
+        catching the key on its way past.
+      -->
+      <div
+        id={LISTBOX}
+        class="list sill-scrolls"
+        role="listbox"
+        tabindex="-1"
+        aria-label="Extensions"
+      >
         <Instead tone={showing} inline headline={saying} hint={alsoSaying} />
 
         {#each rows as row, index (row.name)}
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
+            id={optionId(index)}
             class="row"
             class:selected={index === selected}
+            role="option"
+            aria-selected={index === selected}
+            tabindex="-1"
             onmouseenter={() => onselect(index)}
             onclick={() => {
+              onselect(index);
+              void activate();
+            }}
+            onkeydown={(e) => {
+              if (e.key !== "Enter") return;
               onselect(index);
               void activate();
             }}

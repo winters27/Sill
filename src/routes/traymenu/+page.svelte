@@ -16,6 +16,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { applyAppearance, getPreferences, openSettings, quitApp } from "$lib/settings";
   import { summonWith } from "$lib/exthost/commands";
+  import { itemId } from "$lib/results";
   import "$lib/theme/theme.css";
 
   const win = getCurrentWindow();
@@ -35,6 +36,10 @@
   /** Set from Rust, so the row shows the hotkey actually bound. */
   let summonHotkey = $state("");
   let selected = $state(0);
+  let menu = $state<HTMLDivElement | null>(null);
+
+  /** The menu, for the item ids `aria-activedescendant` names. */
+  const MENU = "sill-tray-menu";
 
   /**
    * Everything here goes through `summonWith`, which is one intent: put the
@@ -118,10 +123,23 @@
     const stops: UnlistenFn[] = [];
     void readAppearance();
 
+    // The menu IS this window, so it holds focus the whole time it is up.
+    menu?.focus();
+
     // Every showing starts at the top. A menu that remembers where the cursor
     // was last time highlights a row nobody is looking at.
     void listen("sill://tray-menu-shown", () => {
       selected = 0;
+      /*
+       * And focus goes back to the menu on every showing.
+       *
+       * This window is not destroyed between showings, it is hidden, so
+       * whatever had focus when it went away still has it when it comes back
+       * and that may be nothing at all. `aria-activedescendant` is read only
+       * from the focused element, so without this the second showing of the
+       * menu is silent even though the first was not.
+       */
+      menu?.focus();
     }).then((stop) => stops.push(stop));
 
     /*
@@ -143,12 +161,21 @@
 
 <svelte:window onkeydown={onKeydown} onblur={() => void win.hide()} />
 
-<div class="menu" role="menu" tabindex="-1">
+<div
+  id={MENU}
+  bind:this={menu}
+  class="menu"
+  role="menu"
+  tabindex="-1"
+  aria-label="Sill"
+  aria-activedescendant={itemId(MENU, selected)}
+>
   {#each items as item, index (item.label)}
     {#if item.breaks}
       <div class="rule" role="separator"></div>
     {/if}
     <div
+      id={itemId(MENU, index)}
       class="item"
       class:selected={index === selected}
       class:danger={item.danger}

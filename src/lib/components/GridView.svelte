@@ -2,6 +2,7 @@
   import type { ElementNode, ViewTree } from "$lib/exthost/tree";
   import Instead from "./Instead.svelte";
   import { standing } from "$lib/instead";
+  import { LISTBOX, optionId } from "$lib/results";
 
   interface Props {
     tree: ViewTree;
@@ -21,11 +22,17 @@
     return typeof value === "number" && value > 0 ? Math.min(value, 8) : 5;
   });
 
-  interface Cell {
-    kind: "section" | "item";
-    node: ElementNode;
-    index?: number;
-  }
+  /**
+   * A section heading or a selectable cell, told apart by `kind`.
+   *
+   * Two shapes rather than one with an optional index, so a cell's index is a
+   * number wherever the markup has narrowed to one. The row id below has to be
+   * a real index or `aria-activedescendant` points at nothing and the
+   * announcement stops, which is a failure with no visible symptom.
+   */
+  type Cell =
+    | { kind: "section"; node: ElementNode }
+    | { kind: "item"; node: ElementNode; index: number };
 
   /**
    * Sections and items share one index space, as in the list, so selection
@@ -80,22 +87,40 @@
   }
 </script>
 
-<div class="grid-scroll" role="listbox" tabindex="-1" aria-label="Grid">
+<!--
+  A grid of pictures is still one list to walk, so it stays a listbox.
+
+  No `aria-orientation`. It is laid out in columns, but the launcher moves the
+  selection with Up and Down only, and saying "horizontal" would tell somebody
+  to press keys that do nothing here. What is drawn and what the keys do are
+  different questions, and the reader is answering the second.
+
+  The id is the one the search field points at, and every cell carries the id
+  that field names when the cell is highlighted.
+-->
+<div
+  id={LISTBOX}
+  class="grid-scroll"
+  role="listbox"
+  tabindex="-1"
+  aria-label={str(node, "navigationTitle") || "Results"}
+>
   <div class="grid" style="--columns: {columns}">
     {#each cells as cell (cell.node.id)}
       {#if cell.kind === "section"}
-        <div class="section">{str(cell.node, "title")}</div>
+        <div class="section" role="presentation">{str(cell.node, "title")}</div>
       {:else}
         {@const content = contentOf(cell.node)}
         <div
+          id={optionId(cell.index)}
           class="cell"
           class:selected={cell.index === selected}
           role="option"
           aria-selected={cell.index === selected}
           tabindex="-1"
-          onmousemove={() => cell.index !== undefined && onselect(cell.index)}
-          onclick={() => cell.index !== undefined && onrun(cell.index)}
-          onkeydown={(e) => e.key === "Enter" && cell.index !== undefined && onrun(cell.index)}
+          onmousemove={() => onselect(cell.index)}
+          onclick={() => onrun(cell.index)}
+          onkeydown={(e) => e.key === "Enter" && onrun(cell.index)}
         >
           <div class="tile">
             {#if content.src}

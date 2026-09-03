@@ -5,6 +5,8 @@
   import ClipKindIcon from "./ClipKindIcon.svelte";
   import Instead from "./Instead.svelte";
   import { couldNot, noMatch, standing } from "$lib/instead";
+  import { LISTBOX, optionId } from "$lib/results";
+  import { hint } from "$lib/hint";
   import {
     clipboardDelete,
     clipboardEntry,
@@ -640,12 +642,23 @@
   </div>
 
   <div class="panes">
-    <div class="list" bind:this={listEl} role="listbox" tabindex="-1" aria-label="Clipboard history">
+    <!-- The id the launcher's field points `aria-controls` at, and the row ids
+         its `aria-activedescendant` names. Only one list is ever on screen, so
+         the clipboard uses the same pair the root list does. -->
+    <div
+      id={LISTBOX}
+      class="list"
+      bind:this={listEl}
+      role="listbox"
+      tabindex="-1"
+      aria-label="Clipboard history"
+    >
       {#each rows as row (row.entry.id)}
         {#if row.heading}
-          <div class="sill-group">{row.heading}</div>
+          <div class="sill-group" role="presentation">{row.heading}</div>
         {/if}
         <div
+          id={optionId(row.index)}
           class="row"
           class:selected={row.index === selected}
           role="option"
@@ -724,7 +737,9 @@
           {#each facts as fact (fact.name)}
             <div class="fact">
               <span class="name">{fact.name}</span>
-              <span class="value" title={fact.value}>
+              <!-- The value is truncated to fit the column, so the whole of it
+                   is only reachable on hover. -->
+              <span class="value" use:hint={fact.value}>
                 {#if fact.icon}
                   <img class="app-icon" src={fact.icon} alt="" width="14" height="14" />
                 {/if}

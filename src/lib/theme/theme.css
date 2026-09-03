@@ -1238,3 +1238,115 @@ body {
   border-radius: var(--radius-lg);
   box-shadow: var(--elevation-menu);
 }
+
+/*
+ * The tooltip, built by `$lib/hint` and appended to the body.
+ *
+ * Global because the element is not inside the component that asked for it:
+ * an absolutely positioned bubble parented to a row would be clipped by the
+ * first ancestor that scrolls, which is every list in the window.
+ *
+ * One line, no arrow, no animation. It exists for about as long as it takes
+ * to read six words, and a bubble that slides in is a bubble that is still
+ * arriving when somebody has finished with it.
+ */
+.sill-hint {
+  position: fixed;
+  z-index: var(--z-menu);
+  max-width: 260px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background-color: rgba(0, 0, 0, 0.88);
+  box-shadow: var(--elevation-menu);
+  color: var(--text-1);
+  font-size: var(--text-meta);
+  line-height: var(--line-meta);
+  /* It describes what is under the pointer, so it must never become what is
+     under the pointer. */
+  pointer-events: none;
+}
+
+/*
+ * Windows high contrast, which throws the whole palette away.
+ *
+ * ## What breaks without this
+ *
+ * `forced-colors` replaces every colour the page chose with one of about a
+ * dozen the user chose, and it strips `box-shadow` and `background-image`
+ * entirely. Sill draws its focus ring, its row selection, its switches and
+ * its keycaps with `box-shadow`, and 22 files turn the browser's own outline
+ * off to do it. So in the one mode somebody is using BECAUSE they cannot make
+ * out low contrast, every one of those indicators disappears and nothing at
+ * all shows which row is highlighted or which control has focus.
+ *
+ * ## Why it is one global block
+ *
+ * The same reason the reduced-motion guard above is one: the failure mode of
+ * doing it per component is that the next component forgets, and forgetting
+ * here is invisible to everybody who is not in high contrast.
+ *
+ * The system colours are the point. `Highlight`, `HighlightText`, `CanvasText`
+ * and `ButtonBorder` are the keywords the OS maps to whatever the user picked,
+ * so this describes roles rather than choosing colours, which is the only way
+ * to be right in a palette that is not ours.
+ */
+@media (forced-colors: active) {
+  /*
+   * Give the outline back, everywhere it was turned off.
+   *
+   * `outline: none` is written 29 times across the tree, always paired with a
+   * `box-shadow` ring that this mode deletes. Rather than hunt them one at a
+   * time, focus gets a real outline here and it wins because it is later and
+   * more specific than any of them.
+   */
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
+  }
+
+  /*
+   * The highlighted row, in every list mode.
+   *
+   * Selection is drawn with a background wash and an inset box-shadow, and
+   * both are gone here, so an outline is the only thing left that can say
+   * which row the arrow keys are on. `forced-color-adjust: none` is
+   * deliberately NOT used: the row's own colours are exactly what the user
+   * asked to have replaced.
+   */
+  .sill-row.selected,
+  [role="option"][aria-selected="true"],
+  [role="menuitem"].selected,
+  [role="menuitemradio"].selected {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+    color: HighlightText;
+    background: Highlight;
+  }
+
+  /*
+   * The chosen option in a group of them.
+   *
+   * A segmented control says which segment is on with a sliding thumb, and a
+   * thumb is a background and a shadow. Both go, so all six segments read
+   * identically without this.
+   */
+  [role="radio"][aria-checked="true"],
+  [aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  /*
+   * Anything whose only edge was a shadow.
+   *
+   * Menus, cards, keycaps and the tooltip all draw their border with
+   * `box-shadow` or a translucent hairline, and a translucent colour resolves
+   * to the same forced colour as the surface behind it, so the edge vanishes.
+   */
+  .sill-menu,
+  .sill-hint,
+  .sill-key {
+    border: 1px solid ButtonBorder;
+  }
+}

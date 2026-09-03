@@ -162,6 +162,7 @@
   <Row title="Degrees">
     {#snippet control()}
       <Segmented
+        label="Degrees"
         value={prefs.widgets.fahrenheit ? "f" : "c"}
         options={[
           { value: "f", label: "Fahrenheit" },

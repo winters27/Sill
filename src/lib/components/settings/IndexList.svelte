@@ -13,6 +13,7 @@
    * alias" beside something you were already looking at is the invitation.
    */
   import { onMount } from "svelte";
+  import { hint } from "$lib/hint";
   import {
     acceleratorFrom,
     indexRows,
@@ -152,6 +153,7 @@
     type="text"
     bind:value={query}
     placeholder="Filter by name"
+    aria-label="Filter by name"
     spellcheck="false"
   />
 </div>
@@ -166,7 +168,8 @@
 <div class="rows">
   {#each rows as row (row.id)}
     <div class="row" class:off={row.hidden}>
-      <span class="name" title={row.title}>{row.title}</span>
+      <!-- Truncated to the column, so the whole name is only on hover. -->
+      <span class="name" use:hint={row.title}>{row.title}</span>
 
       {#if naming === row.id}
         <input

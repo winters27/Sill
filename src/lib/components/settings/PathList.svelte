@@ -2,6 +2,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import Instead from "../Instead.svelte";
   import { standing } from "$lib/instead";
+  import { hint } from "$lib/hint";
 
   interface Props {
     paths: string[];
@@ -31,7 +32,9 @@
 <div class="list">
   {#each paths as path (path)}
     <div class="entry">
-      <span class="path" title={path}>{path}</span>
+      <!-- A long path is truncated to the row, and the folder it names is the
+           half that gets cut. -->
+      <span class="path" use:hint={path}>{path}</span>
       <button class="remove" aria-label="Stop searching {path}" onclick={() => remove(path)}>
         <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
           <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />

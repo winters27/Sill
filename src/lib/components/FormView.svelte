@@ -107,7 +107,9 @@
     {:else if field.tag === "Form.Dropdown"}
       <div class="row">
         <div class="label">{str(field, "title")}</div>
-        <select bind:value={values[key] as string}>
+        <!-- The label beside it is a `div`, so nothing links the two. An
+             extension's field had no name at all until this. -->
+        <select aria-label={str(field, "title")} bind:value={values[key] as string}>
           {#each dropdownOptions(field) as option (option.value)}
             <option value={option.value}>{option.title}</option>
           {/each}
@@ -118,6 +120,7 @@
         <div class="label">{str(field, "title")}</div>
         <textarea
           rows="4"
+          aria-label={str(field, "title")}
           placeholder={str(field, "placeholder")}
           bind:value={values[key] as string}
         ></textarea>
@@ -127,6 +130,7 @@
         <div class="label">{str(field, "title")}</div>
         <input
           type={field.tag === "Form.PasswordField" ? "password" : "text"}
+          aria-label={str(field, "title")}
           placeholder={str(field, "placeholder")}
           bind:value={values[key] as string}
         />

@@ -99,6 +99,65 @@ function styled(text) {
   ]);
 }
 
+/**
+ * A component with everything that is not markup blanked out.
+ *
+ * Comments, `<script>` and `<style>` are replaced by spaces of the same
+ * length, so offsets still land on the right line and nothing inside them is
+ * read as an element. That matters more than it sounds: half the comments in
+ * this tree explain an attribute by quoting it, and a rule that says
+ * `role="application"` is banned would otherwise be tripped by the comment
+ * saying why it was removed.
+ */
+function markup(text) {
+  const blank = (c) => c.replace(/[^\n]/g, " ");
+
+  return text
+    .replace(/<!--[\s\S]*?-->/g, blank)
+    .replace(/<script[\s\S]*?<\/script>/g, blank)
+    .replace(/<style[\s\S]*?<\/style>/g, blank);
+}
+
+/**
+ * Every opening tag in a template, with its attributes as one string.
+ *
+ * Written by hand rather than with a regex because a Svelte attribute holds
+ * arbitrary JavaScript: `onclick={() => go("<b>")}` contains both a quote and
+ * a `>` and neither of them ends the tag. Quotes and braces are tracked so the
+ * end of the tag is the first `>` that is in neither.
+ */
+function* tags(text) {
+  for (const found of text.matchAll(/<([A-Za-z][\w:.-]*)/g)) {
+    let at = found.index + found[0].length;
+    let quote = "";
+    let depth = 0;
+
+    while (at < text.length) {
+      const ch = text[at];
+
+      if (quote) {
+        if (ch === quote) quote = "";
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === "{") {
+        depth += 1;
+      } else if (ch === "}") {
+        depth -= 1;
+      } else if (ch === ">" && depth === 0) {
+        break;
+      }
+
+      at += 1;
+    }
+
+    yield {
+      name: found[1],
+      attrs: text.slice(found.index + found[0].length, at),
+      at: found.index,
+    };
+  }
+}
+
 /*
  * The literals a component may still write, and why each one is allowed.
  *
@@ -496,6 +555,135 @@ for (const file of sources(".")) {
       for (const m of text.matchAll(/<select\b/g)) {
         fail(file, lineOf(text, m.index), "a bare <select> in settings; use Select.svelte");
       }
+    }
+
+    /*
+     * What a screen reader is told, which is the half of the interface nobody
+     * looks at.
+     *
+     * Every rule below is a mistake that renders perfectly. The launcher's
+     * search field keeps focus while the arrow keys walk the list under it, so
+     * the ONLY thing that says which row is highlighted is
+     * `aria-activedescendant` naming that row's id. A row with no id is a row
+     * that is never announced, and it looks exactly like a row that is.
+     *
+     * That was the state of four of the five lists in this window. It is the
+     * kind of thing that comes back, because nothing about a missing id shows
+     * up on screen, in the type checker, or in a test that renders markup and
+     * looks at the text in it.
+     */
+    const view = markup(text);
+
+    for (const tag of tags(view)) {
+      const attrs = tag.attrs;
+      const where = () => lineOf(text, tag.at);
+
+      /*
+       * One list on screen, one name for it.
+       *
+       * `LISTBOX` is the id the search field points `aria-controls` at. A
+       * listbox that spells its own id is a listbox the field cannot name.
+       */
+      if (/\brole="listbox"/.test(attrs) && !/\bid=\{LISTBOX\}/.test(attrs)) {
+        fail(
+          file,
+          where(),
+          'a role="listbox" with no `id={LISTBOX}`, so the search field above ' +
+            "it has nothing to point `aria-controls` at",
+        );
+      }
+
+      /*
+       * A row that can be named, and that says whether it is the named one.
+       *
+       * Both halves, because either alone is silence: an id nothing points at
+       * announces nothing, and a highlighted row with no `aria-selected` is
+       * announced as an ordinary one.
+       */
+      if (/\brole="option"/.test(attrs)) {
+        if (!/\bid=\{optionId\(/.test(attrs)) {
+          fail(
+            file,
+            where(),
+            'a role="option" with no `id={optionId(...)}`, so ' +
+              "`aria-activedescendant` can never name it and the highlight is " +
+              "never announced",
+          );
+        }
+
+        if (!/\baria-selected=/.test(attrs)) {
+          fail(file, where(), 'a role="option" with no `aria-selected`');
+        }
+      }
+
+      /*
+       * The same for a menu, except that a `<button>` is already focusable and
+       * announces itself when focus lands on it. A `<div>` is not and does not.
+       */
+      if (/\brole="menuitem(?:radio|checkbox)?"/.test(attrs) && tag.name !== "button") {
+        if (!/\bid=\{itemId\(/.test(attrs)) {
+          fail(
+            file,
+            where(),
+            `a role="menuitem" on a <${tag.name}> with no \`id={itemId(...)}\`. ` +
+              "It takes no focus of its own, so the only way it is ever " +
+              "announced is the menu naming it",
+          );
+        }
+      }
+
+      /*
+       * `role="application"` turns the screen reader off.
+       *
+       * It tells the reader to stop intercepting keys and hand every one to
+       * the page: no browse mode, no arrow keys for reading, no headings. It
+       * is a contract for something genuinely unreadable any other way, and it
+       * was on the Ask window because a `div` there listens for a drag.
+       */
+      if (/\brole="application"/.test(attrs)) {
+        fail(
+          file,
+          where(),
+          'role="application" turns off the screen reader\'s own navigation ' +
+            "for everything inside it",
+        );
+      }
+
+      /*
+       * A native tooltip.
+       *
+       * Drawn by Windows in the system font on a white slab, a second late,
+       * unreachable from the keyboard, and announced differently by every
+       * reader. `use:hint` from `$lib/hint` is the same sentence in the
+       * window's own type, on focus as well as hover.
+       *
+       * Only lowercase names, which are HTML elements. `<Row title="...">`
+       * and `<Section title="...">` are components taking a prop called
+       * `title`, and that prop is a heading somebody reads.
+       */
+      if (/^[a-z][a-z0-9]*$/.test(tag.name) && /(^|\s)title=/.test(attrs)) {
+        fail(
+          file,
+          where(),
+          `a native title="" on <${tag.name}>; use \`use:hint\` from $lib/hint`,
+        );
+      }
+    }
+
+    /*
+     * Menu item ids that nothing names.
+     *
+     * `itemId` exists for one purpose, and a menu that gives its items ids
+     * without pointing `aria-activedescendant` at one of them has done the
+     * half of the work that has no effect.
+     */
+    if (view.includes("id={itemId(") && !view.includes("aria-activedescendant=")) {
+      fail(
+        file,
+        null,
+        "menu items here carry ids and nothing points `aria-activedescendant` " +
+          "at any of them, so the ids are decoration",
+      );
     }
   }
 
@@ -1332,6 +1520,63 @@ for (const file of sources("src-tauri/src")) {
         lineOf(text, found.index),
         "this opens something with no `crate::reach::url` or `crate::reach::target` " +
           "above it, so a javascript:, data: or file: address reaches the shell",
+      );
+    }
+  }
+}
+
+/*
+ * The high contrast fallback, still in place.
+ *
+ * Windows high contrast replaces every colour the page chose and DELETES
+ * `box-shadow` outright. Sill draws its focus ring, its selected row, its
+ * switches and its keycaps with box-shadow, and turns the browser's own
+ * outline off in about thirty places to do it. So in the one mode somebody is
+ * using because they cannot make out low contrast, every one of those
+ * indicators disappears and nothing shows which row is highlighted or which
+ * control has focus.
+ *
+ * One block in `theme.css` gives them all back with system colours. Nothing
+ * about deleting it fails: the interface looks identical to everybody who is
+ * not in that mode, which is everybody who would notice.
+ *
+ * The check is deliberately shallow. It cannot tell whether the block is
+ * right; it can tell whether somebody removed it, or replaced the system
+ * colour keywords with a palette that forced colours will throw away again.
+ */
+{
+  const THEME = "src/lib/theme/theme.css";
+  const css = readFileSync(THEME, "utf8");
+  const opens = css.indexOf("@media (forced-colors: active)");
+
+  if (opens === -1) {
+    fail(
+      THEME,
+      null,
+      "no `@media (forced-colors: active)` block. Windows high contrast strips " +
+        "every box-shadow, which is what draws the focus ring and the selected row",
+    );
+  } else {
+    const block = css.slice(opens);
+
+    if (!/outline:\s*\d/.test(block)) {
+      fail(
+        THEME,
+        lineOf(css, opens),
+        "the forced-colors block sets no `outline`, so focus and selection are " +
+          "still invisible there",
+      );
+    }
+
+    // `Highlight`, `HighlightText`, `CanvasText` and `ButtonBorder` are what
+    // the OS maps to whatever the user picked. Any other colour written here
+    // is thrown away by the same mechanism this block exists to answer.
+    if (!/\b(Highlight|HighlightText|CanvasText|ButtonBorder|ButtonText)\b/.test(block)) {
+      fail(
+        THEME,
+        lineOf(css, opens),
+        "the forced-colors block names no system colour, so whatever it paints " +
+          "is replaced by the palette the user chose",
       );
     }
   }

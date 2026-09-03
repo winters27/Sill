@@ -1,6 +1,7 @@
 <script lang="ts">
   import { openSettings, quitApp } from "$lib/settings";
   import { popover } from "$lib/motion";
+  import { itemId } from "$lib/results";
 
   interface Props {
     /** Runs a Sill built-in by id, e.g. "reload". */
@@ -11,6 +12,49 @@
 
   let open = $state(false);
   let selected = $state(0);
+  let menu = $state<HTMLDivElement | null>(null);
+
+  /** The menu, for `aria-controls` and for the item ids below. */
+  const MENU = "sill-launcher-menu";
+
+  /**
+   * Whatever had focus when the menu opened, so it can have it back.
+   *
+   * Plain rather than `$state`: nothing renders from it, and making it
+   * reactive would re-run the effect that sets it.
+   */
+  let came: HTMLElement | null = null;
+
+  /*
+   * The menu takes focus while it is open, and gives it back when it closes.
+   *
+   * Not for the keys: those are caught on the window, which is why the arrows
+   * work here at all. It is that `aria-activedescendant` is read only from the
+   * element that has focus, and with focus left in the search field a screen
+   * reader announced the field while somebody arrowed through six menu items
+   * it knew nothing about.
+   *
+   * Giving it back is the half that matters. The search field is where every
+   * keystroke in this window is supposed to land, and a menu that quietly
+   * keeps focus after it closes is how typing stops working with no visible
+   * cause.
+   */
+  $effect(() => {
+    if (open) {
+      const had = document.activeElement;
+
+      // Anything inside the menu is this effect seeing its own work. Taking
+      // that as where focus came from would send it back to an element that
+      // is about to be removed, which is the same as sending it nowhere.
+      if (had instanceof HTMLElement && !menu?.contains(had)) came = had;
+
+      menu?.focus();
+      return;
+    }
+
+    came?.focus();
+    came = null;
+  });
 
   /**
    * A menu item.
@@ -86,9 +130,13 @@
   <!-- Grows out of the trigger it sits above, and leaves faster than it
        arrives. See $lib/motion.ts. -->
   <div
+    id={MENU}
+    bind:this={menu}
     class="menu sill-menu"
     role="menu"
     tabindex="-1"
+    aria-label="Sill menu"
+    aria-activedescendant={itemId(MENU, selected)}
     in:popover={{ origin: "bottom left" }}
     out:popover={{ origin: "bottom left", out: true }}
   >
@@ -97,6 +145,7 @@
         <div class="rule" role="separator"></div>
       {/if}
       <div
+        id={itemId(MENU, index)}
         class="item"
         class:selected={index === selected}
         class:danger={item.danger}
@@ -176,6 +225,7 @@
   aria-label="Sill menu"
   aria-haspopup="menu"
   aria-expanded={open}
+  aria-controls={open ? MENU : undefined}
   onmousedown={(e) => e.preventDefault()}
   onclick={(e) => {
     e.stopPropagation();

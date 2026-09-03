@@ -50,6 +50,7 @@
   } from "$lib/markup";
   import { cancelMarkup, finishMarkup, markupImage } from "$lib/capture";
   import { applyAppearance, getPreferences } from "$lib/settings";
+  import { hint } from "$lib/hint";
 
   let picture = $state<HTMLImageElement | null>(null);
   let canvas = $state<HTMLCanvasElement | null>(null);
@@ -768,7 +769,7 @@
         <button
           class="icon"
           class:on={tool === option.id}
-          title={option.hint}
+          use:hint={option.hint}
           aria-label={option.hint}
           aria-pressed={tool === option.id}
           onclick={() => (tool = option.id)}
@@ -781,7 +782,7 @@
     <div class="group right">
       <button
         class="icon"
-        title="Undo the last mark"
+        use:hint={"Undo the last mark"}
         aria-label="Undo the last mark"
         onclick={undo}
         disabled={shapes.length === 0}
@@ -793,7 +794,7 @@
              otherwise and a permanently dead button is noise. -->
         <button
           class="icon"
-          title="Show the whole picture again"
+          use:hint={"Show the whole picture again"}
           aria-label="Show the whole picture again"
           onclick={uncrop}
         >
@@ -802,7 +803,7 @@
       {/if}
       <button
         class="icon"
-        title="Remove every mark"
+        use:hint={"Remove every mark"}
         aria-label="Remove every mark"
         onclick={clear}
         disabled={shapes.length === 0}
@@ -811,13 +812,13 @@
       </button>
       <button
         class="icon"
-        title="Close without keeping it"
+        use:hint={"Close without keeping it"}
         aria-label="Close without keeping it"
         onclick={() => void cancelMarkup()}
       >
         <MarkupIcon name="close" />
       </button>
-      <button class="keep" title="Copy the marked-up picture" onclick={() => void done()}>
+      <button class="keep" use:hint={"Copy the marked-up picture"} onclick={() => void done()}>
         <MarkupIcon name="copy" />
         Copy
         <span class="sill-key on-accent">Ctrl</span><span class="sill-key on-accent">↵</span>
@@ -862,7 +863,7 @@
           class="swatch"
           class:on={colour === swatch.value}
           style:background={swatch.value}
-          title={swatch.name}
+          use:hint={swatch.name}
           aria-label={swatch.name}
           aria-pressed={colour === swatch.value}
           onclick={() => restyle({ colour: swatch.value })}
