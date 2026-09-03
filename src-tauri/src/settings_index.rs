@@ -399,6 +399,12 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "shortcuts",
         "Shortcuts",
+        "Action keys",
+        "action panel key chord copy path name terminal reveal read aloud",
+    ),
+    s(
+        "shortcuts",
+        "Shortcuts",
         "Moving around",
         "vim emacs arrows navigation keys preset page section jump number",
     ),

@@ -747,6 +747,75 @@ pub(crate) struct NavigationKey {
     pub overridden: bool,
 }
 
+/// Every action a key can be given, and the key it has.
+///
+/// Built from the same registry the action panel and Enter use, so a transform
+/// added in Rust becomes bindable without this file or the panel changing.
+///
+/// **The conflict is worked out here, not on screen.** Whether two chords
+/// clash depends on which actions appear together, and that is an answer only
+/// the registry has: Copy Path and Close Window can share a key because a file
+/// and a window are never the same row. The panel draws what this says.
+#[tauri::command]
+pub(crate) async fn action_shortcuts(
+    actions: State<'_, crate::action::ActionRegistry>,
+    prefs: State<'_, crate::state::PrefsState>,
+) -> Result<Vec<ActionShortcut>, String> {
+    let keys = prefs.inner.lock().await.action_keys.clone();
+
+    // Every clash, from every list an action can appear on. An action shown on
+    // two kinds is contested if it is contested on either of them.
+    let mut clashes: std::collections::BTreeMap<String, crate::action_keys::Conflict> =
+        std::collections::BTreeMap::new();
+
+    for kind in crate::object::ObjectKind::ALL {
+        let shown: Vec<(String, String, Option<crate::action_keys::Shortcut>)> = actions
+            .describe(*kind, &keys)
+            .into_iter()
+            .map(|a| (a.id.to_string(), a.title.to_string(), a.shortcut))
+            .collect();
+
+        for clash in crate::action_keys::conflicts(&shown) {
+            clashes.entry(clash.id.clone()).or_insert(clash);
+        }
+    }
+
+    let mut rows: Vec<ActionShortcut> = actions
+        .all()
+        .into_iter()
+        .map(|(id, title, default)| {
+            let shortcut = crate::action_keys::effective(&keys, id, default);
+
+            ActionShortcut {
+                id,
+                title,
+                chord: shortcut.map(|s| s.chord()).unwrap_or_default(),
+                overridden: keys.overrides.contains_key(id),
+                contested: clashes.get(id).map(|c| c.other.clone()),
+            }
+        })
+        .collect();
+
+    // Alphabetical, because registration order is an implementation detail and
+    // this is a list somebody scans for a name.
+    rows.sort_by(|a, b| a.title.cmp(b.title));
+    Ok(rows)
+}
+
+/// One action, as a settings row shows it.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ActionShortcut {
+    pub id: &'static str,
+    pub title: &'static str,
+    /// The accelerator, or empty for an action with no key.
+    pub chord: String,
+    /// Whether this was set by hand rather than shipped.
+    pub overridden: bool,
+    /// The other action that wants this chord and gets it, when there is one.
+    pub contested: Option<String>,
+}
+
 /// The skin tones, each shown as a hand rather than named.
 ///
 /// Built in Rust because the swatch is the emoji itself and the set of tones

@@ -769,7 +769,10 @@
           title: action.title,
           tag: `Sill.Action:${action.id}`,
           props: {},
-          shortcut: undefined,
+          // The action's own, from Rust. These used to arrive with none at
+          // all, so Read Aloud sat on the clipboard list advertising nothing
+          // while the four rows above it advertised chords written by hand.
+          shortcut: action.shortcut,
         })),
       ] as typeof extensionActions;
     }
@@ -836,9 +839,18 @@
         title: action.title,
         tag: `Sill.Action:${action.id}`,
         props: {},
+        /*
+         * Enter for the primary one, and otherwise whatever the action says.
+         *
+         * Enter stays written here rather than being declared in Rust,
+         * because for the primary action it is not a shortcut: it is the
+         * `open` movement, handled by the chord map with everything the
+         * launcher does on the way out. Declaring it as a shortcut as well
+         * would put two handlers on one key.
+         */
         shortcut: action.primary
           ? { modifiers: [], key: "enter" }
-          : undefined,
+          : action.shortcut,
         })),
         ...naming,
       ] as typeof extensionActions;

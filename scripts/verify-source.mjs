@@ -895,6 +895,46 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * A registry action reaches the panel with the key it declares.
+ *
+ * The window used to write the chords beside the clipboard's four rows by
+ * hand and pass `shortcut: undefined` for everything else, so an action that
+ * arrived through any other list had no key at all and the panel drew nothing
+ * beside it. `Action::shortcut` in Rust is the answer now, and the only way
+ * to lose it again is to map an `ActionInfo` into a panel entry and drop the
+ * field on the way, which type-checks: `shortcut` is optional.
+ *
+ * So every place the window turns a registry action into a panel row has to
+ * pass the action's own shortcut along.
+ */
+{
+  const PAGE = "src/routes/+page.svelte";
+  const text = readFileSync(PAGE, "utf8");
+
+  // Each entry built from a registry action, found by the tag it is given.
+  const built = Array.from(text.matchAll(/tag: `Sill\.Action:\$\{action\.id\}`/g));
+
+  if (built.length === 0) {
+    fail(PAGE, 1, "no registry action reaches the action panel at all");
+  }
+
+  for (const at of built) {
+    // The entry is a short object literal. A whole file's worth of slack
+    // would let one entry borrow the shortcut another passed.
+    const nearby = text.slice(at.index, at.index + 900);
+
+    if (!nearby.includes("action.shortcut")) {
+      fail(
+        PAGE,
+        lineOf(text, at.index),
+        "a registry action is drawn without the shortcut Rust resolved for it, " +
+          "so the key somebody set in Settings is neither drawn nor read",
+      );
+    }
+  }
+}
+
+/*
  * Every place a hotkey is registered records whether it took.
  *
  * Windows refuses a combination another application already owns, and there is

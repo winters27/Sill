@@ -1,4 +1,5 @@
 pub mod action;
+pub mod action_keys;
 pub mod actions;
 pub mod activity;
 pub mod ai;
@@ -1657,6 +1658,7 @@ pub fn run() {
             commands::settings::set_hidden,
             commands::settings::navigation_chords,
             commands::settings::navigation_keys,
+            commands::settings::action_shortcuts,
             commands::settings::emoji_tones,
             commands::search::list_monitors,
             commands::search::open_path,
