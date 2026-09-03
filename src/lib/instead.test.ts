@@ -7,7 +7,7 @@
  * `actions.length === 0` is true in both of the two branches that tested it.
  */
 import { describe, expect, test } from "vitest";
-import { couldNot, noMatch, standing, type Reading } from "$lib/instead";
+import { couldNot, noMatch, standing, whileEmpty, type Reading } from "$lib/instead";
 
 const reading = (over: Partial<Reading> = {}): Reading => ({
   failed: false,
@@ -113,5 +113,58 @@ describe("what the state says", () => {
     expect(couldNot("read your clipboard history")).toBe(
       "Sill could not read your clipboard history",
     );
+  });
+});
+
+/**
+ * The empty state of a list an extension rendered.
+ *
+ * Its own describe because it is the one place `isLoading` is turned into
+ * words. That prop was read nowhere, so a command still fetching its first
+ * page said "No results", which is a statement about somebody's data made
+ * before the answer arrived.
+ */
+describe("what an extension's own list says when it is empty", () => {
+  const words = { headline: "No results", hint: "This command found nothing to show." };
+
+  test("still fetching is not the same as nothing found", () => {
+    const said = whileEmpty(reading({ loading: true }), "", words);
+    expect(said.tone).toBe("loading");
+    expect(said.headline).toBe("Still looking");
+  });
+
+  /*
+   * Loading only wins while the screen is blank. A later page arriving over
+   * rows somebody is already reading is an append, and replacing them with a
+   * status line to say more is coming is worse than letting the list grow.
+   */
+  test("still fetching over rows already drawn says nothing at all", () => {
+    expect(whileEmpty(reading({ loading: true, count: 4 }), "", words).tone).toBe("content");
+  });
+
+  test("a filter that matched nothing names the word that emptied it", () => {
+    const said = whileEmpty(reading(), "tada", words);
+    expect(said.tone).toBe("empty");
+    expect(said.headline).toBe("No results for tada");
+  });
+
+  /*
+   * A command that genuinely returned nothing gets the caller's words, because
+   * an empty list and an empty grid are not the same sentence.
+   */
+  test("a command that returned nothing gets the view's own words", () => {
+    expect(whileEmpty(reading(), "", words)).toMatchObject(words);
+    expect(whileEmpty(reading(), "", { headline: "Nothing to show", hint: "" }).headline).toBe(
+      "Nothing to show",
+    );
+  });
+
+  /*
+   * The order matters as much as the branches. A command that is fetching AND
+   * has something typed in the field is fetching: saying "No results for tada"
+   * before the answer is back is the lie this whole function exists to stop.
+   */
+  test("fetching beats a query that has not been answered yet", () => {
+    expect(whileEmpty(reading({ loading: true }), "tada", words).headline).toBe("Still looking");
   });
 });

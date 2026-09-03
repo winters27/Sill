@@ -49,6 +49,18 @@ const granted =
     ? []
     : args[grantArg + 1].split(",").map((one) => one.trim()).filter(Boolean);
 
+/**
+ * Where `environment.assetsPath` points.
+ *
+ * Rust hands this to every command from the installed extension's own folder,
+ * and this harness passed nothing, so an extension that reads a data file it
+ * ships with looked to itself like one running against an empty disk. Not
+ * defaulted to the extension's directory: the entrypoint given here is a
+ * bundle in `extensions/build`, which is not where the assets are.
+ */
+const assetsArg = args.indexOf("--assets");
+const assetsPath = assetsArg === -1 ? "" : resolve(args[assetsArg + 1] ?? "");
+
 /** Pre-populated LocalStorage, so a history view has history to show. */
 const seeds = new Map();
 for (let i = 0; i < args.length; i++) {
@@ -151,6 +163,27 @@ await new Promise((done, fail) => {
   p.on("exit", (c) => (c === 0 ? done() : fail(new Error(`esbuild exited ${c}`))));
 });
 const { collectActions, shortcutKeys, isRunnable } = await import(pathToFileURL(actionsOut).href);
+
+// The search field's rules, bundled the same way. What this reports about
+// `filtering` and about which rows survive a query is what the window would
+// draw, rather than a second implementation of it that could agree with a bug.
+const searchOut = join(scratchDir("sill-search-"), "search.mjs");
+await new Promise((done, fail) => {
+  const p = spawn(
+    process.execPath,
+    [
+      join(root, "host", "node_modules", "esbuild", "bin", "esbuild"),
+      join(root, "src", "lib", "exthost", "search.ts"),
+      "--bundle",
+      "--format=esm",
+      `--outfile=${searchOut}`,
+      "--log-level=error",
+    ],
+    { stdio: "inherit" },
+  );
+  p.on("exit", (c) => (c === 0 ? done() : fail(new Error(`esbuild exited ${c}`))));
+});
+const { itemsOf, rowsOf, searchProps } = await import(pathToFileURL(searchOut).href);
 
 // ---- host process ----
 const child = spawn(process.execPath, [hostJs], { stdio: ["pipe", "pipe", "pipe"] });
@@ -298,6 +331,45 @@ function manifestPreferences() {
 
 const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Text to type into the search field once the first render has landed. */
+const typedArg = args.indexOf("--type");
+const typed = typedArg === -1 ? undefined : args[typedArg + 1];
+
+/**
+ * Types into the field the way the window does.
+ *
+ * The window has no special channel for this: `onSearchTextChange` is an
+ * ordinary prop, so it arrives as a handler id like every other callback and
+ * is fired through the same `EventCore/handlerActivated` request. Doing it
+ * here the same way is the point, because an extension that answers this is an
+ * extension the window can search.
+ *
+ * The handler comes from `searchProps`, which is the window's own reader,
+ * rather than off the prop bag directly. Reaching past it made this gate pass
+ * while Sill read the prop nowhere: the host answered, and the half that
+ * decides whether the window ever asks was never exercised.
+ */
+function type(handler, text) {
+  if (!handler) return false;
+
+  send({
+    jsonrpc: "2.0",
+    method: "Manager/messageExtension",
+    id: 900,
+    params: {
+      session_id: session,
+      payload: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 9000,
+        method: "EventCore/handlerActivated",
+        params: { id: handler, args: [text] },
+      }),
+    },
+  });
+
+  return true;
+}
+
 send({
   jsonrpc: "2.0",
   id: 1,
@@ -311,6 +383,7 @@ send({
       extension_id: extensionName,
       command_name: "cmd",
       is_raycast: true,
+      assets_path: assetsPath,
       preferences: manifestPreferences(),
       arguments: {},
       launch_type: "User",
@@ -322,6 +395,33 @@ send({
 await settle(500);
 send({ jsonrpc: "2.0", id: 2, method: "Manager/ready", params: { session_id: session } });
 await settle(2500);
+
+/**
+ * What the field said, and what it reached.
+ *
+ * `heard` is whether the extension was told, `before`/`after` are how many
+ * rows the window would draw either side of the typing. An extension doing its
+ * own searching moves `after` by re-rendering; one Sill filters moves it
+ * without the extension being involved at all. Both are worth seeing.
+ */
+const field = { asked: typed, heard: false, before: 0, after: 0, props: undefined };
+
+if (typed !== undefined) {
+  const before = tree.top();
+  field.props = searchProps(before);
+  field.before = before ? itemsOf(rowsOf(tree, before, "")).length : 0;
+  field.heard = type(field.props.onChange, typed);
+
+  // Long enough for a handler that fetches, re-renders and settles. The gate
+  // runs offline against extensions that filter in memory, so this is slack
+  // rather than a wait anybody watches.
+  await settle(2000);
+
+  const after = tree.top();
+  const narrow = field.props?.filtering ? typed : "";
+  field.after = after ? itemsOf(rowsOf(tree, after, narrow)).length : 0;
+}
+
 child.kill();
 
 // ---- report ----
@@ -374,6 +474,15 @@ if (top) {
   }
 }
 
+if (typed !== undefined) {
+  console.log("\nSearch field:");
+  console.log(`  filtering: ${field.props?.filtering ? "Sill" : "the extension"}`);
+  console.log(`  throttle: ${field.props?.throttle ?? false}`);
+  console.log(`  isLoading: ${field.props?.loading ?? false}`);
+  console.log(`  onSearchTextChange: ${field.heard ? "fired" : "none registered"}`);
+  console.log(`  rows ${field.before} -> ${field.after} after typing ${JSON.stringify(typed)}`);
+}
+
 if (gaps.size) {
   console.log("\nUnimplemented API surface this extension needs:");
   for (const g of [...gaps].sort()) console.log(`  ${g}`);
@@ -422,7 +531,60 @@ if (expectActions !== undefined) {
   );
 }
 
-if (expectRoot !== undefined || expectItems !== undefined || expectActions !== undefined) {
+/*
+ * What typing was supposed to do.
+ *
+ * `--expect-heard` is the wire being connected at all: the extension was told
+ * what was typed. `--expect-rows` is the answer arriving, whether the
+ * extension narrowed it or Sill did. The pair is what `P4-02` is done when.
+ */
+const expectHeard = args.includes("--expect-heard");
+const expectRows = flag("--expect-rows");
+
+/*
+ * Who was supposed to be narrowing the rows, "sill" or "extension".
+ *
+ * Worth asserting on its own because getting it backwards is silent: a list
+ * Sill wrongly filters still draws rows, just the wrong ones, and a list Sill
+ * wrongly leaves alone looks like an extension that ignores typing.
+ */
+const expectFiltering = flag("--expect-filtering");
+
+if (expectFiltering !== undefined) {
+  const who = field.props?.filtering ? "sill" : "extension";
+  check(who === expectFiltering, `${expectFiltering} filters this list, got ${who}`);
+}
+
+if (expectHeard) {
+  check(field.heard, "the extension was told what was typed");
+  /*
+   * The list answering is the half that cannot be faked by firing a handler
+   * into a void. Not an exact count: an extension that searches its own data
+   * decides how many rows a word matches, and pinning that number here would
+   * make this gate fail whenever somebody upstream changed their matcher.
+   */
+  check(
+    field.after !== field.before,
+    `the extension re-rendered in answer, ${field.before} rows -> ${field.after}`,
+  );
+}
+
+if (expectRows !== undefined) {
+  check(
+    field.after === Number(expectRows),
+    `${expectRows} row(s) after typing, got ${field.after}`,
+  );
+  check(field.after !== field.before, `typing changed the list, was ${field.before}`);
+}
+
+if (
+  expectRoot !== undefined ||
+  expectItems !== undefined ||
+  expectActions !== undefined ||
+  expectHeard ||
+  expectRows !== undefined ||
+  expectFiltering !== undefined
+) {
   check(gaps.size === 0, `no unimplemented API was needed, ${gaps.size} gap(s)`);
 }
 

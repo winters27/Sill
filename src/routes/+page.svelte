@@ -1,7 +1,7 @@
 <script lang="ts">
   // Aliased: this page has a `tick` of its own, which measures a running
   // command rather than waiting for the DOM.
-  import { onMount, tick as rendered } from "svelte";
+  import { onMount, tick as rendered, untrack } from "svelte";
   import { beginCapture, captureScreen, lastImage, openMarkup } from "$lib/capture";
   import { openQuicklink } from "$lib/quicklinks";
   import { saveWorkspace } from "$lib/workspaces";
@@ -107,6 +107,7 @@
     type RankedCommand,
   } from "$lib/exthost/commands";
   import { ViewTree, isHandlerRef, type ElementNode, type Op } from "$lib/exthost/tree";
+  import { SearchRelay, itemsOf, rowsOf, searchProps } from "$lib/exthost/search";
   import {
     applyAppearance,
     getPreferences,
@@ -588,27 +589,70 @@
     return tree.top();
   });
 
-  /** Selectable items in a running command's List, flattened as ListView does. */
-  const items = $derived.by((): ElementNode[] => {
+  /**
+   * What the extension said about the field above its list.
+   *
+   * `filtering`, `throttle`, `isLoading` and `onSearchTextChange`, all four of
+   * which used to be read by nobody. The rules live in `$lib/exthost/search`
+   * so they can be tested without a window.
+   */
+  const search = $derived.by(() => {
+    version;
+    return searchProps(tree.top());
+  });
+
+  /**
+   * What the field narrows, which is nothing unless the extension asked.
+   *
+   * An extension doing its own searching gets every row it rendered drawn:
+   * narrowing those as well would be Sill hiding results the extension went
+   * and fetched because they do not happen to contain the letters typed.
+   */
+  const narrow = $derived(search.filtering ? query.trim() : "");
+
+  /**
+   * A running command's rows, flattened, narrowed and numbered once.
+   *
+   * The one sequence: `ListView` and `GridView` draw it and Enter runs out of
+   * it, where each used to derive its own copy from the tree.
+   */
+  const rows = $derived.by(() => {
     version;
     const node = tree.top();
-    if (!node) return [];
+    if (!node || (node.tag !== "List" && node.tag !== "Grid")) return [];
+    return rowsOf(tree, node, narrow);
+  });
 
-    // List and Grid differ only in how they are drawn; selection walks the
-    // same flattened item sequence in both.
-    const itemTag = node.tag === "Grid" ? "Grid.Item" : "List.Item";
-    const sectionTag = node.tag === "Grid" ? "Grid.Section" : "List.Section";
-    if (node.tag !== "List" && node.tag !== "Grid") return [];
+  /** Selectable items, which is what the arrow keys count and Enter runs. */
+  const items = $derived(itemsOf(rows));
 
-    const out: ElementNode[] = [];
-    for (const child of tree.elementChildren(node)) {
-      if (child.tag === sectionTag) {
-        out.push(...tree.elementChildren(child).filter((c) => c.tag === itemTag));
-      } else if (child.tag === itemTag) {
-        out.push(child);
-      }
-    }
-    return out;
+  /**
+   * The word an empty command view is allowed to blame.
+   *
+   * Only when something actually consumed it: Sill narrowed on it, or the
+   * extension was told about it. A `<List filtering={false}>` with no
+   * `onSearchTextChange` ignores typing entirely, and "No results for foo"
+   * there would blame a word that never reached anything.
+   */
+  const searchedFor = $derived(search.filtering || search.onChange ? query.trim() : "");
+
+  /**
+   * Carries typing to an extension that asked to hear it.
+   *
+   * One per window rather than a module-level timer, which rule 2 refuses.
+   * Failures are reported only for the newest call; a slow refusal for text
+   * somebody has already typed past is not news about anything on screen.
+   */
+  const relay = new SearchRelay({
+    send: (text) => {
+      const to = session;
+      const handler = search.onChange;
+      if (!to || !handler) return Promise.resolve(null);
+      return activateHandler(to, handler, [text]);
+    },
+    failed: (err) => {
+      status = `the command could not search: ${err}`;
+    },
   });
 
   /**
@@ -960,6 +1004,20 @@
   // at nothing, and Enter would do nothing with no sign of why.
   $effect(() => {
     if (panelSelected >= shownActions.length) panelSelected = 0;
+  });
+
+  /*
+   * The same, for a running command's rows.
+   *
+   * Two things shorten that list without the selection hearing about it: the
+   * field narrowing it, and the extension itself re-rendering fewer rows after
+   * an action removed one. Typing resets the highlight where it happens, so
+   * this is the second case, and it is the one that leaves a launcher looking
+   * broken rather than empty: the row under the cursor is gone, Enter finds
+   * nothing at that index, and nothing on screen says why.
+   */
+  $effect(() => {
+    if (mode === "command" && selected >= items.length) selected = 0;
   });
 
   let rootActions = $state<ActionInfo[]>([]);
@@ -2100,6 +2158,9 @@
 
         tree.reset();
         version++;
+        // Whatever was typed at the last command is not typed at this one, and
+        // a throttled call still waiting would arrive at a stranger.
+        relay.cancel();
         session = launched.session;
         running = { title: launched.title, extensionTitle: launched.extensionTitle };
         mode = "command";
@@ -3196,6 +3257,10 @@
       toast = null;
       tree.reset();
       version++;
+      // A throttled call still waiting would fire at a session that is on its
+      // way to being unloaded, and answer with an error about a command
+      // nobody is looking at any more.
+      relay.cancel();
       await refreshRoot();
 
       // Unloaded after the UI has moved on, so tearing down a worker never
@@ -3621,6 +3686,37 @@
      */
     if (searchesOnType(mode)) {
       void refreshRoot();
+      return;
+    }
+
+    /*
+     * Inside a command the field belongs to the extension.
+     *
+     * Two things can happen and which one is the extension's choice, declared
+     * in `filtering`. Sill narrowing what was rendered is `rows` above and
+     * needs nothing here; the extension being told is this. Both can be true,
+     * because Raycast calls `onSearchTextChange` whenever it is registered and
+     * an extension is allowed to fetch on typing and have Sill narrow what
+     * comes back.
+     *
+     * The selection goes back to the top either way. It is an index into a
+     * list that has just changed underneath it, and leaving it where it was
+     * points the highlight at a row that has nothing to do with what was
+     * typed.
+     */
+    if (mode === "command") {
+      selected = 0;
+
+      /*
+       * The typing is what this reacts to, never the render that answers it.
+       *
+       * `search` reads the op-stream version, so tracking it here would make
+       * every re-render an extension makes look like a keystroke: the
+       * selection would jump back to the top each time a toast appeared or
+       * `isLoading` went false, and Sill would offer the extension text it
+       * already has once per render for as long as it kept rendering.
+       */
+      untrack(() => relay.offer(query, search.throttle));
     }
   });
 
@@ -3672,6 +3768,11 @@
             break;
           case "setSearchText":
             query = payload.text;
+            // Adopted rather than relayed. The extension wrote this, and
+            // handing it straight back through `onSearchTextChange` would be
+            // Sill reporting the extension's own words to it as news, which
+            // for an extension that sets the text from that handler is a loop.
+            relay.adopt(payload.text);
             break;
           case "popToRoot":
           case "closeMainWindow":
@@ -4401,8 +4502,10 @@
     </div>
   {:else if view?.tag === "List"}
     <ListView
-      {tree}
       node={view}
+      {rows}
+      query={searchedFor}
+      loading={search.loading}
       {selected}
       onselect={(i) => (selected = i)}
       onrun={(i) => {
@@ -4412,9 +4515,11 @@
     />
   {:else if view?.tag === "Grid"}
     <GridView
-      {tree}
       node={view}
+      cells={rows}
       {version}
+      query={searchedFor}
+      loading={search.loading}
       {selected}
       onselect={(i) => (selected = i)}
       onrun={(i) => {

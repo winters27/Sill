@@ -1,19 +1,31 @@
 <script lang="ts">
-  import type { ElementNode, ViewTree } from "$lib/exthost/tree";
+  import type { ElementNode } from "$lib/exthost/tree";
+  import type { Row } from "$lib/exthost/search";
   import Instead from "./Instead.svelte";
-  import { standing } from "$lib/instead";
+  import { whileEmpty } from "$lib/instead";
   import { LISTBOX, optionId } from "$lib/results";
 
   interface Props {
-    tree: ViewTree;
     node: ElementNode;
+    /**
+     * The cells to draw, already flattened and already narrowed.
+     *
+     * Built by the page, for the same reason the list's are: the page walks
+     * the same sequence to know what Enter runs, and two derivations of one
+     * order is one derivation too many the moment a filter narrows it.
+     */
+    cells: Row[];
     version: number;
+    /** What is in the field, so an empty grid can name what emptied it. */
+    query: string;
+    /** Whether the extension says an answer is still coming. */
+    loading: boolean;
     selected: number;
     onselect: (index: number) => void;
     onrun: (index: number) => void;
   }
 
-  let { tree, node, version, selected, onselect, onrun }: Props = $props();
+  let { node, cells, version, query, loading, selected, onselect, onrun }: Props = $props();
 
   /** Raycast's column counts; the prop is a number of columns, not a width. */
   const columns = $derived.by(() => {
@@ -23,39 +35,17 @@
   });
 
   /**
-   * A section heading or a selectable cell, told apart by `kind`.
+   * What the pane says when it has no cells.
    *
-   * Two shapes rather than one with an optional index, so a cell's index is a
-   * number wherever the markup has narrowed to one. The row id below has to be
-   * a real index or `aria-activedescendant` points at nothing and the
-   * announcement stops, which is a failure with no visible symptom.
+   * The same three-way choice the list makes, from the same place, so a grid
+   * that has not finished fetching does not claim to be empty either.
    */
-  type Cell =
-    | { kind: "section"; node: ElementNode }
-    | { kind: "item"; node: ElementNode; index: number };
-
-  /**
-   * Sections and items share one index space, as in the list, so selection
-   * moves through what the user sees rather than through the markup.
-   */
-  const cells = $derived.by(() => {
-    version;
-    const out: Cell[] = [];
-    let index = 0;
-
-    for (const child of tree.elementChildren(node)) {
-      if (child.tag === "Grid.Section") {
-        out.push({ kind: "section", node: child });
-        for (const item of tree.elementChildren(child)) {
-          if (item.tag === "Grid.Item") out.push({ kind: "item", node: item, index: index++ });
-        }
-      } else if (child.tag === "Grid.Item") {
-        out.push({ kind: "item", node: child, index: index++ });
-      }
-    }
-
-    return out;
-  });
+  const saying = $derived(
+    whileEmpty({ failed: false, loading, count: cells.length }, query, {
+      headline: "Nothing to show",
+      hint: "This command returned an empty grid.",
+    }),
+  );
 
   const str = (n: ElementNode, key: string): string => {
     const v = n.props[key];
@@ -140,11 +130,7 @@
     {/each}
   </div>
 
-  <Instead
-    tone={standing({ failed: false, loading: false, count: cells.length })}
-    headline="Nothing to show"
-    hint="This command returned an empty grid."
-  />
+  <Instead tone={saying.tone} headline={saying.headline} hint={saying.hint} />
 </div>
 
 <style>
