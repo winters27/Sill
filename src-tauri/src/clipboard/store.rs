@@ -71,6 +71,16 @@ pub fn preview_of(text: &str) -> String {
 
 pub struct Store {
     connection: Connection,
+    /// Whether a picture written from here is locked to this Windows account.
+    ///
+    /// Only what is written. What is *read* is decided by the bytes on the
+    /// row, so a database holding both kinds at once reads correctly, which
+    /// is what a conversion interrupted half way leaves behind.
+    ///
+    /// A `Cell` because every other method takes `&self` and the callers hold
+    /// the store through a lock. It is a field on an owned struct, not global
+    /// state.
+    encrypting: std::cell::Cell<bool>,
 }
 
 /// A named group of history entries.
@@ -147,7 +157,10 @@ impl Store {
         // presses two keys and has milliseconds to spare.
         connection.pragma_update(None, "wal_autocheckpoint", 256)?;
 
-        let store = Self { connection };
+        let store = Self {
+            connection,
+            encrypting: std::cell::Cell::new(false),
+        };
         store.migrate()?;
 
         // Whatever piled up before now, handed back to the filesystem. The
@@ -318,21 +331,149 @@ impl Store {
             })
     }
 
+    /// Whether pictures written from now on are locked to this account.
+    ///
+    /// Says nothing about what is already stored. Converting that is
+    /// [`Self::seal_pictures`] and [`Self::unseal_pictures`], which is a
+    /// separate decision because it is the one that can take a moment.
+    pub fn encrypt_blobs(&self, on: bool) {
+        self.encrypting.set(on);
+    }
+
+    pub fn encrypting(&self) -> bool {
+        self.encrypting.get()
+    }
+
     /// Stores an image's bytes against an entry.
-    pub fn put_blob(&self, id: i64, data: &[u8]) -> rusqlite::Result<()> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO blobs (entry_id, data) VALUES (?1, ?2)",
-            params![id, data],
-        )?;
+    ///
+    /// Refuses rather than falling back when locking is on and the lock cannot
+    /// be applied. Writing the picture in the clear under a setting that says
+    /// it is encrypted would be the one outcome worse than not writing it, and
+    /// the caller already reports a blob that could not be stored.
+    pub fn put_blob(&self, id: i64, data: &[u8]) -> Result<(), String> {
+        let sealed;
+        let data = if self.encrypting.get() {
+            sealed = crate::secrets::seal_bytes(data)
+                .ok_or("this picture could not be locked to your Windows account")?;
+            sealed.as_slice()
+        } else {
+            data
+        };
+
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO blobs (entry_id, data) VALUES (?1, ?2)",
+                params![id, data],
+            )
+            .map_err(|err| err.to_string())?;
         Ok(())
     }
 
+    /// An image's bytes, unlocked if they were locked.
+    ///
+    /// Decided by the bytes rather than by the setting. Turning the setting
+    /// off converts the database back, but a conversion that was interrupted,
+    /// or a row written before the setting last changed, leaves both kinds
+    /// side by side, and both have to read.
+    ///
+    /// A blob that says it is locked and will not open comes back as `None`,
+    /// not as its own ciphertext. That is a picture copied under another
+    /// Windows account, and handing the encrypted bytes to a PNG decoder would
+    /// turn "this is not yours" into an unexplained decode failure.
     pub fn blob(&self, id: i64) -> rusqlite::Result<Option<Vec<u8>>> {
-        self.connection
+        let stored: Option<Vec<u8>> = self
+            .connection
             .query_row("SELECT data FROM blobs WHERE entry_id = ?1", [id], |row| {
                 row.get(0)
             })
-            .optional()
+            .optional()?;
+
+        Ok(stored.and_then(|bytes| {
+            if crate::secrets::is_sealed_bytes(&bytes) {
+                crate::secrets::unseal_bytes(&bytes)
+            } else {
+                Some(bytes)
+            }
+        }))
+    }
+
+    /// Locks every picture that is not already locked.
+    ///
+    /// What happens to the history when the setting is turned on. Doing
+    /// nothing would mean the setting only covered whatever was copied next,
+    /// so the pictures somebody actually wanted protected, the ones already
+    /// there, would be the ones left in the clear.
+    ///
+    /// Row by row rather than in one statement, because the encryption happens
+    /// in this process and not in SQLite. Each row is committed on its own, so
+    /// an interruption leaves a database that is partly converted and entirely
+    /// readable rather than one that lost a transaction's worth of pictures.
+    ///
+    /// Returns how many were converted. A row that cannot be sealed is left
+    /// exactly as it is and counted as a failure, never dropped.
+    pub fn seal_pictures(&self) -> rusqlite::Result<(usize, usize)> {
+        self.convert_pictures(true)
+    }
+
+    /// Unlocks every picture that is locked.
+    ///
+    /// What happens when the setting is turned off. Without it the pictures
+    /// stored while it was on would stay locked, which reads correctly today
+    /// and would be unreadable the moment the account changed, under a setting
+    /// that says nothing is encrypted.
+    pub fn unseal_pictures(&self) -> rusqlite::Result<(usize, usize)> {
+        self.convert_pictures(false)
+    }
+
+    /// The shared half of both conversions. Returns (converted, failed).
+    fn convert_pictures(&self, seal: bool) -> rusqlite::Result<(usize, usize)> {
+        let ids: Vec<i64> = {
+            let mut statement = self
+                .connection
+                .prepare("SELECT entry_id FROM blobs ORDER BY entry_id")?;
+            let rows = statement.query_map([], |row| row.get(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        let mut converted = 0;
+        let mut failed = 0;
+
+        for id in ids {
+            let stored: Option<Vec<u8>> = self
+                .connection
+                .query_row("SELECT data FROM blobs WHERE entry_id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .optional()?;
+            let Some(stored) = stored else { continue };
+
+            if crate::secrets::is_sealed_bytes(&stored) == seal {
+                continue;
+            }
+
+            let next = if seal {
+                crate::secrets::seal_bytes(&stored)
+            } else {
+                crate::secrets::unseal_bytes(&stored)
+            };
+
+            let Some(next) = next else {
+                // Left alone. A picture that will not unlock belongs to
+                // another Windows account, and there is nothing to convert it
+                // into; deleting it to tidy up would be losing somebody's
+                // data to make a number look better.
+                failed += 1;
+                continue;
+            };
+
+            self.connection.execute(
+                "UPDATE blobs SET data = ?2 WHERE entry_id = ?1",
+                params![id, next],
+            )?;
+            converted += 1;
+        }
+
+        Ok((converted, failed))
     }
 
     /// The history, newest first, pinned entries above everything.
@@ -469,6 +610,46 @@ impl Store {
         self.connection.execute(
             "DELETE FROM entries WHERE pinned = 0 AND last_seen < ?1",
             [cutoff],
+        )
+    }
+
+    /// Keeps the newest `max` unpinned entries and drops the rest.
+    ///
+    /// The second bound, beside retention. They answer different questions: an
+    /// age says nothing about a week spent copying, and a count says nothing
+    /// about a one-time code from a month ago that is still there because
+    /// nothing has pushed it out. Neither one subsumes the other.
+    ///
+    /// Three kinds of row are never counted and never dropped.
+    ///
+    /// - **Pinned**, which is what pinning means and what retention already
+    ///   does.
+    /// - **In a collection**, because a collection is something a person
+    ///   arranged by hand, and a cap that emptied one would be undoing work
+    ///   rather than reclaiming space.
+    /// - **`keep`**, the row the history window is showing. The oldest row is
+    ///   exactly what somebody scrolled to the bottom to read, and deleting it
+    ///   under the cursor is the one failure a cap must not have.
+    ///
+    /// So the file can hold more than `max` rows. The cap bounds what
+    /// accumulates on its own, which is the thing that grows without limit.
+    pub fn trim_to(&self, max: u32, keep: Option<i64>) -> rusqlite::Result<usize> {
+        if max == 0 {
+            return Ok(0);
+        }
+
+        self.connection.execute(
+            r#"
+            DELETE FROM entries WHERE id IN (
+                SELECT id FROM entries
+                WHERE pinned = 0
+                  AND (?2 IS NULL OR id != ?2)
+                  AND id NOT IN (SELECT entry_id FROM collection_entries)
+                ORDER BY last_seen DESC
+                LIMIT -1 OFFSET ?1
+            )
+            "#,
+            params![max as i64, keep],
         )
     }
 
@@ -1063,6 +1244,274 @@ mod tests {
         add(&store, "old", NOW - 1000 * 86_400);
         assert_eq!(store.prune(0, NOW).expect("prunes"), 0);
         assert_eq!(store.count().expect("counts"), 1);
+    }
+
+    // ------------------------------------------------------- the count cap
+
+    #[test]
+    fn the_cap_keeps_the_newest_and_drops_the_rest() {
+        // The second bound beside retention. Thirty days says nothing about a
+        // week spent copying.
+        let (_dir, store) = store();
+        for age in 0..6 {
+            add(&store, &format!("entry {age}"), NOW - age * 60);
+        }
+
+        assert_eq!(store.trim_to(3, None).expect("trims"), 3);
+
+        let left: Vec<String> = store
+            .search("", None, 10)
+            .expect("lists")
+            .into_iter()
+            .map(|e| e.text)
+            .collect();
+        assert_eq!(left, vec!["entry 0", "entry 1", "entry 2"]);
+    }
+
+    #[test]
+    fn the_cap_never_deletes_a_pin() {
+        // Pinning means keeping. Retention already says so and the cap has to
+        // agree, or pinning would mean "kept until you copy enough".
+        let (_dir, store) = store();
+        let pinned = add(&store, "kept by hand", NOW - 10_000);
+        store.set_pinned(pinned, true).expect("pins");
+        for age in 0..5 {
+            add(&store, &format!("entry {age}"), NOW - age);
+        }
+
+        store.trim_to(2, None).expect("trims");
+
+        assert!(
+            store.get(pinned).expect("reads").is_some(),
+            "the cap deleted a pinned entry"
+        );
+    }
+
+    #[test]
+    fn the_cap_never_deletes_what_is_in_a_collection() {
+        // A collection is arranged by hand. A cap that emptied one would be
+        // undoing somebody's work rather than reclaiming space.
+        let (_dir, store) = store();
+        let collected = add(&store, "in a collection", NOW - 10_000);
+        let group = store
+            .create_collection("Release notes", NOW)
+            .expect("makes");
+        store
+            .add_to_collection(group, &[collected])
+            .expect("collects");
+        for age in 0..5 {
+            add(&store, &format!("entry {age}"), NOW - age);
+        }
+
+        store.trim_to(2, None).expect("trims");
+
+        assert_eq!(
+            store.collection_entries(group).expect("reads").len(),
+            1,
+            "the cap emptied a collection"
+        );
+    }
+
+    /// The one failure a cap must not have.
+    ///
+    /// The oldest row is exactly what somebody scrolled to the bottom of the
+    /// list to read, and the cap deletes from the oldest end.
+    #[test]
+    fn the_cap_never_deletes_the_row_being_looked_at() {
+        let (_dir, store) = store();
+        let oldest = add(&store, "the one on screen", NOW - 10_000);
+        for age in 0..5 {
+            add(&store, &format!("entry {age}"), NOW - age);
+        }
+
+        store.trim_to(2, Some(oldest)).expect("trims");
+
+        assert!(
+            store.get(oldest).expect("reads").is_some(),
+            "the row under the cursor was deleted while it was being read"
+        );
+    }
+
+    #[test]
+    fn a_cap_of_zero_keeps_as_many_as_arrive() {
+        let (_dir, store) = store();
+        for age in 0..20 {
+            add(&store, &format!("entry {age}"), NOW - age);
+        }
+
+        assert_eq!(store.trim_to(0, None).expect("trims"), 0);
+        assert_eq!(store.count().expect("counts"), 20);
+    }
+
+    #[test]
+    fn a_history_under_the_cap_loses_nothing() {
+        // The ordinary case, which is every copy anybody makes.
+        let (_dir, store) = store();
+        add(&store, "one", NOW);
+        add(&store, "two", NOW + 1);
+
+        assert_eq!(store.trim_to(10, None).expect("trims"), 0);
+        assert_eq!(store.count().expect("counts"), 2);
+    }
+
+    #[test]
+    fn a_trimmed_entry_stops_turning_up_in_search() {
+        // The FTS index is maintained by triggers, and a bound that left
+        // results behind would look exactly like search being broken.
+        let (_dir, store) = store();
+        add(&store, "findable", NOW - 1000);
+        add(&store, "newer", NOW);
+
+        store.trim_to(1, None).expect("trims");
+
+        assert_eq!(
+            store.search("findable", None, 10).expect("searches").len(),
+            0
+        );
+    }
+
+    // ------------------------------------------------- locking the pictures
+
+    /// The raw bytes on the row, before anything unlocks them.
+    #[cfg(windows)]
+    fn stored_bytes(store: &Store, id: i64) -> Vec<u8> {
+        store
+            .connection
+            .query_row("SELECT data FROM blobs WHERE entry_id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .expect("the blob is there")
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_picture_written_while_locked_is_not_the_picture_on_disk() {
+        // The whole promise. If the plaintext is still in the file, the
+        // setting is a label rather than a feature.
+        let (_dir, store) = store();
+        let id = add(&store, "screenshot", NOW);
+        store.encrypt_blobs(true);
+        store
+            .put_blob(id, b"\x89PNG-pretend-pixels")
+            .expect("stores");
+
+        let raw = stored_bytes(&store, id);
+        assert!(crate::secrets::is_sealed_bytes(&raw));
+        assert!(
+            !raw.windows(6).any(|w| w == b"pixels"),
+            "the picture is still readable in the file"
+        );
+
+        assert_eq!(
+            store.blob(id).expect("reads").as_deref(),
+            Some(b"\x89PNG-pretend-pixels".as_slice()),
+            "and it still comes back"
+        );
+    }
+
+    /// Turning it on must not lose the history that is already there.
+    #[cfg(windows)]
+    #[test]
+    fn turning_the_lock_on_keeps_every_picture_readable() {
+        let (_dir, store) = store();
+        let mut kept = Vec::new();
+        for n in 0..3 {
+            let id = store
+                .record(Recording {
+                    hash: &format!("pic{n}"),
+                    kind: Kind::Image,
+                    text: &format!("Image {n}"),
+                    html: None,
+                    app: None,
+                    app_path: None,
+                    bytes: 4,
+                    now: NOW,
+                })
+                .expect("records");
+            let pixels = vec![0x89, b'P', b'N', b'G', n as u8];
+            store.put_blob(id, &pixels).expect("stores");
+            kept.push((id, pixels));
+        }
+
+        assert_eq!(store.seal_pictures().expect("seals"), (3, 0));
+
+        for (id, pixels) in &kept {
+            assert!(crate::secrets::is_sealed_bytes(&stored_bytes(&store, *id)));
+            assert_eq!(
+                store.blob(*id).expect("reads").as_ref(),
+                Some(pixels),
+                "a picture was lost by turning the lock on"
+            );
+        }
+    }
+
+    /// And turning it off must not leave a row only one account can open.
+    #[cfg(windows)]
+    #[test]
+    fn turning_the_lock_off_leaves_every_picture_in_the_clear() {
+        let (_dir, store) = store();
+        let id = add(&store, "screenshot", NOW);
+        store.encrypt_blobs(true);
+        store.put_blob(id, b"\x89PNGpixels").expect("stores");
+
+        store.encrypt_blobs(false);
+        assert_eq!(store.unseal_pictures().expect("unseals"), (1, 0));
+
+        assert_eq!(
+            stored_bytes(&store, id),
+            b"\x89PNGpixels".to_vec(),
+            "the row is still locked after the setting was turned off"
+        );
+        assert_eq!(
+            store.blob(id).expect("reads").as_deref(),
+            Some(b"\x89PNGpixels".as_slice())
+        );
+    }
+
+    /// A conversion interrupted half way leaves both kinds side by side.
+    ///
+    /// Reading is decided by the bytes on the row rather than by the setting,
+    /// which is what makes that survivable instead of a database of pictures
+    /// nothing can open.
+    #[cfg(windows)]
+    #[test]
+    fn a_history_holding_both_kinds_reads_both() {
+        let (_dir, store) = store();
+
+        let plain = add(&store, "before", NOW);
+        store.put_blob(plain, b"\x89PNGplain").expect("stores");
+
+        let locked = add(&store, "after", NOW + 1);
+        store.encrypt_blobs(true);
+        store.put_blob(locked, b"\x89PNGlocked").expect("stores");
+
+        assert_eq!(
+            store.blob(plain).expect("reads").as_deref(),
+            Some(b"\x89PNGplain".as_slice())
+        );
+        assert_eq!(
+            store.blob(locked).expect("reads").as_deref(),
+            Some(b"\x89PNGlocked".as_slice())
+        );
+
+        // And converting from there finishes the job rather than double
+        // sealing what is already sealed.
+        assert_eq!(store.seal_pictures().expect("seals"), (1, 0));
+        assert_eq!(
+            store.blob(locked).expect("reads").as_deref(),
+            Some(b"\x89PNGlocked".as_slice()),
+            "an already locked picture was sealed twice"
+        );
+    }
+
+    /// Converting an empty history is not an error and does no work.
+    #[test]
+    fn converting_a_history_with_no_pictures_does_nothing() {
+        let (_dir, store) = store();
+        add(&store, "just words", NOW);
+
+        assert_eq!(store.seal_pictures().expect("seals"), (0, 0));
+        assert_eq!(store.unseal_pictures().expect("unseals"), (0, 0));
     }
 
     #[test]

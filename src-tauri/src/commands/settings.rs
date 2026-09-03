@@ -10,6 +10,57 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::state::PrefsState;
 use crate::{clipboard, preferences, settings_index, snippets, summon};
 
+/// The one report about pictures that would not convert.
+const LOCK_TROUBLE: &str = "clipboard-lock";
+
+/// Converts the pictures already in the history when the setting changes.
+///
+/// Nothing is deleted either way and nothing becomes unreadable: a picture is
+/// rewritten in place, and one that will not convert is left exactly as it
+/// was. A blob carries its own marker, so a database holding both kinds reads
+/// correctly whatever happens here.
+///
+/// A picture that will not unlock was copied under a different Windows
+/// account. Said out loud rather than swallowed, because the alternative is a
+/// row that draws as an image and shows nothing, with no explanation anywhere.
+fn convert_clipboard_pictures(app: &AppHandle, history: &clipboard::monitor::Clipboard, on: bool) {
+    let store = history.store();
+    let outcome = if on {
+        store.seal_pictures()
+    } else {
+        store.unseal_pictures()
+    };
+    drop(store);
+
+    match outcome {
+        Ok((converted, 0)) => {
+            if converted > 0 {
+                crate::say!(
+                    "{converted} stored clipboard pictures were {}",
+                    if on { "locked" } else { "unlocked" }
+                );
+            }
+            crate::status::resolved(app, LOCK_TROUBLE);
+        }
+        Ok((_, failed)) => crate::status::report(
+            app,
+            LOCK_TROUBLE,
+            format!(
+                "{failed} pictures in the clipboard history were copied under a different \
+                 Windows account and could not be changed. They are still there and still \
+                 unreadable from this one."
+            ),
+            Some("clipboard"),
+        ),
+        Err(err) => crate::status::report(
+            app,
+            LOCK_TROUBLE,
+            format!("Sill could not change how stored pictures are kept: {err}"),
+            Some("clipboard"),
+        ),
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn get_preferences(
     state: State<'_, PrefsState>,
@@ -78,7 +129,22 @@ pub(crate) async fn set_preferences(
             ignored_apps: prefs.clipboard.ignored_apps.clone(),
             secrets: prefs.clipboard.secrets,
             retain_days: prefs.clipboard.retain_days,
+            max_entries: prefs.clipboard.max_entries,
+            encrypt_images: prefs.clipboard.encrypt_images,
         });
+
+        // Turning the lock on covers what is already stored, and turning it
+        // off leaves nothing behind that only one Windows account can open.
+        // Doing neither would make the setting a promise about the future
+        // only, so the pictures somebody wanted protected, the ones already
+        // there, would be the ones still in the clear.
+        //
+        // Only when it changed. This runs on every settings write, and reading
+        // every stored picture to find nothing to do is not free.
+        if previous.clipboard.encrypt_images != prefs.clipboard.encrypt_images {
+            convert_clipboard_pictures(&app, &history, prefs.clipboard.encrypt_images);
+        }
+
         // Switched off means stopped. The watcher owns a thread and a hidden
         // window and is woken by every copy on the machine, whether or not it
         // does anything with what it sees.
