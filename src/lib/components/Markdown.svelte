@@ -236,8 +236,8 @@
     width: 12px;
     height: 12px;
     flex: none;
-    border-radius: 3px;
-    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    border-radius: var(--radius-xs);
+    box-shadow: var(--ring-strong);
   }
 
   .box.done {
@@ -275,7 +275,7 @@
     overflow-x: auto;
     border-radius: var(--radius-md);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
   }
 
   table {
@@ -320,7 +320,7 @@
     padding: var(--space-3);
     border-radius: var(--radius-md);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
   }
 
   .lead {
@@ -349,7 +349,7 @@
     font-weight: var(--weight-strong);
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    padding-top: 1px;
+    padding-top: var(--space-hair);
   }
 
   dd {

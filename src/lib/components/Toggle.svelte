@@ -40,7 +40,7 @@
   /* Dimmed rather than hidden while it is busy: the row still says what it is
      set to, it simply cannot be set again until the last change has landed. */
   .switch:disabled {
-    opacity: 0.5;
+    opacity: var(--opacity-disabled);
     cursor: default;
   }
 
@@ -56,8 +56,8 @@
     cursor: pointer;
     /* Scoped, never `all`: see the WebView2 note in theme.css. */
     transition:
-      background-color 0.22s var(--ease),
-      border-color 0.22s var(--ease);
+      background-color var(--motion-travel) var(--ease),
+      border-color var(--motion-travel) var(--ease);
   }
 
   .switch.on {
@@ -72,9 +72,9 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: #f4f5f6;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-    transition: translate 0.22s var(--ease);
+    background: var(--knob);
+    box-shadow: var(--elevation-1);
+    transition: translate var(--motion-travel) var(--ease);
   }
 
   .switch.on .knob {

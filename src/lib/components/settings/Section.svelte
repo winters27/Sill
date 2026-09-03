@@ -38,7 +38,7 @@
   }
 
   .head {
-    padding: 0 2px var(--space-2);
+    padding: 0 var(--space-half) var(--space-2);
   }
 
   /*

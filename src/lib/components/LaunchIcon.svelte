@@ -61,8 +61,8 @@
     flex: none;
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: var(--icon-tile);
+    height: var(--icon-tile);
     border-radius: var(--radius-sm);
     overflow: hidden;
   }

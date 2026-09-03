@@ -58,7 +58,7 @@
 
   .hint {
     display: block;
-    margin-top: 2px;
+    margin-top: var(--space-half);
     /* Shorter than a section's, because a row's control sits at the end of
        the same line and prose running under it reads as a collision. */
     max-width: 68ch;
@@ -71,7 +71,7 @@
     flex: none;
     /* Half a line, so a control lines up with the title rather than the
        middle of a two-line label. */
-    padding-top: 1px;
+    padding-top: var(--space-hair);
   }
 
   .wide {

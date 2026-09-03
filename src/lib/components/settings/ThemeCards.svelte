@@ -101,14 +101,14 @@
     border: 0;
     border-radius: var(--radius-lg);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-1);
     font: inherit;
     text-align: left;
     cursor: pointer;
     transition:
-      background-color 0.15s var(--ease),
-      box-shadow 0.15s var(--ease);
+      background-color var(--motion-state) var(--ease),
+      box-shadow var(--motion-state) var(--ease);
   }
 
   .theme:hover {
@@ -120,7 +120,7 @@
      colour at the same time as telling you it is chosen. */
   .theme.selected {
     background: var(--fill-2);
-    box-shadow: inset 0 0 0 2px var(--core-accent);
+    box-shadow: var(--ring-swatch);
   }
 
   /*
@@ -136,7 +136,7 @@
   .swatch {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-half);
     padding-bottom: var(--space-1);
     border-radius: var(--radius-md);
     background-color: var(--core-secondary-background);
@@ -173,7 +173,7 @@
     flex: none;
     width: 10px;
     height: 10px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     background: var(--fill-3);
   }
 
@@ -205,7 +205,7 @@
   }
 
   .theme-note {
-    margin-top: -4px;
+    margin-top: calc(var(--space-1) * -1);
     font-size: var(--text-label);
     color: var(--text-3);
   }

@@ -100,7 +100,7 @@
   .list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-half);
   }
 
   .entry {
@@ -120,7 +120,7 @@
   .what {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-half);
     min-width: 0;
   }
 
@@ -143,6 +143,6 @@
   }
 
   .trouble {
-    color: var(--accent-red);
+    color: var(--danger);
   }
 </style>

@@ -116,7 +116,7 @@
     font-size: var(--text-meta);
     text-align: left;
     cursor: pointer;
-    transition: color 0.15s var(--ease);
+    transition: color var(--motion-state) var(--ease);
   }
 
   .head:hover {
@@ -145,7 +145,7 @@
 
   /* Something is happening, said without a spinner. */
   .working {
-    animation: pulse 1.4s ease-in-out infinite;
+    animation: pulse var(--motion-pulse) ease-in-out infinite;
   }
 
   @keyframes pulse {
@@ -167,7 +167,7 @@
 
   .chevron {
     flex: none;
-    transition: transform 0.15s var(--ease);
+    transition: transform var(--motion-state) var(--ease);
   }
 
   .up {
@@ -180,7 +180,7 @@
     gap: var(--space-1);
     /* Lined up under the words above rather than under the mark, so the
        summary and the steps it summarises read as one column. */
-    margin: var(--space-1) 0 0 calc(4px + var(--space-2));
+    margin: var(--space-1) 0 0 calc(var(--space-1) + var(--space-2));
   }
 
   .step {

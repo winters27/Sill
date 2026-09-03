@@ -127,7 +127,7 @@
     gap: var(--space-2);
     /* Room for the tile's pin, which lives in the top right corner of every
        tile and does not move for anybody. */
-    padding-right: 26px;
+    padding-right: var(--icon-tile);
   }
 
   .temperature {

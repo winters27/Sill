@@ -52,7 +52,7 @@
     padding: 0.12em 0.36em;
     border-radius: var(--radius-sm);
     background: var(--fill-2);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     font-family: var(--font-mono);
     font-size: 0.9em;
     overflow-wrap: anywhere;

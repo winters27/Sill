@@ -72,21 +72,21 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-1);
     font: inherit;
     font-size: var(--text-meta);
     outline: none;
     cursor: pointer;
-    transition: box-shadow 0.15s var(--ease);
+    transition: box-shadow var(--motion-state) var(--ease);
   }
 
   select:focus {
-    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    box-shadow: var(--ring-strong);
   }
 
   select:disabled {
-    opacity: 0.5;
+    opacity: var(--opacity-disabled);
     cursor: default;
   }
 
@@ -99,11 +99,11 @@
   }
 
   .quiet {
-    padding: 2px var(--space-1);
+    padding: var(--space-half) var(--space-1);
     background: transparent;
     box-shadow: none;
     color: var(--text-2);
-    transition: color 0.15s var(--ease);
+    transition: color var(--motion-state) var(--ease);
   }
 
   .quiet:hover,

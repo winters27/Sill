@@ -131,14 +131,14 @@
   /* A hairline between rows, not around them: this is a list of one kind of
      thing, and a box per row reads as a set of cards. */
   .entry + .entry {
-    box-shadow: inset 0 1px 0 var(--hairline);
+    box-shadow: var(--ring-top);
   }
 
   .text {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-half);
     min-width: 0;
   }
 

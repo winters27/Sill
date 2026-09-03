@@ -675,8 +675,8 @@
     letter-spacing: 0.04em;
     cursor: pointer;
     transition:
-      background-color 0.15s var(--ease),
-      color 0.15s var(--ease);
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .recorder:hover {
@@ -712,11 +712,11 @@
   }
 
   .lamp.warn {
-    background: var(--accent-yellow);
+    background: var(--warning);
   }
 
   .lamp.bad {
-    background: var(--accent-red);
+    background: var(--danger);
   }
 
   .hook-text {
@@ -730,18 +730,18 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-1);
     font: inherit;
     font-size: var(--text-meta);
     outline: none;
     user-select: text;
-    transition: box-shadow 0.15s var(--ease);
+    transition: box-shadow var(--motion-state) var(--ease);
   }
 
   input:focus,
   textarea:focus {
-    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    box-shadow: var(--ring-strong);
   }
 
   input {

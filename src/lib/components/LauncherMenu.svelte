@@ -195,7 +195,7 @@
     align-items: center;
     gap: var(--space-1);
     flex: none;
-    height: 30px;
+    height: var(--control-height);
     padding: 0 var(--space-2);
     border: 0;
     border-radius: var(--radius-lg);
@@ -203,7 +203,9 @@
     color: var(--text-2);
     font: inherit;
     cursor: default;
-    transition: background-color 0.16s var(--ease), color 0.16s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   /*
@@ -218,7 +220,7 @@
     flex: none;
     color: var(--text-3);
     transition:
-      color 0.16s var(--ease),
+      color var(--motion-state) var(--ease),
       transform var(--motion-enter) var(--ease);
   }
 
@@ -240,7 +242,7 @@
   .scrim {
     position: fixed;
     inset: 0;
-    z-index: 20;
+    z-index: var(--z-menu-scrim);
   }
 
   /* Rises out of its own button, so it is anchored to the bottom left.
@@ -249,7 +251,7 @@
     position: fixed;
     left: var(--space-2);
     bottom: 44px;
-    z-index: 21;
+    z-index: var(--z-menu);
     width: 208px;
     padding: var(--space-1);
   }
@@ -258,19 +260,21 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    height: 30px;
+    height: var(--control-height);
     padding: 0 var(--space-2);
     border-radius: var(--radius-md);
     font-size: var(--text-body);
     color: var(--text-2);
     cursor: default;
-    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .glyph {
     flex: none;
     color: var(--text-3);
-    transition: color 0.15s var(--ease);
+    transition: color var(--motion-state) var(--ease);
   }
 
   .item.selected {
@@ -287,7 +291,7 @@
      would make quitting the loudest thing in the menu. */
   .item.danger.selected,
   .item.danger.selected .glyph {
-    color: var(--accent-red);
+    color: var(--danger);
   }
 
   .rule {

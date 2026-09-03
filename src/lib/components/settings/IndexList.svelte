@@ -263,7 +263,7 @@
   /* No border: a row of bordered pills reads as eight buttons competing for
      attention rather than one control with eight settings. */
   .chip {
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     font: inherit;
     font-size: var(--text-label);
     color: var(--text-2);
@@ -346,7 +346,7 @@
   }
 
   .cell {
-    padding: 2px var(--space-1);
+    padding: var(--space-half) var(--space-1);
     font: inherit;
     font-size: var(--text-label);
     text-align: left;
@@ -383,8 +383,8 @@
   .tick {
     display: grid;
     place-items: center;
-    width: 20px;
-    height: 20px;
+    width: var(--icon-tile-sm);
+    height: var(--icon-tile-sm);
     padding: 0;
     color: var(--text-3);
     background: transparent;
@@ -406,6 +406,6 @@
 
   .status {
     padding-left: var(--space-2);
-    color: var(--accent-red);
+    color: var(--danger);
   }
 </style>

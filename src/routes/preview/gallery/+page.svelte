@@ -476,7 +476,7 @@
     );
     background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
     border-radius: var(--radius-window);
-    box-shadow: var(--bevel-window), 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+    box-shadow: var(--bevel-window), var(--elevation-window);
     overflow: hidden;
   }
 
@@ -712,7 +712,7 @@
   }
 
   .p-row.selected { background-color: var(--accent-fill); color: var(--text-1); }
-  .p-row.danger span:first-child { color: var(--accent-red); }
+  .p-row.danger span:first-child { color: var(--danger); }
 
   /* The real window's size, so the mock proves the constant in lib.rs:
      6 rows at 30 + 2 separators at 9 + 4 of padding each side = 206, and no
@@ -722,11 +722,11 @@
     width: 216px;
     background-image: var(--chroma), linear-gradient(var(--tint-menu), var(--tint-menu));
     border-radius: var(--radius-window);
-    box-shadow: var(--bevel-window), 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+    box-shadow: var(--bevel-window), var(--elevation-menu);
   }
 
   .tray-row { height: 30px; color: var(--text-2); }
-  .tray-row.danger.selected { color: var(--accent-red); }
+  .tray-row.danger.selected { color: var(--danger); }
 
   .tray-glyph {
     flex: none;
@@ -749,7 +749,7 @@
     );
     background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
     border-radius: var(--radius-window);
-    box-shadow: var(--bevel-window), 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+    box-shadow: var(--bevel-window), var(--elevation-window);
     overflow: hidden;
   }
 

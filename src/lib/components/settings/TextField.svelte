@@ -51,21 +51,21 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-1);
     font: inherit;
     font-size: var(--text-meta);
     outline: none;
     user-select: text;
-    transition: box-shadow 0.15s var(--ease);
+    transition: box-shadow var(--motion-state) var(--ease);
   }
 
   input:focus {
-    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    box-shadow: var(--ring-strong);
   }
 
   input:disabled {
-    opacity: 0.5;
+    opacity: var(--opacity-disabled);
   }
 
   input::placeholder {

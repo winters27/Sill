@@ -516,7 +516,7 @@
     );
     background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
     border-radius: var(--radius-window);
-    box-shadow: var(--bevel-window), 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+    box-shadow: var(--bevel-window), var(--elevation-window);
     overflow: hidden;
   }
 

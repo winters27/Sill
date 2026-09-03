@@ -65,7 +65,7 @@
     margin: 0 0 var(--space-3);
     border-radius: var(--radius-md);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     overflow: hidden;
   }
 
@@ -91,7 +91,7 @@
   }
 
   button {
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -99,7 +99,9 @@
     font: inherit;
     font-size: var(--text-micro);
     cursor: pointer;
-    transition: color 0.15s var(--ease), background-color 0.15s var(--ease);
+    transition:
+      color var(--motion-state) var(--ease),
+      background-color var(--motion-state) var(--ease);
   }
 
   button:hover {
@@ -113,7 +115,7 @@
 
   button:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 1px var(--accent);
+    box-shadow: var(--ring-accent);
   }
 
   pre {

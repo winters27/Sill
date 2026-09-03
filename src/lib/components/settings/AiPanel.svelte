@@ -505,6 +505,13 @@
    * about as wide as they are informative.
    */
   .stack {
+    /*
+     * The label column, named once because two rules have to agree about it.
+     * The field grid states the width and the action row underneath has to
+     * clear the same width, and while both said 68px the second was a copy
+     * waiting to be left behind by the first.
+     */
+    --label-column: 68px;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
     gap: var(--space-2);
@@ -539,7 +546,7 @@
 
   .provider.on.open {
     background: var(--accent-fill);
-    box-shadow: inset 0 0 0 1px var(--accent-line);
+    box-shadow: var(--ring-accent-faint);
   }
 
   /* Fills a card the grid has stretched, so the contents stay centred in it. */
@@ -579,14 +586,14 @@
 
   .pick:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 2px var(--accent-line);
+    box-shadow: var(--ring-selected);
   }
 
   .text {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-half);
     min-width: 0;
   }
 
@@ -619,8 +626,8 @@
     display: grid;
     place-items: center;
     flex: none;
-    width: 26px;
-    height: 26px;
+    width: var(--icon-tile);
+    height: var(--icon-tile);
     padding: 0;
     border: 0;
     border-radius: var(--radius-sm);
@@ -640,7 +647,7 @@
 
   .disclose:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 2px var(--accent-line);
+    box-shadow: var(--ring-selected);
   }
 
   .provider.open .disclose {
@@ -672,7 +679,7 @@
    */
   .field {
     display: grid;
-    grid-template-columns: 68px minmax(0, 1fr);
+    grid-template-columns: var(--label-column) minmax(0, 1fr);
     align-items: baseline;
     gap: var(--space-3);
   }
@@ -714,7 +721,7 @@
     align-items: center;
     gap: var(--space-2);
     /* Clears the label column, so the buttons sit under the fields. */
-    padding-left: calc(68px + var(--space-3));
+    padding-left: calc(var(--label-column) + var(--space-3));
   }
 
   .spacer {

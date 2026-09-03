@@ -74,13 +74,11 @@
   .track {
     position: relative;
     display: inline-flex;
-    gap: 2px;
-    padding: 2px;
-    border-radius: 8px;
+    gap: var(--space-half);
+    padding: var(--space-half);
+    border-radius: var(--radius-md);
     background: var(--fill-1);
-    box-shadow:
-      inset 0 1px 2px rgba(0, 0, 0, 0.32),
-      inset 0 0 0 1px var(--fill-2);
+    box-shadow: var(--well), var(--ring-fill-soft);
   }
 
   /* The thumb marks which option is chosen, so it is one of the places the
@@ -91,12 +89,10 @@
     bottom: 2px;
     border-radius: var(--radius-md);
     background: var(--accent-fill);
-    box-shadow:
-      0 1px 1px rgba(0, 0, 0, 0.22),
-      inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    box-shadow: var(--elevation-thumb), var(--ring);
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.14s linear;
+    transition: opacity var(--motion-state) linear;
   }
 
   .thumb.ready {
@@ -105,14 +101,14 @@
 
   .thumb.animate {
     transition:
-      left 0.28s var(--ease),
-      width 0.28s var(--ease),
-      opacity 0.14s linear;
+      left var(--motion-travel) var(--ease),
+      width var(--motion-travel) var(--ease),
+      opacity var(--motion-state) linear;
   }
 
   button {
     position: relative;
-    z-index: 1;
+    z-index: var(--z-raised);
     padding: var(--space-1) var(--space-3);
     border: 0;
     border-radius: var(--radius-md);
@@ -122,7 +118,7 @@
     font-size: var(--text-body);
     font-weight: var(--weight-medium);
     cursor: pointer;
-    transition: color 0.15s var(--ease);
+    transition: color var(--motion-state) var(--ease);
   }
 
   button:hover {
@@ -135,7 +131,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .thumb.animate {
-      transition: opacity 0.14s linear;
+      transition: opacity var(--motion-state) linear;
     }
   }
 </style>

@@ -117,8 +117,8 @@
     right: var(--space-2);
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: var(--icon-tile);
+    height: var(--icon-tile);
     border: 0;
     border-radius: var(--radius-pill);
     background: transparent;

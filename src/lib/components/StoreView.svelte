@@ -635,7 +635,7 @@
 
   .chips button {
     flex: none;
-    padding: 3px var(--space-2);
+    padding: var(--space-snug) var(--space-2);
     border: 0;
     border-radius: var(--radius-pill);
     background: transparent;
@@ -694,7 +694,7 @@
     padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-md);
     cursor: default;
-    transition: background-color 0.22s var(--ease);
+    transition: background-color var(--motion-travel) var(--ease);
   }
 
   .row:hover:not(.selected) {
@@ -744,7 +744,7 @@
 
   .meta {
     gap: var(--space-3);
-    margin-top: 2px;
+    margin-top: var(--space-half);
   }
 
   .have {
@@ -783,7 +783,7 @@
   }
 
   .sub {
-    margin: 2px 0 0;
+    margin: var(--space-half) 0 0;
     color: var(--text-3);
     font-size: var(--text-meta);
   }
@@ -821,7 +821,7 @@
     display: flex;
     gap: var(--space-2);
     align-items: baseline;
-    padding: 2px 0;
+    padding: var(--space-half) 0;
     color: var(--text-2);
     font-size: var(--text-meta);
   }
@@ -895,7 +895,7 @@
 
   .reaches li {
     display: grid;
-    gap: 1px;
+    gap: var(--space-hair);
     padding: var(--space-2) 0;
     border-bottom: 1px solid var(--hairline);
   }

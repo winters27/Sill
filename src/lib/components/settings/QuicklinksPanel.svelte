@@ -293,7 +293,7 @@
     gap: var(--space-3);
     padding: var(--space-4) var(--space-4);
     border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--fill-0);
     box-shadow: var(--bevel-tile);
   }
 
@@ -325,7 +325,7 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: var(--fill-1);
-    box-shadow: inset 0 0 0 1px var(--hairline);
+    box-shadow: var(--ring);
     color: var(--text-1);
     font: inherit;
     font-size: var(--text-body);
@@ -334,7 +334,7 @@
   }
 
   input:focus-visible {
-    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    box-shadow: var(--ring-strong);
   }
 
   .placeholders {
@@ -344,7 +344,7 @@
   }
 
   .token {
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     border: 0;
     border-radius: var(--radius-sm);
     background: var(--fill-2);
@@ -375,7 +375,7 @@
   .error {
     margin: 0;
     font-size: var(--text-meta);
-    color: var(--accent-red);
+    color: var(--danger);
   }
 
   .actions {
@@ -395,7 +395,7 @@
   }
 
   .keyword-tag {
-    padding: 2px var(--space-2);
+    padding: var(--space-half) var(--space-2);
     border-radius: var(--radius-sm);
     background: var(--fill-2);
     color: var(--text-2);
