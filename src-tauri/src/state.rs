@@ -497,7 +497,11 @@ impl RegistryState {
 
         let mut next = Ranking::clone(&self.ranking.load());
         let answer = change(&mut next);
-        let text = serde_json::to_string(&next.frecency).ok();
+        // Through `Frecency` rather than serde directly, so what is written
+        // from here carries the schema version that `Frecency::save` writes.
+        // Two ways to produce the same file is how one of them ends up
+        // missing whatever the other learned.
+        let text = next.frecency.text();
 
         self.ranking.store(Arc::new(next));
         (answer, text)

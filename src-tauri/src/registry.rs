@@ -313,16 +313,31 @@ pub fn one_per_id(records: Vec<CommandRecord>) -> Vec<CommandRecord> {
     out
 }
 
-pub fn load_cache(path: &Path) -> Vec<CommandRecord> {
-    let cached: Vec<CommandRecord> = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
+/// How the cache is kept. See `json_store` for what each part buys.
+///
+/// The only store that does not keep an unreadable file aside. There is
+/// nothing in a cache the scan behind it does not produce again a second
+/// later, so keeping copies of torn ones would accumulate half a megabyte at a
+/// time for nothing.
+///
+/// The version is what a cache most wants and had least: `CommandRecord` has
+/// required fields and no catch-all, so a cache written by a build whose shape
+/// has since changed was read back as records missing whatever moved. Bumping
+/// the version retires the whole file instead, and `load_list` covers the
+/// narrower case of one bad record among thousands.
+const CACHE_SCHEMA: crate::json_store::Schema = crate::json_store::Schema {
+    version: 1,
+    shape: crate::json_store::Shape::Around,
+    layout: crate::json_store::Layout::Compact,
+    unreadable: crate::json_store::Unreadable::Overwrite,
+    what: "the index cache",
+};
 
+pub fn load_cache(path: &Path) -> Vec<CommandRecord> {
     // Checked on the way in as well as on the way out. A cache written before
     // the scan enforced this is still on disk, and is read at every start until
     // the first rescan finishes behind it.
-    one_per_id(cached)
+    one_per_id(crate::json_store::load_list(path, &CACHE_SCHEMA))
 }
 
 /// Writes the index for the next start.
@@ -339,7 +354,7 @@ pub fn save_cache(path: &Path, commands: &[CommandRecord]) -> std::io::Result<()
 /// still not worth writing an empty cache over: a missing cache costs a slower
 /// next start, and an empty one would be read as an index with nothing in it.
 pub fn cache_text(commands: &[CommandRecord]) -> Option<String> {
-    serde_json::to_string(commands).ok()
+    crate::json_store::to_text(&commands, &CACHE_SCHEMA).ok()
 }
 
 /// Puts an already-serialised index on disk.
@@ -348,17 +363,7 @@ pub fn cache_text(commands: &[CommandRecord]) -> Option<String> {
 /// window in which the file is neither the old index nor the new one, and what
 /// is read back from a torn one is an empty root list on the next start.
 pub fn write_cache(path: &Path, text: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let staging = path.with_extension("json.partial");
-    std::fs::write(&staging, text)?;
-    if let Err(err) = std::fs::rename(&staging, path) {
-        let _ = std::fs::remove_file(&staging);
-        return Err(err);
-    }
-    Ok(())
+    crate::json_store::write_text(path, text)
 }
 
 /// Where the scanned index is cached, given the app's data directory.
@@ -1454,12 +1459,26 @@ const RECENCY_TIERS: [(i64, i64); 5] = [
     (i64::MAX, 5),           // ever
 ];
 
+/// How the ranking history is kept. See `json_store` for what each part buys.
+///
+/// `Beside`, because this serialises as an object and none of its fields is
+/// called `version`.
+///
+/// What it gains is being kept aside. A file that could not be read used to
+/// fall back to nothing and then be written over on the very next launch, so
+/// one torn write silently reset everybody's ranking to "never launched" with
+/// no way to see that it had happened.
+const FRECENCY_SCHEMA: crate::json_store::Schema = crate::json_store::Schema {
+    version: 1,
+    shape: crate::json_store::Shape::Beside,
+    layout: crate::json_store::Layout::Compact,
+    unreadable: crate::json_store::Unreadable::KeepAside,
+    what: "the ranking history",
+};
+
 impl Frecency {
     pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
+        crate::json_store::load(path, &FRECENCY_SCHEMA)
     }
 
     /**
@@ -1478,31 +1497,21 @@ impl Frecency {
     silently resets everybody's ranking to "never launched".
     */
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        crate::json_store::save_atomic(path, self, &FRECENCY_SCHEMA)
+    }
 
-        let text = serde_json::to_string(self).unwrap_or_else(|_| "{}".into());
-        Self::write(path, &text)
+    /// The history as text, for a caller holding a lock.
+    ///
+    /// Split from `save` so it can be serialised under the lock and written
+    /// outside it, which is what `launch_command` does: the write used to
+    /// happen on the lock the next keystroke waits for.
+    pub fn text(&self) -> Option<String> {
+        crate::json_store::to_text(self, &FRECENCY_SCHEMA).ok()
     }
 
     /// Puts already-serialised history on disk.
-    ///
-    /// Split from `save` so a caller holding a lock can serialise under it and
-    /// write outside it, which is what `launch_command` does: the write used to
-    /// happen on the lock the next keystroke waits for.
     pub fn write(path: &Path, text: &str) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let staging = path.with_extension("json.partial");
-        std::fs::write(&staging, text)?;
-        if let Err(err) = std::fs::rename(&staging, path) {
-            let _ = std::fs::remove_file(&staging);
-            return Err(err);
-        }
-        Ok(())
+        crate::json_store::write_text(path, text)
     }
 
     /// How many times one entry has been launched.
@@ -2770,4 +2779,170 @@ pub fn is_hidden(command: &CommandRecord, hidden: &[String]) -> bool {
 /// Where the frecency file lives, given the app's data directory.
 pub fn frecency_path(data_dir: &Path) -> PathBuf {
     data_dir.join("frecency.json")
+}
+
+#[cfg(test)]
+mod on_disk {
+    use super::*;
+
+    fn record(id: &str) -> CommandRecord {
+        CommandRecord {
+            id: id.to_string(),
+            extension: "test".into(),
+            extension_title: "Test".into(),
+            command: "run".into(),
+            title: id.to_string(),
+            subtitle: String::new(),
+            description: String::new(),
+            mode: "app".into(),
+            entrypoint: String::new(),
+            keywords: Vec::new(),
+            icon: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            toggle: None,
+        }
+    }
+
+    /// Every ranking file on disk is a bare object with no version in it.
+    #[test]
+    fn a_ranking_file_written_before_versioning_still_reads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("frecency.json");
+        std::fs::write(&path, r#"{"entries":{"app:notepad":[4,1700000000]}}"#).expect("writes");
+
+        assert_eq!(
+            Frecency::load(&path).count("app:notepad"),
+            4,
+            "everybody's ranking was reset to never launched"
+        );
+    }
+
+    /// One writer serialises under the lock, another does not, and both have
+    /// to produce the same file. Two ways to write one file is how one of
+    /// them ends up missing whatever the other learned.
+    #[test]
+    fn both_ways_of_writing_the_ranking_agree() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let saved = dir.path().join("saved.json");
+        let written = dir.path().join("written.json");
+
+        let mut frecency = Frecency::default();
+        frecency.record("app:notepad", 1_700_000_000);
+
+        frecency.save(&saved).expect("saves");
+        Frecency::write(&written, &frecency.text().expect("serialises")).expect("writes");
+
+        assert_eq!(
+            std::fs::read_to_string(&saved).expect("readable"),
+            std::fs::read_to_string(&written).expect("readable")
+        );
+        assert_eq!(Frecency::load(&written).count("app:notepad"), 1);
+    }
+
+    /// A ranking file that cannot be read is kept, not left for the next
+    /// launch to write nothing over.
+    #[test]
+    fn an_unreadable_ranking_file_is_kept_aside() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("frecency.json");
+        std::fs::write(&path, "{ torn").expect("writes");
+
+        assert_eq!(Frecency::load(&path).len(), 0);
+        assert_eq!(
+            std::fs::read_to_string(path.with_extension("json.broken")).expect("kept aside"),
+            "{ torn"
+        );
+    }
+
+    /// Every index cache on disk is a bare list with no version in it.
+    #[test]
+    fn a_cache_written_before_versioning_still_reads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("index-cache.json");
+        let bare = serde_json::to_string(&[record("app:one")]).expect("serialises");
+        std::fs::write(&path, bare).expect("writes");
+
+        let cached = load_cache(&path);
+
+        assert_eq!(cached.len(), 1, "a slower start for everybody on upgrade");
+        assert_eq!(cached[0].id, "app:one");
+    }
+
+    #[test]
+    fn a_cache_survives_the_round_trip_it_is_written_for() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("index-cache.json");
+
+        save_cache(&path, &[record("app:one"), record("app:two")]).expect("saves");
+
+        assert_eq!(load_cache(&path).len(), 2);
+        assert!(!path.with_extension("json.partial").exists());
+    }
+
+    /// The cache is the one store that does not keep a bad file aside,
+    /// because the scan behind it rebuilds the whole thing a second later.
+    #[test]
+    fn an_unreadable_cache_is_left_for_the_next_scan_rather_than_kept() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("index-cache.json");
+        std::fs::write(&path, "[ torn").expect("writes");
+
+        assert!(load_cache(&path).is_empty());
+        assert!(
+            !path.with_extension("json.broken").exists(),
+            "half a megabyte of rebuildable cache was kept for no reason"
+        );
+    }
+
+    /// A cache from a later build is discarded rather than half-read.
+    ///
+    /// `CommandRecord` has required fields and no catch-all, so a build that
+    /// changes the shape has nothing else to notice it with.
+    #[test]
+    fn a_cache_from_a_later_build_is_not_read() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("index-cache.json");
+
+        // A record this build reads perfectly well, so the only thing that can
+        // refuse the file is the version on it. Anything malformed here would
+        // let the test pass while the version check did nothing at all.
+        let document = serde_json::json!({
+            "version": 99,
+            "items": serde_json::to_value([record("app:one")]).expect("serialises"),
+        });
+        std::fs::write(&path, document.to_string()).expect("writes");
+
+        assert!(
+            load_cache(&path).is_empty(),
+            "records from a later build were read as though the fields still meant what they did"
+        );
+    }
+
+    /// One unreadable record costs that record, not the whole index.
+    #[test]
+    fn one_bad_record_does_not_empty_the_cache() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("index-cache.json");
+
+        let mut good = serde_json::to_value([record("app:one"), record("app:two")])
+            .expect("serialises")
+            .as_array()
+            .expect("a list")
+            .clone();
+        // No `command`, which is required and has no default.
+        good.insert(1, serde_json::json!({ "id": "app:half" }));
+
+        std::fs::write(
+            &path,
+            serde_json::to_string(&serde_json::Value::Array(good)).expect("serialises"),
+        )
+        .expect("writes");
+
+        let cached = load_cache(&path);
+
+        assert_eq!(cached.len(), 2, "the readable records survive");
+        assert_eq!(cached[0].id, "app:one");
+        assert_eq!(cached[1].id, "app:two");
+    }
 }

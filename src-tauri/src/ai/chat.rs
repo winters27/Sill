@@ -160,7 +160,32 @@ const FILE: &str = "conversations.json";
 /// unreadable byte silently replaced every conversation with an empty list.
 /// Moving it aside means the next save writes a clean file and what could not
 /// be read is still on disk to look at.
-const BROKEN: &str = "conversations.broken.json";
+///
+/// Named by `json_store`, which puts every store's aside file beside the
+/// original under the same rule, so there is one place to look rather than one
+/// convention per store. Only the test that proves it needs the name; nothing
+/// in the store writes it any more.
+#[cfg(test)]
+const BROKEN: &str = "conversations.json.broken";
+
+/// How the file is kept. See `json_store` for what each part buys.
+///
+/// Compact, because nobody reads a transcript in a text editor and the
+/// indentation would be most of the bytes.
+///
+/// The gain that matters here is `load_list`. `Conversation` has required
+/// fields, so a single entry serde could not read failed the whole file and
+/// took every other conversation with it; now that one is dropped and named in
+/// the log and the rest survive. The staged write is the other: this was
+/// written in place, so being killed mid-save left a truncated file that reads
+/// as no history at all.
+const SCHEMA: crate::json_store::Schema = crate::json_store::Schema {
+    version: 1,
+    shape: crate::json_store::Shape::Around,
+    layout: crate::json_store::Layout::Compact,
+    unreadable: crate::json_store::Unreadable::KeepAside,
+    what: "conversations",
+};
 
 /// The longest a question may be before it is shortened into a name.
 const TITLE: usize = 80;
@@ -470,27 +495,10 @@ impl Chat {
     /// back to, not somewhere to be when the launcher appears.
     pub fn load(&self, dir: &std::path::Path) {
         // Nothing there is a thing that was read: an empty history is the
-        // ordinary state of a machine nobody has asked anything on yet.
-        let Ok(text) = std::fs::read_to_string(dir.join(FILE)) else {
-            self.read_the_file
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            return;
-        };
-
-        let saved = match serde_json::from_str::<Vec<Conversation>>(&text) {
-            Ok(saved) => saved,
-            Err(why) => {
-                // Moved aside rather than left where the next save will land
-                // on it. See the note on `BROKEN`.
-                crate::say!("conversations could not be read, keeping them aside: {why}");
-                let _ = std::fs::rename(dir.join(FILE), dir.join(BROKEN));
-                // Safe to write from here: what could not be read is on disk
-                // under another name, so a fresh file destroys nothing.
-                self.read_the_file
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                return;
-            }
-        };
+        // ordinary state of a machine nobody has asked anything on yet, and a
+        // file that could not be read has been moved aside by the time this
+        // returns, so a fresh file destroys nothing either way.
+        let saved: Vec<Conversation> = crate::json_store::load_list(&dir.join(FILE), &SCHEMA);
 
         if let Ok(mut held) = self.held.lock() {
             held.past = saved.into_iter().take(KEEP_PAST).collect();
@@ -524,12 +532,7 @@ impl Chat {
 
         let all: Vec<&Conversation> = held.open.iter().chain(held.past.iter()).collect();
 
-        let Ok(text) = serde_json::to_string(&all) else {
-            return;
-        };
-
-        let _ = std::fs::create_dir_all(dir);
-        let _ = std::fs::write(dir.join(FILE), text);
+        let _ = crate::json_store::save_atomic(&dir.join(FILE), &all, &SCHEMA);
     }
 
     /// Remembers something said, and marks the conversation as spoken to.
@@ -1424,10 +1427,16 @@ mod tests {
             let aside = std::fs::read_to_string(dir.join(BROKEN)).expect("kept aside");
             assert_eq!(aside, nonsense, "what could not be read was thrown away");
 
-            let now: Vec<serde_json::Value> =
-                serde_json::from_str(&std::fs::read_to_string(dir.join(FILE)).expect("written"))
-                    .expect("valid");
-            assert_eq!(now.len(), 1, "the new conversation was not saved");
+            // Read back through the store rather than off the bytes, because
+            // what the bytes look like is `json_store`'s business and this is
+            // asking whether the conversation survived.
+            let after = Chat::new();
+            after.load(&dir);
+            assert_eq!(
+                after.summaries(0).len(),
+                1,
+                "the new conversation was not saved"
+            );
         }
 
         /*

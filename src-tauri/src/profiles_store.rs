@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
 
+use crate::json_store;
 use crate::profiles::Profile;
 
 pub fn path(app: &AppHandle) -> PathBuf {
@@ -17,23 +18,29 @@ pub fn path(app: &AppHandle) -> PathBuf {
         .join("workspaces.json")
 }
 
+/// How the file is kept. See `json_store` for what each part buys.
+///
+/// `Profile` has required fields, so one arrangement written by a build whose
+/// shape has since changed used to cost every other one. `load_list` drops
+/// that one and keeps the rest.
+const SCHEMA: json_store::Schema = json_store::Schema {
+    version: 1,
+    shape: json_store::Shape::Around,
+    layout: json_store::Layout::Readable,
+    unreadable: json_store::Unreadable::KeepAside,
+    what: "workspaces",
+};
+
 /// Everything saved, in the order it was saved.
 ///
-/// A missing or unreadable file is an empty list rather than an error: not
-/// having made one yet is the ordinary state.
+/// A missing file is an empty list rather than an error: not having made one
+/// yet is the ordinary state.
 pub fn load(file: &Path) -> Vec<Profile> {
-    let Ok(text) = std::fs::read_to_string(file) else {
-        return Vec::new();
-    };
-    serde_json::from_str(&text).unwrap_or_default()
+    json_store::load_list(file, &SCHEMA)
 }
 
 pub fn save(file: &Path, profiles: &[Profile]) -> std::io::Result<()> {
-    if let Some(parent) = file.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let text = serde_json::to_string_pretty(profiles).unwrap_or_else(|_| "[]".into());
-    std::fs::write(file, text)
+    json_store::save_atomic(file, &profiles, &SCHEMA)
 }
 
 /// Adds one, replacing any with the same name.
@@ -124,5 +131,50 @@ mod tests {
     fn a_new_name_is_added_rather_than_replacing() {
         let all = put(vec![profile("Work")], profile("Evening"));
         assert_eq!(all.len(), 2);
+    }
+
+    /// Every workspaces file on disk is a bare list with no version in it.
+    #[test]
+    fn a_file_written_before_versioning_still_reads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("workspaces.json");
+        std::fs::write(&file, r#"[{"name":"Work","windows":[]}]"#).expect("writes");
+
+        let all = load(&file);
+
+        assert_eq!(all.len(), 1, "the file this build inherits has to read");
+        assert_eq!(all[0].name, "Work");
+    }
+
+    /// `Profile` has required fields, so one bad entry used to cost them all.
+    #[test]
+    fn one_arrangement_that_cannot_be_read_does_not_take_the_others() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("workspaces.json");
+        // The middle one has no `name`, which is what a hand edit or a field
+        // added in a later version looks like from here.
+        std::fs::write(
+            &file,
+            r#"[{"name":"Work","windows":[]},{"windows":[]},{"name":"Evening","windows":[]}]"#,
+        )
+        .expect("writes");
+
+        let all = load(&file);
+
+        assert_eq!(all.len(), 2, "the readable arrangements survive");
+        assert_eq!(all[0].name, "Work");
+        assert_eq!(all[1].name, "Evening");
+    }
+
+    /// This file was written in place, so a torn write lost every arrangement.
+    #[test]
+    fn saving_stages_the_write_and_leaves_nothing_behind() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("workspaces.json");
+
+        save(&file, &[profile("Work")]).expect("saves");
+
+        assert_eq!(load(&file).len(), 1);
+        assert!(!file.with_extension("json.partial").exists());
     }
 }

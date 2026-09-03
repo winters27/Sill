@@ -102,6 +102,15 @@ pub struct Recording<'a> {
     pub now: i64,
 }
 
+/// What shape this build leaves the database in.
+///
+/// One, not zero, because zero is what SQLite puts in the header of a file
+/// nobody stamped, which is every clipboard history written before this. A
+/// build that changes a column's meaning rather than its name raises this, and
+/// an older build then refuses the file instead of reading the new meaning as
+/// the old one.
+const SCHEMA: u32 = 1;
+
 impl Store {
     /// Opens the history, creating it if this is the first run.
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
@@ -110,6 +119,13 @@ impl Store {
         }
 
         let connection = Connection::open(path)?;
+
+        // Before the migration, because the migration is `CREATE IF NOT
+        // EXISTS` and `ALTER TABLE`, neither of which would notice that it is
+        // running against a shape a later build defined. See the note on the
+        // helper for why this refuses rather than keeping the file aside the
+        // way the JSON stores do.
+        crate::json_store::refuse_a_newer_database(&connection, SCHEMA, "the clipboard history")?;
 
         // WAL so a read while the monitor is writing does not block, and
         // NORMAL because losing the last clipboard entry to a power cut is
@@ -254,6 +270,8 @@ impl Store {
 
         // Off by default in SQLite, and the blobs table depends on it.
         self.connection.pragma_update(None, "foreign_keys", true)?;
+
+        crate::json_store::stamp_database(&self.connection, SCHEMA)?;
         Ok(())
     }
 
@@ -679,6 +697,62 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let store = Store::open(&dir.path().join("clipboard.db")).expect("opens");
         (dir, store)
+    }
+
+    /// The header records which shape this build left the file in.
+    ///
+    /// It was zero on every clipboard history ever written, so a schema change
+    /// had nowhere to be recorded and an older build had no way to know it was
+    /// looking at a newer one.
+    #[test]
+    fn the_schema_version_is_written_into_the_file() {
+        let (_dir, store) = store();
+
+        let stamped: u32 = store
+            .connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("readable");
+
+        assert_eq!(stamped, SCHEMA);
+    }
+
+    /// A history from a later build is refused rather than migrated.
+    ///
+    /// The migration is `CREATE IF NOT EXISTS` and `ALTER TABLE`, neither of
+    /// which notices that a column it is happy to find already means something
+    /// else. Opening at all is the damage.
+    #[test]
+    fn a_history_from_a_later_build_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("clipboard.db");
+
+        let ahead = Connection::open(&path).expect("opens");
+        ahead
+            .pragma_update(None, "user_version", SCHEMA + 1)
+            .expect("stamped");
+        drop(ahead);
+
+        assert!(
+            Store::open(&path).is_err(),
+            "a history a later build wrote was opened and migrated anyway"
+        );
+    }
+
+    /// Every history on disk has a zero in the header, and must still open.
+    #[test]
+    fn a_history_written_before_versioning_still_opens() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("clipboard.db");
+
+        let before = Connection::open(&path).expect("opens");
+        before
+            .pragma_update(None, "user_version", 0)
+            .expect("stamped");
+        drop(before);
+
+        let store = Store::open(&path).expect("an unstamped history has to open");
+        add(&store, "copied", NOW);
+        assert_eq!(store.search("", None, 10).expect("listed").len(), 1);
     }
 
     fn add(store: &Store, text: &str, at: i64) -> i64 {

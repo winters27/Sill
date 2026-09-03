@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::json_store;
+
 /// One snippet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -82,23 +84,28 @@ pub fn path(app: &AppHandle) -> PathBuf {
         .join("snippets.json")
 }
 
+/// How the file is kept. See `json_store` for what each part buys.
+///
+/// Readable, because snippet bodies are prose and somebody writing a long one
+/// is better off in an editor than in a text box.
+const SCHEMA: json_store::Schema = json_store::Schema {
+    version: 1,
+    shape: json_store::Shape::Around,
+    layout: json_store::Layout::Readable,
+    unreadable: json_store::Unreadable::KeepAside,
+    what: "snippets",
+};
+
 /// Reads the file, or an empty list when there is not one yet.
 ///
 /// A malformed file yields nothing rather than an error: a launcher that
 /// refuses to start because one snippet is unparseable is worse than one that
-/// is briefly missing its snippets, and the file is right there to fix.
+/// is briefly missing its snippets. It is kept aside rather than left where
+/// the next save would land on it, which is the part this used to be missing:
+/// falling back to nothing and then writing nothing over the top is how one
+/// bad byte became every snippet gone.
 pub fn load(file: &Path) -> Vec<Snippet> {
-    let Ok(text) = std::fs::read_to_string(file) else {
-        return Vec::new();
-    };
-
-    match serde_json::from_str(&text) {
-        Ok(snippets) => snippets,
-        Err(err) => {
-            crate::say!("snippets could not be read: {err}");
-            Vec::new()
-        }
-    }
+    json_store::load_list(file, &SCHEMA)
 }
 
 /// Writes the whole list.
@@ -106,19 +113,7 @@ pub fn load(file: &Path) -> Vec<Snippet> {
 /// Staged and renamed, so an interrupted write cannot leave a truncated file
 /// where every snippet used to be.
 pub fn save(file: &Path, snippets: &[Snippet]) -> std::io::Result<()> {
-    if let Some(parent) = file.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let body = serde_json::to_string_pretty(snippets).unwrap_or_else(|_| "[]".to_string());
-
-    let staging = file.with_extension("json.partial");
-    std::fs::write(&staging, body)?;
-    if let Err(err) = std::fs::rename(&staging, file) {
-        let _ = std::fs::remove_file(&staging);
-        return Err(err);
-    }
-    Ok(())
+    json_store::save_atomic(file, &snippets, &SCHEMA)
 }
 
 /// Adds or replaces one snippet, keyed by id.
@@ -610,6 +605,47 @@ mod tests {
         let broken = dir.path().join("broken.json");
         std::fs::write(&broken, "{ not json").expect("writes");
         assert!(load(&broken).is_empty());
+
+        // The half this used to be missing. Yielding nothing is right; leaving
+        // the file where the next save writes nothing over it is how one bad
+        // byte became every snippet gone.
+        assert_eq!(
+            std::fs::read_to_string(broken.with_extension("json.broken")).expect("kept aside"),
+            "{ not json",
+            "what could not be read has to still be on disk"
+        );
+    }
+
+    /// Every snippets file on disk is a bare list with no version in it.
+    #[test]
+    fn a_file_written_before_versioning_still_reads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("snippets.json");
+        std::fs::write(&file, r#"[{"id":"a","name":"Sign off","content":"Best"}]"#)
+            .expect("writes");
+
+        let all = load(&file);
+
+        assert_eq!(all.len(), 1, "the file this build inherits has to read");
+        assert_eq!(all[0].content, "Best");
+    }
+
+    /// Notepad writes a byte order mark, and this used to empty the file.
+    #[test]
+    fn a_file_saved_with_a_byte_order_mark_still_reads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("snippets.json");
+        std::fs::write(
+            &file,
+            "\u{feff}[{\"id\":\"a\",\"name\":\"Hand edited\",\"content\":\"Best\"}]",
+        )
+        .expect("writes");
+
+        assert_eq!(
+            load(&file).len(),
+            1,
+            "three bytes of encoding threw away every snippet"
+        );
     }
 
     #[test]

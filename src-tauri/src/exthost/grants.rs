@@ -38,6 +38,26 @@ use super::permission::{needs_granting, plainly, Permits};
 
 const FILE: &str = "extension-grants.json";
 
+/// What each extension holds, as it is written down.
+type Granting = BTreeMap<String, Vec<Capability>>;
+
+/// How the file is kept. See `json_store` for what each part buys.
+///
+/// This was written in place, so being killed mid-write left a truncated file,
+/// and a truncated file reads as nothing granted. The symptom is a card asking
+/// again for every permission somebody already agreed to, which trains exactly
+/// the press-yes-without-reading reflex this whole module exists to avoid.
+///
+/// `Around`, because the payload is a map keyed by extension and there is
+/// nowhere in it for a field of Sill's own.
+const SCHEMA: crate::json_store::Schema = crate::json_store::Schema {
+    version: 1,
+    shape: crate::json_store::Shape::Around,
+    layout: crate::json_store::Layout::Readable,
+    unreadable: crate::json_store::Unreadable::KeepAside,
+    what: "extension grants",
+};
+
 /// How long a card waits before an unanswered one counts as no.
 const PATIENCE: std::time::Duration = std::time::Duration::from_secs(90);
 
@@ -73,8 +93,7 @@ impl Granted {
     fn load(&self) {
         let read = self
             .path()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .and_then(|text| serde_json::from_str::<BTreeMap<String, Vec<Capability>>>(&text).ok());
+            .map(|path| crate::json_store::load::<Granting>(&path, &SCHEMA));
 
         if let (Some(found), Ok(mut held)) = (read, self.by_extension.lock()) {
             *held = found;
@@ -96,13 +115,7 @@ impl Granted {
         };
         let Some(path) = self.path() else { return };
 
-        if let Ok(text) = serde_json::to_string_pretty(&*held) {
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-
-            let _ = std::fs::write(path, text);
-        }
+        let _ = crate::json_store::save_atomic(&path, &*held, &SCHEMA);
     }
 
     fn already(&self, extension: &str, capability: &Capability) -> bool {
@@ -247,4 +260,48 @@ pub fn for_extension(app: &tauri::AppHandle, extension: &str) -> Vec<Capability>
     app.try_state::<std::sync::Arc<Granted>>()
         .map(|grants| grants.held(extension))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The file as it exists on every machine that has granted anything: a
+    /// bare map of extension to capabilities, with no version anywhere in it.
+    ///
+    /// Refusing it would re-ask for every permission somebody has already
+    /// agreed to, which trains exactly the press-yes-without-reading reflex
+    /// this module exists to avoid, so it matters more here than most.
+    #[test]
+    fn a_file_written_before_versioning_still_reads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(FILE);
+        std::fs::write(&path, r#"{"raycast/clipboard":["clipboardRead"]}"#).expect("writes");
+
+        let held = crate::json_store::load::<Granting>(&path, &SCHEMA);
+
+        assert_eq!(
+            held.get("raycast/clipboard").map(Vec::as_slice),
+            Some([Capability::ClipboardRead].as_slice()),
+            "a grant somebody already agreed to was asked for again"
+        );
+    }
+
+    /// Written in place before this, so a torn write meant nothing granted.
+    #[test]
+    fn what_was_granted_survives_a_round_trip_and_stages_the_write() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(FILE);
+
+        let mut granting = Granting::new();
+        granting.insert("raycast/window".into(), vec![Capability::SystemControl]);
+
+        crate::json_store::save_atomic(&path, &granting, &SCHEMA).expect("saves");
+
+        assert_eq!(
+            crate::json_store::load::<Granting>(&path, &SCHEMA),
+            granting
+        );
+        assert!(!path.with_extension("json.partial").exists());
+    }
 }

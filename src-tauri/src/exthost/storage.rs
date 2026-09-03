@@ -16,6 +16,14 @@ use std::sync::Mutex;
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Map, Value};
 
+/// What shape this build leaves the database in.
+///
+/// Every value here is an extension's own JSON, so the interesting change is
+/// not to a column but to how the rows are scoped: `(extension, key)` is what
+/// keeps one extension out of another's storage, and anything that alters that
+/// meaning has to be a version an older build refuses rather than reads.
+const SCHEMA: u32 = 1;
+
 pub struct Storage {
     /// One connection behind a lock rather than a pool. Extensions write a
     /// key at a time and rarely; a pool would be machinery for no traffic.
@@ -36,6 +44,12 @@ impl Storage {
     }
 
     fn from_connection(connection: Connection) -> rusqlite::Result<Self> {
+        // Before the table is created, so a file a later build wrote is
+        // refused rather than having this build's DDL run over it. See the
+        // note on the helper for why a database is refused where a JSON file
+        // is kept aside.
+        crate::json_store::refuse_a_newer_database(&connection, SCHEMA, "extension storage")?;
+
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
 
@@ -55,6 +69,8 @@ impl Storage {
             ) WITHOUT ROWID;
             "#,
         )?;
+
+        crate::json_store::stamp_database(&connection, SCHEMA)?;
 
         Ok(Self {
             connection: Mutex::new(connection),
@@ -135,6 +151,58 @@ pub fn path(data_dir: &Path) -> std::path::PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The header records which shape this build left the file in.
+    #[test]
+    fn the_schema_version_is_written_into_the_file() {
+        let store = Storage::memory().expect("in-memory store opens");
+
+        let stamped: u32 = store
+            .connection
+            .lock()
+            .expect("storage poisoned")
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("readable");
+
+        assert_eq!(stamped, SCHEMA);
+    }
+
+    /// A store from a later build is refused rather than opened.
+    ///
+    /// What is at stake is the scoping. `(extension, key)` is what keeps one
+    /// extension out of another's storage, and a build that changed how rows
+    /// are scoped would have this one reading and writing across the boundary
+    /// while everything looked normal.
+    #[test]
+    fn a_store_from_a_later_build_is_refused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("extension-storage.db");
+
+        let ahead = Connection::open(&path).expect("opens");
+        ahead
+            .pragma_update(None, "user_version", SCHEMA + 1)
+            .expect("stamped");
+        drop(ahead);
+
+        assert!(Storage::open(&path).is_err());
+    }
+
+    /// Every extension store on disk has a zero in the header.
+    #[test]
+    fn a_store_written_before_versioning_still_opens() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("extension-storage.db");
+
+        let before = Connection::open(&path).expect("opens");
+        before
+            .pragma_update(None, "user_version", 0)
+            .expect("stamped");
+        drop(before);
+
+        let store = Storage::open(&path).expect("an unstamped store has to open");
+        store.set("alpha", "token", &json!("abc123")).unwrap();
+        assert_eq!(store.get("alpha", "token"), json!("abc123"));
+    }
 
     #[test]
     fn a_value_survives_being_written_and_read_back() {
