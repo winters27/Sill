@@ -324,6 +324,7 @@
   >
     {#snippet control()}
       <Segmented
+        label="What happens to the transcript"
         value={prefs.dictation.outputMode}
         options={[
           { value: "paste", label: "Paste" },
@@ -421,6 +422,7 @@
   >
     {#snippet control()}
       <Segmented
+        label="Finish and cancel keys"
         value="{prefs.dictation.finishKey}/{prefs.dictation.cancelKey}"
         options={[
           { value: "Enter/Escape", label: "Enter / Esc" },
@@ -475,6 +477,7 @@
     >
       {#snippet control()}
         <Segmented
+          label="Keep transcripts for"
           value={String(prefs.dictation.retainDays)}
           options={RETENTION}
           onchange={(next) => {
@@ -494,6 +497,7 @@
   <Row title="Backend">
     {#snippet control()}
       <Segmented
+        label="Backend"
         value={prefs.dictation.providerId}
         options={[
           { value: "local", label: "Local" },

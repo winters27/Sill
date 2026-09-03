@@ -5,6 +5,7 @@
   import Button from "./Button.svelte";
   import Instead from "../Instead.svelte";
   import { standing } from "$lib/instead";
+  import { hint } from "$lib/hint";
   import {
     blankQuicklink,
     deleteQuicklink,
@@ -191,7 +192,7 @@
         {#each TOKENS as placeholder (placeholder.token)}
           <button
             class="token"
-            title={placeholder.means}
+            use:hint={placeholder.means}
             onclick={() => {
               if (editing) editing.link += placeholder.token;
             }}

@@ -12,32 +12,60 @@
 
 import type { RankedCommand } from "$lib/exthost/commands";
 
-/** The id of the result list, which the search field points at. */
+/**
+ * The id of the list on screen, which the search field points at.
+ *
+ * One name for five components. The root list, the clipboard, the store and
+ * an extension's List and Grid are never on screen together: the window shows
+ * exactly one of them at a time, and the field above them is the same field.
+ * Giving each its own id would mean the field had to know which view it was
+ * looking at to name it, which is the knowledge this constant exists to
+ * remove.
+ */
 export const LISTBOX = "sill-results";
 
-/** The id of one result row, which is what `aria-activedescendant` names. */
+/** The id of one row, which is what `aria-activedescendant` names. */
 export function optionId(index: number): string {
   return `sill-result-${index}`;
+}
+
+/**
+ * The id of one item in a popover menu.
+ *
+ * Separate from `optionId` because a menu can be open OVER a list, so the two
+ * sets of ids exist in the document at the same time and must not collide.
+ * `which` names the menu: there are three, and two of them can be open at
+ * once only in the sense that neither knows about the other.
+ */
+export function itemId(which: string, index: number): string {
+  return `sill-${which}-item-${index}`;
 }
 
 /**
  * Whether the search field is filtering a list that is on screen and walkable.
  *
  * Only then is it a combobox. The same field is a plain one everywhere else:
- * in the modes that show something other than the root list there is no
- * listbox to point at, and naming a row that is not rendered leaves a screen
- * reader announcing nothing at all, which is the state this was meant to fix.
- * Naming a collection or an alias is typing a name rather than filtering, so
- * there is nothing to arrow through either.
+ * where nothing on screen is a listbox there is nothing to point at, and
+ * naming a row that is not rendered leaves a screen reader announcing nothing
+ * at all, which is the state this was meant to fix. Naming a collection or an
+ * alias is typing a name rather than filtering, so there is nothing to arrow
+ * through either.
+ *
+ * `rows` is how many rows the arrow keys walk, not how many results the index
+ * returned. Those are the same number at the root and nowhere else: the
+ * clipboard, the store and an extension's list each count their own.
+ *
+ * `tree` is the tag an extension rendered, for the modes where the mode alone
+ * does not say whether there is a list. See `showsAListbox`.
  */
 // Which modes those are lives in `modes.ts`, with everything else that is
 // decided per mode. It was four hand-written lists in three files, and they
 // had already drifted.
-export { isListMode } from "./modes";
-import { isListMode } from "./modes";
+export { isListMode, showsAListbox } from "./modes";
+import { showsAListbox } from "./modes";
 
-export function isBrowsing(mode: string, results: number): boolean {
-  return isListMode(mode) && results > 0;
+export function isBrowsing(mode: string, rows: number, tree?: string): boolean {
+  return showsAListbox(mode, tree) && rows > 0;
 }
 
 /**

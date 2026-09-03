@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AudioInputDevice } from "$lib/dictation";
+  import { hint } from "$lib/hint";
 
   interface Props {
     devices: AudioInputDevice[];
@@ -55,7 +56,9 @@
   {#each rows as row, index (row.id)}
     <div class="row" class:absent={!row.present}>
       <span class="position">{row.ranked ? index + 1 : "–"}</span>
-      <span class="name" title={row.id}>{row.name}</span>
+      <!-- Windows gives two headsets the same name often enough that the id is
+           the only way to tell them apart. -->
+      <span class="name" use:hint={row.id}>{row.name}</span>
       {#if !row.present}
         <span class="tag">not connected</span>
       {/if}

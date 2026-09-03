@@ -1,5 +1,6 @@
 <script lang="ts">
   import Select from "./Select.svelte";
+  import { hint } from "$lib/hint";
   import {
     dictationStats,
     formatCount,
@@ -54,7 +55,7 @@
   </div>
 
   <div class="stat">
-    <span class="name" title="Against typing the same words at 40 words per minute">
+    <span class="name" use:hint={"Against typing the same words at 40 words per minute"}>
       Time saved
     </span>
     <span class="figure">

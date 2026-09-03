@@ -30,6 +30,7 @@
    */
   import "$lib/theme/theme.css";
   import StoreView from "$lib/components/StoreView.svelte";
+  import { LISTBOX, optionId } from "$lib/results";
   import type { Preferences } from "$lib/settings";
   import type { Browse, Preparation, StoreRow, StoreQuery } from "$lib/store";
 
@@ -421,11 +422,27 @@
     <div class="l-search">
       <img src="/sill.png" alt="" width="26" height="26" />
       <span class="l-crumb">Extension Store</span>
+      <!--
+        The combobox wiring the real launcher puts on this field.
+
+        Copied here rather than left out because it is the half of the store
+        that cannot be seen: the field keeps focus while the arrows walk the
+        list, so `aria-activedescendant` naming the highlighted row is the only
+        thing that announces it. A harness that leaves it out is a harness
+        somebody checks the store in with a screen reader and finds silent for
+        a reason that is not the store's.
+      -->
       <!-- svelte-ignore a11y_autofocus -->
       <input
         bind:value={query}
         onkeydown={onKey}
         placeholder="Search the extension store…"
+        aria-label="Search the extension store"
+        role={count ? "combobox" : undefined}
+        aria-expanded={count ? true : undefined}
+        aria-controls={count ? LISTBOX : undefined}
+        aria-activedescendant={count ? optionId(selected) : undefined}
+        aria-autocomplete={count ? "list" : undefined}
         spellcheck="false"
         autofocus
       />

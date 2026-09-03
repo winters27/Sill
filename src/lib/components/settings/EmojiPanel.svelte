@@ -11,6 +11,7 @@
   import Row from "./Row.svelte";
   import Segmented from "./Segmented.svelte";
   import { emojiTones, type Preferences, type ToneChoice } from "$lib/settings";
+  import { rovingTab, rovingTo } from "$lib/roving";
 
   interface Props {
     prefs: Preferences;
@@ -35,6 +36,41 @@
     { value: "paste", label: "Paste it" },
     { value: "copy", label: "Copy it" },
   ];
+
+  /** Which tone is on, or -1 before the list has arrived. */
+  const chosen = $derived(tones.findIndex((tone) => tone.id === prefs.emoji.tone));
+
+  let swatches: (HTMLButtonElement | null)[] = [];
+
+  /**
+   * What to call a tone out loud.
+   *
+   * The swatch is a hand in that tone, which is the whole reason these are
+   * drawn rather than listed, and a hand says nothing to somebody who is not
+   * looking at it. The id was standing in for the name, so a reader said
+   * "mediumLight": an internal spelling read out as if it were English.
+   */
+  function nameOf(id: ToneChoice["id"]): string {
+    const spaced = id.replace(/([A-Z])/g, " $1").toLowerCase();
+    return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  }
+
+  function pick(tone: ToneChoice["id"]) {
+    prefs.emoji.tone = tone;
+    commit();
+  }
+
+  /* The arrows move along the row of swatches, which is what a radio group
+     does. Six buttons that were each their own Tab stop and answered no
+     arrow key are six buttons pretending to be a group. */
+  function onKeydown(event: KeyboardEvent, at: number) {
+    const next = rovingTo(event.key, at, tones.length);
+    if (next === null) return;
+
+    event.preventDefault();
+    pick(tones[next].id);
+    swatches[next]?.focus();
+  }
 </script>
 
 <Section
@@ -47,17 +83,17 @@
   >
     {#snippet control()}
       <div class="tones" role="radiogroup" aria-label="Skin tone">
-        {#each tones as tone (tone.id)}
+        {#each tones as tone, index (tone.id)}
           <button
             class="tone"
             class:on={prefs.emoji.tone === tone.id}
             role="radio"
             aria-checked={prefs.emoji.tone === tone.id}
-            aria-label={tone.id}
-            onclick={() => {
-              prefs.emoji.tone = tone.id;
-              commit();
-            }}
+            aria-label={nameOf(tone.id)}
+            tabindex={rovingTab(index, chosen)}
+            bind:this={swatches[index]}
+            onclick={() => pick(tone.id)}
+            onkeydown={(event) => onKeydown(event, index)}
           >
             {tone.swatch}
           </button>
@@ -72,6 +108,7 @@
   >
     {#snippet control()}
       <Segmented
+        label="What Enter does"
         value={prefs.emoji.primary}
         options={ACTIONS}
         onchange={(next) => {

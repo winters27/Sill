@@ -51,6 +51,7 @@
   } from "$lib/exthost/commands";
   import { applyAppearance, getPreferences, openSettings, type Preferences } from "$lib/settings";
   import { forgetUnreadable, orElse, silently } from "$lib/status";
+  import { hint } from "$lib/hint";
 
   interface Shown {
     role: string;
@@ -531,13 +532,19 @@
   Dropping a file anywhere on the window attaches it.
 
   The whole window rather than a target inside it: somebody dragging a
-  screenshot is looking at the screenshot, not at where to put it.
+  screenshot is looking at the screenshot, not at where to put it. On the body
+  rather than on a `div`, because that is literally what "anywhere on the
+  window" means.
+
+  It was on the `div` below with `role="application"` to satisfy the rule that
+  a drag target needs a role. `application` tells a screen reader to stop
+  intercepting keys and hand every one of them straight to the page: no arrow
+  keys for reading, no headings, no browse mode. That is a contract for a
+  canvas nobody can read any other way, and this is a conversation, a list of
+  past ones and a text box. The whole window was unreadable so that a `div`
+  could listen for a drag.
 -->
-<div
-  class="window"
-  class:hovering
-  role="application"
-  aria-label="AI Chat"
+<svelte:body
   ondragover={(event) => {
     event.preventDefault();
     hovering = true;
@@ -547,7 +554,9 @@
     event.preventDefault();
     hovering = false;
   }}
->
+/>
+
+<div class="window" class:hovering>
   <TitleBar title="AI Chat" />
 
   <div class="body">
@@ -569,7 +578,7 @@
             <button
               class="bin"
               aria-label="Forget this conversation"
-              title="Forget this conversation"
+              use:hint={"Forget this conversation"}
               onclick={() => void forget(one.id)}
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -710,7 +719,12 @@
         {/if}
 
         <div class="line">
-        <button class="round attach" onclick={() => void pick()} aria-label="Attach a file" title="Attach a file">
+        <button
+          class="round attach"
+          onclick={() => void pick()}
+          aria-label="Attach a file"
+          use:hint={"Attach a file"}
+        >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path
               d="M21 11.5l-8.5 8.5a5.5 5.5 0 01-7.8-7.8l8.7-8.7a3.7 3.7 0 015.2 5.2l-8.6 8.6a1.8 1.8 0 01-2.6-2.6l7.9-7.9"
@@ -745,7 +759,7 @@
             than a destructive one. A square inside, which is what stop has
             meant on every machine since tape.
           -->
-          <button class="round stop" onclick={() => void stop()} aria-label="Stop" title="Stop">
+          <button class="round stop" onclick={() => void stop()} aria-label="Stop" use:hint={"Stop"}>
             <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
               <rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor" />
             </svg>
@@ -765,7 +779,7 @@
             onclick={() => void send()}
             disabled={!draft.trim() && carrying.length === 0}
             aria-label="Send"
-            title="Send"
+            use:hint={"Send"}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path

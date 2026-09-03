@@ -16,7 +16,7 @@
   import AiMark from "$lib/components/settings/AiMark.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
   import Steps from "$lib/components/Steps.svelte";
-  import { LISTBOX, isBrowsing, isListMode, optionId, selectionAfter } from "$lib/results";
+  import { LISTBOX, isBrowsing, optionId, selectionAfter } from "$lib/results";
   import { deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import { asUrl, isPath, isUrl } from "$lib/typed";
   import {
@@ -115,6 +115,7 @@
     type Preferences,
   } from "$lib/settings";
   import "$lib/theme/theme.css";
+  import { hint } from "$lib/hint";
 
   type UiEvent =
     | { kind: "render"; session: string; ops: Op[] }
@@ -587,18 +588,6 @@
   });
 
   /**
-   * Whether the field is filtering a list that is on screen and walkable.
-   *
-   * Only then is it a combobox. The same field is a plain one everywhere else:
-   * in the modes that show something other than the root list there is no
-   * listbox to point at, and naming a row that is not rendered leaves a screen
-   * reader announcing nothing at all. Naming a collection or an alias is
-   * typing a name rather than filtering, so there is nothing to arrow through
-   * either.
-   */
-  const browsing = $derived(isBrowsing(mode, commands.length));
-
-  /**
    * How many rows the arrow keys walk.
    *
    * Where the number comes from is a property of the mode and is declared in
@@ -628,6 +617,26 @@
         return items.length;
     }
   });
+
+  /**
+   * Whether the field is filtering a list that is on screen and walkable.
+   *
+   * Only then is it a combobox. The same field is a plain one everywhere else:
+   * where nothing on screen is a listbox there is nothing to point at, and
+   * naming a row that is not rendered leaves a screen reader announcing
+   * nothing at all. Naming a collection or an alias is typing a name rather
+   * than filtering, so there is nothing to arrow through either.
+   *
+   * `count` rather than `commands.length`, which is the root list's number and
+   * nobody else's. The clipboard, the store, the conversation list and an
+   * extension's list each count their own rows, and every one of them was
+   * silent because this asked the wrong question.
+   *
+   * The view's tag goes with it because the mode cannot answer for an
+   * extension: `command` is a list, a grid, a form or a page of prose
+   * depending on what was rendered.
+   */
+  const browsing = $derived(isBrowsing(mode, count, view?.tag));
 
   /**
    * The action set the panel shows.
@@ -3837,7 +3846,7 @@
         <button
           class="crumb who-crumb"
           onclick={() => void openSettings("ai")}
-          title={askingIs}
+          use:hint={askingIs}
         >
           <AiMark name={answersWith.id} size={13} />
           <span class="who">{answersWith.model || answersWith.name}</span>
@@ -3940,7 +3949,7 @@
         class="asker"
         class:unset={!answersWith.ready}
         onclick={() => void openSettings("ai")}
-        title={askingIs}
+        use:hint={askingIs}
       >
         {#if answersWith.ready}
           <!--

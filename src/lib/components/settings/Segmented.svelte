@@ -1,11 +1,23 @@
 <script lang="ts">
+  import { rovingTab, rovingTo } from "$lib/roving";
+
   interface Props {
     value: string;
     options: { value: string; label: string }[];
     onchange: (value: string) => void;
+    /**
+     * What the group is choosing between.
+     *
+     * A `role="radiogroup"` with no name is announced as "group" and nothing
+     * else, so somebody hears six options and never hears the question. Every
+     * one of these sits in a settings row whose title is that question; this
+     * is that title, passed down because a row and its control are separate
+     * elements and nothing links them.
+     */
+    label?: string;
   }
 
-  let { value = $bindable(), options, onchange }: Props = $props();
+  let { value = $bindable(), options, onchange, label }: Props = $props();
 
   let track = $state<HTMLDivElement | null>(null);
   let buttons: Record<string, HTMLButtonElement | null> = {};
@@ -42,9 +54,30 @@
     value = next;
     onchange(next);
   }
+
+  /** Which option is on, or -1 when the value matches none of them. */
+  const chosen = $derived(options.findIndex((option) => option.value === value));
+
+  /*
+   * The arrows move between the segments, which is what a radio group is.
+   *
+   * Without this every segment was its own Tab stop and the arrows did
+   * nothing, so a reader announced "radio button, 2 of 3" and then the keys
+   * that are supposed to answer that went to the page instead. Choosing on
+   * arrow rather than only on Enter is the radio-group contract: moving the
+   * highlight in a group of radios IS choosing.
+   */
+  function onKeydown(event: KeyboardEvent, at: number) {
+    const next = rovingTo(event.key, at, options.length);
+    if (next === null) return;
+
+    event.preventDefault();
+    pick(options[next].value);
+    buttons[options[next].value]?.focus();
+  }
 </script>
 
-<div class="track" bind:this={track} role="radiogroup">
+<div class="track" bind:this={track} role="radiogroup" aria-label={label}>
   <div
     class="thumb"
     class:ready={thumb.ready}
@@ -54,14 +87,16 @@
     aria-hidden="true"
   ></div>
 
-  {#each options as option (option.value)}
+  {#each options as option, index (option.value)}
     <button
       type="button"
       role="radio"
       aria-checked={value === option.value}
       class:active={value === option.value}
+      tabindex={rovingTab(index, chosen)}
       bind:this={buttons[option.value]}
       onclick={() => pick(option.value)}
+      onkeydown={(event) => onKeydown(event, index)}
     >
       {option.label}
     </button>

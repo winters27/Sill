@@ -2,6 +2,7 @@
   import type { ElementNode, ViewTree } from "$lib/exthost/tree";
   import Instead from "./Instead.svelte";
   import { standing } from "$lib/instead";
+  import { LISTBOX, optionId } from "$lib/results";
 
   interface Props {
     tree: ViewTree;
@@ -18,12 +19,18 @@
    * selection moves through what the user sees as one list regardless of how
    * the extension grouped it.
    */
-  interface Row {
-    kind: "section" | "item";
-    node: ElementNode;
-    /** Only items are selectable, so only items carry an index. */
-    index?: number;
-  }
+  /**
+   * A section heading or a selectable item, told apart by `kind`.
+   *
+   * Two shapes rather than one with an optional index, so the index is a
+   * number wherever the markup has narrowed to an item. It was optional, and
+   * every use of it carried an `index !== undefined` guard that could never be
+   * false; the row id below is the first thing that would have been silently
+   * wrong if one of those guards had ever gone the other way.
+   */
+  type Row =
+    | { kind: "section"; node: ElementNode }
+    | { kind: "item"; node: ElementNode; index: number };
 
   const rows = $derived.by(() => {
     const out: Row[] = [];
@@ -53,10 +60,27 @@
   };
 </script>
 
-<div class="sill-list" role="listbox" tabindex="-1" aria-label={str(node, "navigationTitle") || "Results"}>
+<!--
+  Named by the field above it, the same way the root list is.
+
+  The id is the one the search field points `aria-controls` at, and the row
+  ids below are what its `aria-activedescendant` names. Without them somebody
+  arrowing through an extension's list heard the field announced once and then
+  silence, because focus never leaves the field and nothing said which row had
+  moved under the highlight.
+-->
+<div
+  id={LISTBOX}
+  class="sill-list"
+  role="listbox"
+  tabindex="-1"
+  aria-label={str(node, "navigationTitle") || "Results"}
+>
   {#each rows as row (row.node.id)}
     {#if row.kind === "section"}
-      <div class="section">
+      <!-- A label between options, not an option. Left unmarked it is a child
+           of the listbox with no role, which some readers count as a row. -->
+      <div class="section" role="presentation">
         {str(row.node, "title")}
         {#if str(row.node, "subtitle")}
           <span class="section-sub">{str(row.node, "subtitle")}</span>
@@ -64,14 +88,15 @@
       </div>
     {:else}
       <div
+        id={optionId(row.index)}
         class="sill-row"
         class:selected={row.index === selected}
         role="option"
         aria-selected={row.index === selected}
         tabindex="-1"
-        onmousemove={() => row.index !== undefined && onselect(row.index)}
-        onclick={() => row.index !== undefined && onrun(row.index)}
-        onkeydown={(e) => e.key === "Enter" && row.index !== undefined && onrun(row.index)}
+        onmousemove={() => onselect(row.index)}
+        onclick={() => onrun(row.index)}
+        onkeydown={(e) => e.key === "Enter" && onrun(row.index)}
       >
         <!--
           Title and subtitle stay on ONE line, side by side.

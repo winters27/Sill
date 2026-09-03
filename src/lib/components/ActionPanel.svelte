@@ -3,6 +3,7 @@
   import { noMatch, standing } from "$lib/instead";
   import Instead from "./Instead.svelte";
   import { popover } from "$lib/motion";
+  import { itemId } from "$lib/results";
 
   interface Props {
     /** Already filtered. Selection counts through exactly this list. */
@@ -18,6 +19,10 @@
   let { actions, selected, filter, onfilter, onselect, onrun }: Props = $props();
 
   let field = $state<HTMLInputElement | null>(null);
+  let panel = $state<HTMLDivElement | null>(null);
+
+  /** The menu, for `aria-controls` and for the item ids below. */
+  const MENU = "sill-actions";
 
   /*
    * The field takes focus the moment the panel opens.
@@ -28,9 +33,18 @@
    *
    * The arrows and Enter are still handled above and prevent their default, so
    * they move the selection rather than the caret.
+   *
+   * The panel itself takes focus when there is no field, which is the common
+   * case: five actions or fewer draws no filter. That is not about keystrokes,
+   * which the window catches either way. It is that
+   * `aria-activedescendant` is only read from the element that HAS focus, so
+   * with focus left back on the search field nothing announced which action
+   * the highlight was on. Focus goes back to the field when the panel closes,
+   * which the launcher already does for every one of the nine ways it closes.
    */
   $effect(() => {
-    field?.focus();
+    if (field) field.focus();
+    else panel?.focus();
   });
 
   const groups = $derived(groupActions(actions));
@@ -71,10 +85,22 @@
 <!-- Click-away closes, which is why the backdrop covers the whole window. -->
 <div class="scrim" role="presentation" onclick={() => onrun(-1)}></div>
 
+<!--
+  The panel names the action under the highlight.
+
+  `aria-activedescendant` sits on both the panel and the filter field because
+  either of them can hold focus, and it is only read from whichever one does.
+  Pointing at an id that is not rendered is harmless; leaving it off the one
+  that has focus is silence.
+-->
 <div
+  id={MENU}
+  bind:this={panel}
   class="panel sill-menu"
   role="menu"
   tabindex="-1"
+  aria-label="Actions"
+  aria-activedescendant={actions.length ? itemId(MENU, selected) : undefined}
   in:popover={{ origin: "bottom right" }}
   out:popover={{ origin: "bottom right", out: true }}
 >
@@ -83,30 +109,37 @@
     over them is furniture, and the panel is small enough that it shows.
   -->
   {#if showFilter}
-    <div class="find">
+    <div class="find" role="presentation">
       <input
         bind:this={field}
         value={filter}
         oninput={(e) => onfilter(e.currentTarget.value)}
         placeholder="Filter actions"
         aria-label="Filter actions"
+        role="combobox"
+        aria-expanded="true"
+        aria-haspopup="menu"
+        aria-controls={MENU}
+        aria-activedescendant={actions.length ? itemId(MENU, selected) : undefined}
+        aria-autocomplete="list"
         spellcheck="false"
         autocomplete="off"
       />
     </div>
   {/if}
 
-  <div class="scroll">
+  <div class="scroll" role="presentation">
     {#each groups as group, g (g)}
       {#if group.section}
-        <div class="section">{group.section}</div>
+        <div class="section" role="presentation">{group.section}</div>
       {:else if g > 0}
-        <div class="rule"></div>
+        <div class="rule" role="separator"></div>
       {/if}
 
       {#each group.items as action (action.id)}
         {@const index = indexOf(action)}
         <div
+          id={itemId(MENU, index)}
           class="row"
           class:selected={index === selected}
           class:destructive={action.style === "destructive"}

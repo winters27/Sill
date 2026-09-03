@@ -15,6 +15,7 @@
    * after months of being read every day.
    */
   import type { AiStep } from "$lib/exthost/commands";
+  import { hint } from "$lib/hint";
 
   interface Props {
     steps: AiStep[];
@@ -71,7 +72,7 @@
       class="head"
       onclick={() => (opened = !open)}
       aria-expanded={open}
-      title={open ? "Hide what it looked at" : "Show what it looked at"}
+      use:hint={open ? "Hide what it looked at" : "Show what it looked at"}
     >
       <span class="pip" class:working={live} aria-hidden="true"></span>
       <span class="said">{open ? "What it looked at" : summary}</span>

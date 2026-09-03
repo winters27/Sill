@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Theme } from "$lib/settings";
+  import { rovingTab, rovingTo } from "$lib/roving";
 
   interface Props {
     /** The theme currently in force. */
@@ -24,6 +25,28 @@
     { id: "moss", name: "Moss", note: "Cool green" },
     { id: "aberration", name: "Aberration", note: "Warm and cool fringes, like a lens" },
   ];
+
+  let cards: (HTMLButtonElement | null)[] = [];
+
+  /** Which card is on, or -1 when the theme in force is not one of these. */
+  const chosen = $derived(THEMES.findIndex((t) => t.id === value));
+
+  /*
+   * The arrows walk the cards, and walking them picks one.
+   *
+   * They wrap in a grid, so both axes move: Down from the top row lands on the
+   * one below when the cards are two abreast and on the next card when they
+   * are all on one line. Either way it is the next card, which is what
+   * somebody who cannot see the wrapping means by "next".
+   */
+  function onKeydown(event: KeyboardEvent, at: number) {
+    const next = rovingTo(event.key, at, THEMES.length, "both");
+    if (next === null) return;
+
+    event.preventDefault();
+    onpick(THEMES[next].id);
+    cards[next]?.focus();
+  }
 </script>
 
 <!--
@@ -33,14 +56,17 @@
   than `:root[data-theme]`.
 -->
 <div class="themes" role="radiogroup" aria-label="Theme">
-  {#each THEMES as t (t.id)}
+  {#each THEMES as t, index (t.id)}
     <button
       class="theme"
       class:selected={value === t.id}
       data-theme={t.id}
       role="radio"
       aria-checked={value === t.id}
+      tabindex={rovingTab(index, chosen)}
+      bind:this={cards[index]}
       onclick={() => onpick(t.id)}
+      onkeydown={(event) => onKeydown(event, index)}
     >
       <!--
         A launcher in miniature, drawn with the real tokens: the query, the

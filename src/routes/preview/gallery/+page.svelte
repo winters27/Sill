@@ -337,6 +337,7 @@
         <Row title="Backdrop" description="Which material Windows composites behind the window.">
           {#snippet control()}
             <Segmented
+              label="Backdrop"
               bind:value={segment}
               options={[
                 { value: "acrylic", label: "Acrylic" },

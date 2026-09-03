@@ -17,6 +17,7 @@
     type Snippet,
   } from "$lib/snippets";
   import type { Preferences } from "$lib/settings";
+  import { hint } from "$lib/hint";
 
   /**
    * Writes them out, and says where they went.
@@ -401,7 +402,7 @@
         {#each PLACEHOLDERS as placeholder (placeholder.token)}
           <button
             class="token"
-            title={placeholder.means}
+            use:hint={placeholder.means}
             onclick={() => {
               if (editing) editing.content += placeholder.token;
             }}
@@ -457,7 +458,7 @@
           {#snippet control()}
             <div class="row-actions">
               {#if snippet.onlyIn.length}
-                <span class="limited" title={snippet.onlyIn.join(", ")}>
+                <span class="limited" use:hint={snippet.onlyIn.join(", ")}>
                   {snippet.onlyIn.length === 1
                     ? snippet.onlyIn[0]
                     : `${snippet.onlyIn.length} programs`}

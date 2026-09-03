@@ -49,6 +49,7 @@
   <input
     bind:value={draft}
     placeholder="A name or folder to hide, then Enter"
+    aria-label="A name or folder to hide"
     spellcheck="false"
     onkeydown={(e) => {
       if (e.key === "Enter") {

@@ -60,6 +60,7 @@
   import { forgetUnreadable, statusTroubles, type Trouble } from "$lib/status";
   import { swap } from "$lib/motion";
   import "$lib/theme/theme.css";
+  import { hint } from "$lib/hint";
 
   type PanelId = IconName;
 
@@ -676,7 +677,12 @@
           <circle cx="11" cy="11" r="7" />
           <path d="m20 20-3.5-3.5" stroke-linecap="round" />
         </svg>
-        <input bind:value={filter} placeholder="Search settings" spellcheck="false" />
+        <input
+          bind:value={filter}
+          placeholder="Search settings"
+          aria-label="Search settings"
+          spellcheck="false"
+        />
         {#if filter}
           <button class="clear" aria-label="Clear search" onclick={() => (filter = "")}>
             <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
@@ -956,6 +962,7 @@
             >
               {#snippet control()}
                 <Segmented
+                  label="Backdrop"
                   value={p.appearance.backdrop}
                   options={[
                     { value: "acrylic", label: "Acrylic" },
@@ -976,6 +983,7 @@
             >
               {#snippet control()}
                 <Segmented
+                  label="Interface font"
                   value={p.appearance.font}
                   options={[
                     { value: "satoshi", label: "Satoshi" },
@@ -1254,6 +1262,7 @@
             >
               {#snippet control()}
                 <Segmented
+                  label="After taking one"
                   value={p.screenshot.after}
                   options={[
                     { value: "copy", label: "Copy it" },
@@ -1288,6 +1297,7 @@
             <Row title="Tool">
               {#snippet control()}
                 <Segmented
+                  label="Tool"
                   value={p.screenshot.tool}
                   options={[
                     { value: "box", label: "Box" },
@@ -1313,7 +1323,7 @@
                       class="swatch"
                       class:on={p.screenshot.colour === swatch.value}
                       style:background={swatch.value}
-                      title={swatch.name}
+                      use:hint={swatch.name}
                       aria-label={swatch.name}
                       aria-pressed={p.screenshot.colour === swatch.value}
                       onclick={() => {

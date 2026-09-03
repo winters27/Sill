@@ -10,7 +10,7 @@
  */
 import { describe, expect, test } from "vitest";
 import type { RankedCommand } from "$lib/exthost/commands";
-import { LISTBOX, isBrowsing, optionId, selectionAfter } from "$lib/results";
+import { LISTBOX, isBrowsing, itemId, optionId, selectionAfter } from "$lib/results";
 
 function result(id: string, strong = false): RankedCommand {
   return {
@@ -29,34 +29,64 @@ function result(id: string, strong = false): RankedCommand {
 const ids = (rows: RankedCommand[]) => rows.map((row) => row.id);
 
 describe("when the field is a combobox", () => {
-  test("it is one while browsing a list with something in it", () => {
-    for (const mode of ["root", "switcher", "emoji"]) {
+  test("it is one while browsing the root list", () => {
+    for (const mode of ["root", "switcher", "emoji", "appVolume", "processes", "destination"]) {
       expect(isBrowsing(mode, 5)).toBe(true);
     }
   });
 
   /*
-   * The trap. The field is shared across modes and the list is not: pointing
-   * at a listbox that is not rendered leaves a screen reader announcing
-   * nothing, which is the exact state the combobox wiring was added to fix.
+   * The bug this was widened to fix.
+   *
+   * These three draw a listbox of their own rather than the root list, and
+   * every one of them was silent: `isBrowsing` asked whether the mode walks
+   * the RANKED results, which is the root list and nothing else, so the field
+   * stopped calling itself a combobox the moment somebody opened the
+   * clipboard, the store or the conversation list.
    */
-  test("it is not one where the list is not on screen", () => {
-    for (const mode of ["clipboard", "command", "argument", "collection"]) {
+  test("it is one in the views that count their own rows", () => {
+    for (const mode of ["clipboard", "store", "conversations"]) {
+      expect(isBrowsing(mode, 5)).toBe(true);
+    }
+  });
+
+  /*
+   * The trap. The mode cannot answer for an extension: `command` is whichever
+   * of four things the extension rendered, and only two of them are a list.
+   */
+  test("an extension's view is one only when it rendered a list or a grid", () => {
+    for (const mode of ["command", "argument"]) {
+      expect(isBrowsing(mode, 5, "List")).toBe(true);
+      expect(isBrowsing(mode, 5, "Grid")).toBe(true);
+
+      expect(isBrowsing(mode, 5, "Form")).toBe(false);
+      expect(isBrowsing(mode, 5, "Detail")).toBe(false);
+
+      // Nothing rendered yet. Pointing at a row in a tree that has not
+      // arrived is the state this whole wiring exists to avoid.
       expect(isBrowsing(mode, 5)).toBe(false);
     }
   });
 
   test("naming something is typing, not filtering", () => {
-    // Alias and collection modes take a name. There is nothing to arrow
-    // through, so announcing a highlighted row would be announcing a fiction.
-    expect(isBrowsing("alias", 5)).toBe(false);
-    expect(isBrowsing("collection", 5)).toBe(false);
+    // Alias, collection and workspace modes take a name. There is nothing to
+    // arrow through, so announcing a highlighted row would announce a fiction.
+    for (const mode of ["alias", "collection", "namingWorkspace"]) {
+      expect(isBrowsing(mode, 5)).toBe(false);
+      expect(isBrowsing(mode, 5, "List")).toBe(false);
+    }
+  });
+
+  test("a mode nobody declared is not a list", () => {
+    expect(isBrowsing("whatever", 5)).toBe(false);
   });
 
   test("an empty list is not something to point at", () => {
-    for (const mode of ["root", "switcher", "emoji"]) {
+    for (const mode of ["root", "switcher", "clipboard", "store"]) {
       expect(isBrowsing(mode, 0)).toBe(false);
     }
+
+    expect(isBrowsing("command", 0, "List")).toBe(false);
   });
 });
 
@@ -66,10 +96,29 @@ describe("the ids the two sides agree on", () => {
     expect(optionId(0)).not.toBe(optionId(1));
   });
 
-  test("both ids are usable in markup", () => {
+  test("a menu item id is distinct per menu and per item", () => {
+    expect(itemId("a", 0)).toBe(itemId("a", 0));
+    expect(itemId("a", 0)).not.toBe(itemId("a", 1));
+    expect(itemId("a", 0)).not.toBe(itemId("b", 0));
+  });
+
+  /*
+   * A menu opens OVER a list, so both sets of ids are in the document at the
+   * same time. One colliding with the other would resolve
+   * `aria-activedescendant` to the wrong element, and nothing about that looks
+   * wrong on screen.
+   */
+  test("a menu item id can never be a row id", () => {
+    for (let at = 0; at < 50; at++) {
+      expect(itemId("sill-actions", at)).not.toBe(optionId(at));
+      expect(itemId("sill-tray-menu", at)).not.toBe(optionId(at));
+    }
+  });
+
+  test("every id is usable in markup", () => {
     // They end up in `id` and `aria-controls`. A space or a hash would make
     // the reference silently fail to resolve.
-    for (const id of [LISTBOX, optionId(0), optionId(999)]) {
+    for (const id of [LISTBOX, optionId(0), optionId(999), itemId("sill-actions", 3)]) {
       expect(id).toMatch(/^[A-Za-z][\w-]*$/);
     }
   });

@@ -340,6 +340,7 @@
   >
     {#snippet control()}
       <Segmented
+        label="Open with a double-tap"
         value={prefs.taps?.modifier ?? "off"}
         options={TAP_MODIFIERS}
         onchange={setTap}
@@ -358,6 +359,7 @@
   >
     {#snippet control()}
       <Segmented
+        label="Extra keys"
         value={prefs.navigation.preset}
         options={PRESETS}
         onchange={(next) => void setPreset(next)}
