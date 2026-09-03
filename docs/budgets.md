@@ -59,8 +59,8 @@ outside the code.
 | What | Measured |
 | --- | --- |
 | Whole application, idle, all processes | 281 MB private at the time of the audit |
-| Whole application, a minute after startup | 228.6 MB private, 89.0 MB set |
-| Working set, before and after the renderers suspend | 488.1 MB then 89.0 MB |
+| Whole application, a minute after startup | 221.7 MB private, 78.1 MB set |
+| Working set, before and after the renderers suspend | 488.1 MB then 78.1 MB |
 | Idle CPU at steady state, whole tree | 0.00% of one core |
 | Wakeups at rest, whole tree | 1,740 a minute across 7 threads, busiest 819 |
 | Hidden but not yet suspended, first 15 s | 0.9 to 1.3% of one core |
