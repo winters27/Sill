@@ -35,6 +35,9 @@ use crate::action::Capability;
 pub const NEEDED: &[(&str, &[Capability])] = &[
     // The extension's own view. Drawing into the space it was given.
     ("UI/render", &[]),
+    // Saying how deep its own view stack is. Nothing outside the command can
+    // hear this and nothing outside the command is touched by it.
+    ("UI/navigation", &[]),
     // Sill's own surface, and the state of the window the extension is in.
     ("UI/showToast", &[Capability::Ui]),
     ("UI/updateToast", &[Capability::Ui]),
@@ -156,7 +159,18 @@ mod tests {
     /// yes without reading, which costs more than it buys.
     #[test]
     fn an_extensions_own_view_and_own_storage_ask_for_nothing() {
-        for method in ["UI/render", "Storage/get", "Storage/set", "Storage/list"] {
+        // `UI/navigation` is here for the same reason `UI/render` is: it says
+        // how deep the command is in its own view stack, which is a fact about
+        // a tree the extension already owns. Asking somebody to agree to an
+        // extension pushing its own second screen would be asking them about
+        // nothing, and every such question makes the real ones cheaper.
+        for method in [
+            "UI/render",
+            "UI/navigation",
+            "Storage/get",
+            "Storage/set",
+            "Storage/list",
+        ] {
             assert_eq!(needed(method), Some(&[][..]), "{method} grew a permission");
         }
     }

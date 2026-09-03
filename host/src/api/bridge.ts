@@ -26,7 +26,15 @@ export interface Environment {
 
 /** The worker owns the view stack; useNavigation just drives it. */
 export interface Navigation {
-  push(view: unknown): void;
+  /**
+   * Shows a view on top of the current one.
+   *
+   * `onPop` is Raycast's: the caller is told when its screen is left again,
+   * which is where an extension refreshes the list it pushed away from. It
+   * belongs to the entry rather than to the stack, so it is remembered here
+   * with the view it was given for.
+   */
+  push(view: unknown, onPop?: () => void): void;
   pop(): void;
 }
 

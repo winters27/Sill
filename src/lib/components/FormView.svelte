@@ -47,6 +47,10 @@
 
       if (field.tag === "Form.Checkbox") {
         values[key] = field.props.defaultValue === true;
+      } else if (field.tag === "Form.DatePicker") {
+        // Raycast hands the extension a Date; over the wire it is the ISO
+        // string a `<input type=date>` also speaks, so nothing is converted.
+        values[key] = str(field, "defaultValue");
       } else if (field.tag === "Form.TagPicker") {
         values[key] = Array.isArray(field.props.defaultValue) ? field.props.defaultValue : [];
       } else if (field.tag === "Form.Dropdown") {
@@ -64,6 +68,27 @@
 
   export function submit() {
     onsubmit($state.snapshot(values));
+  }
+
+  /** What is chosen in a tag picker, which is always a list. */
+  function picked(key: string): string[] {
+    const held = values[key];
+    return Array.isArray(held) ? (held as string[]) : [];
+  }
+
+  function toggleTag(key: string, value: string) {
+    const held = picked(key);
+    values[key] = held.includes(value) ? held.filter((v) => v !== value) : [...held, value];
+  }
+
+  function tagOptions(field: ElementNode) {
+    return tree
+      .elementChildren(field)
+      .filter((child) => child.tag === "Form.TagPicker.Item")
+      .map((child) => ({
+        value: str(child, "value"),
+        title: str(child, "title") || str(child, "value"),
+      }));
   }
 
   function dropdownOptions(field: ElementNode) {
@@ -114,6 +139,43 @@
             <option value={option.value}>{option.title}</option>
           {/each}
         </select>
+      </div>
+    {:else if field.tag === "Form.TagPicker"}
+      <div class="row">
+        <div class="label">{str(field, "title")}</div>
+        <!--
+          A row of chips that toggle, rather than a multiple `<select>`.
+          A native multi-select needs Ctrl held to pick a second thing, which
+          is a rule nobody knows and one this window can simply not have.
+        -->
+        <div class="tags" role="group" aria-label={str(field, "title")}>
+          {#each tagOptions(field) as option (option.value)}
+            {@const chosen = picked(key).includes(option.value)}
+            <button
+              type="button"
+              class="pick"
+              class:chosen
+              aria-pressed={chosen}
+              onclick={() => toggleTag(key, option.value)}
+            >
+              {option.title}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {:else if field.tag === "Form.DatePicker"}
+      <div class="row">
+        <div class="label">{str(field, "title")}</div>
+        <!--
+          The type follows what the extension asked for. `Form.DatePicker.Type`
+          is `date` or `date_time`, and giving somebody a time to fill in that
+          the extension will not read is asking for something twice.
+        -->
+        <input
+          type={field.props.type === "date" ? "date" : "datetime-local"}
+          aria-label={str(field, "title")}
+          bind:value={values[key] as string}
+        />
       </div>
     {:else if field.tag === "Form.TextArea"}
       <div class="row">
@@ -214,6 +276,60 @@
   input::placeholder,
   textarea::placeholder {
     color: var(--text-4);
+  }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  /*
+   * A chip that is either taken or not, and says which by being filled.
+   *
+   * Not a bordered chip button, which this project has refused before: the
+   * unchosen state is the ordinary fill with no outline, and choosing one
+   * fills it with the accent wash a selected row takes. One thing changes.
+   */
+  .pick {
+    padding: var(--space-1) var(--space-2);
+    border: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--fill-2);
+    color: var(--text-2);
+    font-family: inherit;
+    font-size: var(--text-meta);
+    line-height: var(--line-meta);
+    cursor: default;
+    transition: background-color var(--motion-state) var(--ease);
+  }
+
+  .pick:hover {
+    background-color: var(--fill-3);
+  }
+
+  .pick.chosen {
+    background-color: var(--accent-fill);
+    color: var(--text-1);
+  }
+
+  .pick:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  input[type="date"],
+  input[type="datetime-local"] {
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    background-color: color-mix(in srgb, var(--core-secondary-background) 55%, transparent);
+    background-image: var(--sheen);
+    color: var(--text-1);
+    font-family: inherit;
+    font-size: var(--text-body);
+    outline: none;
   }
 
   .checkbox {

@@ -13,6 +13,8 @@
 
 import { createElement, isValidElement, type FunctionComponent, type ReactNode } from "react";
 
+import { getBridge } from "./bridge";
+
 /** Wraps an element-valued prop so it becomes part of the rendered tree. */
 export const SLOT_TAG = "$slot";
 
@@ -74,12 +76,58 @@ type AnyProps = Record<string, unknown> & { children?: ReactNode };
 
 const ActionBase = host<AnyProps>("Action");
 
+const PushHost = host<AnyProps>("Action.Push");
+
+/**
+ * The one action the host performs itself, and the reason it is not a `host`.
+ *
+ * `<Action.Push target={<Detail/>}/>` hands over a React element, and the rule
+ * above would lift it into the tree as a `$slot` child like every other
+ * element prop. That is wrong twice.
+ *
+ * **It renders a screen nobody asked for.** A list of two hundred rows each
+ * offering to push a detail view would mount two hundred detail views on the
+ * first frame, run every `useEffect` in them, and start every fetch they make,
+ * for the one the reader might eventually press. Raycast mounts a pushed view
+ * when it is pushed, and so does this.
+ *
+ * **It leaves the stack nowhere.** A pushed view is the top of a navigation
+ * stack, and the stack lives in the worker, next to the React root that has to
+ * render it. A subtree hanging off an action in the previous screen is not a
+ * stack, it is two screens drawn at once with the UI asked to guess.
+ *
+ * So the target stays an unrendered element and Push becomes an ordinary
+ * callback: `onAction` is synthesised here, gets a handler id from the same
+ * registry every other callback uses, and rides the same activation the UI
+ * already sends. Nothing new crosses the wire and nothing in the UI has to
+ * know that this action is different from a copy or an open.
+ */
+const ActionPush: FunctionComponent<AnyProps> = (props) => {
+  const { target, onPop, onAction, ...rest } = props as AnyProps & {
+    target?: ReactNode;
+    onPop?: () => void;
+    onAction?: () => void;
+  };
+
+  return createElement(PushHost, {
+    ...rest,
+    onAction: () => {
+      getBridge().navigation.push(target, onPop);
+      // Raycast runs the author's own `onAction` as well as pushing, and
+      // extensions use it to record that the screen was opened.
+      onAction?.();
+    },
+  });
+};
+
+ActionPush.displayName = "Action.Push";
+
 export const Action = withMembers(ActionBase, {
   CopyToClipboard: host<AnyProps>("Action.CopyToClipboard"),
   OpenInBrowser: host<AnyProps>("Action.OpenInBrowser"),
   Open: host<AnyProps>("Action.Open"),
   Paste: host<AnyProps>("Action.Paste"),
-  Push: host<AnyProps>("Action.Push"),
+  Push: ActionPush,
   SubmitForm: host<AnyProps>("Action.SubmitForm"),
   Trash: host<AnyProps>("Action.Trash"),
   ShowInFinder: host<AnyProps>("Action.ShowInFinder"),
