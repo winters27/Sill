@@ -55,6 +55,23 @@ pub enum UiEvent {
         session: String,
         text: String,
     },
+    /// How deep the command's own view stack is now.
+    ///
+    /// `Action.Push` and `useNavigation().push` put a second screen on top of
+    /// the first inside the same worker, and the window cannot see that
+    /// happen: an op stream that replaces the root's child looks the same
+    /// whether a command re-rendered itself or opened something new. Without
+    /// being told, Escape on a pushed screen closes the whole command, which
+    /// is the wrong half of "back".
+    ///
+    /// `pop` is the handler id to activate to go back one. Named here rather
+    /// than agreed in advance, because a constant written on both sides of a
+    /// wire is two constants and only one of them gets changed.
+    Navigation {
+        session: String,
+        depth: u64,
+        pop: String,
+    },
     PopToRoot {
         session: String,
     },
@@ -212,6 +229,15 @@ impl ApiLayer {
                 self.emit(UiEvent::SetSearchText {
                     session: session.to_string(),
                     text: string("text"),
+                });
+                Ok(Value::Null)
+            }
+
+            "UI/navigation" => {
+                self.emit(UiEvent::Navigation {
+                    session: session.to_string(),
+                    depth: params.get("depth").and_then(Value::as_u64).unwrap_or(1),
+                    pop: string("pop"),
                 });
                 Ok(Value::Null)
             }

@@ -35,6 +35,55 @@ node scripts/build-extension.mjs extensions/raycast-src/extensions/password-gene
 node scripts/run-extension.mjs extensions/build/password-generator/generate-random-password.js password-generator \
   --expect-root Form
 
+# Everything a row draws that is not its title: icons in all three shapes an
+# extension is allowed to pass, text and tag accessories, a dropdown beside the
+# field, a detail pane with every kind of metadata row, and the extension's own
+# words for an empty list. A fixture because no single real extension uses all
+# of them at once, and the point of this line is that they hold together.
+echo
+echo "--- Icons, accessories, dropdown, detail, EmptyView: fixture ---"
+node scripts/run-extension.mjs host/test/fixture/draws-everything.js draws-everything \
+  --expect-root List --expect-icons 3 --expect-accessories 4 --expect-dropdown 2 \
+  --expect-detail --expect-empty-view
+
+# The same parts on somebody else's extension rather than on ours.
+#
+# Skipped with a reason rather than failed when the sparse checkout does not
+# have them, which is the same treatment every other non-hermetic probe in this
+# project gets: a machine without the working area should not be told its code
+# is broken. Kill Process reads the real process table, so the counts are lower
+# bounds rather than numbers.
+for real in kill-process:index:"--expect-icons 5 --expect-accessories 5 --expect-dropdown 2" \
+            hacker-news:frontpage:"--expect-dropdown 10"; do
+  name=${real%%:*}
+  rest=${real#*:}
+  command=${rest%%:*}
+  expect=${rest#*:}
+
+  if [ ! -d "extensions/raycast-src/extensions/$name/node_modules" ]; then
+    echo
+    echo "--- skipped $name: not in the sparse checkout, or its dependencies are not installed ---"
+    continue
+  fi
+
+  echo
+  echo "--- Rows of a real extension: $name ---"
+  node scripts/build-extension.mjs "extensions/raycast-src/extensions/$name" "$command" > /dev/null
+  node scripts/run-extension.mjs "extensions/build/$name/$command.js" "$name" \
+    --grant fileRead,fileWrite,network,processLaunch $expect
+done
+
+# The navigation stack, which is what an extension with more than one screen
+# needs to work at all. Three claims, and the third is the one nothing on
+# screen would show: the pushed screen must not be mounted until it is pushed,
+# or a list of two hundred rows mounts two hundred detail views on its first
+# frame. The fixture says so out loud from inside the component.
+echo
+echo "--- Action.Push and back: fixture ---"
+node scripts/run-extension.mjs host/test/fixture/pushes-a-view.js push-fixture --push \
+  --expect-root List --expect-pushed Detail --expect-popped List \
+  --expect-lazy "second screen mounted"
+
 echo
 echo "--- Grid: fixture ---"
 node scripts/run-extension.mjs host/test/fixture/grid-command.js grid-fixture --expect-root Grid

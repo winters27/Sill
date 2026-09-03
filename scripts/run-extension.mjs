@@ -185,9 +185,47 @@ await new Promise((done, fail) => {
 });
 const { itemsOf, rowsOf, searchProps } = await import(pathToFileURL(searchOut).href);
 
+// What the views draw beyond a title: icons, accessories, empty views,
+// dropdowns and detail panes. Bundled from the window's own module for the
+// same reason as the three above, and it matters more here than anywhere: a
+// second reader of `accessories` would agree with itself and with nothing on
+// screen.
+const presentOut = join(scratchDir("sill-present-"), "present.mjs");
+await new Promise((done, fail) => {
+  const p = spawn(
+    process.execPath,
+    [
+      join(root, "host", "node_modules", "esbuild", "bin", "esbuild"),
+      join(root, "src", "lib", "exthost", "present.ts"),
+      "--bundle",
+      "--format=esm",
+      `--outfile=${presentOut}`,
+      "--log-level=error",
+    ],
+    { stdio: "inherit" },
+  );
+  p.on("exit", (c) => (c === 0 ? done() : fail(new Error(`esbuild exited ${c}`))));
+});
+const { accessoriesOf, detailOf, dropdownOf, emptyViewOf, iconOf, showsDetail } = await import(
+  pathToFileURL(presentOut).href
+);
+
 // ---- host process ----
 const child = spawn(process.execPath, [hostJs], { stdio: ["pipe", "pipe", "pipe"] });
-child.stderr.on("data", (d) => process.stderr.write(`[host] ${d}`));
+
+/**
+ * Everything the extension wrote to the console, kept as well as shown.
+ *
+ * The host relays an extension's `console.log` to its own stderr, which makes
+ * it the one place a test can see something happen that leaves no mark on the
+ * tree. A component that was mounted said so; one that was never mounted said
+ * nothing, and the difference between those two is what `Action.Push` is for.
+ */
+let said = "";
+child.stderr.on("data", (d) => {
+  said += d;
+  process.stderr.write(`[host] ${d}`);
+});
 
 const send = (m) => {
   const b = Buffer.from(JSON.stringify(m), "utf8");
@@ -203,6 +241,9 @@ const gaps = new Set();
 const tree = new ViewTree();
 let session;
 let buf = Buffer.alloc(0);
+
+/** The last thing the command said about its own view stack. */
+let navigation = { depth: 1, pop: "" };
 
 /**
  * Mimics Rust's ApiLayer closely enough to exercise an extension.
@@ -233,6 +274,12 @@ function serveApi(method, params) {
       return null;
     case "Storage/list":
       return Object.fromEntries(storage);
+    case "UI/navigation":
+      // What the window keeps: how deep the command is in its own stack, and
+      // the handler id that takes it back one. Recorded rather than ignored,
+      // because "Escape pops" is only testable if this half arrives.
+      navigation = { depth: params.depth ?? 1, pop: params.pop ?? "" };
+      return null;
     case "UI/showToast":
     case "UI/updateToast":
     case "UI/hideToast":
@@ -350,24 +397,71 @@ const typed = typedArg === -1 ? undefined : args[typedArg + 1];
  * decides whether the window ever asks was never exercised.
  */
 function type(handler, text) {
+  return activate(handler, [text]);
+}
+
+/**
+ * Fires one handler, which is the only thing the window can say to a worker.
+ *
+ * Typing, pressing an action and going back a screen are all this call with a
+ * different id, and that is the design rather than a coincidence: the stack
+ * lives in the worker and the window drives it through the same stable ids it
+ * already had. Anything here that needed a channel of its own would be a
+ * second protocol.
+ */
+let activations = 0;
+
+function activate(handler, args = []) {
   if (!handler) return false;
 
   send({
     jsonrpc: "2.0",
     method: "Manager/messageExtension",
-    id: 900,
+    id: 900 + activations,
     params: {
       session_id: session,
       payload: JSON.stringify({
         jsonrpc: "2.0",
-        id: 9000,
+        id: 9000 + activations++,
         method: "EventCore/handlerActivated",
-        params: { id: handler, args: [text] },
+        params: { id: handler, args },
       }),
     },
   });
 
   return true;
+}
+
+/** The value after a named argument, or undefined when it was not given. */
+function argAfter(name) {
+  const at = args.indexOf(name);
+  return at === -1 ? undefined : args[at + 1];
+}
+
+/** The first Action.Push offered by an item, if it offers one. */
+function pushAction(subject) {
+  return collectActions(tree, subject).find((a) => a.tag === "Action.Push");
+}
+
+/**
+ * The row a person would be on when the view first appears.
+ *
+ * Sections included, because an extension that groups its rows still has a
+ * first one and it is the one under the highlight.
+ */
+function firstItemOf(root) {
+  const itemTag = root.tag === "Grid" ? "Grid.Item" : "List.Item";
+  const sectionTag = root.tag === "Grid" ? "Grid.Section" : "List.Section";
+
+  for (const child of tree.elementChildren(root)) {
+    if (child.tag === itemTag) return child;
+    if (child.tag !== sectionTag) continue;
+    const inside = tree.elementChildren(child).find((c) => c.tag === itemTag);
+    if (inside) return inside;
+  }
+
+  // A Detail or a Form has no rows and hangs its actions off itself.
+  return root;
 }
 
 send({
@@ -420,6 +514,43 @@ if (typed !== undefined) {
   const after = tree.top();
   const narrow = field.props?.filtering ? typed : "";
   field.after = after ? itemsOf(rowsOf(tree, after, narrow)).length : 0;
+}
+
+/**
+ * Opens the first row's pushed screen, then goes back the way Escape does.
+ *
+ * Both halves go through the window's own reader: the action comes from
+ * `collectActions`, and the pop uses the handler id the worker named in its
+ * navigation event. Reaching past either would leave this passing while the
+ * window could not do it.
+ */
+const journey = {
+  wanted: args.includes("--push"),
+  found: false,
+  /** Whether the target had already been mounted before anything was pressed. */
+  eager: false,
+  pushedTo: undefined,
+  depth: 0,
+  poppedTo: undefined,
+};
+
+const lazyFor = argAfter("--expect-lazy");
+
+if (journey.wanted) {
+  const before = tree.top();
+  const subject = before ? firstItemOf(before) : undefined;
+  const action = subject ? pushAction(subject) : undefined;
+
+  journey.eager = lazyFor !== undefined && said.includes(lazyFor);
+  journey.found = activate(action?.handler);
+
+  await settle(1500);
+  journey.pushedTo = tree.top()?.tag;
+  journey.depth = navigation.depth;
+
+  activate(navigation.pop);
+  await settle(1500);
+  journey.poppedTo = tree.top()?.tag;
 }
 
 child.kill();
@@ -481,6 +612,44 @@ if (typed !== undefined) {
   console.log(`  isLoading: ${field.props?.loading ?? false}`);
   console.log(`  onSearchTextChange: ${field.heard ? "fired" : "none registered"}`);
   console.log(`  rows ${field.before} -> ${field.after} after typing ${JSON.stringify(typed)}`);
+}
+
+/**
+ * What the window would draw beyond the titles.
+ *
+ * Reported for every run rather than behind a flag, because this is the
+ * question P4-01 asks and the answer is different for every extension. A list
+ * whose rows carry six accessories and a detail pane is a list Sill either
+ * draws or does not, and until this printed it the only way to find out was to
+ * install the thing and look.
+ */
+const drawn = { icons: 0, accessories: 0, dropdown: 0, detail: false, empty: false };
+
+if (top && (top.tag === "List" || top.tag === "Grid")) {
+  for (const item of itemsOf(rowsOf(tree, top, ""))) {
+    if (iconOf(item.props.icon)) drawn.icons++;
+    drawn.accessories += accessoriesOf(item).length;
+    if (detailOf(tree, item)) drawn.detail = true;
+  }
+  drawn.dropdown = dropdownOf(tree, top)?.options.length ?? 0;
+  drawn.empty = emptyViewOf(tree, top) !== undefined;
+
+  console.log("\nDrawn beyond the title:");
+  console.log(`  rows with an icon: ${drawn.icons}`);
+  console.log(`  accessories in total: ${drawn.accessories}`);
+  console.log(`  dropdown options: ${drawn.dropdown}`);
+  console.log(`  detail pane: ${drawn.detail} (list asks for one: ${showsDetail(top)})`);
+  console.log(`  EmptyView: ${drawn.empty}`);
+}
+
+if (journey.wanted) {
+  console.log("\nNavigation:");
+  console.log(`  Action.Push found: ${journey.found}`);
+  console.log(`  pushed to: <${journey.pushedTo}> at depth ${journey.depth}`);
+  console.log(`  popped back to: <${journey.poppedTo}>`);
+  if (lazyFor !== undefined) {
+    console.log(`  target mounted before it was pushed: ${journey.eager}`);
+  }
 }
 
 if (gaps.size) {
@@ -577,12 +746,79 @@ if (expectRows !== undefined) {
   check(field.after !== field.before, `typing changed the list, was ${field.before}`);
 }
 
+/*
+ * What pressing a Push action was supposed to do.
+ *
+ * Three separate claims, because they fail separately. `--expect-pushed` is
+ * the second screen arriving; `--expect-popped` is going back, which is the
+ * half that turns a one-way door into navigation; `--expect-lazy` is the cost
+ * of the first, and it is the one that cannot be seen on screen: a target
+ * mounted with every row is a working push and a hundred components nobody
+ * asked for.
+ */
+const expectPushed = flag("--expect-pushed");
+const expectPopped = flag("--expect-popped");
+
+/*
+ * What the rows carry, as counts rather than as a picture.
+ *
+ * Each is a lower bound, because the numbers belong to somebody else's
+ * extension: pinning them exactly would fail this gate whenever an author
+ * added a row. What must not change is that they are drawn at all, which is
+ * what every one of these was not doing before.
+ */
+const atLeast = (name, actual, what) => {
+  const wanted = flag(name);
+  if (wanted === undefined) return;
+  check(actual >= Number(wanted), `at least ${wanted} ${what}, got ${actual}`);
+};
+
+atLeast("--expect-icons", drawn.icons, "rows with an icon");
+atLeast("--expect-accessories", drawn.accessories, "accessories");
+atLeast("--expect-dropdown", drawn.dropdown, "dropdown options");
+
+if (args.includes("--expect-detail")) {
+  check(drawn.detail, "the selected row hands over a detail pane");
+}
+
+if (args.includes("--expect-empty-view")) {
+  check(drawn.empty, "the list declares its own words for being empty");
+}
+
+if (expectPushed !== undefined) {
+  check(journey.found, "the first row offers an Action.Push the window can run");
+  check(
+    journey.pushedTo === expectPushed,
+    `pushed view is <${expectPushed}>, got <${journey.pushedTo}>`,
+  );
+  check(journey.depth === 2, `the command is two screens deep, got ${journey.depth}`);
+}
+
+if (expectPopped !== undefined) {
+  check(
+    journey.poppedTo === expectPopped,
+    `back at <${expectPopped}> after popping, got <${journey.poppedTo}>`,
+  );
+}
+
+if (lazyFor !== undefined) {
+  check(!journey.eager, `the pushed target was not mounted before it was pushed`);
+  check(said.includes(lazyFor), `the pushed target was mounted when it was pushed`);
+}
+
 if (
   expectRoot !== undefined ||
   expectItems !== undefined ||
   expectActions !== undefined ||
   expectHeard ||
   expectRows !== undefined ||
+  expectPushed !== undefined ||
+  expectPopped !== undefined ||
+  flag("--expect-icons") !== undefined ||
+  flag("--expect-accessories") !== undefined ||
+  flag("--expect-dropdown") !== undefined ||
+  args.includes("--expect-detail") ||
+  args.includes("--expect-empty-view") ||
   expectFiltering !== undefined
 ) {
   check(gaps.size === 0, `no unimplemented API was needed, ${gaps.size} gap(s)`);

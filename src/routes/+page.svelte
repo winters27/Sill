@@ -11,6 +11,8 @@
   import ListView from "$lib/components/ListView.svelte";
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
+  import DetailPane from "$lib/components/DetailPane.svelte";
+  import ExtDropdown from "$lib/components/ExtDropdown.svelte";
   import RootList from "$lib/components/RootList.svelte";
   import Instead from "$lib/components/Instead.svelte";
   import KeySheet from "$lib/components/KeySheet.svelte";
@@ -110,6 +112,7 @@
   } from "$lib/exthost/commands";
   import { ViewTree, isHandlerRef, type ElementNode, type Op } from "$lib/exthost/tree";
   import { SearchRelay, itemsOf, rowsOf, searchProps } from "$lib/exthost/search";
+  import { dropdownOf } from "$lib/exthost/present";
   import {
     applyAppearance,
     getPreferences,
@@ -127,12 +130,37 @@
     | { kind: "hideToast"; session: string; id: string }
     | { kind: "showHud"; session: string; text: string }
     | { kind: "setSearchText"; session: string; text: string }
+    | { kind: "navigation"; session: string; depth: number; pop: string }
     | { kind: "popToRoot"; session: string }
     | { kind: "closeMainWindow"; session: string }
     | { kind: "crashed"; session: string; reason: string }
     | { kind: "closed"; session: string; reason: string };
 
   const tree = new ViewTree();
+
+  /**
+   * Where the running command is in its own view stack.
+   *
+   * ## Why the window is told rather than counting
+   *
+   * A command that pushes a screen does it inside its worker: the stack is a
+   * stack of React elements in one root, so pushing renders a different
+   * element and the op stream that arrives is indistinguishable from the same
+   * screen re-rendering. Counting the pushes this window started would miss
+   * every `useNavigation().push()` an extension makes on its own, and a
+   * miscounted depth is worse than no depth: Escape would close a command
+   * somebody was two screens into.
+   *
+   * ## Why the handler id comes with it
+   *
+   * Going back means telling the worker, and the only thing this window can
+   * say to a worker is "activate this handler". The worker names the one that
+   * pops in the same message, so neither side holds a constant the other has
+   * to keep matching.
+   */
+  const NOT_NAVIGATED = { depth: 1, pop: "" };
+
+  let nav = $state<{ depth: number; pop: string }>(NOT_NAVIGATED);
 
   /** Root browses installed commands; command shows one that is running. */
   /*
@@ -537,6 +565,20 @@
   const view = $derived.by(() => {
     version;
     return tree.top();
+  });
+
+  /**
+   * The picker beside the search field, when the command offers one.
+   *
+   * Read here rather than inside `ListView` and `GridView`, because it is
+   * drawn in the search row that the page owns and a list and a grid declare
+   * it identically. One reading, one control, either kind of view.
+   */
+  const dropdown = $derived.by(() => {
+    version;
+    const node = tree.top();
+    if (!node || (node.tag !== "List" && node.tag !== "Grid")) return undefined;
+    return dropdownOf(tree, node);
   });
 
   /**
@@ -2111,6 +2153,10 @@
         // Whatever was typed at the last command is not typed at this one, and
         // a throttled call still waiting would arrive at a stranger.
         relay.cancel();
+        // A new command starts at the bottom of its own stack. Adopted here as
+        // well as on the way out, because a command can be opened from a view
+        // that never went through `goBack`.
+        nav = NOT_NAVIGATED;
         session = launched.session;
         running = { title: launched.title, extensionTitle: launched.extensionTitle };
         mode = "command";
@@ -3201,6 +3247,9 @@
       const previous = session;
       session = null;
       running = null;
+      // The stack went with the worker. Left behind, the next command opened
+      // would start life believing it was two screens deep in the last one.
+      nav = NOT_NAVIGATED;
       mode = "root";
       selected = 0;
       query = "";
@@ -3630,6 +3679,27 @@
         }
         break;
       case "back":
+        /*
+         * A step back inside the command before a step out of it.
+         *
+         * Only here, and deliberately not inside `goBack`. Six other things
+         * call that: a crash, Sill letting the view go, `popToRoot`, a summon
+         * that resets, and two modes of its own. Every one of them means
+         * "leave the command", and a pop hidden inside `goBack` would turn
+         * each into "go back one screen and stay in a command whose worker is
+         * already gone". Escape is the one caller that means back.
+         *
+         * Nothing is done here beyond asking: the worker renders the screen
+         * underneath and says so, and the `navigation` event is what resets
+         * the highlight and the field. Guessing at it from this side would be
+         * a second opinion about a stack this window does not own.
+         */
+        if (mode === "command" && session && nav.depth > 1 && nav.pop) {
+          void activateHandler(session, nav.pop);
+          panelOpen = false;
+          break;
+        }
+
         void goBack();
         break;
     }
@@ -3738,8 +3808,31 @@
             // for an extension that sets the text from that handler is a loop.
             relay.adopt(payload.text);
             break;
+          case "navigation":
+            /*
+             * A different screen, so everything about the last one is dropped.
+             *
+             * The same three things a command switch drops, for the same
+             * reasons: the highlight belongs to rows that are gone, the field
+             * was typed at a screen nobody is looking at any more, and a
+             * throttled call still waiting carries a handler id the worker
+             * released on the commit that swapped the screens. Left armed it
+             * fires into nothing and puts "the command could not search" on a
+             * screen that never asked to search.
+             */
+            nav = { depth: payload.depth, pop: payload.pop };
+            selected = 0;
+            query = "";
+            relay.cancel();
+            panelOpen = false;
+            status = "";
+            break;
           case "popToRoot":
           case "closeMainWindow":
+            // Out of the command entirely, however deep it was. `popToRoot`
+            // is the extension asking for the root search, not for one step
+            // back, and `goBack` steps back while there is a stack to step in.
+            nav = NOT_NAVIGATED;
             void goBack();
             break;
           case "crashed": {
@@ -4167,6 +4260,23 @@
       Only in the root list. In a conversation the crumb already says Ask, and
       in the clipboard or the switcher Tab is not free to ask anything.
     -->
+    <!--
+      The set of rows the command is showing, when it offers a choice of them.
+      Beside the field, which is where Raycast puts it and where it belongs:
+      it narrows the same list the field narrows.
+    -->
+    {#if dropdown}
+      <ExtDropdown
+        {dropdown}
+        onpick={(value) => {
+          if (!session || !dropdown?.onChange) return;
+          void activateHandler(session, dropdown.onChange, [value]).catch((err: unknown) => {
+            status = `the command could not change that: ${err}`;
+          });
+        }}
+      />
+    {/if}
+
     {#if mode === "root" && answersWith}
       <button
         class="asker"
@@ -4485,7 +4595,9 @@
     </div>
   {:else if view?.tag === "List"}
     <ListView
+      {tree}
       node={view}
+      {version}
       {rows}
       query={searchedFor}
       loading={search.loading}
@@ -4498,6 +4610,7 @@
     />
   {:else if view?.tag === "Grid"}
     <GridView
+      {tree}
       node={view}
       cells={rows}
       {version}
@@ -4513,7 +4626,15 @@
   {:else if view?.tag === "Form"}
     <FormView bind:this={formView} {tree} node={view} {version} onsubmit={submitForm} />
   {:else if view?.tag === "Detail"}
-    <div class="detail">{tree.text(view) || String(view.props.markdown ?? "")}</div>
+    <!--
+      Prose, drawn as prose.
+
+      This was a `div` holding the markdown source, so an extension that wrote
+      a heading put a hash on screen and one that wrote a table put pipes on
+      it. `DetailPane` runs it through the same parser the AI answers use and
+      draws the metadata panel beside it.
+    -->
+    <DetailPane {tree} node={view} {version} />
   {:else}
     <!-- No spinner. The launcher is meant to feel instant and a spinner
          advertises that it is not; the mark plus a line of text says the same
@@ -5166,16 +5287,6 @@
     font-size: var(--text-meta);
     line-height: 1.6;
     color: var(--text-3);
-  }
-
-  .detail {
-    flex: 1;
-    overflow-y: auto;
-    padding: var(--space-4) var(--space-3);
-    color: var(--text-1);
-    line-height: 1.6;
-    white-space: pre-wrap;
-    user-select: text;
   }
 
   /*

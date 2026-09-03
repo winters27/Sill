@@ -1,11 +1,15 @@
 <script lang="ts">
-  import type { ElementNode } from "$lib/exthost/tree";
+  import type { ElementNode, ViewTree } from "$lib/exthost/tree";
   import type { Row } from "$lib/exthost/search";
+  import { emptyViewOf, iconOf } from "$lib/exthost/present";
+  import ExtIcon from "./ExtIcon.svelte";
   import Instead from "./Instead.svelte";
   import { whileEmpty } from "$lib/instead";
   import { LISTBOX, optionId } from "$lib/results";
 
   interface Props {
+    /** The whole tree, for the parts of a grid that arrive as subtrees. */
+    tree: ViewTree;
     node: ElementNode;
     /**
      * The cells to draw, already flattened and already narrowed.
@@ -25,7 +29,7 @@
     onrun: (index: number) => void;
   }
 
-  let { node, cells, version, query, loading, selected, onselect, onrun }: Props = $props();
+  let { tree, node, cells, version, query, loading, selected, onselect, onrun }: Props = $props();
 
   /** Raycast's column counts; the prop is a number of columns, not a width. */
   const columns = $derived.by(() => {
@@ -40,10 +44,23 @@
    * The same three-way choice the list makes, from the same place, so a grid
    * that has not finished fetching does not claim to be empty either.
    */
+  /**
+   * The extension's own words for an empty grid, when it wrote any.
+   *
+   * The same rule the list follows and read by the same function, so a
+   * `Grid.EmptyView` and a `List.EmptyView` are one behaviour rather than two
+   * that happen to look alike. It fills in the one empty-state recipe; it does
+   * not get a design of its own.
+   */
+  const declared = $derived.by(() => {
+    version;
+    return emptyViewOf(tree, node);
+  });
+
   const saying = $derived(
     whileEmpty({ failed: false, loading, count: cells.length }, query, {
-      headline: "Nothing to show",
-      hint: "This command returned an empty grid.",
+      headline: declared?.headline || "Nothing to show",
+      hint: declared?.hint || "This command returned an empty grid.",
     }),
   );
 
