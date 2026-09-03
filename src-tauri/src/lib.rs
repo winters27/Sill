@@ -43,6 +43,7 @@ pub mod profiles;
 pub mod profiles_store;
 pub mod quicklinks;
 pub mod radios;
+pub mod recycle_bin;
 pub mod registry;
 pub mod scripts;
 pub mod secrets;
@@ -1201,6 +1202,9 @@ fn manage_before_windows(app: &tauri::App) {
     app.manage(state::Fresh::<Vec<app_volume::Session>>::new(
         app_volume::FRESH_FOR,
     ));
+    app.manage(state::Fresh::<Vec<processes::Process>>::new(
+        processes::FRESH_FOR,
+    ));
 
     /*
      * The file index's container, empty, whether or not anything will fill it.
@@ -1632,6 +1636,7 @@ pub fn run() {
             commands::search::forget_previews,
             commands::search::timings,
             commands::search::search_app_volume,
+            commands::search::search_processes,
             commands::launch::move_path,
             commands::launch::search_destinations,
             commands::search::search_emoji,

@@ -72,6 +72,8 @@ export interface RankedCommand {
     | "emoji"
     /** One program's own volume, while it is playing something. */
     | "audio-session"
+    /** One running program, while it is running. */
+    | "process"
     /** A folder offered as somewhere to move something into. */
     | "destination"
     /**
@@ -167,6 +169,8 @@ export interface LaunchedCommand {
     | "emoji"
     /** One program's own volume, while it is playing something. */
     | "audio-session"
+    /** One running program, while it is running. */
+    | "process"
     /**
      * A switch belonging to Windows.
      *
@@ -230,6 +234,18 @@ export function movePath(path: string, folder: string): Promise<ActionOutcome> {
 
 export function searchAppVolume(query: string): Promise<RankedCommand[]> {
   return invoke<RankedCommand[]>("search_app_volume", { query });
+}
+
+/**
+ * Everything running right now, heaviest first.
+ *
+ * Its own call rather than part of the root search, and for a stronger version
+ * of the reason the volume list has one: this walks every process on the
+ * machine and opens each of them to read what it costs, and the root list runs
+ * on every keystroke whether or not anybody asked about processes.
+ */
+export function searchProcesses(query: string): Promise<RankedCommand[]> {
+  return invoke<RankedCommand[]>("search_processes", { query });
 }
 
 /**

@@ -620,6 +620,22 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "audio",
             ],
         ),
+        // Behind a row of its own for the reason App Volume is: the list is
+        // built by walking every process on the machine, and the root list runs
+        // on every keystroke whether or not anybody asked about processes.
+        //
+        // Wearing Task Manager's own mark rather than a panel's, because what
+        // it shows belongs to Windows.
+        builtin_wearing(
+            "processes",
+            &task_manager_icon(),
+            "Processes",
+            "What is running, what it costs, and how to end it",
+            &[
+                "process", "task", "memory", "ram", "kill", "quit", "end", "running", "usage",
+                "manager",
+            ],
+        ),
         builtin(
             "emoji",
             "snippets",
@@ -792,6 +808,29 @@ fn system_commands() -> Vec<CommandRecord> {
             "Lock Screen",
             "Locks Windows straight away",
             &["lock", "away", "screen", "afk", "system"],
+        ),
+        /*
+         * The bin, filed with the switches and asked about like the power
+         * commands.
+         *
+         * The subtitle says what pressing it does rather than what is in
+         * there, and that is the same rule the switches follow: a row that
+         * carried the size would need the shell queried while the index is
+         * being built and again on every keystroke that matched it. What is in
+         * there is read once, at the moment somebody presses Enter, and it is
+         * the question that says it.
+         *
+         * The keywords are narrow on purpose. "delete" and "clear" are words
+         * people type about all sorts of things, and a row that empties the
+         * recycle bin turning up in those searches is a row somebody arrows
+         * onto by accident.
+         */
+        system_switch(
+            crate::actions::EMPTY_RECYCLE_BIN,
+            &recycle_bin_icon(),
+            "Empty Recycle Bin",
+            "Permanently deletes everything in it, on every drive",
+            &["recycle", "bin", "trash", "empty", "system"],
         ),
     ];
 
@@ -995,6 +1034,34 @@ fn system_switch(
         panel: None,
         preferences: serde_json::Value::Null,
     }
+}
+
+/// The recycle bin's own mark, full rather than empty.
+///
+/// Index 50, and the index is checked rather than trusted, the way the
+/// Bluetooth one had to be. `imageres.dll` holds the empty bin at 49 and the
+/// bin with paper in it at 50, which was established by extracting 48 to 55 as
+/// a sheet and looking: the gold padlock lands at 54, which is the index the
+/// Lock Screen row above has always used, so the numbering the sheet shows is
+/// the numbering this file already depends on.
+///
+/// The full one deliberately. A row offering to empty the bin is a row about a
+/// bin with something in it, and the empty glyph would say the opposite of
+/// what pressing it is for.
+fn recycle_bin_icon() -> String {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    format!(r"{root}\System32\imageres.dll,50")
+}
+
+/// Where Task Manager keeps its icon.
+///
+/// The program that already answers "what is running and what does it cost",
+/// so the row that answers the same question wears the same mark. It is a
+/// Windows program rather than one of Sill's, which is the whole reason this
+/// row does not wear the settings gear.
+fn task_manager_icon() -> String {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    format!(r"{root}\System32\Taskmgr.exe")
 }
 
 /// Where the volume mixer keeps its icon.

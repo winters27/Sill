@@ -64,6 +64,17 @@ pub fn builtins() -> ActionRegistry {
         Box::new(SessionQuieter),
         Box::new(SessionHalf),
         Box::new(SessionFull),
+        // Quit above Force Quit, and it is this order plus `is_primary` that
+        // puts them that way round on the row rather than a comment saying so.
+        // The one that lets a program save its work is what Enter runs and
+        // what the panel offers first; the one that destroys unsaved work is
+        // below it, reached deliberately.
+        Box::new(QuitProcess),
+        Box::new(ForceQuitProcess),
+        // Below every action that opens or copies, for the reason "Move to
+        // Recycle Bin" is: the panel is drawn in this order and the entry that
+        // removes a program should not sit above the ones that do not.
+        Box::new(UninstallApp),
         Box::new(RestoreWorkspace),
         Box::new(ForgetWorkspace),
         Box::new(ForgetConversation),
@@ -445,7 +456,35 @@ impl Action for ToggleSystem {
          * reach the asking and one that is cannot reach the line below it.
          */
         if let Some(power) = crate::system::Power::from_id(&object.target) {
-            return power_once_answered(ctx, power);
+            return once_answered(ctx, power.into(), power.question().to_string()).await;
+        }
+
+        /*
+         * The bin, which asks the same way and asks with a number.
+         *
+         * Read before the question rather than after, so the question can name
+         * what is about to go: "are you sure" is a worse thing to be asked
+         * than "3.7 GB in 412 items", and the second is what somebody needs to
+         * decide. An empty bin is not asked about at all, because there is
+         * nothing to lose and a question about nothing trains people to answer
+         * these without reading them.
+         */
+        if object.target == EMPTY_RECYCLE_BIN {
+            let held = crate::recycle_bin::held();
+
+            if held.is_empty() {
+                return Ok(Outcome::done("The recycle bin is already empty"));
+            }
+
+            return once_answered(
+                ctx,
+                crate::system::Irreversible::EmptyRecycleBin,
+                format!(
+                    "Press Enter again to permanently delete {}",
+                    held.in_words()
+                ),
+            )
+            .await;
         }
 
         // Each says what it did rather than what it was asked to do, because
@@ -704,6 +743,194 @@ impl Action for SessionFull {
     }
 }
 
+/*
+ * Ending a running program.
+ *
+ * Two actions and the difference between them is the whole feature. One asks
+ * the program to close and lets it save; the other kills it and does not.
+ *
+ * The row carries the process id as its target and the program's name as its
+ * title, and **both are needed**, which is the part that is easy to get wrong.
+ * An id on its own is not an identity: Windows hands a number back out once
+ * the process holding it exits, and the gap between a row being drawn and Enter
+ * being pressed on it is long enough for that to happen. So the name the row
+ * was drawn with goes down with the id, and the check is that the machine still
+ * agrees. See `processes::may_end`.
+ */
+
+/// The process id a row carries, if it carries one.
+///
+/// Its own step because the failure has to be an error rather than a default.
+/// A target that does not parse means the window sent something that is not a
+/// process row, and picking a pid out of the air for it is how the wrong thing
+/// gets ended.
+fn pid_of(object: &Object) -> Result<u32, String> {
+    object
+        .target
+        .parse::<u32>()
+        .map_err(|_| format!("{} is not a running program", object.title))
+}
+
+/// Asks a program to close.
+struct QuitProcess;
+
+#[async_trait]
+impl Action for QuitProcess {
+    fn id(&self) -> &'static str {
+        "sill.process.quit"
+    }
+
+    fn title(&self) -> &'static str {
+        "Quit"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Process
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        // Reaching into another program's windows, which is what a close
+        // request is. Not `Ui`, which is Sill's own surface.
+        &[Capability::WindowControl]
+    }
+
+    /// What Enter does on a process row, and the safe one of the pair.
+    ///
+    /// This is the ordering the panel is drawn in: the registry lifts the
+    /// primary to the front and leaves the rest in registration order, so
+    /// Force Quit is below this because it does not claim Enter and because it
+    /// is registered after. Neither of those is a comment somebody has to
+    /// keep true.
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let pid = pid_of(object)?;
+        let name = object.title.clone();
+
+        let said = tokio::task::spawn_blocking(move || crate::processes::quit(pid, &name))
+            .await
+            .map_err(|err| format!("that could not be asked: {err}"))??;
+
+        // The list on screen is about to be wrong about the row that was just
+        // acted on, and a second of it saying otherwise is exactly how long
+        // somebody looks at a row they pressed.
+        crate::processes::forget(
+            &ctx.app
+                .state::<crate::state::Fresh<Vec<crate::processes::Process>>>(),
+        );
+
+        Ok(Outcome::done(said))
+    }
+}
+
+/// Ends a program outright, without asking it.
+struct ForceQuitProcess;
+
+#[async_trait]
+impl Action for ForceQuitProcess {
+    fn id(&self) -> &'static str {
+        "sill.process.forceQuit"
+    }
+
+    fn title(&self) -> &'static str {
+        "Force Quit"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Process
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        // Deliberately not `WindowControl`, which is what asking a window to
+        // close is. This does not go near a window: it ends the process, and
+        // a permission screen should be able to say those are different
+        // things to be allowed to do.
+        &[Capability::SystemControl]
+    }
+
+    /// Never Enter. Left at the default, and the default is the point:
+    /// claiming the primary here would need a line of code, so the dangerous
+    /// half of this pair cannot become the one Enter runs by accident.
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let pid = pid_of(object)?;
+        let name = object.title.clone();
+
+        let said = tokio::task::spawn_blocking(move || crate::processes::force_quit(pid, &name))
+            .await
+            .map_err(|err| format!("that could not be run: {err}"))??;
+
+        crate::processes::forget(
+            &ctx.app
+                .state::<crate::state::Fresh<Vec<crate::processes::Process>>>(),
+        );
+
+        Ok(Outcome::done(said))
+    }
+}
+
+/// Runs an installed program's own uninstaller.
+struct UninstallApp;
+
+#[async_trait]
+impl Action for UninstallApp {
+    fn id(&self) -> &'static str {
+        "sill.app.uninstall"
+    }
+
+    fn title(&self) -> &'static str {
+        "Uninstall"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Application
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        // A command line out of the registry, which is a shell and everything
+        // a shell can reach, rather than "open this program".
+        &[Capability::ShellExecution]
+    }
+
+    /**
+    Hands over to the vendor's uninstaller rather than removing anything.
+
+    Sill does not delete a program. It finds the command the installer left
+    behind and runs it, and what happens next is the vendor's own screen with
+    the vendor's own confirmation on it. That is why this needs no question of
+    its own: the thing that asks is better than anything a launcher could put
+    up, because it knows what it is about to remove.
+
+    Refused rather than guessed when nothing matches. Running the wrong
+    uninstaller is the same class of mistake as ending the wrong process, and
+    a near match on a display name is not evidence.
+    */
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let title = object.title.clone();
+        let target = object.target.clone();
+
+        let command =
+            tokio::task::spawn_blocking(move || crate::apps::uninstaller_for(&title, &target))
+                .await
+                .map_err(|err| format!("the registry could not be read: {err}"))?
+                .ok_or_else(|| {
+                    format!("Windows does not list an uninstaller for {}", object.title)
+                })?;
+
+        crate::apps::run_uninstaller(&command)?;
+
+        // The uninstaller owns the screen from here, and it is somebody else's
+        // window with somebody else's buttons on it.
+        crate::dismiss_main(&ctx.app);
+
+        Ok(Outcome::done(format!(
+            "Opened the uninstaller for {}",
+            object.title
+        )))
+    }
+}
+
 /// Flips one system switch, and says what the machine is now doing.
 ///
 /// A toggle reads the current state and inverts it rather than being told,
@@ -715,7 +942,21 @@ pub(crate) const RADIO: &str = "system.radio:";
 /// What an audio output row's id starts with, before the device's own.
 pub(crate) const AUDIO_OUTPUT: &str = "system.audio.output:";
 
-/// Runs a power command, but never on the press that asked about it.
+/// The row that empties the recycle bin.
+///
+/// Filed under `system.` with the switches and the power commands, because
+/// that is what it is: a thing that changes Windows rather than one of Sill's
+/// own commands, and it wears the bin's own mark for the same reason.
+pub(crate) const EMPTY_RECYCLE_BIN: &str = "system.recycle-bin.empty";
+
+/// Does something irreversible, but never on the press that asked about it.
+///
+/// **The only caller of [`crate::system::Irreversible::apply`], and it calls it
+/// from one arm.** That is the whole shape: everything destructive is a
+/// variant of one enum, the enum has one place that runs it, and that place is
+/// inside the branch that already holds the answer. There is no second route
+/// to any of it, which is what makes "no single press ever means yes" a fact
+/// about the code rather than about how carefully each call site was written.
 ///
 /// The launcher deliberately stays open while a question is open. That is what
 /// makes a second press possible at all, and it is also the answer to "did it
@@ -725,23 +966,38 @@ pub(crate) const AUDIO_OUTPUT: &str = "system.audio.output:";
 /// like everything else. Being told to shut the machine down, and having asked
 /// its own permission card, it still gets a question back rather than a
 /// shutdown, and it has to decide to say yes a second time.
-fn power_once_answered(ctx: &ActionCtx, power: crate::system::Power) -> Result<Outcome, String> {
+///
+/// The question is passed in rather than read off the enum, because one of
+/// them has to name what is about to go: "permanently delete 3.7 GB in 412
+/// items" is a different sentence every time it is asked, and a question that
+/// cannot say what it is about is a question nobody can answer properly.
+async fn once_answered(
+    ctx: &ActionCtx,
+    about: crate::system::Irreversible,
+    question: String,
+) -> Result<Outcome, String> {
     use crate::system::Press;
 
-    match ctx.app.state::<crate::system::Asked>().press(power) {
+    match ctx.app.state::<crate::system::Asked>().press(about) {
         // A press that came too soon is the repeat of a held key rather than
         // an answer, and repeating the question is the whole of the response
         // to it: nothing has changed, and the question is still open.
-        Press::Asks | Press::TooSoon => Ok(Outcome::done(power.question())),
+        Press::Asks | Press::TooSoon => Ok(Outcome::done(question)),
 
         Press::Answers => {
-            power.apply()?;
+            // On a thread of its own, because one of these is not quick:
+            // emptying a bin holding tens of gigabytes takes as long as it
+            // takes, and an action that blocks the runtime while it runs takes
+            // every other answer down with it.
+            let said = tokio::task::spawn_blocking(move || about.apply())
+                .await
+                .map_err(|err| format!("that could not be started: {err}"))??;
 
             // The screen is about to belong to a sign-in prompt or to nothing
             // at all. Sitting on top of it until then helps nobody.
             crate::dismiss_main(&ctx.app);
 
-            Ok(Outcome::done(power.under_way()))
+            Ok(Outcome::done(said))
         }
     }
 }

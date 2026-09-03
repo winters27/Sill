@@ -1195,6 +1195,61 @@ for (const file of sources("src-tauri/src")) {
   });
 }
 
+/*
+ * Everything that cannot be taken back has exactly one caller.
+ *
+ * The launcher asks before it shuts the machine down and before it empties the
+ * recycle bin, and the asking is one function: `actions::once_answered` runs
+ * `Irreversible::apply` from inside the arm that already holds the answer, and
+ * from nowhere else. That is what makes "no single press ever means yes" a
+ * fact about the shape of the code rather than a claim about how carefully
+ * each call site was written.
+ *
+ * `Power::apply` needs no rule here, because it is private to `system.rs` and
+ * the compiler already refuses a second caller. These two are reachable across
+ * modules and so can gain one silently, and the way that failure looks is a
+ * row that switches the machine off on the first press.
+ *
+ * A definition is not a call, so `fn apply` and `pub fn empty` are not
+ * counted, and neither is a mention inside a comment.
+ */
+{
+  const ONCE = [
+    ["Irreversible::apply", /Irreversible::apply\s*\(|\babout\.apply\s*\(/g],
+    ["recycle_bin::empty", /recycle_bin::empty\s*\(/g],
+  ];
+
+  for (const [what, pattern] of ONCE) {
+    const found = [];
+
+    for (const file of sources("src-tauri/src")) {
+      if (extname(file) !== ".rs") continue;
+
+      const text = readFileSync(file, "utf8");
+
+      for (const at of text.matchAll(pattern)) {
+        // A doc comment naming the rule is how the rule is explained. Only
+        // code counts.
+        const line = text.slice(0, at.index).split("\n").pop();
+        if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue;
+
+        found.push(`${file}:${lineOf(text, at.index)}`);
+      }
+    }
+
+    if (found.length !== 1) {
+      fail(
+        "src-tauri/src/actions/mod.rs",
+        null,
+        `${what} has ${found.length} call sites (${found.join(", ") || "none"}), ` +
+          "and it must have exactly one, inside the arm of `once_answered` that " +
+          "has already been answered. A second route to it is a way round the " +
+          "question",
+      );
+    }
+  }
+}
+
 const FONTS = /\.(woff2?|ttf|otf|eot)$/i;
 const tracked = spawnSync("git", ["ls-files"], { encoding: "utf8" });
 

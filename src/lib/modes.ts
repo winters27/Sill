@@ -38,6 +38,7 @@ export const MODES = [
   "alias",
   "emoji",
   "appVolume",
+  "processes",
   "widgets",
   "namingWorkspace",
   "output",
@@ -118,6 +119,15 @@ const behaviour: Record<Mode, Behaviour> = {
   // the picker had no way to reach.
   emoji: { rows: "commands", searches: true, shows: "results", escape: false, actions: true },
   appVolume: { rows: "commands", searches: true, shows: "results", escape: false, actions: true },
+  /**
+   * What is running, with the action panel on the row under the cursor.
+   *
+   * The panel is the whole point of this view rather than a nicety. Enter asks
+   * a program to close, and the one action that ends it without asking lives
+   * behind Ctrl+K, below the one that does. Taking the panel away here would
+   * leave no way to reach it at all.
+   */
+  processes: { rows: "commands", searches: true, shows: "results", escape: false, actions: true },
   /**
    * Deliberately no action panel.
    *

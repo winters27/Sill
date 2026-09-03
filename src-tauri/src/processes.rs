@@ -277,6 +277,294 @@ pub fn tree_of(root: u32) -> std::collections::HashSet<u32> {
     std::collections::HashSet::from([root])
 }
 
+// ------------------------------------------------------------- ending one
+
+/// How long a reading of what is running is reused for.
+///
+/// The same second the audio sessions and the open windows get, and for the
+/// same reason: filtering the list is a keystroke at a time, and typing six
+/// letters must not walk every process on the machine six times. Longer than
+/// that would start showing a list that disagrees with the desktop.
+pub const FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// What is running, from the reading that is reused for a moment.
+pub fn listed(held: &crate::state::Fresh<Vec<Process>>) -> Vec<Process> {
+    held.get(running)
+}
+
+/// Throws the last reading away.
+///
+/// Called after something has been quit, because the list is the one thing on
+/// screen that is about to be wrong: the row that was just ended would sit
+/// there for another second saying it is still running.
+pub fn forget(held: &crate::state::Fresh<Vec<Process>>) {
+    held.forget();
+}
+
+/// Processes Sill will not offer to end.
+///
+/// Ending any of these does not close a program, it takes the session or the
+/// machine with it: Windows treats several of them as critical and bugchecks
+/// outright, and `svchost.exe` is whichever handful of services happen to
+/// share that host. None of them is ever what somebody scrolling a list of
+/// what is using memory meant to click.
+///
+/// Deliberately short, and it is not a list of things that are inconvenient to
+/// close. `explorer.exe` is not here on purpose: restarting it is a thing
+/// people do deliberately, Windows brings it back, and refusing would be Sill
+/// deciding what somebody may do with their own desktop.
+///
+/// A name rather than a path, because that is what a row carries and what the
+/// check below has to compare against.
+pub fn is_protected(name: &str) -> bool {
+    const CRITICAL: &[&str] = &[
+        "smss.exe",
+        "csrss.exe",
+        "wininit.exe",
+        "winlogon.exe",
+        "services.exe",
+        "lsass.exe",
+        "lsaiso.exe",
+        "svchost.exe",
+    ];
+
+    let lower = name.to_ascii_lowercase();
+    CRITICAL.contains(&lower.as_str())
+}
+
+/// The two ids that are not programs.
+///
+/// 0 is the idle process, which is what a processor does when it has nothing
+/// to do, and 4 is the kernel itself. Neither opens, so neither is in the list
+/// this draws, and both are refused here anyway because a check that only
+/// holds while the list happens to exclude something is not a check.
+fn is_the_kernel(pid: u32) -> bool {
+    pid == 0 || pid == 4
+}
+
+/// Why a process will not be ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refused {
+    /// It has already exited.
+    Gone,
+    /// The id belongs to something else now.
+    ///
+    /// **The reason this check exists.** Windows reuses process ids, and the
+    /// gap between a row being drawn and Enter being pressed on it is long
+    /// enough for the program to exit and the number to be handed to something
+    /// else. Acting on the id alone means ending whatever inherited it, and
+    /// the symptom is indistinguishable from Sill choosing at random.
+    Reused { now: String },
+    /// It is Sill, or something Sill started.
+    ///
+    /// The whole tree rather than the one process, because a launcher built on
+    /// a webview is not one process: quitting the renderer or the extension
+    /// host out of this list would look exactly like Sill crashing.
+    ///
+    /// It costs something, and the cost is worth writing down. Anything Sill
+    /// spawns directly is in that tree, so a script Sill started cannot be
+    /// ended from this list. Applications are not affected, because they are
+    /// opened through the shell and belong to it rather than to us. The trade
+    /// is deliberate: the list refusing one row is a small thing, and the
+    /// launcher appearing to crash when somebody quits a row called
+    /// `msedgewebview2.exe` is not.
+    Ourselves,
+    /// Ending it would take the session with it.
+    Protected,
+    /// Not a program at all.
+    TheKernel,
+}
+
+impl Refused {
+    /// Said to whoever pressed the key, naming what they thought they had.
+    pub fn say(&self, was: &str) -> String {
+        match self {
+            Self::Gone => format!("{was} is not running any more"),
+            Self::Reused { now } => {
+                format!("That is {now} now, not {was}. Nothing was ended.")
+            }
+            Self::Ourselves => "Sill will not end itself".to_string(),
+            Self::Protected => {
+                format!("{was} is part of Windows, and ending it would end the session")
+            }
+            Self::TheKernel => format!("{was} is not a program that can be ended"),
+        }
+    }
+}
+
+/// Whether the process a row named may be ended.
+///
+/// Its own function, taking what the machine says rather than reading it, so
+/// the rule worth proving can be proved without a process to lose: **an id is
+/// never acted on unless it still names what the row said it was.**
+///
+/// The order is the meaning. Identity is settled before anything decides
+/// using a name, because every decision below it is about the wrong program
+/// otherwise.
+pub fn may_end(pid: u32, was: &str, now: Option<&str>, ours: bool) -> Result<(), Refused> {
+    let Some(now) = now else {
+        return Err(Refused::Gone);
+    };
+
+    if !now.eq_ignore_ascii_case(was) {
+        return Err(Refused::Reused {
+            now: now.to_string(),
+        });
+    }
+
+    if is_the_kernel(pid) {
+        return Err(Refused::TheKernel);
+    }
+
+    if ours {
+        return Err(Refused::Ourselves);
+    }
+
+    if is_protected(now) {
+        return Err(Refused::Protected);
+    }
+
+    Ok(())
+}
+
+/// What a process id is called right now, if it is called anything.
+#[cfg(windows)]
+pub fn named(pid: u32) -> Option<String> {
+    describe(pid).map(|(name, _, _)| name)
+}
+
+#[cfg(not(windows))]
+pub fn named(_pid: u32) -> Option<String> {
+    None
+}
+
+/// [`may_end`], asked of the machine as it is at this moment.
+///
+/// Both readings are taken here rather than passed in, and both are taken
+/// **now** rather than when the row was drawn. That is the whole point: the
+/// row is a photograph and this is the check that it still describes anything.
+#[cfg(windows)]
+fn still_endable(pid: u32, was: &str) -> Result<(), String> {
+    let ours = tree_of(std::process::id()).contains(&pid);
+
+    may_end(pid, was, named(pid).as_deref(), ours).map_err(|refused| refused.say(was))
+}
+
+/// Asks a program to close, the way its own close button does.
+///
+/// `WM_CLOSE` to every window it has, never `TerminateProcess`: the program
+/// gets to run its shutdown and gets to put up "save changes?" if there is
+/// unsaved work. This is what Enter does on a process row, and [`force_quit`]
+/// is what it deliberately is not.
+///
+/// A program with no window cannot be asked, and is told so rather than
+/// quietly killed. Falling through to a terminate here would make the safe
+/// action and the dangerous one the same key on the rows where it matters
+/// most, which is every background process in the list.
+///
+/// ## Packaged apps answer "no window", and that is a real gap
+///
+/// A Store app's visible window belongs to `ApplicationFrameHost`, not to the
+/// app, so `GetWindowThreadProcessId` names the host and the app looks
+/// windowless. Windows 11's own Notepad is one of these, which is how it was
+/// found: the probe watched it refuse to close for ten seconds while sitting
+/// on screen.
+///
+/// Left alone rather than worked around here. The same reading is what
+/// `Process::visible` and `windowing::list` have always used, so a fix belongs
+/// where that enumeration is rather than in one action, and the way this fails
+/// is a sentence pointing at Force Quit rather than something happening to the
+/// wrong program.
+#[cfg(windows)]
+pub fn quit(pid: u32, was: &str) -> Result<String, String> {
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+
+    still_endable(pid, was)?;
+
+    let its_own: Vec<isize> = visible_windows()
+        .into_iter()
+        .filter(|(owner, _)| *owner == pid)
+        .map(|(_, window)| window)
+        .collect();
+
+    if its_own.is_empty() {
+        return Err(format!(
+            "{was} has no window to close. Force Quit ends it outright."
+        ));
+    }
+
+    let mut asked = 0usize;
+
+    for window in its_own {
+        // SAFETY: posts a message to a window the enumeration above just
+        // reported and returns immediately.
+        let posted = unsafe {
+            PostMessageW(
+                Some(HWND(window as *mut core::ffi::c_void)),
+                WM_CLOSE,
+                WPARAM(0),
+                LPARAM(0),
+            )
+        };
+
+        if posted.is_ok() {
+            asked += 1;
+        }
+    }
+
+    if asked == 0 {
+        return Err(format!("{was} would not take the request to close"));
+    }
+
+    // Present tense, and honestly so. The program has been asked and may put
+    // up a dialog, or may decline; saying it closed would be a claim about
+    // something that has not happened yet.
+    Ok(format!("Asked {was} to close"))
+}
+
+/// Ends a program outright, without asking it.
+///
+/// `TerminateProcess`, which is the one action here that destroys work: there
+/// is no shutdown, no save prompt and no chance to write anything out. It is
+/// never what Enter does. It sits in the action panel, below the one that
+/// asks, and the ordering is the registry's rather than a comment's: [`quit`]
+/// claims the primary for a process row and this does not.
+#[cfg(windows)]
+pub fn force_quit(pid: u32, was: &str) -> Result<String, String> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+
+    still_endable(pid, was)?;
+
+    // SAFETY: the handle is closed on every path out below.
+    let handle = unsafe { OpenProcess(PROCESS_TERMINATE, false, pid) }
+        .map_err(|err| format!("Windows would not let Sill end {was}: {err}"))?;
+
+    // SAFETY: the handle came from the call above and carries the right to do
+    // this. The exit code is the one Windows itself uses for a killed process.
+    let ended = unsafe { TerminateProcess(handle, 1) };
+
+    // SAFETY: the handle came from OpenProcess and is not used again.
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+
+    ended.map_err(|err| format!("{was} would not end: {err}"))?;
+
+    Ok(format!("Ended {was}"))
+}
+
+#[cfg(not(windows))]
+pub fn quit(_pid: u32, _was: &str) -> Result<String, String> {
+    Err("Only Windows has this.".to_string())
+}
+
+#[cfg(not(windows))]
+pub fn force_quit(_pid: u32, _was: &str) -> Result<String, String> {
+    Err("Only Windows has this.".to_string())
+}
+
 /// The last segment of a Windows path.
 ///
 /// Its own function so it can be tested without a process: the interesting
@@ -296,10 +584,16 @@ pub fn file_name_of(path: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-/// Which processes own a window somebody could see.
+/// Every visible top-level window on the desktop, with whose it is.
+///
+/// One enumeration behind both questions this file asks about windows: which
+/// processes own one, and which windows one process owns. They were going to
+/// be two walks with two predicates, and two predicates about "has a window"
+/// drift: the row would say a process has a window and quitting it would
+/// answer that it has none, which reads as the launcher being broken rather
+/// than as two functions disagreeing.
 #[cfg(windows)]
-fn windowed_pids() -> std::collections::HashSet<u32> {
-    use std::collections::HashSet;
+fn visible_windows() -> Vec<(u32, isize)> {
     use windows::core::BOOL;
     use windows::Win32::Foundation::{HWND, LPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -307,29 +601,35 @@ fn windowed_pids() -> std::collections::HashSet<u32> {
     };
 
     unsafe extern "system" fn visit(window: HWND, into: LPARAM) -> BOOL {
-        // SAFETY: `into` is the address of the set below, which outlives the
-        // enumeration.
-        let found = unsafe { &mut *(into.0 as *mut HashSet<u32>) };
+        // SAFETY: `into` is the address of the vector below, which outlives
+        // the enumeration.
+        let found = unsafe { &mut *(into.0 as *mut Vec<(u32, isize)>) };
 
         if unsafe { IsWindowVisible(window) }.as_bool() {
             let mut pid = 0u32;
             unsafe { GetWindowThreadProcessId(window, Some(&mut pid)) };
             if pid != 0 {
-                found.insert(pid);
+                found.push((pid, window.0 as isize));
             }
         }
 
         true.into()
     }
 
-    let mut found: HashSet<u32> = HashSet::new();
+    let mut found: Vec<(u32, isize)> = Vec::new();
 
-    // SAFETY: the set outlives the call, which returns before this does.
+    // SAFETY: the vector outlives the call, which returns before this does.
     unsafe {
         let _ = EnumWindows(Some(visit), LPARAM(&mut found as *mut _ as isize));
     }
 
     found
+}
+
+/// Which processes own a window somebody could see.
+#[cfg(windows)]
+fn windowed_pids() -> std::collections::HashSet<u32> {
+    visible_windows().into_iter().map(|(pid, _)| pid).collect()
 }
 
 #[cfg(not(windows))]
@@ -362,6 +662,109 @@ mod tests {
     fn a_path_that_names_nothing_is_nothing_rather_than_an_empty_row() {
         assert_eq!(file_name_of(""), None);
         assert_eq!(file_name_of(r"C:\"), None, "a bare drive names no program");
+    }
+
+    /// The one rule this whole check exists for.
+    ///
+    /// A process id is reused. The row was drawn when 4820 was Notepad, the
+    /// key is pressed a minute later, and by then 4820 is a build server. If
+    /// the id alone decides, the build server is what gets ended.
+    #[test]
+    fn an_id_that_has_been_handed_to_something_else_is_refused() {
+        let refused = may_end(4820, "notepad.exe", Some("node.exe"), false)
+            .expect_err("the id no longer names what the row said");
+
+        assert_eq!(
+            refused,
+            Refused::Reused {
+                now: "node.exe".to_string()
+            }
+        );
+        assert!(
+            refused.say("notepad.exe").contains("node.exe"),
+            "the message has to name what it actually is: {}",
+            refused.say("notepad.exe")
+        );
+    }
+
+    #[test]
+    fn a_process_that_has_already_exited_is_not_an_error_worth_dressing_up() {
+        assert_eq!(
+            may_end(4820, "notepad.exe", None, false),
+            Err(Refused::Gone)
+        );
+    }
+
+    #[test]
+    fn sill_will_not_end_itself_or_anything_it_started() {
+        assert_eq!(
+            may_end(1234, "sill.exe", Some("sill.exe"), true),
+            Err(Refused::Ourselves),
+            "the launcher closing itself from its own list is not a feature"
+        );
+    }
+
+    /// Ending one of these does not close a program, it ends the session.
+    #[test]
+    fn nothing_windows_needs_is_offered_up() {
+        for critical in [
+            "smss.exe",
+            "csrss.exe",
+            "wininit.exe",
+            "winlogon.exe",
+            "services.exe",
+            "lsass.exe",
+            "lsaiso.exe",
+            "svchost.exe",
+        ] {
+            assert!(is_protected(critical), "{critical} is not protected");
+            assert_eq!(
+                may_end(900, critical, Some(critical), false),
+                Err(Refused::Protected),
+                "{critical} would have been ended",
+            );
+        }
+
+        // Case is a fact about how the path was written, not about what the
+        // program is. `SvcHost.exe` is the same process.
+        assert!(is_protected("SVCHOST.EXE"));
+    }
+
+    #[test]
+    fn the_kernel_is_not_a_program() {
+        for pid in [0, 4] {
+            assert_eq!(
+                may_end(pid, "System", Some("System"), false),
+                Err(Refused::TheKernel),
+                "pid {pid} was treated as something to end",
+            );
+        }
+    }
+
+    /// The list is short on purpose. Refusing everything that looks system-ish
+    /// would make the feature useless, and restarting Explorer is a thing
+    /// people do deliberately.
+    #[test]
+    fn an_ordinary_program_is_endable_and_so_is_explorer() {
+        assert!(may_end(4820, "notepad.exe", Some("notepad.exe"), false).is_ok());
+        assert!(may_end(4820, "explorer.exe", Some("explorer.exe"), false).is_ok());
+        assert!(!is_protected("explorer.exe"));
+        assert!(!is_protected("chrome.exe"));
+    }
+
+    /// Identity is settled before anything reads the name.
+    ///
+    /// Otherwise the ordering decides the answer: a reused id whose new
+    /// occupant happens to be protected would be refused for the wrong reason,
+    /// and the message would name a program that is not there.
+    #[test]
+    fn a_reused_id_is_reported_as_reused_whatever_took_it_over() {
+        assert_eq!(
+            may_end(900, "notepad.exe", Some("lsass.exe"), false),
+            Err(Refused::Reused {
+                now: "lsass.exe".to_string()
+            }),
+        );
     }
 
     /// Only meaningful on the machine, so it is ignored. Run it to see the
