@@ -13,11 +13,12 @@
   import FormView from "$lib/components/FormView.svelte";
   import RootList from "$lib/components/RootList.svelte";
   import Instead from "$lib/components/Instead.svelte";
+  import KeySheet from "$lib/components/KeySheet.svelte";
   import AiMark from "$lib/components/settings/AiMark.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
   import Steps from "$lib/components/Steps.svelte";
   import { LISTBOX, isBrowsing, optionId, selectionAfter } from "$lib/results";
-  import { deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
+  import { askedForTheKeys, deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import { asUrl, isPath, isUrl } from "$lib/typed";
   import {
     behaviourOf,
@@ -25,6 +26,7 @@
     handlesItsOwnEscape,
     hasRowActions,
     searchesOnType,
+    type Mode,
   } from "$lib/modes";
   import ActionPanel from "$lib/components/ActionPanel.svelte";
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
@@ -133,72 +135,20 @@
   const tree = new ViewTree();
 
   /** Root browses installed commands; command shows one that is running. */
-  let mode = $state<
-    | "root"
-    | "command"
-    | "clipboard"
-    | "argument"
-    | "switcher"
-    | "collection"
-    | "alias"
-    | "emoji"
-    /**
-     * Every program that is playing something, with its own volume.
-     *
-     * Its own mode rather than rows in the root list, and that is a
-     * measurement: enumerating the audio sessions costs about three
-     * milliseconds and the root list runs on every keystroke, whether or not
-     * anything about sound was typed.
-     */
-    | "appVolume"
-    /**
-     * What is running, and what it costs.
-     *
-     * Its own view for the same reason the volume list has one: walking every
-     * process on the machine is not something to do because somebody typed the
-     * letter p.
-     */
-    | "processes"
-    | "widgets"
-    /**
-     * Naming the arrangement of windows being saved.
-     *
-     * The launcher's own field rather than a dialog, the way an alias and a
-     * collection are named: a window to dismiss for one short string is a
-     * window nobody wanted.
-     */
-    | "namingWorkspace"
-    /** A script's output, while it runs and once it has finished. */
-    | "output"
-    /**
-     * Browsing extensions that are not installed yet.
-     *
-     * Its own mode rather than rows in the root list, and for the same reason
-     * the process view has one: the catalogue is three thousand listings that
-     * have to be fetched, and nothing about typing a letter should reach the
-     * network. It is entered deliberately and left completely, which is what
-     * lets the catalogue be dropped on the way out.
-     */
-    | "store"
-    /**
-     * A conversation with a model.
-     *
-     * Its own mode rather than a row in the list, because an answer is a
-     * paragraph and a list is a list. Reached by Tab from the root, which is
-     * where the question was already being typed.
-     */
-    | "ai"
-    | "conversations"
-    /**
-     * Picking somewhere to move a file to.
-     *
-     * A list rather than a typed path, because a path typed into a launcher is
-     * a path typed wrong: no completion, no telling whether it exists, and no
-     * way to see that there are three folders called "src". The rows are
-     * folders and Enter picks one.
-     */
-    | "destination"
-  >("root");
+  /*
+   * Which face the launcher is showing.
+   *
+   * The union comes from `modes.ts` rather than being written out again here.
+   * It was written out again here, and that is the "two mode unions" the audit
+   * lists under duplicate sources of truth: a mode added to the table still
+   * would not compile in the window, and one added here would have no entry in
+   * the table. One list, and the table is the list.
+   *
+   * The notes that used to sit against individual arms of this union are on
+   * their entries in the table, which is where somebody reading about a mode
+   * is already looking.
+   */
+  let mode = $state<Mode>("root");
   /**
    * The quicklink waiting for something to be typed into it.
    *
@@ -3393,6 +3343,20 @@
      * it is not on the action panel alone: a list somebody opened to tidy up
      * wants tidying with one key rather than two.
      */
+    /*
+     * `?` on an empty field asks what the keys are.
+     *
+     * The same rule Delete follows: with something typed it is a character,
+     * because a launcher that eats a question mark is worse than one whose
+     * reference takes two keys to reach. The launcher menu is the other way
+     * in and works whatever is typed.
+     */
+    if (mode === "root" && askedForTheKeys(event, query)) {
+      event.preventDefault();
+      mode = "keys";
+      return;
+    }
+
     if (mode === "conversations" && deleteMeansTheRow(event, query)) {
       event.preventDefault();
       const row = conversationRows[selected];
@@ -4085,6 +4049,8 @@
       <span class="crumb">Open Windows</span>
     {:else if mode === "emoji"}
       <span class="crumb">Emoji</span>
+    {:else if mode === "keys"}
+      <span class="crumb">Keyboard</span>
     {:else if mode === "ai"}
       <!--
         Who is answering, in the place that says where you are.
@@ -4437,6 +4403,14 @@
         prefs={prefs ?? null}
         onpin={(id, pinned) => void setPinned(id, pinned)}
       />
+    </div>
+
+  {:else if mode === "keys"}
+    <!-- A page to read, not a list to walk. Every chord on it is assembled in
+         Rust from the keys that actually run, so it cannot promise one that
+         does not work. -->
+    <div class="listing">
+      <KeySheet />
     </div>
 
   {:else if mode === "store"}

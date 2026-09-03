@@ -4,7 +4,7 @@
  * Everything here is a mistake that a compiler, a type checker and a test suite
  * all accept, which is why it needs a pass of its own. Each one has happened.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -1891,6 +1891,41 @@ for (const file of sources("src-tauri/src")) {
           "that setting is saved and not applied until the next start",
       );
     }
+  }
+}
+
+/*
+ * The keyboard reference does not write a chord down.
+ *
+ * Every key on that page comes from `keyboard_reference`, which assembles it
+ * from the movement preset, the action shortcuts and the summon key. A chord
+ * typed into the component is a promise nothing keeps: it survives the key
+ * being rebound, and the person reading it has no way to tell it is stale.
+ *
+ * This project has been bitten four times by a hand-kept list quietly
+ * disagreeing with the thing it describes, which is why the rule is a build
+ * failure rather than a note.
+ */
+{
+  const SHEET = "src/lib/components/KeySheet.svelte";
+  const CHORD = /"(?:Ctrl|Alt|Shift|Cmd|Meta|Super)\+[A-Za-z0-9+]+"/g;
+
+  if (existsSync(SHEET)) {
+    const text = readFileSync(SHEET, "utf8");
+
+    text.split("\n").forEach((line, at) => {
+      // A comment may name a chord as an example; only code counts.
+      if (/^\s*(\/\/|\*|\/\*|<!--)/.test(line)) return;
+
+      for (const found of line.matchAll(CHORD)) {
+        fail(
+          SHEET,
+          at + 1,
+          `${found[0]} is written here rather than read from keyboard_reference, ` +
+            "so it goes on saying so after the key is rebound",
+        );
+      }
+    });
   }
 }
 

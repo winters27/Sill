@@ -29,6 +29,7 @@ pub mod icons;
 pub mod input;
 pub mod job;
 pub mod json_store;
+pub mod keysheet;
 pub mod lazy_windows;
 pub mod live;
 pub mod lnk;
@@ -1683,6 +1684,7 @@ pub fn run() {
             commands::settings::navigation_chords,
             commands::settings::navigation_keys,
             commands::settings::action_shortcuts,
+            commands::settings::keyboard_reference,
             commands::settings::emoji_tones,
             commands::search::list_monitors,
             commands::search::open_path,

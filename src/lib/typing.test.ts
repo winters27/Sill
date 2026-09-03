@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deleteMeansTheRow, isTyping, typedInto } from "./typing";
+import { askedForTheKeys, deleteMeansTheRow, isTyping, typedInto } from "./typing";
 
 const press = (key: string, held: Partial<Record<"ctrlKey" | "altKey" | "metaKey", boolean>> = {}) => ({
   key,
@@ -93,5 +93,24 @@ describe("deciding what Delete destroys", () => {
   it("is not any other key", () => {
     expect(deleteMeansTheRow(press("Backspace"), "")).toBe(false);
     expect(deleteMeansTheRow(press("d", { ctrlKey: true }), "")).toBe(false);
+  });
+});
+
+describe("asking for the keys", () => {
+  it("means the sheet on an empty field", () => {
+    expect(askedForTheKeys(press("?"), "")).toBe(true);
+  });
+
+  it("is a character once something is typed", () => {
+    expect(askedForTheKeys(press("?"), "what")).toBe(false);
+  });
+
+  it("is not a chord", () => {
+    expect(askedForTheKeys(press("?", { ctrlKey: true }), "")).toBe(false);
+    expect(askedForTheKeys(press("?", { altKey: true }), "")).toBe(false);
+  });
+
+  it("is only that key", () => {
+    expect(askedForTheKeys(press("/"), "")).toBe(false);
   });
 });

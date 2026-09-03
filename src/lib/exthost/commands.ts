@@ -343,6 +343,27 @@ export interface AiReady {
   * Silent on failure for the same reason the searches are: this is a key
   * press, and the cost of a failure is that Tab does nothing once.
   */
+/** One line of the keyboard reference. */
+export type KeyLine = {
+  chord: string;
+  does: string;
+  changed: boolean;
+  contested: boolean;
+};
+
+/** A group of lines under a heading. */
+export type KeySection = { title: string; keys: KeyLine[] };
+
+/**
+ * The keyboard reference, assembled in Rust from the keys that actually run.
+ *
+ * Not silent: this is a page somebody opened on purpose, so a failure has
+ * somewhere to be shown and should be.
+ */
+export function keyboardReference(): Promise<KeySection[]> {
+  return invoke<KeySection[]>("keyboard_reference");
+}
+
 export function completePath(typed: string): Promise<string | null> {
   return invoke<string | null>("complete_path", { typed }).catch(silently(null));
 }

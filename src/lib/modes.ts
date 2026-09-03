@@ -45,6 +45,7 @@ export const MODES = [
   "store",
   "ai",
   "conversations",
+  "keys",
   "destination",
 ] as const;
 
@@ -148,6 +149,18 @@ const behaviour: Record<Mode, Behaviour> = {
    * one a hotkey cannot bind and the model cannot run.
    */
   conversations: { rows: "own", searches: false, shows: "own", escape: true, actions: true },
+  /**
+   * The keyboard reference.
+   *
+   * Nothing to walk and nothing to act on: it is a page somebody reads and
+   * then leaves, so the arrow keys scroll it rather than moving a highlight,
+   * and Ctrl+K on a page with no rows would be a panel about nothing.
+   *
+   * `searches: false` because the query field is not a filter here. Typing
+   * with the sheet open is somebody who has finished reading and wants to
+   * search, which Escape is for.
+   */
+  keys: { rows: "none", searches: false, shows: "own", escape: true, actions: false },
   /**
    * The extension store, with actions on the listing under the cursor.
    *

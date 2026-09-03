@@ -87,3 +87,23 @@ export function deleteMeansTheRow(event: Keystroke, typed: string): boolean {
 
   return event.ctrlKey || event.metaKey || typed.length === 0;
 }
+
+/**
+ * Whether `?` means "show me the keys" rather than a question mark.
+ *
+ * The same rule Delete follows, and for the same reason: `?` is a character
+ * somebody types, so with anything in the field it is text. On an empty field
+ * there is nothing to be typing, and a launcher that cannot be asked what its
+ * keys are is one whose keys nobody finds.
+ *
+ * No modifier form, deliberately. Shift is already held to type `?` on most
+ * layouts, so a Ctrl or Alt variant would be a third chord for a question
+ * anybody can ask by emptying the field. The launcher menu is the other way
+ * in, and that one works whatever is typed.
+ */
+export function askedForTheKeys(event: Keystroke, typed: string): boolean {
+  if (event.key !== "?") return false;
+  if (event.ctrlKey || event.metaKey || event.altKey) return false;
+
+  return typed.length === 0;
+}

@@ -584,6 +584,72 @@ pub(crate) async fn set_pinned(
     Ok(next)
 }
 
+/// The keyboard reference, built from the keys that actually run.
+///
+/// Assembled here rather than in the window so it reads from the same three
+/// sources the keys come from: the movement preset, the action shortcuts and
+/// the summon key. A written list would be wrong the first time one of them
+/// changed, and the person reading it would have no way to tell.
+#[tauri::command]
+pub(crate) async fn keyboard_reference(
+    actions: State<'_, crate::action::ActionRegistry>,
+    prefs: State<'_, crate::state::PrefsState>,
+) -> Result<Vec<crate::keysheet::KeySection>, String> {
+    let (summon, navigation, keys) = {
+        let current = prefs.inner.lock().await;
+        (
+            current.hotkey.summon.clone(),
+            current.navigation.clone(),
+            current.action_keys.clone(),
+        )
+    };
+
+    let moving: Vec<(String, String, bool)> = crate::navigation::Move::ALL
+        .into_iter()
+        .map(|movement| {
+            (
+                crate::navigation::effective(&navigation, movement),
+                movement.title().to_string(),
+                navigation.overrides.contains_key(&movement),
+            )
+        })
+        .collect();
+
+    // Every action that carries a key, from every list it can appear on, with
+    // the same clash rule the panel uses. Collected by id so an action shown
+    // on two kinds is one line.
+    let mut acting: std::collections::BTreeMap<String, (String, String, bool, bool)> =
+        std::collections::BTreeMap::new();
+
+    for kind in crate::object::ObjectKind::ALL {
+        let shown: Vec<(String, String, Option<crate::action_keys::Shortcut>)> = actions
+            .describe(*kind, &keys)
+            .into_iter()
+            .map(|a| (a.id.to_string(), a.title.to_string(), a.shortcut))
+            .collect();
+
+        let contested: std::collections::BTreeSet<String> = crate::action_keys::conflicts(&shown)
+            .into_iter()
+            .map(|clash| clash.id)
+            .collect();
+
+        for (id, title, shortcut) in shown {
+            let Some(shortcut) = shortcut else { continue };
+            let changed = keys.overrides.contains_key(&id);
+            let clash = contested.contains(&id);
+
+            acting
+                .entry(id)
+                .and_modify(|line| line.3 |= clash)
+                .or_insert((shortcut.chord(), title, changed, clash));
+        }
+    }
+
+    let acting: Vec<(String, String, bool, bool)> = acting.into_values().collect();
+
+    Ok(crate::keysheet::reference(&summon, &moving, &acting))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
