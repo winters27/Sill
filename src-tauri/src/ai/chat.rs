@@ -162,6 +162,10 @@ const FILE: &str = "conversations.json";
 /// be read is still on disk to look at.
 const BROKEN: &str = "conversations.broken.json";
 
+/// The one report about conversations not being saved, named once so the save
+/// that works withdraws the one that did not.
+const TROUBLE: &str = "conversations";
+
 /// The longest a question may be before it is shortened into a name.
 const TITLE: usize = 80;
 
@@ -508,28 +512,57 @@ impl Chat {
     /// Called after anything that changes them rather than on a timer. There
     /// are at most fifty and the whole file is a few kilobytes, so this costs
     /// less than deciding when to do it would.
-    pub fn save(&self, dir: &std::path::Path) {
-        // Never over a file nobody read. See the field this reads.
+    /// Writes them out, and says whether it worked.
+    ///
+    /// Separate from `save` so the behaviour can be tested against a temporary
+    /// directory without standing up an application to report to, which is
+    /// rule 20: the brain is testable without the frontend.
+    pub fn write_to(&self, dir: &std::path::Path) -> Result<(), String> {
+        // Never over a file nobody read. See the field this reads. Not a
+        // failure to report: refusing to write is the correct outcome here,
+        // and the load that did not happen is what would be worth knowing.
         if !self
             .read_the_file
             .load(std::sync::atomic::Ordering::Relaxed)
         {
             crate::say!("not saving conversations: they were never loaded");
-            return;
+            return Ok(());
         }
 
-        let Ok(held) = self.held.lock() else {
-            return;
-        };
+        let held = self.held.lock().map_err(|_| "the lock was poisoned")?;
 
         let all: Vec<&Conversation> = held.open.iter().chain(held.past.iter()).collect();
 
-        let Ok(text) = serde_json::to_string(&all) else {
-            return;
-        };
+        let text = serde_json::to_string(&all).map_err(|err| err.to_string())?;
 
         let _ = std::fs::create_dir_all(dir);
-        let _ = std::fs::write(dir.join(FILE), text);
+        std::fs::write(dir.join(FILE), text).map_err(|err| err.to_string())
+    }
+
+    /// Writes them out and reports it when that does not work.
+    ///
+    /// What everything outside this file calls. It takes the application
+    /// rather than a directory because the directory is derived from it and
+    /// every caller was already deriving it, and because a failure has
+    /// somewhere to go now.
+    ///
+    /// Worth reporting because there is no other sign. Every conversation from
+    /// this session is on screen and reads as saved; the loss happens at the
+    /// next start, when the list of past conversations is simply short, and
+    /// nothing connects that to the disk having been full an hour earlier.
+    pub fn save(&self, app: &tauri::AppHandle) {
+        match self.write_to(&crate::state::data_dir(app)) {
+            Ok(()) => crate::status::resolved(app, TROUBLE),
+            Err(err) => crate::status::report(
+                app,
+                TROUBLE,
+                format!(
+                    "Sill could not save your conversations, so anything said since it \
+                     started will be gone when it next opens: {err}"
+                ),
+                Some("ai"),
+            ),
+        }
     }
 
     /// Remembers something said, and marks the conversation as spoken to.
@@ -1270,7 +1303,7 @@ mod tests {
             before.load(&dir);
             before.begin("asked yesterday", 100);
             said(&before, "asked yesterday", "answered yesterday", 100);
-            before.save(&dir);
+            before.write_to(&dir).expect("written");
 
             let after = Chat::new();
             after.load(&dir);
@@ -1293,7 +1326,7 @@ mod tests {
             before.load(&dir);
             before.begin("asked yesterday", 100);
             said(&before, "asked yesterday", "an answer", 100);
-            before.save(&dir);
+            before.write_to(&dir).expect("written");
 
             let after = Chat::new();
             after.load(&dir);
@@ -1314,7 +1347,7 @@ mod tests {
             before.load(&dir);
             before.begin("the question", 100);
             said(&before, "the question", "the answer", 100);
-            before.save(&dir);
+            before.write_to(&dir).expect("written");
 
             let after = Chat::new();
             after.load(&dir);
@@ -1341,7 +1374,7 @@ mod tests {
             before.begin("asked", 0);
             said(&before, "asked", "an answer", 0);
             before.set_session("session-abc".to_string());
-            before.save(&dir);
+            before.write_to(&dir).expect("written");
 
             let after = Chat::new();
             after.load(&dir);
@@ -1362,7 +1395,7 @@ mod tests {
                 before.begin(&format!("question {n}"), n);
                 said(&before, "q", "a", n);
             }
-            before.save(&dir);
+            before.write_to(&dir).expect("written");
 
             let after = Chat::new();
             after.load(&dir);
@@ -1419,7 +1452,7 @@ mod tests {
             chat.load(&dir);
             chat.begin("something new", 0);
             said(&chat, "something new", "an answer", 0);
-            chat.save(&dir);
+            chat.write_to(&dir).expect("written");
 
             let aside = std::fs::read_to_string(dir.join(BROKEN)).expect("kept aside");
             assert_eq!(aside, nonsense, "what could not be read was thrown away");
@@ -1446,13 +1479,13 @@ mod tests {
             first.begin("worth keeping", 0);
             said(&first, "worth keeping", "an answer", 0);
             first.load(&dir);
-            first.save(&dir);
+            first.write_to(&dir).expect("written");
 
             // A second `Chat` that never loaded, doing what it does.
             let careless = Chat::new();
             careless.begin("brand new", 10);
             said(&careless, "brand new", "an answer", 10);
-            careless.save(&dir);
+            let _ = careless.write_to(&dir);
 
             let after = Chat::new();
             after.load(&dir);
@@ -1471,11 +1504,41 @@ mod tests {
             chat.load(&dir);
             chat.begin("the first thing", 0);
             said(&chat, "the first thing", "an answer", 0);
-            chat.save(&dir);
+            chat.write_to(&dir).expect("written");
 
             let after = Chat::new();
             after.load(&dir);
             assert_eq!(after.summaries(1).len(), 1);
+        }
+
+        /// A save that does not happen says so rather than returning quietly.
+        ///
+        /// This used to be `let _ = std::fs::write(...)`, so a full disk, a
+        /// read-only data directory or a file another process was holding
+        /// meant every conversation from that session was gone at the next
+        /// start with nothing at any point suggesting it. Nothing on screen
+        /// changes when a save fails: the conversation is still there, in
+        /// memory, looking saved.
+        ///
+        /// A directory standing where the file goes is the failure that can be
+        /// arranged on any machine. What it stands in for is the ones that
+        /// cannot: the disk being full, and the folder being denied.
+        #[test]
+        fn a_save_that_cannot_be_written_says_so() {
+            let dir = a_directory("unwritable");
+
+            // Something that is not a file, exactly where the file belongs.
+            std::fs::create_dir_all(dir.join(FILE)).expect("a directory in the way");
+
+            let chat = Chat::new();
+            chat.load(&dir);
+            chat.begin("worth keeping", 0);
+            said(&chat, "worth keeping", "an answer", 0);
+
+            assert!(
+                chat.write_to(&dir).is_err(),
+                "a save that did not happen reported success, so the loss is silent"
+            );
         }
 
         #[test]

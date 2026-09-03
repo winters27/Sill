@@ -736,7 +736,10 @@
         stepFrom = prefs.screenshot?.stepFrom ?? stepFrom;
       })
       .catch(() => {
-        // A window with the default palette is still a usable window.
+        // A window with the default palette is still a usable window, so this
+        // is judged not worth the status surface: nothing here claims to be
+        // showing somebody's settings, it just starts from the same place a
+        // machine with no settings saved would.
       });
 
     void load();

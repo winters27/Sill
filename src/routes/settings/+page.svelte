@@ -56,6 +56,7 @@
     type Timings,
     type Preferences,
   } from "$lib/settings";
+  import { forgetUnreadable, statusTroubles, type Trouble } from "$lib/status";
   import { swap } from "$lib/motion";
   import "$lib/theme/theme.css";
 
@@ -364,6 +365,38 @@
 
   /** Accelerators Windows refused because something else already has them. */
   let conflicts = $state<string[]>([]);
+
+  /**
+   * Everything Sill is quietly not doing.
+   *
+   * The tray icon that was not created, the startup entry that was not
+   * written, the copied image that was not stored, a saved file that did not
+   * save, and anything this window itself could not read. All of them used to
+   * end at a log line, so the switch said one thing and the machine did
+   * another with nothing on screen to tell them apart.
+   *
+   * Shown above the panels rather than inside one, because it is about the
+   * application and not about whichever section happens to be open. Kept
+   * current by an event, so something that breaks while this window is up
+   * appears without reopening it.
+   */
+  let troubles = $state<Trouble[]>([]);
+
+  /** The trouble about one thing, for the row that sets that thing. */
+  function troubleOf(id: string): Trouble | undefined {
+    return troubles.find((one) => one.id === id);
+  }
+
+  /**
+   * The panel a trouble is about, when it names one this window still has.
+   *
+   * Checked rather than trusted. The section is a string Rust chose beside the
+   * code that failed, and a panel that gets renamed or removed would otherwise
+   * leave an offer to go somewhere that no longer exists.
+   */
+  function panelFor(trouble: Trouble): PanelId | null {
+    return PANELS.find((panel) => panel.id === trouble.section)?.id ?? null;
+  }
   let filter = $state("");
   let clearing = $state(false);
   let rebuilding = $state(false);
@@ -542,6 +575,7 @@
   onMount(() => {
     let unlisten: UnlistenFn | undefined;
     let changed: UnlistenFn | undefined;
+    let wrong: UnlistenFn | undefined;
 
     (async () => {
       // A deep link opens straight at its panel: "About Sill" landing on
@@ -574,6 +608,23 @@
         applyAppearance(payload);
       });
 
+      // Something that breaks while this window is open appears in it, rather
+      // than the next time somebody happens to reopen it.
+      wrong = await listen<Trouble[]>("sill://status-changed", ({ payload }) => {
+        troubles = payload;
+      });
+
+      /*
+       * Cleared before the reads below, not after each one.
+       *
+       * Every read this window does reports itself when it fails, and it does
+       * all of them again on every open, so whatever was reported last time is
+       * stale before the first answer arrives. Clearing them one by one as
+       * they succeed would put an extra call on the path that worked, and the
+       * path that worked is the one that should cost nothing.
+       */
+      await forgetUnreadable("settings");
+
       try {
         prefs = await getPreferences();
         conflicts = await hotkeyConflicts();
@@ -590,11 +641,16 @@
       } catch (err) {
         status = `Could not load settings: ${err}`;
       }
+
+      // Last, so it holds whatever the reads above just reported about
+      // themselves as well as everything Rust had already recorded.
+      troubles = await statusTroubles();
     })();
 
     return () => {
       unlisten?.();
       changed?.();
+      wrong?.();
     };
   });
 </script>
@@ -688,6 +744,31 @@
         {#if status}<span class="status">{status}</span>{/if}
       </header>
 
+      <!--
+        Above the panels, because a thing that is not working is about Sill and
+        not about whichever section happens to be open. Outside `.content` as
+        well as above it: that is a one-cell grid holding the panel swap, so a
+        sibling inside it would be laid over the panel rather than beside it.
+
+        A quiet block of sentences rather than a notice that demands anything.
+        Every one of these is a state somebody can come and read, which is why
+        none of them is a toast: a failed clipboard image would raise one per
+        copy, and the thing that is actually wrong is wrong once.
+      -->
+      {#if troubles.length > 0}
+        <section class="wrong" aria-label="What is not working">
+          {#each troubles as trouble (trouble.id)}
+            {@const goes = panelFor(trouble)}
+            <p>
+              {trouble.message}
+              {#if goes && goes !== active}
+                <button class="goto" onclick={() => (active = goes)}>Go there</button>
+              {/if}
+            </p>
+          {/each}
+        </section>
+      {/if}
+
       <div class="content">
         {#if !prefs}
           <div class="loading">{status || "Loading…"}</div>
@@ -703,9 +784,17 @@
           <div class="panel-body" in:swap out:swap={{ out: true }}>
           {#if active === "general"}
           <Section label="Startup">
+            <!--
+              Both rows say so themselves when the thing they switch did not
+              happen, the same way a refused hotkey marks the row that set it.
+              A switch reading "on" over a startup entry that was never written
+              is the whole problem: the block above says what is wrong, and
+              this is what says which control is lying about it.
+            -->
             <Row
               title="Open at login"
-              description="Sill starts with Windows and waits quietly for the hotkey."
+              description={troubleOf("autostart")?.message ??
+                "Sill starts with Windows and waits quietly for the hotkey."}
             >
               {#snippet control()}
                 <Toggle
@@ -717,7 +806,8 @@
             </Row>
             <Row
               title="Show in the system tray"
-              description="Sill has no taskbar button, so the tray icon is the only sign it is running. Left click summons it, right click opens a menu."
+              description={troubleOf("tray")?.message ??
+                "Sill has no taskbar button, so the tray icon is the only sign it is running. Left click summons it, right click opens a menu."}
             >
               {#snippet control()}
                 <Toggle
@@ -1966,6 +2056,47 @@
     flex: none;
     font-size: var(--text-meta);
     color: var(--core-accent);
+  }
+
+  /*
+   * What is not working, said once and quietly.
+   *
+   * A tinted band with a single hairline down its leading edge, which is the
+   * thinnest thing that separates it from the panel below without becoming a
+   * boxed-in notice. No border on the other three sides and no shadow: this
+   * has to be readable without being the loudest thing in the window, because
+   * most of the time it is not there at all and the times it is, it is the
+   * answer to a question somebody already has.
+   */
+  .wrong {
+    margin: 0 var(--space-8) var(--space-5);
+    padding: var(--space-3) var(--space-4);
+    border-left: 1px solid var(--accent-red);
+    background: rgba(var(--accent-red-rgb), 0.08);
+    border-radius: var(--radius-sm);
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .wrong p {
+    margin: 0;
+    font-size: var(--text-meta);
+    color: var(--text-1);
+    line-height: 1.45;
+  }
+
+  /* A link rather than a button shape. The house keeps bordered chips out of
+     the settings window, and this is one word inside a sentence. */
+  .goto {
+    border: none;
+    background: none;
+    padding: 0;
+    margin-left: var(--space-1);
+    font: inherit;
+    color: var(--core-accent);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   /* The outgoing and incoming panels overlap for the length of the exit, so

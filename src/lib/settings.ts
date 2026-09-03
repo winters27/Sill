@@ -5,6 +5,7 @@
  * side omits, so a stale copy here loses a setting rather than corrupting one.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { orElse, silently } from "$lib/status";
 import type { DictationSettings } from "$lib/dictation";
 
 export type Backdrop = "acrylic" | "blur" | "none";
@@ -408,7 +409,7 @@ export interface SearchEngine {
  * two edits that can disagree.
  */
 export function searchEngines(): Promise<SearchEngine[]> {
-  return invoke<SearchEngine[]>("search_engines").catch(() => []);
+  return invoke<SearchEngine[]>("search_engines").catch(orElse("settings", "the search engines", [], "websearch"));
 }
 
 /**
@@ -425,7 +426,7 @@ export interface KnownBrowser {
 }
 
 export function browserProfiles(): Promise<KnownBrowser[]> {
-  return invoke<KnownBrowser[]>("browser_profiles").catch(() => []);
+  return invoke<KnownBrowser[]>("browser_profiles").catch(orElse("settings", "which browsers are on this machine", [], "browsers"));
 }
 
 export function rebuildIndex(): Promise<void> {
@@ -536,7 +537,7 @@ export function acceleratorFrom(event: KeyboardEvent): string | null {
  * one that is visibly off.
  */
 export function hotkeyConflicts(): Promise<string[]> {
-  return invoke<string[]>("hotkey_conflicts").catch(() => []);
+  return invoke<string[]>("hotkey_conflicts").catch(orElse("settings", "which hotkeys another application already has", [], "shortcuts"));
 }
 
 /**
@@ -576,10 +577,9 @@ export interface IndexPage {
  * showing the first two hundred as though that were all of them.
  */
 export function indexRows(query: string, mode?: string): Promise<IndexPage> {
-  return invoke<IndexPage>("index_rows", { query, mode }).catch(() => ({
-    rows: [],
-    total: 0,
-  }));
+  return invoke<IndexPage>("index_rows", { query, mode }).catch(
+    orElse("settings", "what is in the index", { rows: [], total: 0 }, "sources"),
+  );
 }
 
 /**
@@ -645,9 +645,16 @@ export type Move =
  *
  * Resolved in Rust so this and the settings screen cannot hold two opinions
  * about what Ctrl+N does.
+ *
+ * Silent, unlike the reads around it, for two reasons. It is the launcher that
+ * asks, not this window, so a report would land in the settings window's group
+ * and be cleared by the act of opening settings to read it. And an empty map
+ * is not a lie anybody believes: the arrows and Enter are not chords and keep
+ * working, so what is left is Ctrl+N doing nothing, which is visible to the
+ * person pressing it in the instant they press it.
  */
 export function navigationChords(): Promise<Record<string, Move>> {
-  return invoke<Record<string, Move>>("navigation_chords").catch(() => ({}));
+  return invoke<Record<string, Move>>("navigation_chords").catch(silently({}));
 }
 
 /** One movement, as a settings row shows it. */
@@ -660,7 +667,7 @@ export interface NavigationKey {
 }
 
 export function navigationKeys(): Promise<NavigationKey[]> {
-  return invoke<NavigationKey[]>("navigation_keys").catch(() => []);
+  return invoke<NavigationKey[]>("navigation_keys").catch(orElse("settings", "which keys move around the launcher", [], "shortcuts"));
 }
 
 /** One skin tone, shown as a hand rather than named. */
@@ -677,5 +684,5 @@ export interface ToneChoice {
  * nobody picks "medium-light" off a list, they pick the one that looks right.
  */
 export function emojiTones(): Promise<ToneChoice[]> {
-  return invoke<ToneChoice[]>("emoji_tones").catch(() => []);
+  return invoke<ToneChoice[]>("emoji_tones").catch(orElse("settings", "the emoji skin tones", [], "emoji"));
 }

@@ -61,6 +61,10 @@ cpal = "0.18"
 rubato = "5"
 audioadapter-buffers = "5"
 sha2 = "0.10"
+# SHA-1 and UUIDs, for the utility answers. Both were already being built as
+# transitive dependencies, so naming them here costs nothing new.
+sha1 = "0.11"
+uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 zip = "8.6.0"
 # `gzip`, for the extension store. Its index is 19 MB of JSON uncompressed and

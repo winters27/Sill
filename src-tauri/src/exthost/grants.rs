@@ -38,6 +38,10 @@ use super::permission::{needs_granting, plainly, Permits};
 
 const FILE: &str = "extension-grants.json";
 
+/// The one report about grants not being written, named once so a save that
+/// works withdraws the one that did not.
+const TROUBLE: &str = "extension-grants";
+
 /// How long a card waits before an unanswered one counts as no.
 const PATIENCE: std::time::Duration = std::time::Duration::from_secs(90);
 
@@ -96,12 +100,35 @@ impl Granted {
         };
         let Some(path) = self.path() else { return };
 
-        if let Ok(text) = serde_json::to_string_pretty(&*held) {
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
+        let Ok(text) = serde_json::to_string_pretty(&*held) else {
+            return;
+        };
 
-            let _ = std::fs::write(path, text);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        /*
+         * Reported, because the whole point of this file is being asked once.
+         *
+         * A grant that is not written down is granted for this run and gone by
+         * the next one, so the same card comes back on every launch for a
+         * permission the user has already agreed to. That is precisely the
+         * pattern this module's own doc says teaches somebody to press yes
+         * without reading, and there is nothing in the prompt to suggest a
+         * failed write is why it keeps appearing.
+         */
+        match std::fs::write(path, text) {
+            Ok(()) => crate::status::resolved(&self.app, TROUBLE),
+            Err(err) => crate::status::report(
+                &self.app,
+                TROUBLE,
+                format!(
+                    "Sill could not save which extensions you have allowed, so it will \
+                     ask again next time it starts: {err}"
+                ),
+                Some("extensions"),
+            ),
         }
     }
 

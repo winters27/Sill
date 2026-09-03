@@ -48,6 +48,7 @@
     type AiStep,
   } from "$lib/exthost/commands";
   import { applyAppearance, getPreferences, openSettings, type Preferences } from "$lib/settings";
+  import { forgetUnreadable, orElse, silently } from "$lib/status";
 
   interface Shown {
     role: string;
@@ -146,6 +147,15 @@
         continue;
       }
 
+      /*
+       * Said here rather than on the status surface.
+       *
+       * A picture that cannot be read is a failure about the thing somebody
+       * just did, in the window they did it in, and there is already a line
+       * for exactly that above: a picture too large to send says so here. A
+       * paste that silently attached nothing was the only outcome of this
+       * function that left no trace at all.
+       */
       const body = await new Promise<string>((done, fail) => {
         const reader = new FileReader();
         reader.onload = () => done(String(reader.result));
@@ -153,7 +163,10 @@
         reader.readAsDataURL(picture);
       }).catch(() => "");
 
-      if (!body) continue;
+      if (!body) {
+        trouble = `That picture could not be read, so it was not attached.`;
+        continue;
+      }
 
       carrying = [
         ...carrying,
@@ -420,9 +433,20 @@
       const prefs: Preferences = await getPreferences();
       applyAppearance(prefs);
 
-      ceiling = await aiLimits().catch(() => ceiling);
+      // Forgotten before these ask again, so a failure that has since been
+      // fixed is not still being reported. Scoped to this window: a flat group
+      // would mean opening this one erased what the launcher had found.
+      void forgetUnreadable("ask");
 
-      answersWith = await aiReady().catch(() => null);
+      // Silent. The fallback is the ceiling this page already holds, which is
+      // the same pair of numbers Rust would have answered with unless somebody
+      // has changed them, so nothing on screen becomes untrue. What it costs is
+      // that a picture right on the edge is judged against yesterday's limit.
+      ceiling = await aiLimits().catch(silently(ceiling));
+
+      answersWith = await aiReady().catch(
+        orElse("ask", "whether anything is set up to answer", null, "ai"),
+      );
 
       conversation = (await aiTranscript()).map((turn) => ({ ...turn, steps: [] }));
       await refreshList();
@@ -478,7 +502,9 @@
 
       changed = await listen<Preferences>("sill://preferences-changed", async ({ payload }) => {
         applyAppearance(payload);
-        answersWith = await aiReady().catch(() => null);
+        answersWith = await aiReady().catch(
+          orElse("ask", "whether anything is set up to answer", null, "ai"),
+        );
       });
 
       composer?.focus();
