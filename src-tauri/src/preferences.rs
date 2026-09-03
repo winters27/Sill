@@ -482,7 +482,8 @@ fn seal_secrets(document: &mut serde_json::Value) {
                 Some(sealed) => *slot = serde_json::Value::String(sealed),
                 None => {
                     crate::say!(
-                        "could not encrypt {}; it is left out of the file rather than                          written in plain text. You will have to enter it again",
+                        "could not encrypt {}; it is left out of the file rather than \
+                         written in plain text. You will have to enter it again",
                         path.join(".")
                     );
                     *slot = serde_json::Value::Null;

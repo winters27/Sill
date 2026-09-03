@@ -1007,6 +1007,56 @@ for (const file of sources("src/lib/components/settings")) {
  * added later by somebody who never heard why the first one could not be.
  * This does.
  */
+/*
+ * A message with a run of spaces inside it.
+ *
+ * Rust joins a literal written across two lines only when the first line ends
+ * in a backslash. Lose that backslash, or let a tool reflow the pair onto one
+ * line, and the indentation that was holding the second half in place becomes
+ * part of the sentence. It compiles, every test that checks for a substring
+ * still passes, and the person reading it sees
+ * "so it will                      ask again".
+ *
+ * Found twice in one merge, in a status report and in a log line, so this is a
+ * real shape rather than a hypothetical one.
+ *
+ * Two things are deliberately not this bug. A literal carrying an escape is
+ * formatting on purpose (`"  {} {}\\n    id: {}"` lines a listing up), and a
+ * test fixture is allowed to contain whatever spacing it is testing the
+ * handling of. Both are skipped, which leaves prose meant for a person.
+ */
+for (const file of sources("src-tauri/src")) {
+  const text = readFileSync(file, "utf8");
+
+  text.split("\n").forEach((line, at) => {
+    // Comments are prose, and prose may be spaced however it likes.
+    if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+
+    // A fixture says what spacing it expects; that is the point of it.
+    if (line.includes("assert")) return;
+
+    for (const m of line.matchAll(/"((?:[^"\u005C]|\u005C.)*)"/g)) {
+      // An escape means the spacing was arranged on purpose.
+      if (m[1].includes("\u005C")) continue;
+
+      // Spaces run up to a colon to line a reading up in a column, which is
+      // how every `key    : value` diagnostic in here is written.
+      const aligned = /\S {3,}[:|]/;
+
+      // Three, not two: two spaces after a full stop is a writing style,
+      // while three is indentation that leaked in.
+      if (/\S {3,}\S/.test(m[1]) && !aligned.test(m[1])) {
+        fail(
+          file,
+          at + 1,
+          "a message has a run of spaces in it, which is usually a line " +
+            "continuation that lost its backslash",
+        );
+      }
+    }
+  });
+}
+
 const FONTS = /\.(woff2?|ttf|otf|eot)$/i;
 const tracked = spawnSync("git", ["ls-files"], { encoding: "utf8" });
 

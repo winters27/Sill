@@ -136,7 +136,8 @@ impl Granted {
                 &self.app,
                 TROUBLE,
                 format!(
-                    "Sill could not save which extensions you have allowed, so it will                      ask again next time it starts: {err}"
+                    "Sill could not save which extensions you have allowed, so it \
+                     will ask again next time it starts: {err}"
                 ),
                 Some("extensions"),
             ),
