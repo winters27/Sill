@@ -1,0 +1,222 @@
+# A tag becomes an installer.
+#
+# `git tag v0.2.0 && git push origin v0.2.0` builds Sill on a clean Windows
+# runner and attaches the NSIS setup and the MSI to a draft release, with the
+# CHANGELOG section for that version as the body. Draft, because `verify` runs
+# on the same tag push and this does not wait for it: publishing is the moment
+# somebody looks at both and decides.
+#
+# `workflow_dispatch` does the same build and creates no release. That is the
+# rehearsal, and it exists because a release pipeline nobody has run is a
+# guess. Run it once before the first real tag.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Never cancelled. A half-finished release build leaves a draft release with
+# some of its assets, which is worse than paying for the whole run.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    # A release build compiles the whole tree optimised and then runs WiX and
+    # NSIS over it. `verify` takes 45 on a cold cache doing less than this.
+    timeout-minutes: 90
+
+    env:
+      # Read in `if:` below to decide whether signing can happen at all.
+      # A secrets expression cannot be used in a step condition; an env one can.
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            host/package-lock.json
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
+      # Everything cheap happens before anything expensive. A tag that does not
+      # match the version, or a changelog nobody wrote, should cost seconds
+      # rather than an hour of compiling followed by a release that cannot be
+      # published.
+
+      - name: The tag and the version are the same number
+        id: version
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "rehearsal for $version, no tag to check"
+            exit 0
+          fi
+
+          tagged="${GITHUB_REF_NAME#v}"
+          if [ "$tagged" != "$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} against package.json $version." \
+              "Run \`npm run version:set $tagged\`, commit, and move the tag."
+            exit 1
+          fi
+          echo "$GITHUB_REF_NAME matches package.json"
+
+      # Every other version in the tree is a copy that cannot read package.json,
+      # and `verify:source` is what refuses to let them drift. Run before the
+      # build rather than only in `verify`, because the number this produces is
+      # the one printed on the installer.
+      - name: Every version in the tree agrees
+        run: node scripts/verify-source.mjs
+
+      # The release body, written by a person, extracted rather than generated.
+      # A generated list of commit subjects is not release notes: half of them
+      # are merges and most name the mechanism rather than what changed for
+      # anybody using it. `npm run changelog` prints the diff to write from.
+      - name: The changelog section for this version
+        id: notes
+        shell: bash
+        run: |
+          if ! node scripts/changelog.mjs extract "${{ steps.version.outputs.version }}" > notes.md; then
+            if [ "${{ github.event_name }}" = "push" ]; then exit 1; fi
+            echo "::warning::no changelog section yet. A real tag would stop here."
+            printf 'Rehearsal build. No release notes.\n' > notes.md
+          fi
+
+          # A heredoc, because release notes are many lines and a step output
+          # is one by default. The delimiter is long enough not to occur in
+          # prose about a launcher.
+          {
+            echo "body<<SILL_RELEASE_NOTES_a3f1"
+            cat notes.md
+            echo "SILL_RELEASE_NOTES_a3f1"
+          } >> "$GITHUB_OUTPUT"
+
+          cat notes.md
+
+      - run: npm ci
+      - run: npm --prefix host ci
+
+      # Not optional, and not covered by anything else here. `tauri.conf.json`
+      # names `../host/dist/host.js` and `../host/node_modules/@esbuild/
+      # win32-x64/esbuild.exe` as bundle resources, so a build without this
+      # step fails on a missing resource. `verify` never noticed because its
+      # host tests build the host on their way past.
+      - name: The extension host, which the installer carries
+        run: npm run host:build
+
+      # The last cheap thing before the expensive thing.
+      #
+      # `bundle.resources` is read at the very end of a release build, so a
+      # missing file there costs the whole compile and then fails. This asks
+      # from the config, in the time it takes to stat three paths.
+      #
+      # It also checks the interface font, which is not in the repository:
+      # Satoshi's licence forbids distributing the file through one, so
+      # `postinstall` above fetched it per machine. `npm run build`, which
+      # `tauri build` runs as its beforeBuildCommand, fetches it again with
+      # `--required` and stops if it cannot, because a packaged copy can only
+      # carry the face that was on disk when it was built. That stop is
+      # correct and it is also fifty minutes late.
+      - name: Everything the installer carries is on disk
+        run: node scripts/verify-bundle.mjs
+
+      # Signing, from here down, does nothing until the two secrets exist.
+      # WINDOWS_CERTIFICATE is a base64 `.pfx` and WINDOWS_CERTIFICATE_PASSWORD
+      # its password. Until then these steps are skipped and the installers go
+      # out unsigned, which SmartScreen will warn about and which is still a
+      # release.
+      - name: Import the signing certificate
+        id: certificate
+        if: env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          # RUNNER_TEMP and not the workspace: a `.pfx` inside the checkout is
+          # one careless later step away from being an artifact.
+          #
+          # A plain string and not the object New-Item returns. A DirectoryInfo
+          # interpolates as whatever path it was constructed with, which is a
+          # detail nobody should be relying on to find a certificate.
+          $dir = Join-Path $env:RUNNER_TEMP 'signing'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+          Set-Content -Path "$dir\certificate.b64" -Value $env:WINDOWS_CERTIFICATE
+          certutil -decode "$dir\certificate.b64" "$dir\certificate.pfx"
+          # A native command failing does not stop a pwsh step on its own, and
+          # the next thing that happens would be an error about a missing file.
+          if ($LASTEXITCODE -ne 0) { throw "certutil could not decode WINDOWS_CERTIFICATE" }
+          Remove-Item "$dir\certificate.b64"
+
+          # And an exit code is not enough on its own: certutil answers 0 for
+          # input that is not base64 at all, writing whatever it made of it. A
+          # PKCS#12 file is an ASN.1 SEQUENCE, so it starts 0x30 0x82. Checked
+          # here rather than left to Import-PfxCertificate, whose answer to a
+          # file of nonsense is a message about a password.
+          #
+          # Length first. A short or empty secret decodes to a file with no
+          # second byte, and indexing past the end of it is an error about a
+          # null array, which says nothing about a certificate.
+          $bytes = [System.IO.File]::ReadAllBytes("$dir\certificate.pfx")
+          if ($bytes.Length -lt 2 -or $bytes[0] -ne 0x30 -or $bytes[1] -ne 0x82) {
+            throw "WINDOWS_CERTIFICATE did not decode to a .pfx. Set it to the output of ``base64 -w0 certificate.pfx``"
+          }
+
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $imported = Import-PfxCertificate -FilePath "$dir\certificate.pfx" `
+            -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item "$dir\certificate.pfx"
+
+          # A `.pfx` usually carries its issuing chain, and only one of those
+          # has the private key. Signing with an intermediate's thumbprint
+          # fails with a message about the certificate rather than about this.
+          $leaf = $imported | Where-Object { $_.HasPrivateKey } | Select-Object -First 1
+          if (-not $leaf) { throw "the imported certificate has no private key" }
+
+          "thumbprint=$($leaf.Thumbprint)" >> $env:GITHUB_OUTPUT
+
+      # The thumbprint identifies one certificate in one machine's store, so it
+      # cannot live in the committed config: every build on a machine without
+      # that certificate would fail. It is written here, for this build only.
+      - name: Point the bundler at it
+        if: env.WINDOWS_CERTIFICATE != ''
+        run: node scripts/windows-signing.mjs ${{ steps.certificate.outputs.thumbprint }}
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Empty on a rehearsal, which is what makes it build and stop.
+          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          releaseName: ${{ github.event_name == 'push' && format('Sill {0}', steps.version.outputs.version) || '' }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: true
+          prerelease: false
+          # Off until P7-02. The updater needs a signed manifest and a key
+          # Sill does not have yet, and a `latest.json` pointing at artifacts
+          # nothing can verify is worse than no manifest at all.
+          uploadUpdaterJson: false
+          # So a rehearsal has something to download, and so a failed upload to
+          # a release still leaves the installers somewhere.
+          uploadWorkflowArtifacts: true
+          # `bundle.targets` is "all", which on Windows means these two. Named
+          # here so what comes out of a release is stated rather than inherited.
+          args: --bundles nsis,msi
