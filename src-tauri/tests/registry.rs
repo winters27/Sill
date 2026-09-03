@@ -2575,6 +2575,17 @@ fn the_system_switches_are_reachable_by_the_words_people_use() {
         ("night", "sill:system.theme"),
         ("lock", "sill:system.lock"),
         ("afk", "sill:system.lock"),
+        // The power rows, which are worth nothing at all if the word somebody
+        // types for them reaches something else instead.
+        ("sleep", "sill:system.power.sleep"),
+        ("hibernate", "sill:system.power.hibernate"),
+        ("sign out", "sill:system.power.signout"),
+        ("log off", "sill:system.power.signout"),
+        ("restart", "sill:system.power.restart"),
+        ("reboot", "sill:system.power.restart"),
+        ("shut down", "sill:system.power.shutdown"),
+        ("shutdown", "sill:system.power.shutdown"),
+        ("turn off", "sill:system.power.shutdown"),
     ] {
         let found = ids(&search(&corpus, typed, &Frecency::default(), NOW, 50));
 
@@ -2582,6 +2593,35 @@ fn the_system_switches_are_reachable_by_the_words_people_use() {
             found.iter().any(|id| id == wanted),
             "{typed:?} does not reach {wanted}: {:?}",
             found.iter().take(5).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Every way of ending a session is a row, and none of them is a switch.
+///
+/// The two halves matter separately. A row that is not built is a command that
+/// does not exist, and a row the launcher thinks is a switch would be drawn
+/// with a control beside it saying the machine is currently switched off.
+#[test]
+fn the_power_commands_are_rows_and_none_of_them_draws_a_switch() {
+    let corpus = registry::builtins();
+
+    for power in sill_lib::system::Power::ALL {
+        let row = corpus
+            .iter()
+            .find(|row| row.entrypoint == power.id())
+            .unwrap_or_else(|| panic!("{:?} has no row", power));
+
+        assert_eq!(row.id, format!("sill:{}", power.id()));
+        assert_eq!(row.mode, "system");
+        assert!(!row.title.is_empty(), "{} has no title", row.id);
+        assert!(!row.subtitle.is_empty(), "{} says nothing", row.id);
+        assert!(row.icon.is_some(), "{} wears nothing", row.id);
+
+        assert!(
+            !sill_lib::system::is_switch(&row.entrypoint),
+            "{} would be drawn as something with an on and an off",
+            row.id,
         );
     }
 }

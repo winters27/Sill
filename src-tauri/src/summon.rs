@@ -338,6 +338,22 @@ pub fn show_with(app: &tauri::AppHandle, command: Option<String>) {
 pub fn hide(window: &WebviewWindow) {
     let _ = window.hide();
     restore_foreground();
+    went_away(window);
+}
+
+/// Everything that has to happen however the launcher went away.
+///
+/// Two routes reach it and they differ in what they may do first. Dismissing
+/// puts back whatever was in front; losing focus must not, because focus has
+/// already gone somewhere the user picked. What the two have in common is
+/// here, so a third route cannot quietly do half of it.
+pub fn went_away(window: &WebviewWindow) {
+    // A question the launcher asked belongs to whoever was looking at the row.
+    // The window has gone, so nobody is answering it: leaving it open would
+    // mean coming back and pressing Enter once was enough to restart a machine.
+    if let Some(asked) = window.app_handle().try_state::<crate::system::Asked>() {
+        asked.forget();
+    }
 
     // Arms a timer rather than suspending now: coming straight back is the
     // ordinary way this is used, and that path must stay free.
