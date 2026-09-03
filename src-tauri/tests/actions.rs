@@ -803,3 +803,127 @@ fn every_kind_describes_itself_distinctly() {
          them apart: {said:?}"
     );
 }
+
+/// The safe half of the pair is what Enter runs, and the other one is below it.
+///
+/// `WM_CLOSE` lets a program put up "save changes?" and write out what it has.
+/// `TerminateProcess` does not, and somebody who meant to close a document and
+/// lost an afternoon's work will not be consoled by either of them being one
+/// key away. So this is checked as an ordering rather than trusted to the
+/// order the two are written in: the panel draws what `describe` returns, Enter
+/// runs what `primary` answers, and both have to agree that it is the one that
+/// asks.
+#[test]
+fn quit_is_what_enter_does_to_a_process_and_force_quit_is_never() {
+    let registry = builtins();
+
+    let primary = registry
+        .primary(ObjectKind::Process)
+        .expect("a process row has something bound to Enter");
+
+    assert_eq!(
+        primary.id(),
+        "sill.process.quit",
+        "Enter on a process row runs {} rather than the one that asks",
+        primary.id()
+    );
+
+    let drawn = registry.describe(ObjectKind::Process);
+
+    let quit = drawn
+        .iter()
+        .position(|action| action.id == "sill.process.quit")
+        .expect("Quit is offered on a process");
+    let force = drawn
+        .iter()
+        .position(|action| action.id == "sill.process.forceQuit")
+        .expect("Force Quit is offered on a process");
+
+    assert_eq!(quit, 0, "the panel does not open on Quit: {drawn:?}");
+    assert!(
+        quit < force,
+        "Force Quit is drawn above Quit, so the entry that destroys unsaved \
+         work is the one under the cursor"
+    );
+    assert!(
+        !drawn[force].primary,
+        "Force Quit claims Enter, which is the one key nobody thinks about \
+         before pressing"
+    );
+}
+
+/// Ending a program is offered on a process and on nothing else.
+///
+/// Both actions parse their target as a process id, so a kind that reached
+/// them would be handing a path or a panel name to something that ends
+/// whatever number it managed to read out of it.
+#[test]
+fn nothing_but_a_running_process_can_be_ended() {
+    let registry = builtins();
+
+    for kind in ObjectKind::ALL {
+        if *kind == ObjectKind::Process {
+            continue;
+        }
+
+        let offered: Vec<_> = registry
+            .for_kind(*kind)
+            .into_iter()
+            .map(|action| action.id())
+            .filter(|id| id.starts_with("sill.process."))
+            .collect();
+
+        assert!(
+            offered.is_empty(),
+            "{kind:?} is offered {offered:?}, which parse a process id out of \
+             whatever the row happens to carry"
+        );
+    }
+}
+
+/// Uninstalling is offered on an application, is not what Enter does, and is
+/// last.
+///
+/// The panel is drawn in registration order after the primary is lifted, and
+/// the entry that removes a program should not sit above the ones that open it
+/// or copy its path. Somebody arrowing down a panel quickly should reach every
+/// harmless thing before they reach this.
+#[test]
+fn uninstalling_is_offered_on_an_application_and_is_the_last_thing_offered() {
+    let registry = builtins();
+
+    let drawn = registry.describe(ObjectKind::Application);
+
+    let at = drawn
+        .iter()
+        .position(|action| action.id == "sill.app.uninstall")
+        .expect("an application can be uninstalled");
+
+    assert!(
+        !drawn[at].primary,
+        "Enter on an application runs its uninstaller rather than opening it"
+    );
+    assert_eq!(
+        at,
+        drawn.len() - 1,
+        "Uninstall is drawn at {at} of {}, above something harmless: {drawn:?}",
+        drawn.len()
+    );
+
+    // Nothing else gets it. A file, a folder and a setting are not programs
+    // with an entry in the Uninstall hives, and offering it there would be
+    // offering an action that can only fail.
+    for kind in ObjectKind::ALL {
+        if *kind == ObjectKind::Application {
+            continue;
+        }
+
+        assert!(
+            registry
+                .for_kind(*kind)
+                .into_iter()
+                .all(|action| action.id() != "sill.app.uninstall"),
+            "{kind:?} is offered an uninstaller"
+        );
+    }
+}

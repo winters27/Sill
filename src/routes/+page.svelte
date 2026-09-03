@@ -59,6 +59,7 @@
     aiTranscript,
     forgetPreviews,
     searchAppVolume,
+    searchProcesses,
     searchDestinations,
     summonPainted,
     windowPreview,
@@ -154,6 +155,7 @@
      * process on the machine is not something to do because somebody typed the
      * letter p.
      */
+    | "processes"
     | "widgets"
     /**
      * Naming the arrangement of windows being saved.
@@ -767,13 +769,15 @@
        * long as it is on screen, a window's id is a handle that stops being
        * valid when it closes, and a program's audio session carries the
        * process number in it, so naming one would be naming this morning's
-       * copy of that program.
+       * copy of that program. A running process is that last one exactly: its
+       * id **is** the process number.
        */
       const namable =
         chosen &&
         chosen.mode !== "answer" &&
         chosen.mode !== "window" &&
         chosen.mode !== "audio-session" &&
+        chosen.mode !== "process" &&
         // An alias points at a command id and is matched against the index. A
         // conversation is not in the index, so a name given to one would find
         // nothing however carefully it was chosen.
@@ -1058,6 +1062,18 @@
       return;
     }
 
+    if (mode === "processes") {
+      try {
+        const found = await searchProcesses(current);
+        if (id !== searchId) return;
+
+        show(found, current);
+      } catch (err) {
+        if (id === searchId) status = `could not read what is running: ${err}`;
+      }
+      return;
+    }
+
     if (mode === "emoji") {
       try {
         const found = await searchEmoji(current);
@@ -1234,6 +1250,14 @@
     if (id === "sill:appVolume") {
       void recordUse(id, typed);
       mode = "appVolume";
+      selected = 0;
+      query = "";
+      return true;
+    }
+
+    if (id === "sill:processes") {
+      void recordUse(id, typed);
+      mode = "processes";
       selected = 0;
       query = "";
       return true;
@@ -1588,6 +1612,32 @@
 
       try {
         const outcome = await runObjectAction("sill.audio.session.mute", asTarget(session));
+        status = outcome.message;
+        await refreshRoot();
+      } catch (err) {
+        status = `${err}`;
+      }
+      return;
+    }
+
+    /*
+     * Enter asks a program to close, and never ends one.
+     *
+     * Named here rather than left to the primary lookup so that the one key
+     * somebody presses without thinking is bound to the safe half of the pair
+     * in the window as well as in the registry. Force Quit has no key at all:
+     * it is reached through Ctrl+K, which is a deliberate act.
+     *
+     * The list stays where it is, like the volume list. A program asked to
+     * close may put up "save changes?" and still be there, and closing the
+     * launcher would take away the row that says whether it went.
+     */
+    if (mode === "processes") {
+      const process = commands[selected];
+      if (!process) return;
+
+      try {
+        const outcome = await runObjectAction("sill.process.quit", asTarget(process));
         status = outcome.message;
         await refreshRoot();
       } catch (err) {
@@ -2316,11 +2366,14 @@
          * A whole re-read for the volume list, because these rows carry a
          * percentage as well as a switch and `refreshSwitches` only puts the
          * switch back: turning something down would have flipped nothing and
-         * left "100%" underneath. Elsewhere the switch is the whole state, and
-         * only when the row acted on was one, because copying a path moves
-         * nothing and a one-shot is closing the window anyway.
+         * left "100%" underneath. The process list wants the same for a
+         * different reason: the row acted on is the one that has just stopped
+         * existing, and a list still offering to quit it is offering to quit
+         * whatever inherits its number. Elsewhere the switch is the whole
+         * state, and only when the row acted on was one, because copying a
+         * path moves nothing and a one-shot is closing the window anyway.
          */
-        if (mode === "appVolume") {
+        if (mode === "appVolume" || mode === "processes") {
           await refreshRoot();
         } else if (mode === "conversations") {
           // Forgetting one removes the row that was acted on, so the list has
@@ -3775,6 +3828,8 @@
       <span class="crumb">Conversations</span>
     {:else if mode === "appVolume"}
       <span class="crumb">App Volume</span>
+    {:else if mode === "processes"}
+      <span class="crumb">Processes</span>
     {:else if mode === "widgets"}
       <span class="crumb">Widgets</span>
     {:else if mode === "namingWorkspace"}
@@ -3823,6 +3878,8 @@
           ? "Filter what you have asked…"
         : mode === "appVolume"
           ? "Filter by program name…"
+        : mode === "processes"
+          ? "Filter what is running…"
         : mode === "widgets"
           ? "Esc to go back…"
         : mode === "namingWorkspace"

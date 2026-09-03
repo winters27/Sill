@@ -691,3 +691,432 @@ fn dedupe(found: &mut Vec<AppRecord>) {
         }
     });
 }
+
+// ----------------------------------------------------------- uninstalling
+
+/*
+ * An installed program's own uninstaller.
+ *
+ * `is_noise` above drops every shortcut a vendor ships called "Uninstall Foo",
+ * and it is right to: somebody typing "foo" wants the program, and an
+ * uninstaller sitting beside it in a list you are arrowing through quickly is
+ * a hazard rather than a feature. This is the other half of that decision.
+ * Uninstalling stays possible, and it is reached by name, from the action
+ * panel, on the row for the program itself.
+ *
+ * Sill removes nothing. It finds the command line the installer wrote down and
+ * runs it, and the vendor's own uninstaller is what asks and what deletes.
+ */
+
+/// One installed program, as the Uninstall hives describe it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Installed {
+    pub display_name: String,
+    /// The command line to run to remove it.
+    pub uninstall: String,
+    /// `DisplayIcon`, which for most entries is the program's own executable.
+    pub icon: Option<String>,
+}
+
+/// The executable a `DisplayIcon` names, without its quotes or icon index.
+///
+/// A display icon is usually the program's own path followed by a comma and a
+/// number, and the number is which icon inside the file rather than part of
+/// the path.
+fn icon_executable(icon: &str) -> String {
+    let head = icon.split(',').next().unwrap_or(icon);
+    head.trim().trim_matches('"').to_ascii_lowercase()
+}
+
+/// Whether a registry entry is the program a row names.
+///
+/// Two keys, and both are exact. A path is the stronger of them: a row built
+/// from the Uninstall hive carries that entry's own executable, so the match
+/// is an identity rather than a resemblance. The name is the fallback for a
+/// row that came from a Start Menu shortcut, compared after `tidy_name` has
+/// taken the version and the architecture tag off both sides.
+///
+/// **Nothing fuzzy, on purpose.** Running the wrong uninstaller is the same
+/// class of mistake as ending the wrong process, and "the display name
+/// contains what the row is called" is not evidence: it would offer to
+/// uninstall Visual Studio from a row for Visual Studio Code.
+pub fn same_program(row_title: &str, row_target: &str, entry: &Installed) -> bool {
+    if let Some(icon) = entry.icon.as_deref() {
+        let named = icon_executable(icon);
+        if !named.is_empty() && named == row_target.trim_matches('"').to_ascii_lowercase() {
+            return true;
+        }
+    }
+
+    tidy_name(&entry.display_name).eq_ignore_ascii_case(&tidy_name(row_title))
+}
+
+/// A command line split the way `CreateProcess` splits one.
+///
+/// The registry holds a command line rather than a path, and the two shapes it
+/// comes in need different handling: a quoted program with arguments after it,
+/// and an unquoted name such as the Windows installer with a product code.
+/// Windows resolves an unquoted one by trying each space as if it were the end
+/// of the path, first match winning, which is why a file test is passed in
+/// rather than done here: the rule is then testable without any of those files
+/// existing.
+///
+/// The arguments come back as one untouched string. They are handed on with
+/// `raw_arg`, so what the vendor wrote is what their uninstaller receives,
+/// rather than something re-quoted on the way through.
+pub fn split_command(line: &str, exists: impl Fn(&str) -> bool) -> Option<(String, String)> {
+    let line = line.trim();
+
+    if line.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = line.strip_prefix('"') {
+        let (program, tail) = rest.split_once('"')?;
+        return Some((program.to_string(), tail.trim().to_string()));
+    }
+
+    for (at, ch) in line.char_indices() {
+        if ch != ' ' {
+            continue;
+        }
+
+        let candidate = &line[..at];
+        if exists(candidate) {
+            return Some((candidate.to_string(), line[at..].trim().to_string()));
+        }
+    }
+
+    // Nothing on disk matched, which is ordinary: the Windows installer is
+    // found on the path rather than by a full name. The first word is it.
+    let (program, arguments) = line.split_once(' ').unwrap_or((line, ""));
+    Some((program.to_string(), arguments.trim().to_string()))
+}
+
+/// Every program the Uninstall hives know about.
+///
+/// The same three hives the app scan reads, and missing any one of them loses
+/// real programs: a 32-bit installer lands in the WOW6432Node view and a
+/// per-user install lands under HKCU.
+///
+/// Read directly rather than through PowerShell, which is what the app scan
+/// uses. That scan runs once in the background and can afford a second; this
+/// runs because somebody pressed a key and is waiting for the answer.
+#[cfg(windows)]
+pub fn installed() -> Vec<Installed> {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+    const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+    const WOW: &str = r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall";
+
+    let mut out = Vec::new();
+
+    for (root, path) in [
+        (HKEY_LOCAL_MACHINE, UNINSTALL),
+        (HKEY_LOCAL_MACHINE, WOW),
+        (HKEY_CURRENT_USER, UNINSTALL),
+    ] {
+        out.extend(entries_under(root, path));
+    }
+
+    out
+}
+
+#[cfg(not(windows))]
+pub fn installed() -> Vec<Installed> {
+    Vec::new()
+}
+
+#[cfg(windows)]
+fn entries_under(root: windows::Win32::System::Registry::HKEY, path: &str) -> Vec<Installed> {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Registry::{
+        RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, HKEY, KEY_READ,
+    };
+
+    let mut out = Vec::new();
+    let mut hive = HKEY::default();
+
+    // SAFETY: the path is a valid wide string and the handle is closed below
+    // on every path out.
+    let opened = unsafe { RegOpenKeyExW(root, &HSTRING::from(path), Some(0), KEY_READ, &mut hive) };
+
+    if opened.is_err() {
+        return out;
+    }
+
+    let mut index = 0u32;
+    loop {
+        let mut name = [0u16; 256];
+        let mut length = name.len() as u32;
+
+        // SAFETY: `length` says how much room `name` has, and the call writes
+        // no more than that.
+        let read = unsafe {
+            RegEnumKeyExW(
+                hive,
+                index,
+                Some(windows::core::PWSTR(name.as_mut_ptr())),
+                &mut length,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+
+        if read.is_err() {
+            break;
+        }
+
+        let key = String::from_utf16_lossy(&name[..length as usize]);
+        let under = format!(r"{path}\{key}");
+
+        // An entry with no name is not a program somebody can be shown, and
+        // one with no uninstall string is not one this can do anything with.
+        let display_name =
+            read_string(root, &under, "DisplayName").filter(|name| !name.trim().is_empty());
+        let uninstall =
+            read_string(root, &under, "UninstallString").filter(|line| !line.trim().is_empty());
+
+        if let (Some(display_name), Some(uninstall)) = (display_name, uninstall) {
+            out.push(Installed {
+                display_name,
+                uninstall,
+                icon: read_string(root, &under, "DisplayIcon"),
+            });
+        }
+
+        index += 1;
+    }
+
+    // SAFETY: the handle came from the matching open above.
+    unsafe {
+        let _ = RegCloseKey(hive);
+    }
+
+    out
+}
+
+#[cfg(windows)]
+fn read_string(
+    root: windows::Win32::System::Registry::HKEY,
+    path: &str,
+    value: &str,
+) -> Option<String> {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_SZ};
+
+    let mut size: u32 = 0;
+
+    // SAFETY: a null buffer asks for the size, which is what `size` receives.
+    unsafe {
+        RegGetValueW(
+            root,
+            &HSTRING::from(path),
+            &HSTRING::from(value),
+            RRF_RT_REG_SZ,
+            None,
+            None,
+            Some(&mut size),
+        )
+        .ok()
+        .ok()?;
+    }
+
+    if size == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0u16; size as usize / 2 + 1];
+    let mut got = size;
+
+    // SAFETY: the buffer is the size the call just asked for.
+    unsafe {
+        RegGetValueW(
+            root,
+            &HSTRING::from(path),
+            &HSTRING::from(value),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buffer.as_mut_ptr() as *mut _),
+            Some(&mut got),
+        )
+        .ok()
+        .ok()?;
+    }
+
+    let text = String::from_utf16_lossy(&buffer);
+    Some(text.trim_end_matches('\0').to_string())
+}
+
+/// The command that removes the program a row names, if Windows knows one.
+///
+/// `None` rather than a best guess. Somebody told that Windows lists no
+/// uninstaller can go and look for themselves; somebody whose Visual Studio
+/// was uninstalled from a row for Visual Studio Code cannot undo it.
+pub fn uninstaller_for(row_title: &str, row_target: &str) -> Option<String> {
+    let matched: Vec<Installed> = installed()
+        .into_iter()
+        .filter(|entry| same_program(row_title, row_target, entry))
+        .collect();
+
+    // Two entries answering to one name is the all-users and the per-user
+    // install of the same thing, or two genuinely different programs. Either
+    // way there is no way to tell from here which was meant, and picking one
+    // is picking at random.
+    if matched.len() != 1 {
+        return None;
+    }
+
+    matched.into_iter().next().map(|entry| entry.uninstall)
+}
+
+/// Starts an uninstaller and leaves it to get on with it.
+///
+/// Not waited on. An uninstaller is a program with its own window that a
+/// person is about to answer questions in, and waiting for it would hold the
+/// action open for as long as they take.
+#[cfg(windows)]
+pub fn run_uninstaller(command: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    let (program, arguments) = split_command(command, |candidate| {
+        std::path::Path::new(candidate).is_file()
+    })
+    .ok_or("Windows recorded an empty uninstall command")?;
+
+    let mut run = std::process::Command::new(&program);
+
+    if !arguments.is_empty() {
+        run.raw_arg(&arguments);
+    }
+
+    run.spawn()
+        .map(|_| ())
+        .map_err(|err| format!("{program} would not start: {err}"))
+}
+
+#[cfg(not(windows))]
+pub fn run_uninstaller(_command: &str) -> Result<(), String> {
+    Err("Only Windows has this.".to_string())
+}
+
+#[cfg(test)]
+mod uninstalling {
+    use super::*;
+
+    fn entry(display_name: &str, icon: Option<&str>) -> Installed {
+        Installed {
+            display_name: display_name.to_string(),
+            uninstall: r"C:\Program Files\App\unins000.exe".to_string(),
+            icon: icon.map(str::to_string),
+        }
+    }
+
+    /// The failure this exists to refuse.
+    ///
+    /// One name beginning with another is how a substring match runs the wrong
+    /// thing, and it has cost this project a session before on a different
+    /// surface. Here the wrong thing removes a program.
+    #[test]
+    fn a_name_that_merely_starts_with_the_row_is_not_the_row() {
+        let studio = entry("Microsoft Visual Studio 2022", None);
+
+        assert!(
+            !same_program("Visual Studio Code", "", &studio),
+            "Visual Studio Code matched the entry for Visual Studio"
+        );
+        assert!(
+            !same_program("Visual Studio", "", &studio),
+            "a leading substring is not an identity"
+        );
+    }
+
+    #[test]
+    fn a_version_and_an_architecture_tag_are_not_part_of_the_name() {
+        // The row is built from this same entry with `tidy_name` applied, so
+        // the two sides have to agree about what the program is called.
+        let zip = entry("7-Zip 26.02 (x64)", None);
+        assert!(same_program("7-Zip", "", &zip));
+    }
+
+    #[test]
+    fn the_executable_settles_it_when_the_names_do_not() {
+        // An App Paths row is named after its binary, so two spellings of one
+        // program share no name at all while being the same thing.
+        let zip = entry(
+            "7-Zip File Manager",
+            Some(r#""C:\Program Files\7-Zip\7zFM.exe",0"#),
+        );
+
+        assert!(same_program(
+            "7zFM",
+            r"C:\Program Files\7-Zip\7zFM.exe",
+            &zip
+        ));
+        assert!(
+            same_program("7zFM", r"c:\program files\7-zip\7zfm.exe", &zip),
+            "a path is not case sensitive"
+        );
+        assert!(
+            !same_program("7zFM", r"C:\Program Files\Other\other.exe", &zip),
+            "a different executable is a different program"
+        );
+    }
+
+    #[test]
+    fn an_entry_with_no_icon_is_matched_by_name_alone_rather_than_by_nothing() {
+        let app = entry("Some App", None);
+        assert!(same_program("Some App", r"C:\somewhere\app.exe", &app));
+    }
+
+    #[test]
+    fn a_quoted_program_keeps_its_arguments_exactly_as_written() {
+        let (program, arguments) = split_command(
+            r#""C:\Program Files\App\unins000.exe" /SILENT /NORESTART"#,
+            |_| false,
+        )
+        .expect("a command");
+
+        assert_eq!(program, r"C:\Program Files\App\unins000.exe");
+        assert_eq!(arguments, "/SILENT /NORESTART");
+    }
+
+    #[test]
+    fn an_installer_found_on_the_path_is_the_first_word() {
+        let (program, arguments) = split_command(
+            "MsiExec.exe /X{90160000-008C-0000-1000-0000000FF1CE}",
+            |_| false,
+        )
+        .expect("a command");
+
+        assert_eq!(program, "MsiExec.exe");
+        assert_eq!(arguments, "/X{90160000-008C-0000-1000-0000000FF1CE}");
+    }
+
+    /// The rule Windows itself uses for an unquoted path with a space in it.
+    #[test]
+    fn an_unquoted_path_is_resolved_by_asking_which_prefix_is_a_file() {
+        let line = r"C:\Program Files\App\unins000.exe /S";
+
+        let (program, arguments) =
+            split_command(line, |candidate| candidate.ends_with("unins000.exe"))
+                .expect("a command");
+
+        assert_eq!(program, r"C:\Program Files\App\unins000.exe");
+        assert_eq!(arguments, "/S");
+
+        // With nothing on disk it falls back to the first word, which is the
+        // wrong program, and that is exactly why an uninstaller that is really
+        // there is found by the test above.
+        let (guessed, _) = split_command(line, |_| false).expect("a command");
+        assert_eq!(guessed, r"C:\Program");
+    }
+
+    #[test]
+    fn an_empty_command_is_nothing_rather_than_a_program_called_nothing() {
+        assert_eq!(split_command("", |_| false), None);
+        assert_eq!(split_command("   ", |_| false), None);
+    }
+}

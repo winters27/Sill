@@ -2626,6 +2626,59 @@ fn the_power_commands_are_rows_and_none_of_them_draws_a_switch() {
     }
 }
 
+/// Emptying the bin is a system row and is not a switch.
+///
+/// The same two halves the power rows are checked for, and the second is the
+/// one that matters here: a row Sill thought was a switch would be drawn with
+/// a control beside it, and a control says "this is a state you can put back".
+/// Nothing about this can be put back.
+#[test]
+fn the_recycle_bin_row_exists_and_is_not_drawn_as_something_with_an_off() {
+    let corpus = registry::builtins();
+
+    let row = corpus
+        .iter()
+        .find(|row| row.entrypoint == "system.recycle-bin.empty")
+        .expect("the recycle bin has a row");
+
+    assert_eq!(row.mode, "system");
+    assert!(row.icon.is_some(), "{} wears nothing", row.id);
+    assert!(!row.subtitle.is_empty(), "{} says nothing", row.id);
+
+    assert!(
+        !sill_lib::system::is_switch(&row.entrypoint),
+        "{} would be drawn as something with an on and an off",
+        row.id,
+    );
+}
+
+/// The words that reach it are the ones that mean it and nothing else.
+///
+/// "delete" and "clear" are typed about all sorts of things, and a row that
+/// permanently removes everything in the bin turning up in those searches is a
+/// row somebody arrows onto by accident on the way to something else.
+#[test]
+fn emptying_the_bin_is_not_found_by_a_word_about_something_else() {
+    let corpus = registry::builtins();
+    let bin = "sill:system.recycle-bin.empty";
+
+    for wanted in ["recycle bin", "empty recycle", "trash"] {
+        let found = ids(&search(&corpus, wanted, &Frecency::default(), NOW, 50));
+        assert!(
+            found.iter().any(|id| id == bin),
+            "{wanted:?} does not reach the recycle bin row"
+        );
+    }
+
+    for loose in ["delete", "clear", "remove"] {
+        let found = ids(&search(&corpus, loose, &Frecency::default(), NOW, 50));
+        assert!(
+            !found.iter().any(|id| id == bin),
+            "{loose:?} brings up the row that permanently deletes everything"
+        );
+    }
+}
+
 #[test]
 fn a_system_switch_says_what_it_does_rather_than_what_the_machine_is_doing() {
     // Titles that named the state would need the audio endpoint queried to

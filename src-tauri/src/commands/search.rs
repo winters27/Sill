@@ -330,6 +330,77 @@ pub(crate) async fn search_app_volume(
     Ok(results.into_iter().map(Into::into).collect())
 }
 
+/// What is running, matching a query.
+///
+/// Its own command for the reason the volume list has one: a different corpus
+/// with a different lifetime. The index is scanned once and cached; a process
+/// exists only while it is running, and the list is wrong the moment anything
+/// starts or stops.
+///
+/// **Not part of the root list, and that is the whole reason it is here.**
+/// Walking every process on the machine, opening each one and reading its
+/// working set, is not something to do because somebody typed the letter p.
+/// It sits behind a row of its own, so it costs nothing until somebody asks.
+///
+/// Anything Windows needs is dropped, because a row drawn only to refuse is a
+/// worse row than no row. Sill's own processes stay: what the launcher costs
+/// is a fair question to ask a list of what things cost, and quitting one is
+/// refused when it is tried rather than hidden from view.
+///
+/// The refusing is the action's, not this list's. Nothing here is a gate: a
+/// hotkey, a workflow and the model all reach the same action without passing
+/// through a search, so the check that matters is the one at the other end.
+#[tauri::command]
+pub(crate) async fn search_processes(
+    app: AppHandle,
+    state: State<'_, RegistryState>,
+    query: String,
+) -> Result<Vec<registry::SearchResult>, String> {
+    // Blocking: an enumeration of every process on the machine. The handle is
+    // cloned in rather than a `State` borrowed, because the reading happens on
+    // a thread that outlives this call.
+    let running = tokio::task::spawn_blocking(move || {
+        crate::processes::listed(
+            &app.state::<crate::state::Fresh<Vec<crate::processes::Process>>>(),
+        )
+    })
+    .await
+    .unwrap_or_default();
+
+    let records: Vec<registry::CommandRecord> = running
+        .into_iter()
+        .filter(|process| !crate::processes::is_protected(&process.name))
+        .map(|process| registry::process_record(&process))
+        .collect();
+
+    // An empty query is the whole list, in the order `running` produced, which
+    // is heaviest first: what somebody opening this came to find.
+    if query.trim().is_empty() {
+        return Ok(records
+            .into_iter()
+            .map(registry::SearchResult::from_record)
+            .collect());
+    }
+
+    let ranking = state.ranking();
+
+    let results = registry::search_excluding(
+        records.iter(),
+        &query,
+        &ranking.frecency,
+        // A process is not in the index, so nothing can have been given a name
+        // for one: an alias points at a command id that survives a restart.
+        &registry::Aliases::default(),
+        now_seconds(),
+        registry::SEARCH_LIMIT,
+        // What is running is a fact rather than a preference. Hiding a row
+        // here would mean not being able to quit the thing eating the machine.
+        registry::Excluded::none(),
+    );
+
+    Ok(results.into_iter().map(Into::into).collect())
+}
+
 /// The open windows matching a query.
 ///
 /// Separate from `search_commands` for the reason file search is separate: it

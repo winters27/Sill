@@ -293,8 +293,15 @@ impl Power {
     ///
     /// Nothing here asks anything. [`Asked`] is the asking, and this is only
     /// ever reached once it has been answered.
+    ///
+    /// **Private to this module, and that is the guarantee rather than a
+    /// comment.** It used to be public and the discipline that nobody called
+    /// it without asking first lived in one function's doc. Now the only thing
+    /// that can reach it is [`Irreversible::apply`] a few lines below, which
+    /// is itself only reached from inside the answered arm, so a second route
+    /// to shutting the machine down does not compile.
     #[cfg(windows)]
-    pub fn apply(self) -> Result<(), String> {
+    fn apply(self) -> Result<(), String> {
         match self {
             Self::Sleep => suspend(false),
             Self::Hibernate => suspend(true),
@@ -305,7 +312,7 @@ impl Power {
     }
 
     #[cfg(not(windows))]
-    pub fn apply(self) -> Result<(), String> {
+    fn apply(self) -> Result<(), String> {
         Err("Only Windows has this.".to_string())
     }
 }
@@ -387,7 +394,54 @@ fn end_the_session(arguments: &[&str]) -> Result<(), String> {
     })
 }
 
-/// What a press on a power row means.
+/// Something the launcher does that nothing can take back.
+///
+/// One type rather than one per feature, and that is the point of it. There is
+/// one question open at a time because there is one row in front of somebody,
+/// and [`press_means`] decides what a press answers by comparing what was
+/// asked against what is being pressed. Two separate `Asked` states would be
+/// two places to remember to forget, and a press on one could not tell that it
+/// was not answering the other.
+///
+/// A variant here is a promise that it goes through [`Asked`]. Adding one
+/// stops [`Irreversible::apply`] compiling until somebody has written down
+/// what it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Irreversible {
+    /// One of the ways a session or a machine can be ended.
+    Power(Power),
+    /// Everything in the recycle bin, for good.
+    ///
+    /// The one thing Sill can do to a file that the recycle bin is not the
+    /// undo for, because it is the recycle bin.
+    EmptyRecycleBin,
+}
+
+impl From<Power> for Irreversible {
+    fn from(power: Power) -> Self {
+        Self::Power(power)
+    }
+}
+
+impl Irreversible {
+    /// Does it, and says what happened.
+    ///
+    /// **Nothing here asks anything.** [`Asked`] is the asking, and this is
+    /// only ever reached once it has been answered: `actions::once_answered`
+    /// is the single caller, from inside the arm that already holds the
+    /// answer.
+    pub fn apply(self) -> Result<String, String> {
+        match self {
+            Self::Power(power) => {
+                power.apply()?;
+                Ok(power.under_way().to_string())
+            }
+            Self::EmptyRecycleBin => crate::recycle_bin::empty().map(|freed| freed.freed()),
+        }
+    }
+}
+
+/// What a press on a row that asks first means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Press {
     /// Nothing has been asked about this one, so ask.
@@ -404,8 +458,8 @@ pub enum Press {
 /// worth proving can be proved without a clock, a window, or a machine to shut
 /// down: no single press ever means yes.
 pub fn press_means(
-    asked: Option<(Power, std::time::Instant)>,
-    about: Power,
+    asked: Option<(Irreversible, std::time::Instant)>,
+    about: Irreversible,
     now: std::time::Instant,
 ) -> Press {
     let Some((open, when)) = asked else {
@@ -426,7 +480,8 @@ pub fn press_means(
     }
 }
 
-/// The power command that has been asked about and is waiting for an answer.
+/// The irreversible thing that has been asked about and is waiting for an
+/// answer.
 ///
 /// One at a time, because the question is about the row in front of somebody
 /// and there is only ever one of those.
@@ -441,17 +496,19 @@ pub fn press_means(
 /// there is nothing to work out.
 #[derive(Default)]
 pub struct Asked {
-    open: std::sync::Mutex<Option<(Power, std::time::Instant)>>,
+    open: std::sync::Mutex<Option<(Irreversible, std::time::Instant)>>,
 }
 
 impl Asked {
     /// What this press means, remembering it for the next one.
-    pub fn press(&self, about: Power) -> Press {
+    pub fn press(&self, about: impl Into<Irreversible>) -> Press {
         self.pressed_at(about, std::time::Instant::now())
     }
 
     /// The same, with the moment given rather than read.
-    pub fn pressed_at(&self, about: Power, now: std::time::Instant) -> Press {
+    pub fn pressed_at(&self, about: impl Into<Irreversible>, now: std::time::Instant) -> Press {
+        let about = about.into();
+
         let mut open = match self.open.lock() {
             Ok(open) => open,
             // A panic somewhere else must not turn this into a lock nobody can
@@ -856,9 +913,9 @@ mod tests {
         /// The property the whole row exists to have.
         ///
         /// A counter stands in for the machine, because the branch this
-        /// mirrors is the one in `power_once_answered` that calls `apply`, and
-        /// a test that called the real one would pass by switching off the
-        /// computer it was running on.
+        /// mirrors is the one in `actions::once_answered` that calls
+        /// `Irreversible::apply`, and a test that called the real one would
+        /// pass by switching off the computer it was running on.
         #[test]
         fn a_mistyped_query_cannot_reach_the_machine() {
             let asked = Asked::default();
@@ -964,6 +1021,64 @@ mod tests {
                 asked.pressed_at(Power::Shutdown, at + Duration::from_secs(2)),
                 Press::Answers,
                 "the new question could not be answered either",
+            );
+        }
+
+        /// Emptying the bin is asked about on exactly the same terms.
+        ///
+        /// It shares the state and the rule rather than carrying a
+        /// confirmation of its own, which is what makes "no single press ever
+        /// means yes" one property with one set of tests instead of two that
+        /// can drift.
+        #[test]
+        fn emptying_the_recycle_bin_takes_two_presses_like_everything_else() {
+            let asked = Asked::default();
+            let at = Instant::now();
+
+            assert_eq!(
+                asked.pressed_at(Irreversible::EmptyRecycleBin, at),
+                Press::Asks,
+                "the first press emptied the bin",
+            );
+            assert_eq!(
+                asked.pressed_at(
+                    Irreversible::EmptyRecycleBin,
+                    at + Duration::from_millis(30)
+                ),
+                Press::TooSoon,
+                "the repeat of a held key emptied the bin",
+            );
+            assert_eq!(
+                asked.pressed_at(Irreversible::EmptyRecycleBin, at + Duration::from_secs(1)),
+                Press::Answers,
+            );
+        }
+
+        /// The two kinds of question cannot answer for each other.
+        ///
+        /// One state holds one question, so the comparison inside it is the
+        /// only thing keeping "press Enter again to shut down" from being
+        /// answered by an Enter on the row underneath.
+        #[test]
+        fn a_question_about_the_machine_is_not_answered_by_one_about_the_bin() {
+            let asked = Asked::default();
+            let at = Instant::now();
+
+            asked.pressed_at(Power::Shutdown, at);
+
+            assert_eq!(
+                asked.pressed_at(Irreversible::EmptyRecycleBin, at + Duration::from_secs(1)),
+                Press::Asks,
+                "an open question about shutting down emptied the recycle bin",
+            );
+
+            let asked = Asked::default();
+            asked.pressed_at(Irreversible::EmptyRecycleBin, at);
+
+            assert_eq!(
+                asked.pressed_at(Power::Shutdown, at + Duration::from_secs(1)),
+                Press::Asks,
+                "an open question about the recycle bin shut the machine down",
             );
         }
 
