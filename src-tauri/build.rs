@@ -31,5 +31,25 @@ fn main() {
         );
     }
 
+    // The application's own manifest, replacing the one `tauri_build` embeds.
+    //
+    // Only to add `longPathAware`: Sill walks whatever folders somebody
+    // indexes, and a `node_modules` tree passes 260 characters without
+    // trying, at which point every path API refuses the entry and it is
+    // missing from the index with nothing said. `sill.manifest` carries
+    // Tauri's Common-Controls dependency across verbatim, for the reason
+    // written above about test binaries.
+    #[cfg(windows)]
+    {
+        let attributes = tauri_build::Attributes::new().windows_attributes(
+            tauri_build::WindowsAttributes::new().app_manifest(include_str!("sill.manifest")),
+        );
+
+        // `try_build` rather than `build`, so a manifest this file gets wrong
+        // stops the build with the reason rather than being embedded.
+        tauri_build::try_build(attributes).expect("the application manifest is valid");
+    }
+
+    #[cfg(not(windows))]
     tauri_build::build()
 }

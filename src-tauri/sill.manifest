@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Sill's application manifest.
+
+  This replaces the one `tauri_build` embeds by default, which is why the
+  Common-Controls dependency below is copied from it verbatim rather than
+  omitted: without it the dialog plugin binds to the version 5 comctl32 in
+  System32, which does not export TaskDialogIndirect, and the binary fails to
+  start with STATUS_ENTRYPOINT_NOT_FOUND before any code runs. build.rs says
+  the same thing about test binaries.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <!--
+        Paths longer than 260 characters.
+
+        Sill walks whatever folders somebody indexes, and a `node_modules`
+        tree passes 260 characters without trying. Without this, every API
+        that takes a path fails on those entries with ERROR_FILENAME_EXCED_RANGE
+        and the file is simply missing from the index, with nothing said.
+
+        Necessary but not sufficient: Windows also requires
+        HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled.
+        Where that is off the behaviour is exactly what it was before, so this
+        can only help.
+      -->
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+</assembly>

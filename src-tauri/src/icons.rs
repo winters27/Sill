@@ -364,6 +364,41 @@ fn ensure_com() {
     });
 }
 
+/// Whether touching this file would pull it down from the cloud.
+///
+/// OneDrive, and every other provider built on the same Windows feature,
+/// leaves a **placeholder**: an entry that looks like a file and has none of
+/// the bytes. Reading one downloads it. An icon is the worst possible reason
+/// for that to happen, because it happens while somebody is typing, for every
+/// row that scrolls past, over a connection they did not choose to spend.
+///
+/// Read through `MetadataExt` rather than by calling `GetFileAttributesW`,
+/// which would mean another `windows` crate feature; accumulating those has
+/// aborted this build once already.
+#[cfg(windows)]
+fn is_a_placeholder(path: &str) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    std::fs::metadata(path)
+        .map(|about| wants_recall(about.file_attributes()))
+        .unwrap_or(false)
+}
+
+/// The two attributes that mean "the bytes are somewhere else".
+///
+/// `FILE_ATTRIBUTE_OFFLINE` is deliberately not one of them. It predates
+/// cloud files by decades, tape archival software sets it, and some
+/// providers set it on files that are in fact local. Treating it as a
+/// placeholder would silently drop icons for files that are right there.
+fn wants_recall(attributes: u32) -> bool {
+    /// The file is a placeholder and opening it fetches it.
+    const RECALL_ON_OPEN: u32 = 0x0004_0000;
+    /// The file is partly here and reading the rest fetches it.
+    const RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+
+    attributes & (RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS) != 0
+}
+
 /// Image files are returned as-is rather than going through GDI.
 ///
 /// A packaged app's icon is a PNG in its install directory, not an icon
@@ -380,6 +415,14 @@ fn image_file(path: &str) -> Option<String> {
     } else {
         return None;
     };
+
+    // A picture that is not here yet is not worth downloading to look at as a
+    // twenty-two pixel tile. The shell path below still answers, from the
+    // extension, without opening anything.
+    #[cfg(windows)]
+    if is_a_placeholder(path) {
+        return None;
+    }
 
     let bytes = std::fs::read(path).ok()?;
     if bytes.is_empty() {
@@ -567,20 +610,42 @@ fn icon_at_size(path: &str, index: i32) -> Option<windows::Win32::UI::WindowsAnd
 #[cfg(windows)]
 fn composited_icon(path: &str) -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
     use windows::core::PCWSTR;
-    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
+    use windows::Win32::UI::Shell::{
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_USEFILEATTRIBUTES,
+    };
 
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
     let mut info = SHFILEINFOW::default();
+
+    /*
+     * A file that is not here yet is asked about by name only.
+     *
+     * `SHGFI_USEFILEATTRIBUTES` tells the shell to answer from the extension
+     * and the attributes it is handed, without going near the file. Without
+     * it, asking for the icon of a OneDrive placeholder downloads the file,
+     * which is a real cost somebody did not ask for and a slow one on a row
+     * that is merely scrolling past.
+     *
+     * The icon is then the one for that kind of file rather than the picture
+     * inside it, which is the correct trade: a thumbnail is not worth a
+     * download, and it is what Explorer shows for the same file.
+     */
+    let (attributes, extra) = if is_a_placeholder(path) {
+        (FILE_ATTRIBUTE_NORMAL, SHGFI_USEFILEATTRIBUTES)
+    } else {
+        (Default::default(), Default::default())
+    };
 
     // SAFETY: `wide` is NUL-terminated and outlives the call, and `info` is a
     // correctly sized owned struct.
     let ok = unsafe {
         SHGetFileInfoW(
             PCWSTR(wide.as_ptr()),
-            Default::default(),
+            attributes,
             Some(&mut info),
             std::mem::size_of::<SHFILEINFOW>() as u32,
-            SHGFI_ICON | SHGFI_LARGEICON,
+            SHGFI_ICON | SHGFI_LARGEICON | extra,
         )
     };
 
@@ -922,5 +987,31 @@ mod across_runs {
 
         icons.warm();
         icons.save();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two attributes that mean the bytes are elsewhere.
+    #[test]
+    fn a_cloud_placeholder_is_recognised() {
+        assert!(wants_recall(0x0004_0000), "recall on open");
+        assert!(wants_recall(0x0040_0000), "recall on data access");
+
+        // Beside the ordinary attributes a real file carries.
+        assert!(wants_recall(0x0004_0000 | 0x0000_0020), "beside ARCHIVE");
+    }
+
+    /// `FILE_ATTRIBUTE_OFFLINE` predates cloud files by decades and tape
+    /// archival software sets it. Reading it as a placeholder would drop the
+    /// icons of files that are sitting right there.
+    #[test]
+    fn offline_on_its_own_is_not_a_placeholder() {
+        assert!(!wants_recall(0x0000_1000), "OFFLINE alone");
+        assert!(!wants_recall(0x0000_0020), "an ordinary file");
+        assert!(!wants_recall(0x0000_0010), "a directory");
+        assert!(!wants_recall(0), "nothing set");
     }
 }

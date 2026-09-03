@@ -364,6 +364,67 @@ pub struct Catalog {
     dead: u32,
 }
 
+/// How long to wait for a network share to say whether it is there.
+///
+/// Long enough for a share on a LAN that is awake, short enough that a
+/// laptop off the network is not held up by it.
+const REACHABLE_WITHIN: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether a path names a network share rather than a local disk.
+fn is_a_share(root: &Path) -> bool {
+    root.to_str().is_some_and(|text| {
+        // Both separators, because a root is written by hand in Settings and
+        // `//server/share` is a thing people type.
+        text.starts_with("\\\\") || text.starts_with("//")
+    })
+}
+
+/// Whether a root is there, without waiting on a share that is not.
+///
+/// `is_dir()` on an unreachable UNC path blocks until SMB gives up, which is
+/// tens of seconds. It runs on the indexing thread at startup and again on
+/// every rebuild, so a laptop carried off the network spends that long doing
+/// nothing, once per root, every time anything changes.
+fn reachable(root: &Path) -> bool {
+    let asking = root.to_path_buf();
+    answers_within(is_a_share(root), REACHABLE_WITHIN, move || asking.is_dir())
+}
+
+/// Asks, and gives up waiting.
+///
+/// Split from [`reachable`] so a test can supply a question that is slow on
+/// purpose. Pointing the real one at an address nothing answers proves
+/// nothing: the first version of that test passed with the guard removed,
+/// because this machine refuses a documentation address immediately. A test
+/// that cannot fail is worse than no test, and one whose result depends on
+/// how this network behaves today is exactly that.
+///
+/// Only a share pays for the guard. A local path answers immediately and
+/// spawning a thread to ask would cost more than the question.
+fn answers_within(
+    is_share: bool,
+    wait: std::time::Duration,
+    ask: impl FnOnce() -> bool + Send + 'static,
+) -> bool {
+    if !is_share {
+        return ask();
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    // Left to finish on its own if it is slow. It is one thread per share per
+    // rebuild, blocked in the kernel rather than spinning, and SMB does
+    // eventually answer. Detaching is the point: the walk stops waiting.
+    std::thread::spawn(move || {
+        let _ = tx.send(ask());
+    });
+
+    // A share that has not answered is treated as absent, which skips it for
+    // this walk. The next rebuild asks again, so coming back onto the network
+    // needs nothing but the next change.
+    rx.recv_timeout(wait).unwrap_or(false)
+}
+
 impl Catalog {
     /// How many files are in it.
     pub fn len(&self) -> usize {
@@ -389,7 +450,7 @@ impl Catalog {
         let mut entries = Vec::new();
 
         for root in roots {
-            if !root.is_dir() {
+            if !reachable(root) {
                 continue;
             }
 
@@ -1123,6 +1184,58 @@ mod tests {
         assert!(
             Catalog::load(&file, &shouted).is_some(),
             "the index was discarded because a root was capitalised differently"
+        );
+    }
+
+    #[test]
+    fn a_share_is_told_from_a_local_disk() {
+        assert!(is_a_share(Path::new(r"\\\\server\\share")));
+        assert!(is_a_share(Path::new("//server/share")));
+
+        assert!(!is_a_share(Path::new(r"C:\\Users")));
+        assert!(!is_a_share(Path::new(r"C:\\")));
+        assert!(!is_a_share(Path::new("")));
+    }
+
+    /// A share that does not answer is skipped rather than waited on.
+    ///
+    /// The question is slow on purpose rather than pointed at a real address,
+    /// so this measures the guard instead of measuring the network.
+    #[test]
+    fn a_share_that_does_not_answer_is_given_up_on() {
+        let began = std::time::Instant::now();
+        let there = answers_within(true, std::time::Duration::from_millis(120), || {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            true
+        });
+        let waited = began.elapsed();
+
+        assert!(!there, "an answer that never came should read as absent");
+        assert!(
+            waited < std::time::Duration::from_secs(2),
+            "waited {waited:?}, which is the block this exists to stop"
+        );
+    }
+
+    /// And a share that does answer is believed.
+    #[test]
+    fn a_share_that_answers_in_time_is_believed() {
+        assert!(answers_within(true, REACHABLE_WITHIN, || true));
+        assert!(!answers_within(true, REACHABLE_WITHIN, || false));
+    }
+
+    /// A local disk is asked straight out, with no thread and no waiting.
+    #[test]
+    fn a_local_path_is_asked_directly() {
+        let began = std::time::Instant::now();
+        assert!(answers_within(
+            false,
+            std::time::Duration::from_secs(30),
+            || true
+        ));
+        assert!(
+            began.elapsed() < std::time::Duration::from_millis(100),
+            "a local path should not go anywhere near the timeout"
         );
     }
 
