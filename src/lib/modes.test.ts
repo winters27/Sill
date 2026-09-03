@@ -99,6 +99,50 @@ describe("what each mode behaves like", () => {
     }
   });
 
+  /**
+   * Every list of Sill's own rows has a panel, and the exceptions are named.
+   *
+   * `P1-09`: five views answered Ctrl+K with "no actions here" on rows that
+   * plainly had some. Written as a list of exceptions rather than a list of
+   * modes that have one, because that is the difference between forgetting a
+   * new view and being told about it: the same inversion `ObjectKind::plainly`
+   * makes in Rust, and the same one `groupOf` needed after its default filed
+   * four kinds of thing as applications.
+   *
+   * An extension's own tree is not in scope. Those rows carry actions the
+   * extension declared, and the registry has never known anything about them.
+   */
+  it("gives every list of Sill's own rows an action panel, or says why not", () => {
+    /** A mode with rows of Sill's own and no panel, and the reason. */
+    const without: Record<string, string> = {
+      // The rows are folders, so the registry would offer everything it
+      // offers a folder: reveal it, compress it, put it in the recycle bin.
+      // This view was opened to answer "which folder", and offering to delete
+      // one of the answers is not a feature.
+      destination: "the rows are the answers to one question",
+      // It has a panel; it does not take it from the selected row. Every row
+      // in the history is the same kind of thing, so the answer cannot differ
+      // between them and it is fetched once instead of per selection.
+      clipboard: "one fetch for the whole list, because every row is alike",
+    };
+
+    for (const mode of MODES) {
+      const how = behaviourOf(mode)!;
+
+      // Sill's own rows: the ranked results, or a view counting rows it holds.
+      if (how.rows !== "commands" && how.rows !== "own") continue;
+      if (mode in without) {
+        expect(hasRowActions(mode), `${mode} is excused and has a panel anyway`).toBe(false);
+        continue;
+      }
+
+      expect(
+        hasRowActions(mode),
+        `${mode} answers Ctrl+K with "no actions here" on a row that has some`,
+      ).toBe(true);
+    }
+  });
+
   it("keeps the modes that were known to answer Escape themselves", () => {
     // Named rather than derived: this is the behaviour the table replaced, and
     // a table that quietly changed it would be a refactor that broke Escape.

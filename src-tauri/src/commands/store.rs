@@ -229,28 +229,32 @@ pub(crate) async fn store_discard(app: AppHandle) -> Result<(), String> {
 }
 
 /// Removes an installed extension, and everything it was allowed to reach.
+///
+/// Transport, like everything else in this file. The removal itself is
+/// `sill.store.remove` in the action registry, and going through
+/// [`crate::action::ActionRegistry::perform`] is what puts it in the activity
+/// log: it used to do the work here, so an extension removed from the settings
+/// panel or the store's own key appeared nowhere afterwards.
 #[tauri::command]
-pub(crate) async fn store_uninstall(
-    app: AppHandle,
-    grants: State<'_, std::sync::Arc<crate::exthost::grants::Granted>>,
-    extension: String,
-) -> Result<bool, String> {
-    let handle = app.clone();
+pub(crate) async fn store_uninstall(app: AppHandle, extension: String) -> Result<String, String> {
+    let object = crate::object::Object {
+        kind: crate::object::ObjectKind::StoreListing,
+        id: format!("store:{extension}"),
+        target: extension.clone(),
+        title: extension,
+        mode: "store-listing".to_string(),
+    };
 
-    // Before the removal rather than after, so a failure to delete the files
-    // does not leave permissions granted to something nobody can see.
-    grants.forget(&extension);
+    let registry = app.state::<crate::action::ActionRegistry>();
+    let action = registry
+        .get("sill.store.remove")
+        .ok_or("removing an extension is not available")?;
 
-    let data_dir = crate::state::data_dir(&handle);
+    let outcome = registry
+        .perform(&crate::action::ActionCtx::new(app.clone()), action, &object)
+        .await?;
 
-    let had =
-        tauri::async_runtime::spawn_blocking(move || install::uninstall(&data_dir, &extension))
-            .await
-            .map_err(|err| format!("the removal did not finish: {err}"))??;
-
-    crate::reload_index(&app);
-
-    Ok(had)
+    Ok(outcome.message)
 }
 
 // ------------------------------------------------------- installed, in full

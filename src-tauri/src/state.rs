@@ -773,6 +773,63 @@ pub(crate) fn now_seconds() -> i64 {
         .unwrap_or(0)
 }
 
+/// What a folder chosen as a destination is remembered under.
+///
+/// Its own prefix so these never collide with a command id, and so the ones
+/// worth offering again can be found without walking everything ever launched.
+pub(crate) const MOVED_TO: &str = "moved-to:";
+
+/**
+Writes the ranking history without holding anything up.
+
+[`RegistryState::record`] hands back the serialised form, made while the writer
+lock was held and the data was therefore consistent. Putting it on disk is a
+different matter: it happens on the blocking pool, where a slow disk is
+nobody's problem. It used to happen on the lock a search takes.
+
+Losing a launch's ranking is not worth failing the launch over, which is why
+this reports and returns rather than propagating.
+*/
+pub(crate) fn save_ranking_soon(path: &std::path::Path, text: Option<String>) {
+    let Some(text) = text else {
+        crate::say!("could not serialise the ranking history");
+        return;
+    };
+
+    let path = path.to_path_buf();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(err) = Frecency::write(&path, &text) {
+            crate::say!("could not save frecency: {err}");
+        }
+    });
+}
+
+/**
+Remembers a folder something was moved into, so the next move offers it first.
+
+Here rather than beside the command that used to do the moving, because the
+moving is an action now and an action reaches state through the app handle.
+Kept in the same store that ranks everything else, under a prefix of its own: a
+folder somebody moves things to is exactly the kind of thing frecency is for,
+and a second store would be a second answer to "what do you reach for" that
+could disagree with the first.
+
+Call it **after** the move rather than before, so a destination that turned out
+to be refused is not learned as one somebody uses.
+*/
+pub(crate) fn remember_destination(app: &AppHandle, folder: &str) {
+    let now = now_seconds();
+    let key = format!("{MOVED_TO}{folder}");
+
+    let (path, text) = app.state::<RegistryState>().record(move |ranking| {
+        ranking.frecency.record(&key, now);
+        ranking.path.clone()
+    });
+
+    save_ranking_soon(&path, text);
+}
+
 pub(crate) fn data_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()

@@ -492,6 +492,7 @@ pub(crate) async fn set_command_hotkey(
                 action: crate::bindings::PRIMARY.to_string(),
                 source: crate::bindings::Source::Command { id: command },
                 replace: false,
+                argument: None,
             });
         }
 
@@ -623,6 +624,7 @@ mod tests {
                 id: "app:code".into(),
             },
             replace: false,
+            argument: None,
         }];
         let hidden = vec!["exe:7z".to_string()];
 
@@ -651,6 +653,7 @@ mod tests {
                 action: "sill.text.upper".into(),
                 source: Source::Selection,
                 replace: true,
+                argument: None,
             },
             Binding {
                 accelerator: "Ctrl+Alt+Z".into(),
@@ -659,6 +662,7 @@ mod tests {
                     id: "app:zed".into(),
                 },
                 replace: false,
+                argument: None,
             },
         ];
 

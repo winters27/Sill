@@ -148,9 +148,19 @@ const behaviour: Record<Mode, Behaviour> = {
    * one a hotkey cannot bind and the model cannot run.
    */
   conversations: { rows: "own", searches: false, shows: "own", escape: true, actions: true },
-  // The store's query does go to Rust, but it answers with a page already
-  // narrowed and capped, so what is arrowed through is whatever came back.
-  store: { rows: "own", searches: false, shows: "own", escape: true, actions: false },
+  /**
+   * The extension store, with actions on the listing under the cursor.
+   *
+   * The query does go to Rust, but it answers with a page already narrowed and
+   * capped, so what is arrowed through is whatever came back and the count is
+   * the view's own.
+   *
+   * Ctrl+K here said "no actions here" on a shelf of code somebody is deciding
+   * whether to run, and removing one was a chord wired straight into the page.
+   * Enter still installs, because installing is two screens and the second one
+   * is what says what the code appears to be able to do.
+   */
+  store: { rows: "own", searches: false, shows: "own", escape: true, actions: true },
 
   // An extension's own tree.
   command: { rows: "items", searches: false, shows: "own", escape: true, actions: false },

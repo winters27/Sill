@@ -326,7 +326,7 @@
         revision: PREPARED.revision,
       }),
       store_discard: () => null,
-      store_uninstall: () => true,
+      store_uninstall: () => `Removed ${PREPARED.title}`,
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -458,6 +458,7 @@
         onselect={(i) => (selected = i)}
         oncount={(n) => (count = n)}
         onstatus={(said) => (status = said)}
+        oncurrent={() => {}}
         onchanged={() => {}}
       />
     </div>

@@ -93,7 +93,21 @@ export interface RankedCommand {
      * offering back the one you left. These are the whole history, they carry
      * a delete, and they never appear in the root list.
      */
-    | "past-conversation";
+    | "past-conversation"
+    /**
+     * One extension as the store lists it, installed here or not.
+     *
+     * Its own kind rather than `view` or `no-view`, which are extension
+     * *commands*: those are installed and can be run, and a listing may have
+     * no files on this machine at all. Its entrypoint is the extension's name,
+     * because that is what every store operation takes.
+     *
+     * Never in the root list. It exists so the action panel can ask what can
+     * be done to the row the store has under its cursor, which it could not do
+     * while the store's rows were the one shape nothing outside that view
+     * could name.
+     */
+    | "store-listing";
   entrypoint: string;
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;
@@ -227,11 +241,6 @@ export function searchDestinations(
   source: string,
 ): Promise<RankedCommand[]> {
   return invoke<RankedCommand[]>("search_destinations", { query, source });
-}
-
-/** Moves a file or folder, and comes back with a way to put it back. */
-export function movePath(path: string, folder: string): Promise<ActionOutcome> {
-  return invoke<ActionOutcome>("move_path", { path, folder });
 }
 
 export function searchAppVolume(query: string): Promise<RankedCommand[]> {
@@ -1056,9 +1065,19 @@ export interface ActionTarget {
  *
  * Nothing here decides what an action means or whether it applies; Rust owns
  * both, and rejects a pairing the window got wrong.
+ *
+ * `argument` is the answer to whatever the action had to ask for first: the
+ * new name for a rename, the folder for a move. Left out for everything else,
+ * which is nearly everything. Those two used to be commands of their own that
+ * did the work themselves, which made them the only actions this window could
+ * run and nothing else could.
  */
-export function runAction(action: string, object: ActionTarget): Promise<ActionOutcome> {
-  return invoke<ActionOutcome>("run_action", { action, object });
+export function runAction(
+  action: string,
+  object: ActionTarget,
+  argument?: string,
+): Promise<ActionOutcome> {
+  return invoke<ActionOutcome>("run_action", { action, object, argument });
 }
 
 /** A search result, in the shape an action wants. */
@@ -1078,17 +1097,6 @@ export function asTarget(command: RankedCommand): ActionTarget {
  */
 export function undoAction(id: number): Promise<string> {
   return invoke<string>("undo_activity", { id });
-}
-
-/**
- * Renames a file or folder, keeping it where it is.
- *
- * Its own command rather than an action, because the action is handed an
- * object and acts: there is nowhere in that for a question, and renaming is
- * mostly the question.
- */
-export function renamePath(path: string, to: string): Promise<string> {
-  return invoke<string>("rename_path", { path, to });
 }
 
 /** A row whose subtitle is a measurement rather than a description. */

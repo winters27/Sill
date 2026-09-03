@@ -79,6 +79,12 @@ pub fn builtins() -> ActionRegistry {
         Box::new(ForgetWorkspace),
         Box::new(ForgetConversation),
         Box::new(CopyConversation),
+        Box::new(CopyStoreSource),
+        // Below the one that copies a link, for the reason Uninstall sits
+        // below everything on an application: the panel is drawn in this
+        // order and the entry that removes something should not be the one
+        // under the cursor when it opens.
+        Box::new(RemoveExtension),
         Box::new(ReadAloud),
         Box::new(StopReading),
     ];
@@ -1783,6 +1789,130 @@ impl Action for CopyConversation {
     }
 }
 
+/// Copies the link to an extension's source, at the revision on the row.
+///
+/// The store's rows had no action panel at all, which on a shelf of code
+/// somebody is deciding whether to run is the worst place for Ctrl+K to say
+/// "no actions here". The one thing anybody wants from a listing they have not
+/// installed is somewhere to go and read it.
+///
+/// The link is built from the catalogue rather than sent up by the window,
+/// because it is a fact about a revision and the window's copy of it is a
+/// second answer that goes stale the moment the catalogue is fetched again.
+struct CopyStoreSource;
+
+#[async_trait]
+impl Action for CopyStoreSource {
+    fn id(&self) -> &'static str {
+        "sill.store.copySource"
+    }
+
+    fn title(&self) -> &'static str {
+        "Copy Source Link"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::StoreListing
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardWrite]
+    }
+
+    /// Enter installs, and installing is the store's own two screens.
+    ///
+    /// Deliberately not claimed here. What Enter does to a listing is fetch
+    /// the source, read it, and show what it appears to be able to do before
+    /// a line of it runs. That is a conversation rather than an action, and an
+    /// action that skipped it would be a way to install code without the one
+    /// screen written to stop exactly that.
+    fn is_primary(&self, _kind: ObjectKind) -> bool {
+        false
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        // The catalogue as the store parked it. Cheap: an `Arc` clone, not a
+        // copy of three thousand listings.
+        let catalog = ctx
+            .app
+            .state::<crate::store::StoreState>()
+            .held()
+            .ok_or("the extension store is not open")?;
+
+        let url = catalog
+            .listings
+            .iter()
+            .find(|listing| listing.name == object.target)
+            .ok_or_else(|| format!("the store has no extension called {}", object.target))?
+            .source_url();
+
+        Ok(copy_with_undo(ctx, &url, self.title())?.producing(url))
+    }
+}
+
+/// Removes an installed extension, and everything it was allowed to reach.
+///
+/// It was Ctrl+Shift+X in the store view and nothing else: a removal wired
+/// straight into the page, invisible to the activity log and unreachable by
+/// anything that is not the page. Same shape as Delete on a conversation, and
+/// the same fix.
+///
+/// Deliberately not the last word on whether it was there. Removing something
+/// already gone is the end state somebody asked for, and the message says
+/// which of the two happened.
+struct RemoveExtension;
+
+#[async_trait]
+impl Action for RemoveExtension {
+    fn id(&self) -> &'static str {
+        "sill.store.remove"
+    }
+
+    fn title(&self) -> &'static str {
+        "Remove"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::StoreListing
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::FileWrite]
+    }
+
+    fn is_primary(&self, _kind: ObjectKind) -> bool {
+        false
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let extension = object.target.clone();
+
+        // Before the removal rather than after, so files that refuse to go do
+        // not leave permissions granted to something nobody can see any more.
+        ctx.app
+            .state::<std::sync::Arc<crate::exthost::grants::Granted>>()
+            .forget(&extension);
+
+        let data_dir = crate::state::data_dir(&ctx.app);
+        let name = extension.clone();
+
+        let had = tauri::async_runtime::spawn_blocking(move || {
+            crate::store::install::uninstall(&data_dir, &name)
+        })
+        .await
+        .map_err(|err| format!("the removal did not finish: {err}"))??;
+
+        // Its commands are in the index and nothing has read it since.
+        crate::reload_index(&ctx.app);
+
+        Ok(Outcome::done(if had {
+            format!("Removed {}", object.title)
+        } else {
+            format!("{} was not installed", object.title)
+        }))
+    }
+}
+
 /// Reads text out loud. P2.4.
 ///
 /// Accepts exactly what a transform accepts, because a clipboard row and a
@@ -2514,11 +2644,17 @@ impl Action for CompressFile {
     }
 }
 
-/// Renames a file, using the launcher's field to ask for the new name.
+/// Renames a file or folder, keeping it where it is.
 ///
-/// The asking is the feature, so this action never runs from the panel with a
-/// name it guessed: the window takes over the field first, exactly as it does
-/// for a quicklink with a hole in it.
+/// The asking is a feature of the launcher, not of the rename. The window
+/// takes over its own field to collect the new name, exactly as it does for a
+/// quicklink with a hole in it, and hands the answer over in the context.
+///
+/// It used to hand the answer to a Tauri command that did the renaming itself,
+/// and this action existed only to say that it refused. That made renaming
+/// something **only the page could do**: no key could be bound to it, the model
+/// could not run it, and it appeared in no activity log, because none of those
+/// go anywhere near a command the window calls.
 struct RenameFile;
 
 #[async_trait]
@@ -2539,19 +2675,41 @@ impl Action for RenameFile {
         &[Capability::FileWrite]
     }
 
-    /// The window collects the new name and calls `rename_path`, so reaching
-    /// here means something dispatched it without asking.
-    async fn run(&self, _ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
-        Err("renaming needs a new name, which the launcher asks for".to_string())
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        // No name is not a rename to nothing, it is a caller that skipped the
+        // asking. Said rather than guessed at.
+        let to = ctx
+            .argument()
+            .ok_or("renaming needs a new name, which the launcher asks for")?
+            .to_string();
+
+        let from = std::path::PathBuf::from(&object.target);
+        let was = crate::files_ops::name_of(&from);
+
+        let landed = tokio::task::spawn_blocking(move || crate::files_ops::rename(&from, &to))
+            .await
+            .map_err(|err| format!("could not rename that: {err}"))??;
+
+        // No undo. Renaming back is a second rename and nothing here can know
+        // that the name it would put back is still free, so an undo token
+        // would be a promise this cannot keep.
+        Ok(Outcome::done(format!(
+            "Renamed {was} to {}",
+            crate::files_ops::name_of(&landed)
+        )))
     }
 }
 
-/// Moves a file or folder somewhere else.
+/// Moves a file or folder into another folder.
 ///
-/// Refuses to run for the reason renaming does: it needs a destination, and an
-/// action is handed one object and acts. The launcher asks where first and
-/// then calls `move_path`. Reaching here means something dispatched it without
-/// asking, and doing nothing loudly is better than guessing at a folder.
+/// Takes its destination the way renaming takes its new name. The window
+/// borrows its whole list rather than only the field, because the answer is a
+/// folder and typing only narrows which one, but what it does with the answer
+/// is one call either way.
+///
+/// The only file action that reverses exactly, and the token is two paths
+/// rather than anything copied, so undoing a move of ten gigabytes costs what
+/// undoing a move of a text file costs.
 struct MoveFile;
 
 #[async_trait]
@@ -2577,8 +2735,46 @@ impl Action for MoveFile {
         &[Capability::FileRead, Capability::FileWrite]
     }
 
-    async fn run(&self, _ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
-        Err("moving needs somewhere to move to, which the launcher asks for".to_string())
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let folder = ctx
+            .argument()
+            .ok_or("moving needs somewhere to move to, which the launcher asks for")?
+            .to_string();
+
+        let from = std::path::PathBuf::from(&object.target);
+        let into = std::path::PathBuf::from(&folder);
+        let name = crate::files_ops::name_of(&from);
+
+        // Where it came out of, read before the move, because afterwards there
+        // is nothing left at the old path to ask.
+        let came_from = from
+            .parent()
+            .map(|parent| parent.to_string_lossy().to_string())
+            .ok_or_else(|| format!("{name} has nowhere to be put back"))?;
+
+        let landed = {
+            let from = from.clone();
+            let into = into.clone();
+
+            // Blocking: between two drives this copies, and that is as slow as
+            // whatever is being moved is large.
+            tokio::task::spawn_blocking(move || crate::files_ops::move_to(&from, &into))
+                .await
+                .map_err(|err| format!("could not move that: {err}"))??
+        };
+
+        // After the move, so a folder that refused is not learned as one
+        // somebody uses. The next move offers it first.
+        crate::state::remember_destination(&ctx.app, &folder);
+
+        Ok(Outcome::undoable(
+            format!("Moved {name} to {}", crate::files_ops::name_of(&into)),
+            Undo::MovePath {
+                path: landed.to_string_lossy().to_string(),
+                back_to: came_from,
+                name,
+            },
+        ))
     }
 }
 
