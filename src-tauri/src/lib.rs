@@ -1654,6 +1654,7 @@ pub fn run() {
             commands::settings::index_rows,
             commands::settings::set_command_hotkey,
             commands::settings::set_hidden,
+            commands::settings::set_pinned,
             commands::settings::navigation_chords,
             commands::settings::navigation_keys,
             commands::settings::action_shortcuts,

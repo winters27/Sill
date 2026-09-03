@@ -524,6 +524,35 @@ pub(crate) async fn set_hidden(
     Ok(next)
 }
 
+/// Keeps one entry at the top of the root list, or stops.
+///
+/// Appended rather than inserted, so the order is the order things were
+/// pinned. Somebody who pins five things has arranged five things, and
+/// deciding the order for them would undo that.
+///
+/// Unpinning and pinning again therefore moves an entry to the end, which is
+/// how every pinned list behaves and is the only re-ordering there is until
+/// something can drag them.
+#[tauri::command]
+pub(crate) async fn set_pinned(
+    app: AppHandle,
+    prefs: State<'_, crate::state::PrefsState>,
+    command: String,
+    pinned: bool,
+) -> Result<crate::preferences::Preferences, String> {
+    let next = {
+        let mut current = prefs.inner.lock().await;
+        current.sources.pinned.retain(|id| id != &command);
+        if pinned {
+            current.sources.pinned.push(command);
+        }
+        current.clone()
+    };
+
+    set_preferences(app, prefs, next.clone()).await?;
+    Ok(next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2704,6 +2704,9 @@ pub fn search(
         now,
         limit,
         Excluded::none(),
+        // Nothing pinned: this wrapper is the plain ranking, not the root
+        // list somebody has arranged.
+        &[],
     )
 }
 
@@ -2727,6 +2730,7 @@ pub fn search_excluding<'a>(
     now: i64,
     limit: usize,
     off: Excluded<'_>,
+    pinned: &[String],
 ) -> Vec<RankedCommand> {
     let query = query.trim();
 
@@ -2855,9 +2859,34 @@ pub fn search_excluding<'a>(
      */
     let typed = !query.is_empty();
 
+    /*
+     * Where a pinned entry sits, or nowhere.
+     *
+     * The position in the list is the order somebody arranged, so it is the
+     * sort key rather than a bonus: a bonus large enough to beat frecency
+     * would still let the most-launched pin drift to the top, which is
+     * exactly the arranging being undone.
+     *
+     * Only on an empty query, and that is the whole design. With something
+     * typed, a pin leading would put an unrelated pinned row above an exact
+     * title match, which is a worse list than no pins at all. Pinning says
+     * "keep this where I can see it when I have not asked for anything".
+     */
+    let pin_of = |id: &str| {
+        if typed {
+            return usize::MAX;
+        }
+
+        pinned
+            .iter()
+            .position(|one| one == id)
+            .unwrap_or(usize::MAX)
+    };
+
     scored.sort_by(|(a_class, a_weight, a, _), (b_class, b_weight, b, _)| {
-        a_class
-            .cmp(b_class)
+        pin_of(&a.id)
+            .cmp(&pin_of(&b.id))
+            .then_with(|| a_class.cmp(b_class))
             .then_with(|| b_weight.cmp(a_weight))
             .then_with(|| {
                 if typed {
@@ -3092,5 +3121,129 @@ mod on_disk {
         assert_eq!(cached.len(), 2, "the readable records survive");
         assert_eq!(cached[0].id, "app:one");
         assert_eq!(cached[1].id, "app:two");
+    }
+}
+
+/// Pins: the rows somebody keeps at the top of an empty list.
+///
+/// In the library's own tests rather than `tests/registry.rs`, so running them
+/// costs one test binary instead of linking a second executable of the whole
+/// application.
+#[cfg(test)]
+mod pinned_rows {
+    use super::*;
+
+    const NOW: i64 = 1_700_000_000;
+
+    fn corpus() -> Vec<CommandRecord> {
+        [
+            "view-history",
+            "generate-uuid",
+            "random-password",
+            "search-emoji",
+        ]
+        .iter()
+        .map(|id| CommandRecord {
+            id: (*id).to_string(),
+            extension: "test".into(),
+            extension_title: "Test".into(),
+            command: "run".into(),
+            title: match *id {
+                "view-history" => "View History",
+                "generate-uuid" => "Generate UUID",
+                "random-password" => "Generate Random Password",
+                _ => "Search Emoji",
+            }
+            .to_string(),
+            subtitle: String::new(),
+            description: String::new(),
+            mode: "app".into(),
+            entrypoint: String::new(),
+            keywords: Vec::new(),
+            icon: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            toggle: None,
+        })
+        .collect()
+    }
+
+    fn ranked(query: &str, frecency: &Frecency, pinned: &[String]) -> Vec<String> {
+        search_excluding(
+            &corpus(),
+            query,
+            frecency,
+            &Aliases::default(),
+            NOW,
+            50,
+            Excluded::none(),
+            pinned,
+        )
+        .into_iter()
+        .map(|one| one.command.id)
+        .collect()
+    }
+
+    /// The whole point: the empty query is ordered by what you reach for most,
+    /// and a pin says "this one, whatever the numbers say".
+    #[test]
+    fn a_pinned_entry_leads_the_empty_query() {
+        let mut frecency = Frecency::default();
+        for _ in 0..50 {
+            frecency.record("generate-uuid", NOW);
+        }
+
+        let order = ranked("", &frecency, &["search-emoji".to_string()]);
+        assert_eq!(
+            order.first().map(String::as_str),
+            Some("search-emoji"),
+            "a pin did not beat fifty launches of something else"
+        );
+    }
+
+    /// Several pins keep the order they were pinned in, which is the order
+    /// somebody arranged them.
+    #[test]
+    fn pins_stay_in_the_order_they_were_arranged() {
+        // Neither alphabetical nor the corpus order, so neither can produce
+        // this by accident.
+        let arranged = vec![
+            "search-emoji".to_string(),
+            "view-history".to_string(),
+            "random-password".to_string(),
+        ];
+
+        let order = ranked("", &Frecency::default(), &arranged);
+        assert_eq!(order[..3], arranged[..], "the arranging was re-sorted");
+    }
+
+    /// With something typed, a pin is not a way to the top.
+    ///
+    /// The pinned entry here **does** match what is typed, so it genuinely
+    /// competes. An earlier version pinned something that matched nothing,
+    /// which the ranker drops before the sort ever sees it, so the test passed
+    /// with the guard removed and proved nothing.
+    #[test]
+    fn a_pin_does_not_lead_a_query_somebody_typed() {
+        let pinned = vec!["random-password".to_string()];
+        let order = ranked("generate", &Frecency::default(), &pinned);
+
+        assert!(
+            order.contains(&"random-password".to_string()),
+            "the pinned entry does not match this query, so this proves nothing"
+        );
+        assert_eq!(
+            order.first().map(String::as_str),
+            Some("generate-uuid"),
+            "a pin displaced the shorter title on a query somebody typed"
+        );
+    }
+
+    /// A pin naming something no longer installed holds no place.
+    #[test]
+    fn a_pin_for_something_that_is_gone_changes_nothing() {
+        let plain = ranked("", &Frecency::default(), &[]);
+        let haunted = ranked("", &Frecency::default(), &["uninstalled".to_string()]);
+        assert_eq!(plain, haunted);
     }
 }

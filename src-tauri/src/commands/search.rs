@@ -37,11 +37,12 @@ pub(crate) async fn search_commands(
     emoji: State<'_, crate::emoji::Emoji>,
     query: String,
 ) -> Result<Vec<registry::SearchResult>, String> {
-    let (excluded, hidden, tone) = {
+    let (excluded, hidden, pinned, tone) = {
         let prefs = prefs.inner.lock().await;
         (
             prefs.sources.excluded.clone(),
             prefs.sources.hidden.clone(),
+            prefs.sources.pinned.clone(),
             prefs.emoji.tone,
         )
     };
@@ -102,6 +103,7 @@ pub(crate) async fn search_commands(
             terms: &excluded,
             ids: &hidden,
         },
+        &pinned,
     );
 
     /*
@@ -325,6 +327,8 @@ pub(crate) async fn search_app_volume(
         // Hiding it would mean not being able to turn down the thing making
         // the noise.
         registry::Excluded::none(),
+        // Not the root list, so nothing is pinned to the top of it.
+        &[],
     );
 
     Ok(results.into_iter().map(Into::into).collect())
@@ -396,6 +400,8 @@ pub(crate) async fn search_processes(
         // What is running is a fact rather than a preference. Hiding a row
         // here would mean not being able to quit the thing eating the machine.
         registry::Excluded::none(),
+        // Not the root list, so nothing is pinned to the top of it.
+        &[],
     );
 
     Ok(results.into_iter().map(Into::into).collect())
@@ -453,6 +459,8 @@ pub(crate) async fn search_windows(
         now_seconds(),
         registry::SEARCH_LIMIT,
         registry::Excluded::none(),
+        // Not the root list, so nothing is pinned to the top of it.
+        &[],
     );
 
     Ok(results.into_iter().map(Into::into).collect())
@@ -510,6 +518,8 @@ pub(crate) async fn search_emoji(
         now_seconds(),
         registry::SEARCH_LIMIT,
         registry::Excluded::none(),
+        // Not the root list, so nothing is pinned to the top of it.
+        &[],
     );
 
     if !inline.unwrap_or(false) {
@@ -591,6 +601,8 @@ fn inline_emoji(
         now_seconds(),
         registry::SEARCH_LIMIT,
         registry::Excluded::none(),
+        // Not the root list, so nothing is pinned to the top of it.
+        &[],
     )
     .into_iter()
     .filter(|ranked| {

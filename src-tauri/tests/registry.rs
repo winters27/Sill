@@ -736,6 +736,7 @@ fn an_exclusion_term_hides_matching_entries() {
         NOW,
         50,
         Excluded::none(),
+        &[],
     );
     let after = sill_lib::registry::search_excluding(
         &commands,
@@ -748,6 +749,7 @@ fn an_exclusion_term_hides_matching_entries() {
             terms: &["history".to_string()],
             ids: &[],
         },
+        &[],
     );
 
     assert!(
@@ -785,6 +787,7 @@ fn an_exclusion_term_is_case_insensitive_and_ignores_blanks() {
             terms: &["   ".to_string(), "HISTORY".to_string()],
             ids: &[],
         },
+        &[],
     );
 
     assert!(!results.is_empty(), "a blank term must not hide everything");
@@ -816,6 +819,7 @@ fn searching_borrows_its_corpus_from_more_than_one_source() {
         NOW,
         20,
         Excluded::none(),
+        &[],
     );
 
     assert!(
@@ -843,6 +847,7 @@ fn a_snippet_is_findable_by_what_is_inside_it() {
         NOW,
         20,
         Excluded::none(),
+        &[],
     );
 
     assert_eq!(results.len(), 1, "content should be searchable");
@@ -1216,6 +1221,7 @@ fn an_alias_finds_something_its_name_does_not_contain() {
         NOW,
         50,
         Excluded::none(),
+        &[],
     );
 
     assert_eq!(
@@ -1256,6 +1262,7 @@ fn an_alias_outranks_an_exact_title_match() {
         NOW,
         50,
         Excluded::none(),
+        &[],
     );
 
     assert_eq!(
@@ -1290,6 +1297,7 @@ fn an_alias_only_applies_when_it_is_typed_in_full() {
                 terms: &[],
                 ids: &[],
             },
+            &[],
         );
 
         assert_ne!(
@@ -1328,6 +1336,7 @@ fn an_alias_is_matched_regardless_of_case() {
                 terms: &[],
                 ids: &[],
             },
+            &[],
         );
 
         assert_eq!(
@@ -1356,6 +1365,7 @@ fn an_alias_pointing_at_something_that_is_gone_changes_nothing() {
         NOW,
         50,
         Excluded::none(),
+        &[],
     );
     let without = registry::search_excluding(
         commands.iter(),
@@ -1365,6 +1375,7 @@ fn an_alias_pointing_at_something_that_is_gone_changes_nothing() {
         NOW,
         50,
         Excluded::none(),
+        &[],
     );
 
     let titles = |r: &[registry::RankedCommand]| {
@@ -1403,6 +1414,7 @@ fn a_blank_alias_is_not_an_alias_that_matches_everything() {
         NOW,
         50,
         Excluded::none(),
+        &[],
     );
     let without = registry::search_excluding(
         commands.iter(),
@@ -1412,6 +1424,7 @@ fn a_blank_alias_is_not_an_alias_that_matches_everything() {
         NOW,
         50,
         Excluded::none(),
+        &[],
     );
 
     let titles = |r: &[registry::RankedCommand]| {
@@ -1453,6 +1466,7 @@ fn ranked(commands: &[CommandRecord], query: &str, frecency: &Frecency) -> Vec<S
         NOW,
         50,
         Excluded::none(),
+        &[],
     )
     .into_iter()
     .map(|r| r.command.title)
@@ -1644,6 +1658,7 @@ fn an_alias_still_beats_something_learned() {
         NOW,
         50,
         Excluded::none(),
+        &[],
     );
 
     assert_eq!(
@@ -1678,6 +1693,7 @@ fn hiding_one_entry_hides_exactly_that_one() {
             terms: &[],
             ids: &[notepad],
         },
+        &[],
     );
 
     let titles: Vec<&str> = found.iter().map(|r| r.command.title.as_str()).collect();
@@ -1706,6 +1722,7 @@ fn hiding_by_id_never_matches_a_title_that_merely_contains_it() {
             // A prefix of many real ids in the corpus.
             ids: &["app:".to_string()],
         },
+        &[],
     );
 
     assert_eq!(
@@ -1738,6 +1755,7 @@ fn the_term_list_and_the_hidden_list_both_apply() {
             terms: &["notepad".to_string()],
             ids: &[steam],
         },
+        &[],
     );
 
     let titles: Vec<&str> = found.iter().map(|r| r.command.title.as_str()).collect();
@@ -1843,6 +1861,7 @@ fn an_exact_keyword_beats_letters_found_scattered_in_a_title() {
         NOW,
         50,
         Excluded::none(),
+        &[],
     );
 
     assert_eq!(
@@ -1887,6 +1906,7 @@ fn an_exact_keyword_does_not_outrank_the_title_itself() {
         NOW,
         50,
         Excluded::none(),
+        &[],
     );
 
     assert_eq!(
@@ -1990,6 +2010,7 @@ fn volunteered(query: &str) -> Vec<String> {
         NOW,
         registry::SEARCH_LIMIT,
         Excluded::none(),
+        &[],
     )
     .into_iter()
     .filter(|ranked| match_class(query, &ranked.command).is_some_and(registry::is_strong))
@@ -3034,6 +3055,7 @@ mod sills_own_settings_are_findable {
                 terms: &[],
                 ids: &[],
             },
+            &[],
         )
         .into_iter()
         .map(|hit| hit.command.title.clone())

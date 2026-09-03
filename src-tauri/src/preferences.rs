@@ -412,6 +412,18 @@ pub struct Sources {
     /// containing that word with it.
     #[serde(default)]
     pub hidden: Vec<String>,
+
+    /// Entries kept at the top of the root list, in the order shown.
+    ///
+    /// The opposite of `hidden`, and stored the same way: ids rather than
+    /// titles, because a title changes when an application updates and an id
+    /// does not.
+    ///
+    /// A list rather than a set, because the order is the point. Somebody who
+    /// pins five things has arranged five things, and re-sorting them by how
+    /// often each is opened would undo the arranging on the first launch.
+    #[serde(default)]
+    pub pinned: Vec<String>,
 }
 
 /// Fields that are encrypted on their way to disk.
@@ -542,6 +554,7 @@ impl Default for Sources {
             windows_settings: true,
             excluded: Vec::new(),
             hidden: Vec::new(),
+            pinned: Vec::new(),
         }
     }
 }
