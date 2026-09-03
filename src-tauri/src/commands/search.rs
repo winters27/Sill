@@ -899,6 +899,7 @@ pub(crate) async fn list_drives(
 pub(crate) async fn index_folder(
     state: State<'_, PrefsState>,
     catalog: State<'_, CatalogState>,
+    watching: State<'_, crate::state::Watching>,
     path: String,
     wanted: bool,
 ) -> Result<Vec<String>, String> {
@@ -947,7 +948,14 @@ pub(crate) async fn index_folder(
         prefs.files.clone()
     };
 
-    catalog.rebuild(roots.indexed_roots());
+    let indexed = roots.indexed_roots();
+
+    // The watcher follows the folders. Without this it kept watching whatever
+    // the list held at startup, so a folder added here was walked once and
+    // then never noticed again, and a folder removed went on waking the
+    // index up.
+    watching.re_root(catalog.inner().clone(), indexed.clone());
+    catalog.rebuild(indexed);
 
     Ok(roots.roots)
 }

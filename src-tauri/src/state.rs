@@ -151,6 +151,70 @@ pub(crate) struct CatalogState {
 }
 
 impl CatalogState {
+    /// Applies a set of changed paths without walking anything.
+    ///
+    /// The watcher says what changed but not reliably whether each path was
+    /// created or removed: a rename arrives as one kind on one filesystem and
+    /// another elsewhere, and `Any` means the platform would not say. So each
+    /// path is asked of the disk instead. It is one `exists` per changed path,
+    /// against a walk of the whole root.
+    ///
+    /// Falls back to a full rebuild when the catalog says a patch is not the
+    /// right answer, which is when enough of it is dead to be worth reclaiming.
+    pub(crate) fn patch(&self, changed: Vec<PathBuf>, roots: Vec<PathBuf>) {
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+
+        for path in changed {
+            if path.exists() {
+                // Checked per path rather than per event. An event can name
+                // one path the index wants and one it does not, and the second
+                // has no business being indexed because the first arrived
+                // beside it.
+                if crate::catalog::worth_indexing(&path, &roots) {
+                    added.push(path);
+                }
+            } else {
+                // Not filtered: something the index should not have held is
+                // not in it, so removing it is a no-op, and a path that is
+                // gone cannot be asked whether it was a directory.
+                removed.push(path);
+            }
+        }
+
+        let holding = self.inner.load();
+
+        match holding.apply(&added, &removed) {
+            Some(patched) => {
+                crate::say!(
+                    "file index: {} added, {} gone, {} entries",
+                    added.len(),
+                    removed.len(),
+                    patched.len()
+                );
+
+                let saved = Arc::new(patched);
+                self.inner.store(saved.clone());
+
+                // Written out so the next start reads the patched index rather
+                // than one that predates the change. This is also where the
+                // dead slots are dropped, since saving compacts.
+                if let Some(path) = self.cache.as_ref() {
+                    if let Err(err) = saved.save(path) {
+                        crate::say!("file index: cannot save: {err}");
+                    }
+                }
+            }
+            None => {
+                // Either nothing to do, or the index has enough dead slots
+                // that a walk should reclaim them.
+                if !added.is_empty() || !removed.is_empty() {
+                    self.rebuild(roots);
+                }
+            }
+        }
+    }
+
     /// Rebuilds in the background, unless a rebuild is already running.
     ///
     /// Returns immediately. Nothing waits for the index: file search answers
@@ -325,6 +389,52 @@ pub fn quiet_after(build: std::time::Duration) -> std::time::Duration {
 /// Held so the watcher lives as long as the app does. Dropping it stops the
 /// watching, which is what should happen when the folders change: the old
 /// watcher goes and a new one takes its place.
+/// The watcher, which there may not be one of yet.
+///
+/// ## Why it is a container rather than the watcher itself
+///
+/// Tauri's managed state is set once and handed out by type, so a watcher
+/// managed directly could never be replaced. That had two consequences. A
+/// machine that started with no indexed folders never got a watcher at all,
+/// because the call was inside an `if roots.is_empty()`, so adding a first
+/// folder in Settings indexed it once and then never noticed it again. And
+/// changing the folders re-walked the index but left the watcher watching the
+/// old ones.
+///
+/// This is managed unconditionally, before any window exists, and filled and
+/// refilled as the folders change.
+#[derive(Default)]
+pub(crate) struct Watching {
+    // Nothing reads this; holding the watcher is what keeps it running, and
+    // dropping it is what stops it.
+    held: std::sync::Mutex<Option<CatalogWatcher>>,
+}
+
+impl Watching {
+    /// Watches these folders instead of whatever it was watching.
+    ///
+    /// The old watcher is dropped before the new one starts, so the two never
+    /// both report the same change.
+    pub(crate) fn re_root(&self, state: CatalogState, roots: Vec<PathBuf>) {
+        // Recovered rather than propagated: a poisoned lock here would mean
+        // never watching anything again for the life of the process, and the
+        // worst it can hold is a watcher that is about to be replaced.
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Dropped first, and explicitly, because the next line may take a
+        // moment and two watchers on overlapping folders would each report
+        // every change.
+        *held = None;
+
+        if roots.is_empty() {
+            crate::say!("file index: nothing to watch");
+            return;
+        }
+
+        *held = CatalogWatcher::start(state, roots);
+    }
+}
+
 pub(crate) struct CatalogWatcher {
     // Behind a mutex because Tauri's managed state is shared across threads
     // and a watcher is only `Send`. Nothing ever locks it: the field exists to
@@ -372,7 +482,10 @@ impl CatalogWatcher {
                     return;
                 }
 
-                let _ = tx.send(());
+                // The paths travel with the message now. Sending only "something
+                // happened" is what forced a walk to find out what: the walk was
+                // the only thing that knew.
+                let _ = tx.send(event.paths);
             })
             .ok()?;
 
@@ -392,11 +505,19 @@ impl CatalogWatcher {
             // apart.
             let mut last = std::time::Instant::now();
 
-            while rx.recv().is_ok() {
+            while let Ok(first) = rx.recv() {
                 // Drain whatever else arrived while things settle. Checking
                 // out a branch writes a thousand files and should cost one
-                // rebuild, not a thousand.
-                while rx.recv_timeout(SETTLE).is_ok() {}
+                // patch, not a thousand.
+                //
+                // Collected rather than counted: a set, because a file written
+                // and then written again is one change, and the same path
+                // arriving twice would otherwise be looked at twice.
+                let mut changed: std::collections::HashSet<PathBuf> = first.into_iter().collect();
+
+                while let Ok(more) = rx.recv_timeout(SETTLE) {
+                    changed.extend(more);
+                }
 
                 // Waited out rather than dropped. Skipping the rebuild while
                 // inside the quiet period threw the change away with it, so a
@@ -409,13 +530,16 @@ impl CatalogWatcher {
                 if let Some(wait) = quiet.checked_sub(last.elapsed()) {
                     std::thread::sleep(wait);
 
-                    // Anything that arrived during the wait is covered by the
-                    // rebuild about to happen.
-                    while rx.try_recv().is_ok() {}
+                    // Taken rather than dropped. These used to be thrown away
+                    // because the rebuild about to happen would have seen them
+                    // anyway; a patch only knows what it is handed.
+                    while let Ok(more) = rx.try_recv() {
+                        changed.extend(more);
+                    }
                 }
 
                 last = std::time::Instant::now();
-                state.rebuild(roots.clone());
+                state.patch(changed.into_iter().collect(), roots.clone());
             }
         });
 

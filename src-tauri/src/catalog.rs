@@ -30,6 +30,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::files::FileHit;
 
@@ -325,6 +326,12 @@ struct Slot {
     /// Where the name starts, which is somewhere between the two.
     name_at: u32,
     is_dir: bool,
+    /// Whether the file is still there.
+    ///
+    /// A deletion cannot remove the text from the arena, because every slot
+    /// after it is an offset and they would all move. So the slot stays and
+    /// stops counting, and the space comes back at the next compaction.
+    live: bool,
 }
 
 /// Everything Sill knows about the files under its roots.
@@ -333,11 +340,18 @@ struct Slot {
 /// search in progress never sees a half-built index and never waits for one.
 #[derive(Debug, Default)]
 pub struct Catalog {
-    /// Every path, end to end, in one allocation.
+    /// Everything the last full walk found, in one allocation.
     ///
-    /// See [`Slot`] for why. Paths are pure text and never change once walked,
-    /// so there is nothing to gain from being able to free one of them.
-    paths: String,
+    /// See [`Slot`] for why. Behind an `Arc` because a patch produces a whole
+    /// new catalog and this is the large part of it: sharing it is what makes
+    /// patching cost the changed files rather than the whole index.
+    base: Arc<str>,
+    /// What has been added since that walk.
+    ///
+    /// Offsets are into the two arenas end to end, so anything at or past
+    /// `base.len()` lands here. One number keeps addressing what it was
+    /// instead of every slot carrying which half it lives in.
+    added: String,
     entries: Vec<Slot>,
     /// Letters that begin a word, to the entries whose names contain them.
     ///
@@ -345,12 +359,15 @@ pub struct Catalog {
     /// while somebody is typing.
     buckets: HashMap<char, Vec<u32>>,
     roots: Vec<PathBuf>,
+    /// Slots whose file is gone, so compaction can be decided on a number
+    /// rather than by counting them.
+    dead: u32,
 }
 
 impl Catalog {
     /// How many files are in it.
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.entries.len() - self.dead as usize
     }
 
     pub fn is_empty(&self) -> bool {
@@ -425,19 +442,186 @@ impl Catalog {
         let buckets = index(&paths, &entries);
 
         Self {
-            paths,
+            base: paths.into(),
+            added: String::new(),
             entries,
             buckets,
             roots: roots.to_vec(),
+            dead: 0,
         }
     }
 
+    /// A new catalog with some files added and some gone.
+    ///
+    /// ## Why this exists
+    ///
+    /// Every change used to re-walk every root: measured at **2,653 ms for
+    /// 49,429 entries** on this machine's home folder, for a change that might
+    /// be one saved file. A tool that writes continuously kept that walk
+    /// running, which is the "3.4 s of Rust core per 30 s of writing" the
+    /// audit measured.
+    ///
+    /// ## Why it hands back a new one rather than mutating
+    ///
+    /// The catalog is behind an `ArcSwap` so searching takes no lock, and that
+    /// is worth keeping. `ArcSwap` makes reads free; it does not make
+    /// read-modify-write safe. So a patch builds the next catalog and swaps it
+    /// in, exactly as a rebuild does.
+    ///
+    /// What makes that cheap is that the large part is shared. `base` holds
+    /// the walked text and cloning it is a pointer. Only the entries, the
+    /// buckets and the small second arena are copied, which together are under
+    /// a tenth of the index.
+    ///
+    /// ## What it costs
+    ///
+    /// Measured on this machine's home folder, 49,429 entries: a walk is
+    /// **2,759 ms**, one added file is **890 us**, and a thousand at once is
+    /// **209 ms**. The bulk figure is linear in entries times changed paths,
+    /// because each changed path is looked for in the index; it is left that
+    /// way because a thousand-file change is a branch checkout rather than
+    /// something that happens while somebody types, and 209 ms of it is still
+    /// an order better than walking.
+    ///
+    /// Nothing when there is nothing to do, or when enough slots are dead that
+    /// a walk should reclaim them instead.
+    pub fn apply(&self, added: &[PathBuf], removed: &[PathBuf]) -> Option<Self> {
+        if (added.is_empty() && removed.is_empty()) || self.wants_compacting() {
+            return None;
+        }
+
+        let mut entries = self.entries.clone();
+        let mut buckets = self.buckets.clone();
+        let mut arena = self.added.clone();
+        let mut dead = self.dead;
+        let split = self.base.len();
+
+        // Gone first, and it has to be.
+        //
+        // When the same path is in both lists, which is a file deleted and
+        // written again before things settled, doing the additions first means
+        // `holds` sees the slot that is about to die, calls the addition a
+        // duplicate and skips it, and then the removal kills it: the file ends
+        // up missing from the index while sitting on disk. Removing first
+        // leaves nothing for the addition to collide with.
+        //
+        // A rename to a different name does not care about the order, which is
+        // what this comment used to claim. A sabotage of the ordering disproved
+        // it by passing.
+        for path in removed {
+            let Some(text) = path.to_str() else {
+                continue;
+            };
+
+            for slot in entries.iter_mut() {
+                if !slot.live {
+                    continue;
+                }
+
+                let held = span(&self.base, &arena, split, slot.at, slot.end);
+
+                if same_path(held, text) {
+                    slot.live = false;
+                    dead += 1;
+                    // A path is in the index at most once, because `holds`
+                    // refuses a second one. So there is nothing further to
+                    // find, and on a bulk delete this is the difference
+                    // between scanning the index once per file and scanning
+                    // half of it.
+                    break;
+                }
+            }
+        }
+
+        for path in added {
+            let Some(text) = path.to_str() else {
+                continue;
+            };
+
+            // A watcher reports a write to an existing file as a create on
+            // some filesystems, and indexing it twice would list it twice.
+            //
+            // Asked of the entries being built rather than of `self`. Asking
+            // the original meant a file removed and added in the same batch
+            // was refused as a duplicate of the slot the removal had just
+            // struck out, so it left the index while sitting on disk.
+            let known = entries
+                .iter()
+                .filter(|slot| slot.live)
+                .any(|slot| same_path(span(&self.base, &arena, split, slot.at, slot.end), text));
+
+            if known {
+                continue;
+            }
+
+            let Some(slot) = push_after(&mut arena, split, path, path.is_dir()) else {
+                continue;
+            };
+
+            let at = entries.len() as u32;
+
+            // Taken from the arena rather than the path, so the bucket is
+            // keyed on exactly the bytes a search will compare against.
+            let name = span(&self.base, &arena, split, slot.name_at, slot.end).to_string();
+
+            for letter in word_starts(&name) {
+                buckets.entry(letter).or_default().push(at);
+            }
+
+            entries.push(slot);
+        }
+
+        Some(Self {
+            // A pointer, not the megabytes behind it. This is the whole reason
+            // a patch costs what changed rather than what is indexed.
+            base: self.base.clone(),
+            added: arena,
+            entries,
+            buckets,
+            roots: self.roots.clone(),
+            dead,
+        })
+    }
+
+    /// Whether enough of the index is dead that a walk would be worth it.
+    ///
+    /// A dead slot costs a comparison in every search that reaches it, and the
+    /// bytes it still holds. One is nothing; a third of the index is a slower
+    /// search and memory held for files that are gone.
+    fn wants_compacting(&self) -> bool {
+        if self.entries.len() <= 64 {
+            return false;
+        }
+
+        // Either a third of the slots are dead, or the arena has grown by half
+        // again since the walk. The second matters on its own: renaming files
+        // in a loop adds a live slot and kills one every time, so the dead
+        // fraction can sit still while the text doubles.
+        self.dead as usize * 3 > self.entries.len() || self.added.len() * 2 > self.base.len()
+    }
+
+    /// The text between two offsets, from whichever arena holds it.
+    ///
+    /// Every path is written in one piece, so a slot never straddles the two
+    /// and this never has to join anything.
+    fn text(&self, at: u32, end: u32) -> &str {
+        span(&self.base, &self.added, self.base.len(), at, end)
+    }
+
+    /// How much path text is held, across both arenas.
+    ///
+    /// Includes what dead slots still point at, which is the number
+    /// compaction exists to bring down.
+    pub fn held(&self) -> usize {
+        self.base.len() + self.added.len()
+    }
+
     fn path(&self, slot: &Slot) -> &str {
-        &self.paths[slot.at as usize..slot.end as usize]
+        self.text(slot.at, slot.end)
     }
 
     fn name(&self, slot: &Slot) -> &str {
-        &self.paths[slot.name_at as usize..slot.end as usize]
+        self.text(slot.name_at, slot.end)
     }
 
     /// The files a query matches, best first.
@@ -474,6 +658,12 @@ impl Catalog {
 
         for &at in candidates.iter() {
             let slot = self.entries[at as usize];
+
+            // A deleted file keeps its slot and its place in the buckets until
+            // the next compaction, so this is where it stops being an answer.
+            if !slot.live {
+                continue;
+            }
 
             if !inside.is_empty() && !under(self.path(&slot), &inside) {
                 continue;
@@ -625,6 +815,63 @@ fn index(paths: &str, entries: &[Slot]) -> HashMap<char, Vec<u32>> {
     buckets
 }
 
+/// Whether two paths name the same file.
+///
+/// Case-insensitive and separator-insensitive, which is what Windows means by
+/// the same file and what `settled` does everywhere else here. Written out
+/// rather than calling `settled` because this runs once per indexed entry for
+/// every deleted path, and two allocations per comparison would be the
+/// expensive part of a patch.
+///
+/// Byte length is a valid first test: neither folding ASCII case nor swapping
+/// a separator changes how many bytes a path takes.
+fn same_path(one: &str, two: &str) -> bool {
+    one.len() == two.len()
+        && one.chars().zip(two.chars()).all(|(a, b)| {
+            let a = if a == '/' { '\\' } else { a };
+            let b = if b == '/' { '\\' } else { b };
+            a.eq_ignore_ascii_case(&b)
+        })
+}
+
+/// The text between two offsets, from whichever of the two arenas holds it.
+///
+/// Offsets address the pair end to end, so anything at or past `split` is in
+/// the second. A path is always written in one piece, so no span ever straddles
+/// them.
+fn span<'a>(base: &'a str, added: &'a str, split: usize, at: u32, end: u32) -> &'a str {
+    let (at, end) = (at as usize, end as usize);
+
+    if at < split {
+        &base[at..end]
+    } else {
+        &added[at - split..end - split]
+    }
+}
+
+/// Appends a path to the second arena and returns where it landed.
+///
+/// The same as [`push`] except that offsets carry on from the end of the first
+/// arena, so a slot made here addresses the pair the same way one made by the
+/// walk does.
+fn push_after(arena: &mut String, split: usize, path: &Path, is_dir: bool) -> Option<Slot> {
+    let name = path.file_name()?.to_str()?;
+    let full = path.to_str()?;
+    let name_from = full.len().checked_sub(name.len())?;
+
+    let at = u32::try_from(split + arena.len()).ok()?;
+    let end = u32::try_from(split + arena.len() + full.len()).ok()?;
+    arena.push_str(full);
+
+    Some(Slot {
+        at,
+        end,
+        name_at: at + name_from as u32,
+        is_dir,
+        live: true,
+    })
+}
+
 /// Appends a walked path to the arena and returns where it landed.
 ///
 /// Nothing if the path has no name or is not valid text. A path Windows cannot
@@ -646,6 +893,7 @@ fn push(paths: &mut String, path: &Path, is_dir: bool) -> Option<Slot> {
         end,
         name_at: at + name_from as u32,
         is_dir,
+        live: true,
     })
 }
 
@@ -680,8 +928,15 @@ impl Catalog {
     ///
     /// Written whole and then renamed, so a start that happens during a save
     /// reads either the old file or the new one and never half of either.
+    /// Saving is also how the index is compacted.
+    ///
+    /// Only living slots are written, and their text is copied out in order,
+    /// so the offsets on disk are already closed up. What comes back on the
+    /// next start has one arena and nothing dead in it, which is why the file
+    /// format did not have to learn about either.
     pub fn save(&self, to: &Path) -> std::io::Result<()> {
-        let mut out = Vec::with_capacity(self.paths.len() + self.entries.len() * 16 + 64);
+        let mut out =
+            Vec::with_capacity(self.base.len() + self.added.len() + self.entries.len() * 16 + 64);
 
         out.extend_from_slice(MAGIC);
 
@@ -695,11 +950,31 @@ impl Catalog {
             out.extend_from_slice(text.as_bytes());
         }
 
-        put_u32(&mut out, self.paths.len() as u32);
-        out.extend_from_slice(self.paths.as_bytes());
+        // Built first, because the arena's length has to be written before
+        // the arena and neither is known until the dead have been dropped.
+        let mut text = String::with_capacity(self.base.len() + self.added.len());
+        let mut kept: Vec<Slot> = Vec::with_capacity(self.entries.len() - self.dead as usize);
 
-        put_u32(&mut out, self.entries.len() as u32);
-        for slot in &self.entries {
+        for slot in self.entries.iter().filter(|slot| slot.live) {
+            let at = text.len() as u32;
+            let name_from = slot.name_at - slot.at;
+
+            text.push_str(self.path(slot));
+
+            kept.push(Slot {
+                at,
+                end: at + (slot.end - slot.at),
+                name_at: at + name_from,
+                is_dir: slot.is_dir,
+                live: true,
+            });
+        }
+
+        put_u32(&mut out, text.len() as u32);
+        out.extend_from_slice(text.as_bytes());
+
+        put_u32(&mut out, kept.len() as u32);
+        for slot in &kept {
             put_u32(&mut out, slot.at);
             put_u32(&mut out, slot.end);
             put_u32(&mut out, slot.name_at);
@@ -770,6 +1045,8 @@ impl Catalog {
                 end: take_u32(&raw, &mut at)?,
                 name_at: take_u32(&raw, &mut at)?,
                 is_dir: take_u32(&raw, &mut at)? != 0,
+                // Nothing dead is ever written, so everything read is alive.
+                live: true,
             };
 
             // The file is on disk and anything may have happened to it. Every
@@ -796,10 +1073,12 @@ impl Catalog {
         let buckets = index(&paths, &entries);
 
         Some(Self {
-            paths,
+            base: paths.into(),
+            added: String::new(),
             entries,
             buckets,
             roots: roots.to_vec(),
+            dead: 0,
         })
     }
 }
@@ -907,9 +1186,11 @@ mod tests {
 
         Catalog {
             buckets: index(&paths, &entries),
-            paths,
+            base: paths.into(),
+            added: String::new(),
             entries,
             roots: Vec::new(),
+            dead: 0,
         }
     }
 
@@ -1003,7 +1284,7 @@ mod tests {
         assert_eq!(one.name(&slot), "registry.rs");
         assert_eq!(one.path(&slot), full);
         // The name sits inside the path rather than beside it.
-        assert_eq!(one.paths.len(), full.len(), "stored twice");
+        assert_eq!(one.held(), full.len(), "stored twice");
     }
 
     #[test]
@@ -1016,10 +1297,208 @@ mod tests {
 
         let text: usize = names.iter().map(|name| name.len()).sum();
 
-        assert_eq!(many.paths.len(), text, "the arena holds exactly the paths");
+        assert_eq!(many.held(), text, "the arena holds exactly the paths");
         assert_eq!(many.entries.len(), 3);
-        // Sixteen bytes each, and nothing on the heap of their own.
+        // Sixteen bytes each, and nothing on the heap of their own. Still
+        // sixteen after the tombstone: it went into padding that was already
+        // being paid for.
         assert_eq!(std::mem::size_of::<Slot>(), 16);
+    }
+
+    /// A patch shares the walked text instead of copying it.
+    ///
+    /// This is the whole reason `apply` is worth having: if the arena were
+    /// copied, patching would cost what is indexed rather than what changed,
+    /// and the item would have moved the work rather than removed it.
+    #[test]
+    fn a_patch_does_not_copy_the_walked_text() {
+        let one = catalog(&[(r"C:\work\a.txt", false), (r"C:\work\b.txt", false)]);
+        let two = one
+            .apply(&[PathBuf::from(r"C:\work\c.txt")], &[])
+            .expect("a file was added");
+
+        assert!(
+            Arc::ptr_eq(&one.base, &two.base),
+            "the patched catalog holds a second copy of the walked text"
+        );
+    }
+
+    #[test]
+    fn an_added_file_can_be_found() {
+        let one = catalog(&[(r"C:\work\a.txt", false)]);
+        assert!(one.search("ledger", 10, &[]).is_empty());
+
+        let two = one
+            .apply(&[PathBuf::from(r"C:\work\ledger.txt")], &[])
+            .expect("a file was added");
+
+        let found = two.search("ledger", 10, &[]);
+        assert_eq!(found.len(), 1, "the added file is not searchable");
+        assert_eq!(found[0].path, r"C:\work\ledger.txt");
+        assert_eq!(two.len(), 2);
+    }
+
+    #[test]
+    fn a_removed_file_stops_being_an_answer() {
+        let one = catalog(&[(r"C:\work\ledger.txt", false), (r"C:\work\b.txt", false)]);
+        assert_eq!(one.search("ledger", 10, &[]).len(), 1);
+
+        let two = one
+            .apply(&[], &[PathBuf::from(r"C:\work\ledger.txt")])
+            .expect("a file was removed");
+
+        assert!(
+            two.search("ledger", 10, &[]).is_empty(),
+            "a deleted file is still being offered"
+        );
+        assert_eq!(two.len(), 1, "the count still includes the dead one");
+    }
+
+    /// Windows means the same file by either separator and either case.
+    #[test]
+    fn a_removal_matches_however_the_path_was_written() {
+        for written in [
+            r"C:\work\ledger.txt",
+            "C:/work/ledger.txt",
+            r"c:\WORK\Ledger.TXT",
+        ] {
+            let one = catalog(&[(r"C:\work\ledger.txt", false)]);
+            let two = one
+                .apply(&[], &[PathBuf::from(written)])
+                .expect("a file was removed");
+
+            assert!(
+                two.search("ledger", 10, &[]).is_empty(),
+                "{written} did not match the indexed path"
+            );
+        }
+    }
+
+    /// A watcher reports a write to an existing file as a create on some
+    /// filesystems. Indexing it again would show it twice.
+    #[test]
+    fn adding_a_file_that_is_already_there_does_not_list_it_twice() {
+        let one = catalog(&[(r"C:\work\ledger.txt", false)]);
+        let two = one
+            .apply(
+                &[
+                    PathBuf::from(r"C:\work\ledger.txt"),
+                    PathBuf::from(r"C:\work\new.txt"),
+                ],
+                &[],
+            )
+            .expect("something was added");
+
+        assert_eq!(two.search("ledger", 10, &[]).len(), 1, "listed twice");
+        assert_eq!(two.len(), 2);
+    }
+
+    /// A file deleted and written again before things settled is still there.
+    ///
+    /// This is the case that pins the order of the two loops. Additions first
+    /// would see the dying slot, call it a duplicate, skip it, and then remove
+    /// it, leaving the index saying a file is gone while it sits on disk.
+    #[test]
+    fn a_file_removed_and_added_in_one_batch_is_still_indexed() {
+        let one = catalog(&[(r"C:\work\ledger.txt", false)]);
+        let two = one
+            .apply(
+                &[PathBuf::from(r"C:\work\ledger.txt")],
+                &[PathBuf::from(r"C:\work\ledger.txt")],
+            )
+            .expect("a delete and a write");
+
+        assert_eq!(
+            two.search("ledger", 10, &[]).len(),
+            1,
+            "a file that was rewritten is missing from the index"
+        );
+        assert_eq!(two.len(), 1, "it is in there twice");
+    }
+
+    /// A rename arrives as a delete and a create together. The delete must not
+    /// strike out the entry the create just made.
+    #[test]
+    fn a_rename_in_one_batch_keeps_the_new_name() {
+        let one = catalog(&[(r"C:\work\before.txt", false)]);
+        let two = one
+            .apply(
+                &[PathBuf::from(r"C:\work\after.txt")],
+                &[PathBuf::from(r"C:\work\before.txt")],
+            )
+            .expect("a rename");
+
+        assert!(
+            two.search("before", 10, &[]).is_empty(),
+            "the old name stayed"
+        );
+        assert_eq!(
+            two.search("after", 10, &[]).len(),
+            1,
+            "the new name is gone"
+        );
+        assert_eq!(two.len(), 1);
+    }
+
+    #[test]
+    fn nothing_to_do_is_not_a_new_catalog() {
+        let one = catalog(&[(r"C:\work\a.txt", false)]);
+        assert!(one.apply(&[], &[]).is_none());
+    }
+
+    /// Past a third dead, a walk should reclaim the slots rather than another
+    /// patch adding to them.
+    #[test]
+    fn enough_dead_slots_ask_for_a_walk_instead() {
+        let names: Vec<String> = (0..100).map(|n| format!(r"C:\work\f{n}.txt")).collect();
+        let one = catalog(
+            &names
+                .iter()
+                .map(|name| (name.as_str(), false))
+                .collect::<Vec<_>>(),
+        );
+
+        let gone: Vec<PathBuf> = names[..40].iter().map(PathBuf::from).collect();
+        let two = one.apply(&[], &gone).expect("a first patch is fine");
+
+        assert!(
+            two.apply(&[], &[PathBuf::from(r"C:\work\f50.txt")])
+                .is_none(),
+            "a catalog that is 40% dead should be walked, not patched again"
+        );
+    }
+
+    /// Saving is compaction, so what comes back is clean.
+    #[test]
+    fn saving_drops_the_dead_and_what_they_held() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("index.bin");
+
+        let one = catalog(&[
+            (r"C:\work\keep.txt", false),
+            (r"C:\work\a-very-long-name-that-goes-away.txt", false),
+        ]);
+        let two = one
+            .apply(
+                &[],
+                &[PathBuf::from(
+                    r"C:\work\a-very-long-name-that-goes-away.txt",
+                )],
+            )
+            .expect("a file was removed");
+
+        two.save(&file).expect("saves");
+        let back = Catalog::load(&file, &[]).expect("reads back");
+
+        assert_eq!(back.len(), 1);
+        assert_eq!(back.dead, 0, "a dead slot was written out");
+        assert_eq!(
+            back.held(),
+            r"C:\work\keep.txt".len(),
+            "the arena still holds the text of a file that is gone"
+        );
+        assert_eq!(back.search("keep", 10, &[]).len(), 1);
+        assert!(back.search("goes-away", 10, &[]).is_empty());
     }
 
     #[test]
@@ -1151,7 +1630,18 @@ mod tests {
         let back = Catalog::load(&file, &[PathBuf::from(r"C:\work")]).expect("reads back");
 
         assert_eq!(back.len(), original.len());
-        assert_eq!(back.paths, original.paths);
+
+        // Compared path by path rather than arena to arena. The arena is a
+        // layout detail and a save is also a compaction, so the bytes are
+        // allowed to differ; what must not differ is what is in it.
+        let said = |one: &Catalog| -> Vec<String> {
+            one.entries
+                .iter()
+                .filter(|slot| slot.live)
+                .map(|slot| one.path(slot).to_string())
+                .collect()
+        };
+        assert_eq!(said(&back), said(&original));
 
         let found = back.search("main", 10, &[]);
         assert_eq!(found[0].path, r"C:\work\src\main.rs");

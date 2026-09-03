@@ -1215,6 +1215,12 @@ fn manage_before_windows(app: &tauri::App) {
      *
      * Empty costs nothing: a pointer to a catalog with no entries in it.
      */
+    // Managed here, and unconditionally, because Tauri hands managed state out
+    // by type and sets it once: a watcher managed only when there were folders
+    // to watch could never be created later, so adding a first folder in
+    // Settings indexed it once and then stopped noticing it.
+    app.manage(state::Watching::default());
+
     app.manage(state::CatalogState {
         cache: Arc::new(Some(data_dir.join("file-index.bin"))),
         ..Default::default()
@@ -1530,11 +1536,9 @@ pub fn run() {
                         catalog.warm(&roots);
                         catalog.rebuild(roots.clone());
 
-                        if let Some(watcher) =
-                            state::CatalogWatcher::start(catalog.inner().clone(), roots)
-                        {
-                            handle.manage(watcher);
-                        }
+                        handle
+                            .state::<state::Watching>()
+                            .re_root(catalog.inner().clone(), roots);
                     }
 
                     // Last run's icons, so the first list does not re-extract

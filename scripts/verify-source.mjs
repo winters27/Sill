@@ -16,6 +16,11 @@ const SKIP = new Set([
   "dist",
   ".svelte-kit",
   "package",
+  // A worktree is a whole second checkout living inside this one, usually at
+  // some other commit. Walking into it means judging code that is not the code
+  // being checked: one stale worktree reported 612 problems here, all of them
+  // in files this tree does not have.
+  ".claude",
 ]);
 
 const READ = new Set([
