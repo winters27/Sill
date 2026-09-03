@@ -629,7 +629,7 @@ pub(crate) async fn undo_activity(app: tauri::AppHandle, id: u64) -> Result<Stri
         .take(id)
         .ok_or("That cannot be taken back any more.")?;
 
-    crate::action::undo(&crate::action::ActionCtx { app: app.clone() }, &undo)
+    crate::action::undo(&crate::action::ActionCtx::new(app.clone()), &undo)
 }
 
 #[tauri::command]

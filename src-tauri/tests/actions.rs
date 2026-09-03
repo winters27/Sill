@@ -306,6 +306,88 @@ fn a_file_can_be_acted_on_and_not_only_opened() {
     }
 }
 
+/**
+Renaming and moving are reachable by name, like everything else.
+
+**The point of `P1-09`, and the thing that was not true.** Both did their work
+inside a Tauri command the window called, and the registry entries were stubs
+that refused, so the two were the only actions on a file that nothing but the
+page could run: `registry.get` found them and running one could only ever
+answer with the sentence saying it had not been told enough.
+
+That `get` answers is the whole of reachability. It is the one call a bound
+key, `run_action` and the model's tool all make, and none of them can reach
+anything it does not answer for.
+*/
+#[test]
+fn renaming_and_moving_are_reachable_by_name_and_not_only_by_the_page() {
+    let registry = builtins();
+
+    for id in ["sill.file.rename", "sill.file.move"] {
+        let found = registry
+            .get(id)
+            .unwrap_or_else(|| panic!("{id} is not in the registry, so nothing can reach it"));
+
+        for kind in [ObjectKind::File, ObjectKind::Folder] {
+            assert!(found.accepts(kind), "{id} refuses a {kind:?}");
+        }
+
+        assert!(
+            found.capabilities().contains(&Capability::FileWrite),
+            "{id} changes a file and does not say so"
+        );
+
+        // Neither claims Enter. Enter on a file opens it, and a panel whose
+        // default moved the thing somewhere else would be a trap.
+        assert!(
+            !found.is_primary(ObjectKind::File),
+            "{id} claims Enter on a file"
+        );
+    }
+
+    // And both are drawn, so the panel offers what the ids promise.
+    for kind in [ObjectKind::File, ObjectKind::Folder] {
+        let drawn: Vec<&str> = registry.describe(kind).into_iter().map(|a| a.id).collect();
+
+        for id in ["sill.file.rename", "sill.file.move"] {
+            assert!(
+                drawn.contains(&id),
+                "{kind:?} is not offered {id}: {drawn:?}"
+            );
+        }
+    }
+}
+
+/// Moving comes back with a way to put it back, and renaming does not.
+///
+/// The asymmetry is deliberate and worth stating. A move reverses exactly and
+/// its token is two paths, so undoing a move of ten gigabytes costs what
+/// undoing a move of a text file costs. A rename back is a second rename, and
+/// nothing can promise the old name is still free by the time somebody asks.
+/// Offering an undo that quietly does nothing is worse than offering none.
+#[test]
+fn moving_declares_what_it_reads_as_well_as_what_it_writes() {
+    let registry = builtins();
+
+    let moving = registry
+        .get("sill.file.move")
+        .expect("moving is registered");
+
+    assert!(
+        moving.capabilities().contains(&Capability::FileRead),
+        "moving between two drives copies before it removes, and does not say it reads"
+    );
+
+    let renaming = registry
+        .get("sill.file.rename")
+        .expect("renaming is registered");
+
+    assert!(
+        !renaming.capabilities().contains(&Capability::FileRead),
+        "renaming reads nothing; a capability nobody needs is one somebody grants"
+    );
+}
+
 #[test]
 fn nothing_that_is_not_a_file_is_offered_a_file_action() {
     // `accepts` is the whole guard. An action listed against a clipboard row
@@ -926,4 +1008,132 @@ fn uninstalling_is_offered_on_an_application_and_is_the_last_thing_offered() {
             "{kind:?} is offered an uninstaller"
         );
     }
+}
+
+// ---------------------------------------------------------- the store shelf
+
+/**
+A row in the extension store has a panel, and Enter is not in it.
+
+The last list that said "no actions here", and the worst place for it: a shelf
+of code somebody is deciding whether to run, where the one thing anybody wants
+is somewhere to go and read it first.
+
+**Nothing claims Enter, deliberately.** What Enter does to a listing is fetch
+the source, read it and show what it appears to be able to do before a line of
+it runs. That is a conversation across two screens, not an action, and a
+registry entry that skipped it would be a way to install somebody else's code
+without the one screen written to stop exactly that. Same shape as the
+conversation list, where Enter reopens and the panel offers the rest.
+*/
+#[test]
+fn a_store_listing_has_a_panel_and_nothing_in_it_installs() {
+    let registry = builtins();
+    let drawn = registry.describe(ObjectKind::StoreListing);
+
+    assert!(
+        !drawn.is_empty(),
+        "the store draws an empty panel, which reads as Ctrl+K being dead"
+    );
+
+    assert!(
+        registry.primary(ObjectKind::StoreListing).is_none(),
+        "something claims Enter on a store listing, which is the install \
+         confirmation being skipped: {drawn:?}"
+    );
+
+    let ids: Vec<&str> = drawn.iter().map(|action| action.id).collect();
+
+    for wanted in ["sill.store.copySource", "sill.store.remove"] {
+        assert!(
+            ids.contains(&wanted),
+            "a listing is not offered {wanted}: {ids:?}"
+        );
+    }
+
+    // Last, for the reason Uninstall is last on an application and the recycle
+    // bin is last on a file: the panel is drawn in registration order once the
+    // primary is lifted, and the entry that removes something should not be
+    // the one under the cursor when the panel opens.
+    assert_eq!(
+        ids.last().copied(),
+        Some("sill.store.remove"),
+        "the entry that removes an extension is not the last one offered: {ids:?}"
+    );
+}
+
+/// Nothing but a listing is offered a store action.
+///
+/// Both parse their target as an extension's name, so a kind that reached them
+/// would be handing a path, a window handle or a process id to something that
+/// deletes a directory named after whatever it read.
+#[test]
+fn nothing_but_a_store_listing_can_be_removed_from_the_store() {
+    let registry = builtins();
+
+    for kind in ObjectKind::ALL {
+        if *kind == ObjectKind::StoreListing {
+            continue;
+        }
+
+        let offered: Vec<&str> = registry
+            .for_kind(*kind)
+            .into_iter()
+            .map(|action| action.id())
+            .filter(|id| id.starts_with("sill.store."))
+            .collect();
+
+        assert!(
+            offered.is_empty(),
+            "{kind:?} is offered {offered:?}, which read an extension's name \
+             out of whatever the row happens to carry"
+        );
+    }
+}
+
+/// A listing is not an extension command, and cannot be run.
+///
+/// The distinction the kind exists for. An extension command is installed and
+/// has an entrypoint; a listing is a row in somebody else's catalogue that may
+/// have no files on this machine at all. Offering to run one would be offering
+/// an action that can only fail.
+#[test]
+fn a_store_listing_is_never_offered_a_way_to_run_itself() {
+    let registry = builtins();
+
+    let offered: Vec<&str> = registry
+        .for_kind(ObjectKind::StoreListing)
+        .into_iter()
+        .map(|action| action.id())
+        .collect();
+
+    for wanted in ["sill.runExtensionCommand", "sill.launch"] {
+        assert!(
+            !offered.contains(&wanted),
+            "a listing is offered {wanted}, which needs an entrypoint it does not have"
+        );
+    }
+}
+
+/// Removing an extension says it writes files, and asks for nothing else.
+///
+/// It deletes a directory and forgets what that extension was allowed to
+/// reach. It does not launch anything, touch the clipboard or reach the
+/// network, and a capability nobody needs is one somebody grants without
+/// knowing what they granted.
+#[test]
+fn removing_an_extension_asks_only_to_write_files() {
+    let registry = builtins();
+
+    let removing = registry
+        .get("sill.store.remove")
+        .expect("removing an extension is registered");
+
+    assert_eq!(removing.capabilities(), &[Capability::FileWrite]);
+
+    let copying = registry
+        .get("sill.store.copySource")
+        .expect("copying the source link is registered");
+
+    assert_eq!(copying.capabilities(), &[Capability::ClipboardWrite]);
 }

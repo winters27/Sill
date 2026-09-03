@@ -191,12 +191,78 @@ impl Outcome {
 
 /// Everything an action gets besides the thing it is acting on.
 ///
-/// One field today. It exists as a type rather than a bare `AppHandle` because
-/// the next things to go in are known: the foreground application, the current
-/// selection, what is on the clipboard. Adding a field to this is a change
-/// nobody else has to notice; adding a parameter to every action is not.
+/// It exists as a type rather than a bare `AppHandle` because the next things
+/// to go in are known: the foreground application, the current selection, what
+/// is on the clipboard. Adding a field to this is a change nobody else has to
+/// notice; adding a parameter to every action is not. The second field is the
+/// first time that bargain has been called in.
 pub struct ActionCtx {
     pub app: AppHandle,
+    /**
+    The one answer somebody had to be asked for before this could run.
+
+    Renaming needs a new name and moving needs a folder, and for as long as
+    there was nowhere in an action to put either, both lived in the window:
+    the page took over the search field, collected the answer, and called a
+    Tauri command that did the work itself. That made them **the two actions
+    only the page could reach**. A key could not be bound to them, the model
+    could not run them, and neither appeared in the activity log, which is the
+    exact arrangement the registry exists to end.
+
+    Deliberately one string rather than a map. Both questions have one answer,
+    and a bag of named parameters would be a shape invented for a second case
+    that does not exist yet. When one arrives, this becomes an enum and the
+    two call sites change.
+
+    Private, so it cannot be set to something empty by accident: the
+    constructors drop whitespace, and an action asking for it either gets
+    something or knows to say what it needed.
+    */
+    argument: Option<String>,
+}
+
+impl ActionCtx {
+    /// For the great majority of actions, which take nothing but the object.
+    pub fn new(app: AppHandle) -> Self {
+        Self {
+            app,
+            argument: None,
+        }
+    }
+
+    /// For an action that had to ask something first.
+    ///
+    /// Blank is the same as absent. A rename whose field was cleared is not a
+    /// rename to the empty string, it is a rename with no answer yet, and the
+    /// action says so rather than handing `""` to the filesystem.
+    pub fn answering(app: AppHandle, argument: Option<String>) -> Self {
+        Self {
+            app,
+            argument: meant(argument),
+        }
+    }
+
+    /// What was answered, when anything was.
+    pub fn argument(&self) -> Option<&str> {
+        self.argument.as_deref()
+    }
+}
+
+/// What an answer amounts to, once whitespace is taken off it.
+///
+/// A free function rather than a line inside the constructor, because it is
+/// the only part of the context a test can reach: an [`ActionCtx`] holds a
+/// concrete `AppHandle`, and nothing but a running Tauri app can make one.
+///
+/// The rule is that blank is absent. A rename whose field was cleared is not a
+/// rename to the empty string, and the difference is a file called `""` that
+/// no shell can address versus a sentence saying what was needed. `""` also
+/// reaches here from the model, whose tool arguments have no absent, only
+/// empty.
+fn meant(argument: Option<String>) -> Option<String> {
+    argument
+        .map(|given| given.trim().to_string())
+        .filter(|given| !given.is_empty())
 }
 
 /// Something that can be done to an [`Object`].
@@ -406,5 +472,58 @@ pub fn undo(ctx: &ActionCtx, undo: &Undo) -> Result<String, String> {
 
             Ok(format!("{title} put back"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A blank answer is no answer.
+    ///
+    /// The one rule in the context a test can reach, and the one that costs
+    /// something when it is wrong: renaming to `""` asks the filesystem for a
+    /// file with no name, and moving to `""` asks it to move something into
+    /// whatever directory this process happens to be sitting in.
+    ///
+    /// `""` is not hypothetical. A model's tool arguments have no absent, only
+    /// empty, so every action a model runs arrives here with a blank answer
+    /// unless it gave one.
+    #[test]
+    fn an_answer_that_is_only_whitespace_is_no_answer() {
+        assert_eq!(meant(None), None);
+        assert_eq!(meant(Some(String::new())), None);
+        assert_eq!(meant(Some("   ".to_string())), None);
+        assert_eq!(meant(Some("\t\r\n".to_string())), None);
+    }
+
+    /// A real one survives, with the whitespace around it taken off.
+    ///
+    /// Trailing space matters more than it looks: Windows silently drops one
+    /// from a file name, so `notes.md ` and `notes.md` are the same file under
+    /// two names and one of them is a name nothing can open afterwards.
+    #[test]
+    fn an_answer_arrives_with_the_whitespace_taken_off_it() {
+        assert_eq!(
+            meant(Some("notes.md".to_string())).as_deref(),
+            Some("notes.md")
+        );
+        assert_eq!(
+            meant(Some("  notes.md \n".to_string())).as_deref(),
+            Some("notes.md")
+        );
+        assert_eq!(
+            meant(Some(r"  C:\Users\me\Archive  ".to_string())).as_deref(),
+            Some(r"C:\Users\me\Archive")
+        );
+    }
+
+    /// The space inside a name is not whitespace to be tidied away.
+    #[test]
+    fn only_the_edges_are_trimmed() {
+        assert_eq!(
+            meant(Some(" my notes.md ".to_string())).as_deref(),
+            Some("my notes.md")
+        );
     }
 }

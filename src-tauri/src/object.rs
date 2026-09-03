@@ -100,6 +100,18 @@ pub enum ObjectKind {
     /// It reaches the launcher through its own view, and this is the name the
     /// action registry dispatches on when it does.
     Conversation,
+    /// One extension as the store lists it, installed here or not.
+    ///
+    /// The one kind that is not a thing on this machine. It is a row in
+    /// somebody else's catalogue, joined against what is installed, and its
+    /// identity is the extension's name because that is the string every
+    /// store operation already takes and the one part of a listing that
+    /// survives the catalogue being fetched again.
+    ///
+    /// Not an [`ObjectKind::ExtensionCommand`], which is a command that is
+    /// installed and can be run. A listing has no entrypoint and may have no
+    /// files on this machine at all.
+    StoreListing,
 }
 
 impl ObjectKind {
@@ -137,6 +149,7 @@ impl ObjectKind {
         Self::Workspace,
         Self::Script,
         Self::Conversation,
+        Self::StoreListing,
     ];
 
     /**
@@ -178,6 +191,7 @@ impl ObjectKind {
             Self::Process => "running program",
             Self::Workspace => "saved arrangement",
             Self::Conversation => "conversation",
+            Self::StoreListing => "extension in the store",
         }
     }
 
@@ -227,6 +241,11 @@ impl ObjectKind {
             // other is a row in the list of everything you have asked. They
             // are the same thing and the same actions apply.
             "conversation" | "past-conversation" => Self::Conversation,
+            // A row in the extension store. Not in the index and never will be:
+            // the catalogue is somebody else's list, fetched and parked, and
+            // folding three thousand listings into what a keystroke weighs
+            // would be paying for the store on every search.
+            "store-listing" => Self::StoreListing,
             _ => return None,
         })
     }
@@ -489,12 +508,13 @@ mod tests {
                 ObjectKind::Workspace => 19,
                 ObjectKind::Script => 20,
                 ObjectKind::Conversation => 21,
+                ObjectKind::StoreListing => 22,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            22,
+            23,
             "a kind was added or removed without `ALL` being told",
         );
 

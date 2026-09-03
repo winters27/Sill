@@ -58,6 +58,16 @@ pub struct Binding {
     /// there is nothing to paste over when the source was the clipboard.
     #[serde(default = "yes")]
     pub replace: bool,
+    /**
+    The answer to whatever the action would otherwise stop and ask for.
+
+    Absent for every action that asks nothing, which is nearly all of them.
+    It is here so that the two that do ask can be bound at all: "move this
+    file to the archive folder" is a perfectly good key, and until the answer
+    could travel with the binding it was not a key anything could be bound to.
+    */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub argument: Option<String>,
 }
 
 fn yes() -> bool {
@@ -202,7 +212,14 @@ async fn fire(app: &AppHandle, binding: &Binding) {
     }
 
     let outcome = match registry
-        .perform(&ActionCtx { app: app.clone() }, action, &object)
+        .perform(
+            // The answer a key was recorded with, when it was recorded with
+            // one. A key bound to "move this to the archive folder" is the
+            // whole reason `Binding` carries it.
+            &ActionCtx::answering(app.clone(), binding.argument.clone()),
+            action,
+            &object,
+        )
         .await
     {
         Ok(outcome) => outcome,
@@ -366,6 +383,7 @@ mod tests {
             action: action.into(),
             source: Source::Selection,
             replace: true,
+            argument: None,
         }
     }
 
@@ -387,6 +405,62 @@ mod tests {
             let back: Binding = serde_json::from_str(&text).expect("parses");
             assert_eq!(back, original);
         }
+    }
+
+    /// A key can carry the answer its action would otherwise stop and ask for.
+    ///
+    /// The point of the whole change. Renaming and moving were commands the
+    /// window called, so "move this to the archive folder" was not something a
+    /// key could mean: there was nowhere on a binding to put the folder and
+    /// nowhere in an action to receive it. Both halves exist now, and this is
+    /// the half that survives being written to disk.
+    #[test]
+    fn a_binding_carries_the_answer_its_action_has_to_be_given() {
+        let bound = Binding {
+            action: "sill.file.move".into(),
+            argument: Some(r"C:\Users\me\Archive".into()),
+            source: Source::Command {
+                id: "file:notes".into(),
+            },
+            ..binding("Ctrl+Alt+M", "sill.file.move")
+        };
+
+        let text = serde_json::to_string(&bound).expect("serialises");
+        let back: Binding = serde_json::from_str(&text).expect("parses");
+
+        assert_eq!(back, bound);
+        assert_eq!(back.argument.as_deref(), Some(r"C:\Users\me\Archive"));
+    }
+
+    /// And the great majority, which ask nothing, write nothing.
+    ///
+    /// `skip_serializing_if` rather than a null on every binding anybody has:
+    /// preferences are a file people open, and a field that is empty on all
+    /// twenty of their keys is twenty lines of noise about a feature two
+    /// actions use.
+    #[test]
+    fn a_binding_with_nothing_to_answer_says_nothing() {
+        let text =
+            serde_json::to_string(&binding("Ctrl+Alt+U", "sill.text.upper")).expect("serialises");
+
+        assert!(
+            !text.contains("argument"),
+            "an ordinary binding writes an empty argument: {text}"
+        );
+    }
+
+    /// A binding written before arguments existed still parses.
+    ///
+    /// Every binding on every machine is one of these. Making the field
+    /// required would refuse the whole preferences file, which is how a
+    /// launcher loses somebody's shortcuts on an update.
+    #[test]
+    fn a_binding_written_before_arguments_existed_still_parses() {
+        let older = r#"{"accelerator":"Ctrl+Alt+U","action":"sill.text.upper","source":{"from":"selection"},"replace":true}"#;
+        let parsed: Binding = serde_json::from_str(older).expect("parses");
+
+        assert_eq!(parsed.argument, None);
+        assert!(parsed.replace);
     }
 
     #[test]

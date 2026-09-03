@@ -30,7 +30,7 @@
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import ClipboardView from "$lib/components/ClipboardView.svelte";
   import StoreView from "$lib/components/StoreView.svelte";
-  import { storeClose } from "$lib/store";
+  import { storeClose, type StoreRow } from "$lib/store";
   import WidgetBoard from "$lib/widgets/Board.svelte";
   import WidgetChin from "$lib/widgets/Chin.svelte";
   import { actionFor, collectActions, isRunnable } from "$lib/exthost/actions";
@@ -46,7 +46,6 @@
     activateHandler,
     dismiss,
     launchCommand,
-    movePath,
     aiAsk,
     aiFollowUp,
     aiNew,
@@ -83,7 +82,6 @@
     startFileSearch,
     type FileSearchMissing,
     recordUse,
-    renamePath,
     queryHistory,
     openPath,
     browserAsCommand,
@@ -97,6 +95,7 @@
     // `runAction` here already means "run the panel entry at this index".
     runAction as runObjectAction,
     asTarget,
+    type ActionTarget,
     undoAction,
     type ActionInfo,
     type AiConversation,
@@ -238,6 +237,16 @@
      * shape bent to cover both.
      */
     given?: string[];
+    /**
+     * The row itself, for the ones that end in a registry action.
+     *
+     * Only a rename has this. What was typed is the argument the action takes,
+     * and an action needs the thing it is acting on as well as the answer:
+     * renaming used to be a Tauri command of its own that took a bare path,
+     * which is how it ended up being the one action nothing but this page
+     * could run.
+     */
+    of?: ActionTarget;
   } | null>(null);
 
   /**
@@ -247,7 +256,7 @@
    * This borrows the whole list instead: the answer is one of the rows rather
    * than whatever was typed, and typing only narrows them.
    */
-  let moving = $state<{ path: string; title: string } | null>(null);
+  let moving = $state<{ path: string; title: string; of: ActionTarget } | null>(null);
   let session = $state<string | null>(null);
 
   /**
@@ -527,8 +536,50 @@
   let clipboardCount = $state(0);
   let storeView = $state<ReturnType<typeof StoreView> | null>(null);
   let storeCount = $state(0);
+  /**
+   * The store listing under the cursor, told to us by the view that holds it.
+   *
+   * The action panel reads a row, and the store's rows are catalogue entries
+   * this page never sees otherwise. `storeRow` below is that listing in the
+   * shape everything else on this page speaks, which is what lets one
+   * `rowForActions` answer for every view rather than three.
+   */
+  let storeListing = $state<StoreRow | null>(null);
   /** Whether the store was opened on what has an update rather than on all. */
   let storeOnUpdates = $state(false);
+
+  /**
+   * A store listing as a row, so the panel can ask about it like any other.
+   *
+   * `store-listing` is a mode of its own in Rust, and deliberately not
+   * `view` or `no-view`: those are extension *commands*, which are installed
+   * and can be run. A listing is a row in somebody else's catalogue that may
+   * have no files here at all, and offering to run one would be offering an
+   * action that can only fail.
+   *
+   * The entrypoint is the extension's name because that is the string every
+   * store operation already takes, and the one part of a listing that survives
+   * the catalogue being fetched again: a revision changes, and the link built
+   * from it changes with it.
+   */
+  const storeRow: RankedCommand | undefined = $derived.by(() => {
+    const listing = storeListing;
+    if (!listing) return undefined;
+
+    return {
+      id: `store:${listing.name}`,
+      extension: "sill",
+      extensionTitle: "Extension Store",
+      title: listing.title,
+      subtitle: listing.author,
+      mode: "store-listing",
+      // Not a switch, and the row shape wants to be told.
+      toggle: undefined,
+      entrypoint: listing.name,
+      panel: "store",
+      matched: [],
+    };
+  });
 
   const view = $derived.by(() => {
     version;
@@ -803,7 +854,12 @@
         // conversation is not in the index, so a name given to one would find
         // nothing however carefully it was chosen.
         chosen.mode !== "conversation" &&
-        chosen.mode !== "past-conversation";
+        chosen.mode !== "past-conversation" &&
+        // Nor is an extension in the store, for a stronger version of the same
+        // reason: it may not be installed at all, so there is nothing on this
+        // machine for a name to point at. Once it is installed its commands
+        // are in the index and each can be named there.
+        chosen.mode !== "store-listing";
 
       const naming =
         namable
@@ -939,13 +995,22 @@
    * The row the action panel acts on.
    *
    * Not always `commands[selected]`. A view that draws its own list counts
-   * through its own rows, and the conversation list is one: asking `commands`
-   * there returned whatever the last ordinary search had left in it, which is
-   * why Ctrl+K said "no actions here" on a row that plainly has some.
+   * through its own rows, and two do: asking `commands` there returned
+   * whatever the last ordinary search had left in it, which is why Ctrl+K said
+   * "no actions here" on a row that plainly has some.
+   *
+   * The conversation list holds its rows here and the store holds them inside
+   * its own component, so one is read and the other is told. Both end up in
+   * one place rather than three, which is what the panel was reading
+   * `commands` in three places for.
    */
   const rowForActions = $derived.by(() => {
     if (!hasRowActions(mode)) return undefined;
     if (mode === "conversations") return conversationRows[selected];
+    // The store keeps its rows inside its own view and tells us which one is
+    // under the cursor; `commands` there holds whatever the last ordinary
+    // search left in it.
+    if (mode === "store") return storeRow;
 
     return commands[selected];
   });
@@ -1424,6 +1489,27 @@
     await refreshRoot();
   }
 
+  /**
+   * Takes back the extension under the cursor in the store.
+   *
+   * One function, called by the chord and reached by the panel entry beside
+   * it, and both are the same registry action. The alternative is two ways to
+   * remove an extension with nothing making them agree, which is the shape
+   * this codebase has been bitten by five times.
+   */
+  async function removeExtension() {
+    const listing = storeRow;
+    if (!listing) return;
+
+    try {
+      const outcome = await runObjectAction("sill.store.remove", asTarget(listing));
+      status = outcome.message;
+      await storeView?.reload();
+    } catch (err) {
+      status = `${err}`;
+    }
+  }
+
   async function openSelected() {
     if (mode === "conversations") {
       const row = conversationRows[selected];
@@ -1485,8 +1571,13 @@
       }
 
       if (asked.what === "rename") {
+        // The registry, with what was typed as the action's argument. It was a
+        // command of its own that did the renaming itself, which made renaming
+        // the one thing on this list no key could be bound to.
+        if (!asked.of) return;
+
         try {
-          status = await renamePath(asked.id, query);
+          status = (await runObjectAction("sill.file.rename", asked.of, query)).message;
           awaiting = null;
           mode = "root";
           query = "";
@@ -1602,7 +1693,14 @@
       if (!source || !folder) return;
 
       try {
-        const outcome = await movePath(source.path, folder.entrypoint);
+        // The folder picked is the action's argument. Same shape as the
+        // rename above, and the same reason: moving was a command of its own,
+        // so it was reachable from this page and from nowhere else.
+        const outcome = await runObjectAction(
+          "sill.file.move",
+          source.of,
+          folder.entrypoint,
+        );
         status = outcome.message;
         lastUndo = outcome.undoneBy ?? null;
 
@@ -2323,7 +2421,8 @@
         ? action.tag.slice("Sill.Action:".length)
         : "";
       // The row the panel is showing actions for, which is not always the
-      // ranked results: the conversation list counts through its own.
+      // ranked results: the conversation list and the store both count
+      // through their own.
       const command = rowForActions;
       if (!chosen || !command) return;
 
@@ -2336,23 +2435,25 @@
       }
 
       /*
-       * Renaming needs a name, and the asking is the feature.
+       * Two actions need something asked first, and the asking is the window's
+       * job rather than the action's.
        *
-       * Kept here rather than in the action, which is why the action itself
-       * refuses to run: an action is handed an object and acts, and there is
-       * nowhere in that for a question. The field is borrowed exactly as a
-       * quicklink with a hole in it borrows it.
-       */
-      /*
-       * Moving needs somewhere to move to, and the picking is the feature.
+       * Renaming borrows the field, exactly as a quicklink with a hole in it
+       * does. Moving borrows the whole list instead, because the answer is a
+       * folder and typing only narrows which one.
        *
-       * The whole list is borrowed rather than the field, because the answer
-       * is a folder and typing only narrows which one. Same reason the action
-       * itself refuses to run: it is handed one object, and there is nowhere
-       * in that for a question with a list of answers.
+       * **Only the asking is here.** Both used to do their work in a Tauri
+       * command of their own, which made them the two actions nothing but this
+       * page could run. What is collected goes to the registry as the action's
+       * argument, and everything past that point is the same code a bound key
+       * and the model reach.
        */
       if (chosen === "sill.file.move") {
-        moving = { path: command.entrypoint, title: command.title };
+        moving = {
+          path: command.entrypoint,
+          title: command.title,
+          of: asTarget(command),
+        };
         mode = "destination";
         selected = 0;
         query = "";
@@ -2366,6 +2467,7 @@
           id: command.entrypoint,
           title: command.title,
           link: command.subtitle,
+          of: asTarget(command),
         };
         mode = "argument";
         selected = 0;
@@ -2402,6 +2504,11 @@
           // that is gone.
           pastConversations = await aiConversations();
           selected = Math.min(selected, Math.max(0, conversationRows.length - 1));
+        } else if (mode === "store") {
+          // Removing one is the row that was acted on losing its "Installed"
+          // badge, and the root list losing its commands. From disk, not the
+          // network: nothing about the catalogue changed.
+          await storeView?.reload();
         } else if (command.toggle !== undefined) {
           await refreshSwitches();
         }
@@ -3282,9 +3389,14 @@
       }
       // Removing is the one destructive thing in here, so it is the awkward
       // chord rather than a single key next to the arrows.
+      //
+      // Through the registry, like the same entry in the panel above it. It
+      // used to call Rust from inside the store view, which is how removing an
+      // extension ended up being something only this page could do and
+      // something the activity log never heard about.
       if (ctrl && event.shiftKey && event.key.toLowerCase() === "x") {
         event.preventDefault();
-        void storeView?.remove();
+        void removeExtension();
         return;
       }
     }
@@ -4177,6 +4289,7 @@
         startOnUpdates={storeOnUpdates}
         onselect={(i) => (selected = i)}
         oncount={(n) => (storeCount = n)}
+        oncurrent={(row) => (storeListing = row)}
         onstatus={(said) => (status = said)}
         onchanged={() => void refreshRoot()}
       />

@@ -13,10 +13,12 @@
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 
-use crate::action::{ActionCtx, ActionRegistry, Outcome, Undo};
+use crate::action::{ActionCtx, ActionRegistry};
 use crate::object::Object;
 use crate::registry;
-use crate::state::{now_seconds, CatalogState, PrefsState, RegistryState};
+use crate::state::{
+    now_seconds, save_ranking_soon, CatalogState, PrefsState, RegistryState, MOVED_TO,
+};
 
 /// Runs a command from the root list.
 ///
@@ -97,7 +99,7 @@ pub(crate) async fn launch_command(
     }
 
     let outcome = actions
-        .perform(&ActionCtx { app: app.clone() }, action, &object)
+        .perform(&ActionCtx::new(app.clone()), action, &object)
         .await?;
 
     /*
@@ -278,32 +280,6 @@ pub(crate) async fn perform_builtin(
     }
 }
 
-/**
-Writes the ranking history without holding anything up.
-
-`RegistryState::record` hands back the serialised form, made while the writer
-lock was held and the data was therefore consistent. Putting it on disk is a
-different matter: it happens on the blocking pool, where a slow disk is
-nobody's problem. It used to happen on the lock a search takes.
-
-Losing a launch's ranking is not worth failing the launch over, which is why
-this reports and returns rather than propagating.
-*/
-fn save_ranking_soon(path: &std::path::Path, text: Option<String>) {
-    let Some(text) = text else {
-        crate::say!("could not serialise the ranking history");
-        return;
-    };
-
-    let path = path.to_path_buf();
-
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(err) = crate::registry::Frecency::write(&path, &text) {
-            crate::say!("could not save frecency: {err}");
-        }
-    });
-}
-
 /// An object the window is pointing at.
 ///
 /// The window echoes back the fields Rust already sent it in a search result
@@ -335,117 +311,22 @@ impl ObjectRef {
     }
 }
 
-/// Renames a file or folder, keeping it where it is.
-///
-/// A command rather than an action for one reason: the launcher has to ask for
-/// the new name first, and an action is handed an object and acts. The asking
-/// is most of what renaming is.
-#[tauri::command]
-pub(crate) async fn rename_path(path: String, to: String) -> Result<String, String> {
-    let from = std::path::PathBuf::from(&path);
-    let was = crate::files_ops::name_of(&from);
-
-    let landed = tokio::task::spawn_blocking(move || crate::files_ops::rename(&from, &to))
-        .await
-        .map_err(|err| format!("could not rename that: {err}"))??;
-
-    Ok(format!(
-        "Renamed {was} to {}",
-        crate::files_ops::name_of(&landed)
-    ))
-}
-
-/// Moves a file or folder into another folder.
-///
-/// A command rather than an action for the reason renaming is one: the
-/// launcher has to ask where first, and an action is handed an object and
-/// acts. Picking the folder is most of what moving is.
-///
-/// Unlike renaming, this comes back with an undo. A move is the one file
-/// operation that reverses exactly, and the token is two paths rather than
-/// anything copied, so undoing a move of something enormous costs what undoing
-/// a move of a text file costs.
-#[tauri::command]
-pub(crate) async fn move_path(
-    app: AppHandle,
-    state: State<'_, RegistryState>,
-    path: String,
-    folder: String,
-) -> Result<Outcome, String> {
-    let from = std::path::PathBuf::from(&path);
-    let into = std::path::PathBuf::from(&folder);
-
-    let name = crate::files_ops::name_of(&from);
-
-    // Where it came out of, captured before the move, because afterwards
-    // there is nothing left at the old path to ask.
-    let came_from = from
-        .parent()
-        .map(|parent| parent.to_string_lossy().to_string())
-        .ok_or_else(|| format!("{name} has nowhere to be put back"))?;
-
-    let landed = {
-        let from = from.clone();
-        let into = into.clone();
-
-        // Blocking: between two drives this copies, and that is as slow as
-        // whatever is being moved is large.
-        tokio::task::spawn_blocking(move || crate::files_ops::move_to(&from, &into))
-            .await
-            .map_err(|err| format!("could not move that: {err}"))??
-    };
-
-    /*
-     * Remembered, so the next move offers it first.
-     *
-     * Kept in the same store that ranks everything else, under a prefix of its
-     * own: a folder somebody moves things to is exactly the kind of thing
-     * frecency is for, and a second store would be a second answer to "what do
-     * you reach for" that could disagree with the first.
-     *
-     * After the move rather than before, so a destination that turned out to
-     * be refused is not learned as one somebody uses.
-     */
-    {
-        let now = now_seconds();
-        let folder = folder.clone();
-
-        // Off the lock, like every other write of this file. Losing which
-        // folder was used is not worth failing a move over either.
-        let (path, text) = state.record(move |ranking| {
-            ranking.frecency.record(&format!("{MOVED_TO}{folder}"), now);
-            ranking.path.clone()
-        });
-
-        save_ranking_soon(&path, text);
-    }
-
-    /*
-     * Built here rather than by an action, and recorded here for the same
-     * reason.
-     *
-     * Moving is a command because the destination is a question, and a
-     * question is not something an action has anywhere to ask. That is a fair
-     * exception, but it left this outside the activity log entirely: the move
-     * could be taken back with Ctrl+Z and appeared nowhere in Advanced, so
-     * anything that scrolled the launcher away lost it. Recording it here
-     * costs one call and puts it where every other reversible thing lives.
-     */
-    let mut outcome = Outcome::undoable(
-        format!("Moved {name} to {}", crate::files_ops::name_of(&into)),
-        Undo::MovePath {
-            path: landed.to_string_lossy().to_string(),
-            back_to: came_from,
-            name: name.clone(),
-        },
-    );
-
-    let ctx = ActionCtx { app };
-    let id = crate::activity::record(&ctx, "Move to Folder", &name, &outcome);
-    outcome.undone_by = id.filter(|id| *id != 0);
-
-    Ok(outcome)
-}
+/*
+ * Renaming and moving used to be two commands here.
+ *
+ * They were commands because each has to ask something first, a new name and a
+ * folder, and an action was handed an object and nothing else. So the work
+ * lived in this file, `RenameFile::run` and `MoveFile::run` refused to run at
+ * all, and the two were **the only actions the page alone could reach**: no key
+ * could be bound to them and the model could not run them. Moving had grown a
+ * hand-written `activity::record` call to make up for skipping the registry,
+ * with a comment admitting it.
+ *
+ * `ActionCtx` carries the answer now. Both are ordinary actions, both go
+ * through `ActionRegistry::perform` like everything else, and `run_action`
+ * below is the one way in. The asking is still the window's job, which is where
+ * it belongs; what it does with the answer is no longer the window's business.
+ */
 
 /// The folders something could be moved into, for a query.
 ///
@@ -529,12 +410,6 @@ pub(crate) async fn search_destinations(
         .collect())
 }
 
-/// What a folder chosen as a destination is remembered under.
-///
-/// Its own prefix so these never collide with a command id, and so the ones
-/// worth offering again can be found without walking everything ever launched.
-pub(crate) const MOVED_TO: &str = "moved-to:";
-
 /// Reads the words out of the last picture copied.
 ///
 /// The row in the list and the key bound to it both end here, through the same
@@ -550,7 +425,7 @@ pub(crate) async fn extract_text_from_last_image(app: AppHandle) -> Result<Strin
         .ok_or_else(|| "text recognition is not available".to_string())?;
 
     let outcome = registry
-        .perform(&ActionCtx { app: app.clone() }, action, &object)
+        .perform(&ActionCtx::new(app.clone()), action, &object)
         .await?;
     Ok(outcome.message)
 }
@@ -576,11 +451,17 @@ pub(crate) fn actions_for(
 /// Frecency is deliberately not recorded here. It learns what you open, and
 /// copying a path or opening a containing folder is looking at something
 /// rather than reaching for it. Enter still records, through `launch_command`.
+///
+/// The `argument` is the answer to whatever the action had to ask for first,
+/// and it is what folded renaming and moving back in here. Both were commands
+/// of their own that did the work themselves, which made them the two actions
+/// nothing but the page could run.
 #[tauri::command]
 pub(crate) async fn run_action(
     app: AppHandle,
     action: String,
     object: ObjectRef,
+    argument: Option<String>,
 ) -> Result<crate::action::Outcome, String> {
     let object = object.into_object()?;
 
@@ -600,7 +481,11 @@ pub(crate) async fn run_action(
     }
 
     let outcome = registry
-        .perform(&ActionCtx { app: app.clone() }, chosen, &object)
+        .perform(
+            &ActionCtx::answering(app.clone(), argument),
+            chosen,
+            &object,
+        )
         .await?;
 
     // The screen now belongs to something else, so the launcher must not put
@@ -620,7 +505,7 @@ pub(crate) async fn undo_action(
     app: AppHandle,
     undo: crate::action::Undo,
 ) -> Result<String, String> {
-    crate::action::undo(&ActionCtx { app: app.clone() }, &undo)
+    crate::action::undo(&ActionCtx::new(app.clone()), &undo)
 }
 
 /// Counts a use of something the window opened by itself.

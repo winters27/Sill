@@ -146,8 +146,16 @@ export function storeDiscard(): Promise<void> {
   return invoke("store_discard");
 }
 
-export function storeUninstall(extension: string): Promise<boolean> {
-  return invoke<boolean>("store_uninstall", { extension });
+/**
+ * Removes an installed extension, and answers with what was done.
+ *
+ * The message rather than a boolean, because Rust runs this through the action
+ * registry now and the registry answers in sentences: an extension that was
+ * already gone is the end state somebody asked for rather than a failure, and
+ * the sentence is what says which of the two happened.
+ */
+export function storeUninstall(extension: string): Promise<string> {
+  return invoke<string>("store_uninstall", { extension });
 }
 
 export function storePins(): Promise<Pin[]> {

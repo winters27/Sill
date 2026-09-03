@@ -46,6 +46,16 @@ const HEADINGS: Record<string, string> = {
   conversation: "Continue",
   /* Every conversation, in the list that lets you reopen or forget one. */
   "past-conversation": "Conversations",
+  /*
+   * One extension as the store lists it.
+   *
+   * Never actually drawn here: the store keeps its own view and its own rows,
+   * and a listing is not something the root search offers. It is named anyway
+   * because the rule is about every mode Rust can produce having an answer,
+   * and a mode with no heading that later does reach this list would be filed
+   * under whichever extension the row happened to name.
+   */
+  "store-listing": "Extension Store",
   "sill-setting": "Sill Settings",
   view: "Commands",
   "no-view": "Commands",

@@ -210,6 +210,14 @@ pub const CATALOGUE: &[Tool] = &[
                         "type": "string",
                         "description": "Only when the target is not a path on disk.",
                         "enum": ["text", "systemControl", "window", "url", "file", "folder"]
+                    },
+                    "argument": {
+                        "type": "string",
+                        "description": "The one thing an action has to be told besides \
+                                        what it is acting on. Rename wants the new name, \
+                                        with no folder in it; Move to Folder wants the \
+                                        full path of the folder to move into. Leave it \
+                                        out for every other action, which take none."
                     }
                 },
                 "required": ["action", "target"]
@@ -299,7 +307,16 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value) -> Value {
         "read_selection" => read_selection(app).await,
         "read_screen" => read_screen(app).await,
         "what_can_be_done" => what_can_be_done(app, &text("target"), &text("kind")),
-        "run_action" => run_action(app, &text("action"), &text("target"), &text("kind")).await,
+        "run_action" => {
+            run_action(
+                app,
+                &text("action"),
+                &text("target"),
+                &text("kind"),
+                &text("argument"),
+            )
+            .await
+        }
         other => json!({ "error": format!("Sill has no tool called {other}.") }),
     }
 }
@@ -673,7 +690,13 @@ fn what_can_be_done(app: &AppHandle, target: &str, kind: &str) -> Value {
 /// The answer says what happened either way, including when somebody said no.
 /// A refusal is information the turn should carry: the model can say what it
 /// did not do rather than claiming it did, and it can offer something else.
-async fn run_action(app: &AppHandle, action: &str, target: &str, kind: &str) -> Value {
+async fn run_action(
+    app: &AppHandle,
+    action: &str,
+    target: &str,
+    kind: &str,
+    argument: &str,
+) -> Value {
     if action.is_empty() {
         return json!({ "error": "Name an action. what_can_be_done lists them." });
     }
@@ -745,7 +768,10 @@ async fn run_action(app: &AppHandle, action: &str, target: &str, kind: &str) -> 
         }
     }
 
-    let ctx = crate::action::ActionCtx { app: app.clone() };
+    // The answer to whatever the action asks for, when the model gave one.
+    // Renaming and moving are reachable from here at all because of this: they
+    // were commands the window called, so the model had no way to run them.
+    let ctx = crate::action::ActionCtx::answering(app.clone(), Some(argument.to_string()));
 
     /*
      * Through the registry, exactly as the launcher and a bound key are.
@@ -915,6 +941,51 @@ mod tests {
                     );
                 }
             }
+        }
+
+        /**
+        The model can answer what an action stops to ask.
+
+        Two of them do: renaming wants a new name and moving wants a folder.
+        Both used to be Tauri commands the window called, so there was no way
+        for a model to run either, and `what_can_be_done` would list them on
+        any file while `run_action` could only ever answer with the sentence
+        saying what it had not been told.
+
+        Asserted on the schema rather than on the dispatch, because the schema
+        is what the model is shown: a parameter the dispatch reads and the
+        schema never mentions is a parameter nothing will ever send.
+        */
+        #[test]
+        fn the_model_can_answer_what_an_action_has_to_ask_for() {
+            let acting = CATALOGUE
+                .iter()
+                .find(|tool| tool.name == "run_action")
+                .expect("the tool that runs an action");
+
+            let schema = (acting.schema)();
+            let argument = schema["properties"]
+                .get("argument")
+                .expect("run_action takes no argument, so rename and move cannot be run");
+
+            assert_eq!(argument["type"], "string");
+
+            // Named in the description, because an argument the model is not
+            // told the shape of is one it guesses at: a folder path for a
+            // move, and a bare name with no folder in it for a rename.
+            let said = argument["description"].as_str().unwrap_or_default();
+            assert!(
+                said.contains("Rename") && said.contains("Move"),
+                "the argument does not say which actions want one: {said}"
+            );
+
+            // Not required. Every other action takes none, and a schema that
+            // demanded one would have the model inventing a value for a copy.
+            let required = schema["required"].as_array().expect("a required list");
+            assert!(
+                !required.iter().any(|name| name == "argument"),
+                "every action would have to be given an argument"
+            );
         }
 
         #[test]

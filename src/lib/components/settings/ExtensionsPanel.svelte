@@ -76,8 +76,9 @@
 
   async function remove(one: InstalledExtension) {
     try {
-      await storeUninstall(one.extension);
-      status = `Removed ${one.title}`;
+      // What Rust said, rather than what this hoped. The removal is a registry
+      // action now and it reports whether there was anything there to remove.
+      status = await storeUninstall(one.extension);
       await refresh();
     } catch (err) {
       status = `${err}`;

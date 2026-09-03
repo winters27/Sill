@@ -22,7 +22,6 @@
     storeInstall,
     storePrepare,
     storeReady,
-    storeUninstall,
     weight,
     type Browse,
     type Preparation,
@@ -41,6 +40,15 @@
     oncount: (count: number) => void;
     /** Said in the launcher's status line, where every other view says things. */
     onstatus: (said: string) => void;
+    /**
+     * The listing under the cursor, so the launcher's action panel has one.
+     *
+     * The panel takes its actions from a row, and a store listing is not one
+     * of the ranked results it usually reads: nothing outside this component
+     * knows what is selected. Told rather than asked, so the answer arrives
+     * with the selection instead of a frame later.
+     */
+    oncurrent: (row: StoreRow | null) => void;
     /** Refreshes the launcher's own list after an install or a removal. */
     onchanged: () => void;
     prefs: Preferences | null;
@@ -54,6 +62,7 @@
     onselect,
     oncount,
     onstatus,
+    oncurrent,
     onchanged,
     prefs,
     startOnUpdates = false,
@@ -225,6 +234,18 @@
     oncount(rows.length);
   });
 
+  /*
+   * The listing under the cursor, said out loud.
+   *
+   * The launcher's action panel asks Rust what can be done to the selected
+   * row, and it can only ask about a row it has been told about: a store
+   * listing is not one of the ranked results the panel usually reads. Same
+   * arrangement as the count beside it, and for the same reason.
+   */
+  $effect(() => {
+    oncurrent(current);
+  });
+
   onMount(() => {
     void storeReady().then((answer) => (ready = answer));
   });
@@ -283,19 +304,18 @@
     onselect(0);
   }
 
-  /** Removes the highlighted extension. */
-  export async function remove() {
-    const row = current;
-    if (!row?.installed) return;
-
-    try {
-      await storeUninstall(row.name);
-      onstatus(`Removed ${row.title}`);
-      onchanged();
-      await load();
-    } catch (err) {
-      onstatus(`${err}`);
-    }
+  /**
+   * Reads the list again, without going back to the network.
+   *
+   * What the launcher calls after running an action on a row, because the row
+   * it acted on is the one whose "Installed" badge has just stopped being
+   * true. Removing used to live here and call Rust itself, which made it a
+   * thing only this page could do; it is `sill.store.remove` in the registry
+   * now and this is what puts the shelf back in agreement with the disk.
+   */
+  export async function reload() {
+    await load();
+    onchanged();
   }
 
   /** Whether the highlighted row has something to take back. */
