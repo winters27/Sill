@@ -11,7 +11,7 @@
 
 #![cfg(windows)]
 
-use sill_lib::windowing::{self, Slot};
+use crate::windowing::{self, Slot};
 
 /// A desktop with nothing on it at all is not a case worth handling.
 ///

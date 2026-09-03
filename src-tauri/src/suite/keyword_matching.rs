@@ -5,7 +5,7 @@
 //! nearly anything in order, so every snippet matched every query and sat in
 //! the results under whatever was actually being looked for.
 
-use sill_lib::registry::{self, CommandRecord, MatchClass};
+use crate::registry::{self, CommandRecord, MatchClass};
 
 fn record(title: &str, keywords: &[&str]) -> CommandRecord {
     CommandRecord {

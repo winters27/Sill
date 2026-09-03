@@ -289,11 +289,42 @@ function Test-Idle {
 }
 
 function Test-NodeReported {
-    # Extensions are Node programs. Whether one is present is reported rather
-    # than discovered when the first extension fails to start.
-    $found = $null -ne (Get-Command node -ErrorAction SilentlyContinue)
-    Record "this machine's Node state is known" $true `
-        ("node on PATH: $found. Settings reports the same, checked by running it.")
+    # Extensions are Node programs, and an extension that cannot start is the
+    # single largest thing this suite exists to notice.
+    #
+    # This check used to pass `$true` as its own result. It computed whether
+    # node was on PATH, interpolated that into the message and then reported
+    # PASS regardless, under a detail line claiming "Settings reports the same,
+    # checked by running it" when nothing here reads Settings at all. Confirmed
+    # by running it with node taken off PATH: still green, with "node on PATH:
+    # False" printed underneath the word PASS.
+    #
+    # So it asks what Sill asks, the way Sill asks it. `look_for_node` in
+    # `src-tauri/src/host.rs` runs `node --version` first, deliberately, because
+    # `PATHEXT`, shims and store aliases make walking PATH by hand wrong; then
+    # it falls back to the two ordinary install locations, because a desktop
+    # application does not inherit a shell's PATH. A `node` a lookup finds and
+    # cannot execute is exactly the case the two answers differ on, and it is
+    # the case where extensions silently do nothing.
+    $onPath = $null -ne (Get-Command node -ErrorAction SilentlyContinue)
+
+    $runs = $false
+    try {
+        $null = & node --version 2>$null
+        $runs = $LASTEXITCODE -eq 0
+    } catch {
+        $runs = $false
+    }
+
+    $installed = (Test-Path "C:\Program Files\nodejs\node.exe") -or
+                 (Test-Path "C:\Program Files (x86)\nodejs\node.exe")
+
+    Record "this machine can run an extension" ($runs -or $installed) `
+        ("node --version runs: $runs, on PATH: $onPath, at a known install path: $installed")
+
+    # Deliberately not claimed: that the Settings panel says the same. Reading
+    # it means driving the window to Advanced and scraping it, which is a
+    # different test from this one and is not written yet.
 }
 
 # ----------------------------------------------------------------- the run

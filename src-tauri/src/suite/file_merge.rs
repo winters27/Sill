@@ -5,7 +5,7 @@
 /// Declared here rather than reaching into private code: the behaviour worth
 /// pinning is what somebody sees, and what they see is one list with nothing
 /// in it twice.
-use sill_lib::files::FileHit;
+use crate::files::FileHit;
 
 fn hit(path: &str) -> FileHit {
     FileHit {
@@ -25,7 +25,7 @@ fn the_same_file_from_both_sources_is_listed_once() {
         hit(r"C:\Other\registry.rs"),
     ];
 
-    let merged = sill_lib::commands::search::merge(ours, theirs, 10);
+    let merged = crate::commands::search::merge(ours, theirs, 10);
     let paths: Vec<&str> = merged.iter().map(|h| h.path.as_str()).collect();
 
     assert_eq!(
@@ -42,7 +42,7 @@ fn our_own_results_come_first() {
     let ours = vec![hit(r"C:\work\notes.md")];
     let theirs = vec![hit(r"C:\Windows\other.md")];
 
-    let merged = sill_lib::commands::search::merge(ours, theirs, 10);
+    let merged = crate::commands::search::merge(ours, theirs, 10);
 
     assert_eq!(merged[0].path, r"C:\work\notes.md");
 }
@@ -52,18 +52,18 @@ fn the_limit_is_the_limit_however_many_arrive() {
     let ours = vec![hit(r"C:\a.md"), hit(r"C:\b.md")];
     let theirs = vec![hit(r"C:\c.md"), hit(r"C:\d.md")];
 
-    assert_eq!(sill_lib::commands::search::merge(ours, theirs, 3).len(), 3);
+    assert_eq!(crate::commands::search::merge(ours, theirs, 3).len(), 3);
 }
 
 #[test]
 fn one_source_answering_nothing_is_not_a_problem() {
     // The ordinary case on a machine with no whole-volume indexer, and the
     // ordinary case before our own index has finished its first walk.
-    let only_ours = sill_lib::commands::search::merge(vec![hit(r"C:\a.md")], Vec::new(), 10);
+    let only_ours = crate::commands::search::merge(vec![hit(r"C:\a.md")], Vec::new(), 10);
     assert_eq!(only_ours.len(), 1);
 
-    let only_theirs = sill_lib::commands::search::merge(Vec::new(), vec![hit(r"C:\b.md")], 10);
+    let only_theirs = crate::commands::search::merge(Vec::new(), vec![hit(r"C:\b.md")], 10);
     assert_eq!(only_theirs.len(), 1);
 
-    assert!(sill_lib::commands::search::merge(Vec::new(), Vec::new(), 10).is_empty());
+    assert!(crate::commands::search::merge(Vec::new(), Vec::new(), 10).is_empty());
 }

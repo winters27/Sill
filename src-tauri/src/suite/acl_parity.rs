@@ -219,7 +219,7 @@ fn every_window_an_approval_card_can_appear_in_exists() {
     let mut real = declared_windows(&conf);
     real.extend(built_at_runtime(&root.join("src")));
 
-    let surfaces = sill_lib::ai::approval::SURFACES;
+    let surfaces = crate::ai::approval::SURFACES;
     assert!(
         !surfaces.is_empty(),
         "a card would have nowhere to appear at all"

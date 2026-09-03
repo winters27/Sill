@@ -577,44 +577,90 @@ mod idle_sweep {
     }
 }
 
+/// Looking for Node runs a process, so it is looked for once.
+///
+/// `which` runs `node --version` and waits for it, because `PATHEXT`, shims
+/// and store aliases make walking `PATH` by hand wrong in ways that only show
+/// up on somebody else's computer. That was paid on every cold activation,
+/// **under the host lock**, and on every store readiness check.
+///
+/// This was one wall-clock test, and it had two of the diseases the audit
+/// names. It compared the second call's elapsed time against a quarter of the
+/// first, in a run that shares the machine with thirteen hundred other tests,
+/// which is the shape that measures the machine. And on a computer with no
+/// Node it returned before asserting anything at all, so it passed by not
+/// running.
+///
+/// The slot is the seam its own comment said did not exist. Seeding it and
+/// reading it back afterwards asks the same two questions without a clock, and
+/// both halves hold whether or not this machine has Node. The measurement is
+/// kept below, ignored, because a number is still worth having on demand.
 #[cfg(test)]
 mod finding_node {
-    /// Looking for Node runs a process, so it is looked for once.
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    /// A remembered answer is handed back, and no process is started.
     ///
-    /// `which` runs `node --version` and waits for it, because `PATHEXT`,
-    /// shims and store aliases make walking `PATH` by hand wrong in ways that
-    /// only show up on somebody else's computer. That was paid on every cold
-    /// activation, **under the host lock**, and on every store readiness
-    /// check.
-    ///
-    /// Timed rather than counted: there is no seam to count calls through
-    /// without inventing one, and the thing that matters is that the second
-    /// answer does not cost a process.
+    /// Seeded with a path that is plainly not Node: getting it back is only
+    /// possible by reading the slot. Take the read away and this hands back
+    /// whatever the machine has, or `None`, and either fails.
     #[test]
-    fn the_second_answer_costs_nothing() {
-        // A slot of its own, which is the point: the answer used to live in a
-        // `static` and a test could neither give it a fresh one nor see it.
-        let state = std::sync::Mutex::new(None);
+    fn a_remembered_answer_is_handed_back_without_looking() {
+        let sentinel = PathBuf::from(r"C:\nowhere\this-is-not-node.exe");
+        let state = Mutex::new(Some(sentinel.clone()));
+
+        assert_eq!(
+            super::node_exe(&state),
+            Some(sentinel),
+            "the remembered answer was not used, so every caller pays a process"
+        );
+    }
+
+    /// Finding it writes it down, and failing to find it does not.
+    ///
+    /// One assertion for both, because they are the same invariant read twice:
+    /// after asking, the slot holds exactly what was answered. A positive
+    /// answer must be there or the next caller pays for it again; a negative
+    /// one must **not** be, because somebody can install Node while Sill is
+    /// open and the store is where they would try again.
+    #[test]
+    fn the_slot_ends_up_holding_exactly_what_was_answered() {
+        let state = Mutex::new(None);
+
+        let found = super::node_exe(&state);
+        let remembered = state.lock().expect("not poisoned").clone();
+
+        assert_eq!(
+            remembered, found,
+            "asking for Node answered {found:?} and left {remembered:?} written down"
+        );
+    }
+
+    /// What the second answer actually costs, on demand.
+    ///
+    /// Ignored, for the reason the store's browse budget was given headroom:
+    /// cargo runs tests in parallel, so a wall-clock ratio inside the ordinary
+    /// suite is a reading of how busy the machine is. Run it alone with
+    /// `--ignored` when the number is the question.
+    #[test]
+    #[ignore]
+    fn how_much_the_second_answer_costs() {
+        let state = Mutex::new(None);
 
         let first = std::time::Instant::now();
         let found = super::node_exe(&state);
         let looking = first.elapsed();
 
-        if found.is_none() {
-            // No Node on this machine, so there is nothing cached and nothing
-            // to assert. Not a failure: the negative answer is deliberately
-            // not remembered, so that installing Node and trying again works.
-            return;
-        }
+        assert!(
+            found.is_some(),
+            "no Node on this machine, so there is nothing to time"
+        );
 
         let again = std::time::Instant::now();
         let _ = super::node_exe(&state);
         let remembering = again.elapsed();
 
-        assert!(
-            remembering < looking / 4 || remembering < std::time::Duration::from_millis(1),
-            "the second answer took {remembering:?} against {looking:?} for the first, \
-             which is not a remembered answer"
-        );
+        eprintln!("looking took {looking:?}, remembering took {remembering:?}");
     }
 }

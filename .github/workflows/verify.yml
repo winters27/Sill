@@ -79,9 +79,35 @@ jobs:
               --ignore-scripts
           done
 
+      # Two Rust tests rank and read `extensions/build/index.json`, and neither
+      # had ever run here. That directory is gitignored, and the only thing
+      # that writes it is `gate:views`, which `npm run verify` runs *after*
+      # `verify:rust`. So the file was never there, both tests took their skip,
+      # and one of them reported a working ranker while `search` returned
+      # nothing at all. Building three commands here costs about a second and
+      # is the difference between those tests existing and not.
+      #
+      # `gate:views` still builds them again. It builds five commands to two
+      # here, and rebuilding is what makes it a gate on the current tree rather
+      # than on whatever this step happened to leave behind.
+      - name: Build the index the Rust suite ranks
+        shell: bash
+        run: |
+          node scripts/build-extension.mjs \
+            extensions/raycast-src/extensions/uuid-generator viewHistory
+          node scripts/build-extension.mjs \
+            extensions/raycast-src/extensions/password-generator \
+            generate-random-password
+
       # bash because gate:views is a shell script; it is git-bash on this image.
+      #
+      # SILL_BUILT_INDEX, so the two tests above fail rather than skip if the
+      # step before this one ever stops producing an index. A skip nobody sees
+      # is how they came to prove nothing in the first place.
       - run: npm run verify
         shell: bash
+        env:
+          SILL_BUILT_INDEX: required
 
       # The ranking cost, in the log of every run rather than only the runs
       # that break. The budget on an agent is loose on purpose, so the number

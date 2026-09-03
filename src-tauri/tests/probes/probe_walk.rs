@@ -139,6 +139,10 @@ fn ranking_cost() {
             1_756_000_000,
             60,
             Excluded::none(),
+            // Nothing pinned. Added when search_excluding grew the
+            // parameter; this file was one of forty-five separate binaries
+            // and had not compiled since.
+            &[],
         );
         println!(
             "  {query:>12} -> {:>5} hits in {:>5} ms",

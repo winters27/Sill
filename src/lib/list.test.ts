@@ -9,6 +9,7 @@ import { describe, expect, test } from "vitest";
 import type { RankedCommand } from "$lib/exthost/commands";
 import { groupOf, linesOf, scrollFor } from "$lib/list";
 import { isRunnable, type ActionEntry } from "$lib/exthost/actions";
+import { afterLaunch, type Launched } from "$lib/modes";
 
 const ROW = 38;
 const HEADER = 26;
@@ -287,22 +288,92 @@ describe("whether an action can be run", () => {
   });
 });
 
+/**
+ * What leaves the launcher on screen.
+ *
+ * This block used to hold a five-string array called `DONE_ON_RUN`, declared
+ * in this file, and two assertions about what was in it. It asserted that a
+ * literal on the line above contained what the line above had put there, so it
+ * could not fail: deleting the `system` branch from `openSelected` outright
+ * left all 274 frontend tests green. The decision it named lives in
+ * `afterLaunch` now, and these call it.
+ */
 describe("what leaves the launcher on screen", () => {
+  function launched(over: Partial<Launched>): Launched {
+    return { mode: "view", session: "s1", ...over };
+  }
+
   /**
-   * The modes that finish the moment they run, and so should dismiss.
+   * A Windows switch flips under the cursor.
    *
-   * A Windows switch was missing from this list and fell through to the
+   * It was missing from the old hand-written list and fell through to the
    * extension command view, so the next summon came back showing an extension
    * screen with no extension in it, titled after the switch.
    */
-  const DONE_ON_RUN = ["app", "exe", "setting", "builtin", "system"];
+  test("a Windows switch redraws its row rather than closing", () => {
+    expect(afterLaunch(launched({ mode: "system", session: "", toggle: true }))).toBe("switch");
+    expect(afterLaunch(launched({ mode: "system", session: "", toggle: false }))).toBe("switch");
+  });
 
-  test("a Windows switch is done the moment it runs, like an application", () => {
-    expect(DONE_ON_RUN).toContain("system");
+  /**
+   * A switch with no state to show is Rust's decision, already made.
+   *
+   * A volume nudge has nothing for a row to display, so redrawing one would be
+   * work on a window nobody is looking at.
+   */
+  test("a switch with nothing to show does not redraw", () => {
+    expect(afterLaunch(launched({ mode: "system", session: "" }))).toBe("stay");
+  });
+
+  /** It ran and exited without rendering, so there is no view to enter. */
+  test("a no-view command stays put without a view", () => {
+    expect(afterLaunch(launched({ mode: "no-view", session: "" }))).toBe("stay");
   });
 
   /** An extension command is the one that genuinely has more to show. */
-  test("an extension command is not", () => {
-    expect(DONE_ON_RUN).not.toContain("view");
+  test("an extension command enters the command view", () => {
+    expect(afterLaunch(launched({ mode: "view", session: "s1" }))).toBe("view");
+  });
+
+  /**
+   * The rule, rather than the cases, which is the whole point.
+   *
+   * The old list named four modes and the modes it left out were the bug:
+   * anything unlisted fell through to the command view and sat there with an
+   * empty session, so the next summon came back to a blank screen wearing the
+   * title of whatever was last opened. Every one of these reached it.
+   */
+  test("anything that came back without a session is finished", () => {
+    for (const mode of [
+      "app",
+      "exe",
+      "setting",
+      "builtin",
+      "sill-setting",
+      "quicklink",
+      "workspace",
+      "audio-session",
+      "file",
+      "snippet",
+      "script",
+      "aModeNobodyHasWrittenYet",
+    ]) {
+      expect(afterLaunch(launched({ mode, session: "" })), `${mode} did not dismiss`).toBe(
+        "dismiss",
+      );
+    }
+  });
+
+  /**
+   * A session means a tree is coming, whatever the mode is called.
+   *
+   * The two exceptions are answered before this and are the reason the order
+   * is written down: a switch and a no-view command have no session and are
+   * not finished either.
+   */
+  test("a mode nobody anticipated with a session is a view", () => {
+    expect(afterLaunch(launched({ mode: "aModeNobodyHasWrittenYet", session: "s9" }))).toBe(
+      "view",
+    );
   });
 });

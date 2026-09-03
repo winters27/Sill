@@ -5,6 +5,11 @@
 //! plugin's `TaskDialogIndirect`, which needs a common-controls v6 manifest
 //! that only test targets can be given (see `build.rs`). The app binary
 //! carries its own and cannot be given a second.
+//!
+//! Reproduced rather than believed, while everything else moved into the
+//! library: with this file in `src/suite/` the library's test binary exits
+//! 0xc0000139, `STATUS_ENTRYPOINT_NOT_FOUND`, before running a test. This is
+//! the only file in the suite the constraint actually applies to.
 
 use sill_lib::action::Capability;
 use sill_lib::actions::builtins;
