@@ -875,6 +875,13 @@ pub struct Preferences {
     /// Which keys move around the launcher.
     #[serde(default)]
     pub navigation: crate::navigation::Navigation,
+    /// Which chord runs which action, where it differs from the default.
+    ///
+    /// The sibling of `navigation`: that one is movement, this one is doing
+    /// something to what is selected. Both hold only what was changed, so an
+    /// action whose default is later reconsidered gets the new one.
+    #[serde(default)]
+    pub action_keys: crate::action_keys::Settings,
     /// Skin tone and what Enter does, for the emoji picker.
     #[serde(default)]
     pub emoji: crate::emoji::Settings,
@@ -1029,6 +1036,76 @@ mod tests {
         assert_eq!(back.appearance.backdrop, Backdrop::None);
         assert!(!back.sources.path_executables);
         assert_eq!(back.files.only_in, vec![r"C:\work".to_string()]);
+    }
+
+    #[test]
+    fn an_action_key_survives_being_written_and_read_back() {
+        // The bug this whole item exists to prevent, asserted against the file
+        // rather than against the object in hand. A settings screen that
+        // updates what it is holding and never reaches disk looks correct from
+        // every angle except the one that matters, which is opening Sill
+        // again tomorrow. `P0-01` was exactly that on this panel.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let path = dir.path().join("preferences.json");
+
+        let mut prefs = Preferences::default();
+        prefs
+            .action_keys
+            .overrides
+            .insert("sill.copyPath".to_string(), "Ctrl+Alt+P".to_string());
+        // Turning one off is a stored value too, and an empty string is the
+        // one most likely to be dropped on the way through.
+        prefs
+            .action_keys
+            .overrides
+            .insert("sill.copyName".to_string(), String::new());
+
+        prefs.save(&path).expect("saved");
+
+        let written = std::fs::read_to_string(&path).expect("readable");
+        assert!(
+            written.contains("actionKeys"),
+            "the section never reached the file:\n{written}"
+        );
+
+        let back = Preferences::load(&path);
+        assert_eq!(
+            back.action_keys
+                .overrides
+                .get("sill.copyPath")
+                .map(String::as_str),
+            Some("Ctrl+Alt+P")
+        );
+        assert_eq!(
+            back.action_keys
+                .overrides
+                .get("sill.copyName")
+                .map(String::as_str),
+            Some(""),
+            "an action turned off came back as one that was never touched"
+        );
+
+        // And the chord means the same thing after the trip, which is the
+        // half a string comparison alone would not prove.
+        let chosen = crate::action_keys::effective(&back.action_keys, "sill.copyPath", None)
+            .expect("a chord");
+        assert_eq!(chosen.chord(), "Ctrl+Alt+P");
+        assert_eq!(chosen.key, "p");
+        assert_eq!(
+            crate::action_keys::effective(&back.action_keys, "sill.copyName", None),
+            None
+        );
+    }
+
+    #[test]
+    fn a_file_from_before_action_keys_existed_still_reads() {
+        // Every preferences file on a machine today. Adding a section must
+        // not be the upgrade that resets somebody's settings.
+        let json = r#"{"hotkey":{"summon":"Ctrl+Space"}}"#;
+        let parsed: Preferences = serde_json::from_str(json).expect("it parses");
+
+        assert!(parsed.action_keys.overrides.is_empty());
+        assert_eq!(parsed.hotkey.summon, "Ctrl+Space");
     }
 
     /// A key set in memory must not be readable in the file.

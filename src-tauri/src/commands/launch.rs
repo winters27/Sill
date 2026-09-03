@@ -561,14 +561,19 @@ pub(crate) async fn extract_text_from_last_image(app: AppHandle) -> Result<Strin
 /// only on what kind of thing it is, and because a file result is not in any
 /// index to be looked up in.
 #[tauri::command]
-pub(crate) fn actions_for(
+pub(crate) async fn actions_for(
     actions: State<'_, ActionRegistry>,
+    prefs: State<'_, crate::state::PrefsState>,
     mode: String,
-) -> Vec<crate::action::ActionInfo> {
-    let out = crate::object::ObjectKind::from_mode(&mode)
-        .map(|kind| actions.describe(kind))
-        .unwrap_or_default();
-    out
+) -> Result<Vec<crate::action::ActionInfo>, String> {
+    // The chords come along with the list rather than being asked for
+    // separately: a second call would be a second opinion about what Ctrl+
+    // Shift+C does, and this one is already made per selection change.
+    let keys = prefs.inner.lock().await.action_keys.clone();
+
+    Ok(crate::object::ObjectKind::from_mode(&mode)
+        .map(|kind| actions.describe(kind, &keys))
+        .unwrap_or_default())
 }
 
 /// Runs one action against one object.

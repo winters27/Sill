@@ -228,6 +228,22 @@ pub trait Action: Send + Sync {
         false
     }
 
+    /// The chord this action ships with, before anybody changes it.
+    ///
+    /// Declared here rather than by whichever surface happens to draw the
+    /// action, which is what it was: the launcher wrote `Ctrl+C` beside the
+    /// clipboard's Copy by hand, so an action that arrived through a different
+    /// list arrived with no chord at all and nothing said so. An action knows
+    /// what it is for; the window does not.
+    ///
+    /// `None` for most of them, and deliberately. A key that runs something
+    /// destructive without being asked for is worse than no key: nothing here
+    /// deletes, quits or uninstalls on a chord it was given rather than one
+    /// somebody chose. The person can still set one in Settings.
+    fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
+        None
+    }
+
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String>;
 }
 
@@ -238,6 +254,12 @@ pub struct ActionInfo {
     pub id: &'static str,
     pub title: &'static str,
     pub primary: bool,
+    /// The chord that runs it, after whatever the person has set.
+    ///
+    /// Resolved here rather than in the window, so the panel that draws it and
+    /// the matcher that reads it are looking at one answer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shortcut: Option<crate::action_keys::Shortcut>,
 }
 
 /// Every action Sill knows.
@@ -324,15 +346,42 @@ impl ActionRegistry {
             .find(|a| a.id() == id)
     }
 
-    /// What the window draws for this kind.
-    pub fn describe(&self, kind: ObjectKind) -> Vec<ActionInfo> {
+    /// What the window draws for this kind, with the chords it runs on.
+    ///
+    /// Takes the settings rather than reading them, because the registry is
+    /// built once at startup and the shortcuts change while it is alive.
+    pub fn describe(
+        &self,
+        kind: ObjectKind,
+        keys: &crate::action_keys::Settings,
+    ) -> Vec<ActionInfo> {
         self.for_kind(kind)
             .into_iter()
             .map(|a| ActionInfo {
                 id: a.id(),
                 title: a.title(),
                 primary: a.is_primary(kind),
+                shortcut: crate::action_keys::effective(keys, a.id(), a.shortcut()),
             })
+            .collect()
+    }
+
+    /// Every action, whatever kind it acts on, with the chord it ships with.
+    ///
+    /// For the settings screen, which lists all of them: a key that runs an
+    /// action is a fact about the action rather than about the kind it was
+    /// found under, and the same action reached from a file and from a folder
+    /// is one row.
+    pub fn all(
+        &self,
+    ) -> Vec<(
+        &'static str,
+        &'static str,
+        Option<crate::action_keys::Shortcut>,
+    )> {
+        self.actions
+            .iter()
+            .map(|a| (a.id(), a.title(), a.shortcut()))
             .collect()
     }
 

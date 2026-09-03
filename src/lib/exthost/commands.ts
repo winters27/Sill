@@ -7,6 +7,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { orElse, silently } from "$lib/status";
+// The one shape a chord is written in, shared with the matcher that reads it.
+import type { Shortcut } from "./actions";
 
 export interface RankedCommand {
   id: string;
@@ -990,6 +992,16 @@ export interface ActionInfo {
   title: string;
   /** What Enter does. Exactly one per kind. */
   primary: boolean;
+  /**
+   * The chord that runs it, after whatever the person has set in Settings.
+   *
+   * From Rust rather than written beside the row here, which is what it was:
+   * the launcher hardcoded the clipboard's chords, so an action reached
+   * through any other list arrived with none and the panel drew nothing.
+   * Already resolved, so this is the key that fires rather than the one the
+   * action shipped with.
+   */
+  shortcut?: Shortcut;
 }
 
 export interface ActionOutcome {

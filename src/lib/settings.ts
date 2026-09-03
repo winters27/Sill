@@ -33,6 +33,23 @@ export interface NavigationSettings {
   overrides: Partial<Record<Move, string>>;
 }
 
+/**
+ * Which chord runs which action, where it differs from what it ships with.
+ *
+ * The sibling of `NavigationSettings`: that one is movement, this one is doing
+ * something to what is selected. Only what was changed is held, so an action
+ * whose default is later reconsidered gets the new one.
+ */
+export interface ActionKeySettings {
+  /**
+   * Action id to accelerator, in `chordFrom` spelling.
+   *
+   * An empty string means the action should have no key, which is how a
+   * default is turned off rather than changed.
+   */
+  overrides: Record<string, string>;
+}
+
 /** A name the user chose for one thing in the index. */
 export interface Alias {
   alias: string;
@@ -309,6 +326,7 @@ export interface Preferences {
   bindings: Binding[];
   aliases: Alias[];
   navigation: NavigationSettings;
+  actionKeys: ActionKeySettings;
   emoji: EmojiSettings;
 }
 
@@ -668,6 +686,35 @@ export interface NavigationKey {
 
 export function navigationKeys(): Promise<NavigationKey[]> {
   return invoke<NavigationKey[]>("navigation_keys").catch(orElse("settings", "which keys move around the launcher", [], "shortcuts"));
+}
+
+/** One action, as the shortcuts panel shows it. */
+export interface ActionShortcut {
+  id: string;
+  title: string;
+  /** The accelerator that runs it, or empty for an action with no key. */
+  chord: string;
+  /** Whether this was set by hand rather than shipped. */
+  overridden: boolean;
+  /**
+   * The other action that wants this chord and gets it.
+   *
+   * Worked out in Rust, because whether two chords clash depends on which
+   * actions appear on one list together and only the registry knows that.
+   */
+  contested?: string;
+}
+
+/**
+ * Every action a key can be given, and the key it has.
+ *
+ * From the same registry the action panel and Enter use, so an action added in
+ * Rust becomes bindable without this file changing.
+ */
+export function actionShortcuts(): Promise<ActionShortcut[]> {
+  return invoke<ActionShortcut[]>("action_shortcuts").catch(
+    orElse("settings", "which keys run which action", [], "shortcuts"),
+  );
 }
 
 /** One skin tone, shown as a hand rather than named. */

@@ -16,7 +16,13 @@
   import Instead from "../Instead.svelte";
   import { standing } from "$lib/instead";
   import { actionsFor, searchCommands, type ActionInfo } from "$lib/exthost/commands";
-  import { chordFrom, navigationKeys, type NavigationKey } from "$lib/settings";
+  import {
+    actionShortcuts,
+    chordFrom,
+    navigationKeys,
+    type ActionShortcut,
+    type NavigationKey,
+  } from "$lib/settings";
   import type { Binding, BindingSource, Preferences, TapModifier } from "$lib/settings";
 
   interface Props {
@@ -161,6 +167,87 @@
   onMount(async () => {
     textActions = await actionsFor("text");
   });
+
+  /**
+   * The key that runs each action, and what is contesting it.
+   *
+   * Asked for rather than worked out here for the same reason the movements
+   * are: an action ships with a chord, a person may have replaced it, and
+   * whether two of them clash depends on which lists they appear on together.
+   * All three answers live in Rust, and computing any of them again here is
+   * how a settings screen ends up naming a key that does something else.
+   */
+  let actionKeys = $state<ActionShortcut[]>([]);
+  let rebindingAction = $state<string | null>(null);
+  let actionStatus = $state("");
+
+  async function loadActionKeys() {
+    actionKeys = await actionShortcuts();
+  }
+
+  onMount(() => void loadActionKeys());
+
+  /** Saves one action's key, or clears it, and re-reads what that resolved to. */
+  function setActionKey(id: string, chord: string | null) {
+    const overrides = { ...(prefs.actionKeys?.overrides ?? {}) };
+
+    if (chord === null) delete overrides[id];
+    else overrides[id] = chord;
+
+    commit({ ...prefs, actionKeys: { overrides } });
+    rebindingAction = null;
+    // The commit is asynchronous and the resolved chord, along with any
+    // conflict it just created, is worked out in Rust. The rows are re-read
+    // rather than guessed at.
+    setTimeout(() => void loadActionKeys(), 120);
+  }
+
+  function rebindAction(event: KeyboardEvent, row: ActionShortcut) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.key === "Escape") {
+      rebindingAction = null;
+      return;
+    }
+
+    // Backspace gives the action back the key it shipped with; Delete takes
+    // the key away entirely. Two different things, and a list where some rows
+    // ship with a key and some do not needs both.
+    if (event.key === "Backspace") {
+      actionStatus = "";
+      setActionKey(row.id, null);
+      return;
+    }
+
+    if (event.key === "Delete") {
+      actionStatus = "";
+      setActionKey(row.id, "");
+      return;
+    }
+
+    // The Windows key reaches the launcher as the same held key Ctrl does, so
+    // a chord saved with it would fire on the Ctrl version of itself. Rust
+    // refuses it as well; saying so here saves pressing it twice.
+    if (event.metaKey) {
+      actionStatus = "The Windows key cannot run an action";
+      return;
+    }
+
+    // A bare key is the letter itself. The launcher only reads an action chord
+    // when nothing is being typed, but its search field has focus the whole
+    // time, so binding `c` would be binding a character somebody meant to type.
+    if (!event.ctrlKey && !event.altKey) {
+      actionStatus = "An action key needs at least one of Ctrl or Alt";
+      return;
+    }
+
+    const chord = chordFrom(event);
+    if (!chord) return;
+
+    actionStatus = "";
+    setActionKey(row.id, chord);
+  }
 
   $effect(() => {
     // Resolve any command a binding names, so the row can show "Discord"
@@ -396,6 +483,42 @@
       {/snippet}
     </Row>
   {/each}
+</Section>
+
+<Section
+  label="Action keys"
+  description="A key that runs one of the actions on the selected result without opening the action panel first. The panel draws these down its right hand side, so the key is on screen beside the thing it does. Backspace puts one back to what it shipped with; Delete takes the key away."
+>
+  {#each actionKeys as row (row.id)}
+    <Row
+      title={row.title}
+      description={row.contested
+        ? `${row.chord} already runs ${row.contested} on the same list, so this one never fires. Choose a different key.`
+        : row.overridden
+          ? "Set by hand"
+          : ""}
+    >
+      {#snippet control()}
+        <button
+          class="key"
+          class:taken={!!row.contested}
+          class:recording={rebindingAction === row.id}
+          onclick={() => (rebindingAction = rebindingAction === row.id ? null : row.id)}
+          onkeydown={(e) => rebindingAction === row.id && rebindAction(e, row)}
+        >
+          {#if rebindingAction === row.id}
+            Press a key…
+          {:else if row.chord}
+            {row.chord.split("+").join(" ")}
+          {:else}
+            No key
+          {/if}
+        </button>
+      {/snippet}
+    </Row>
+  {/each}
+
+  {#if actionStatus}<span class="status">{actionStatus}</span>{/if}
 </Section>
 
 <Section

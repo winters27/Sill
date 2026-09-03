@@ -174,7 +174,7 @@ fn the_action_panel_has_something_to_show_for_every_result() {
 
     for mode in INDEX_MODES {
         let kind = ObjectKind::from_mode(mode).expect("a known mode");
-        let drawn = registry.describe(kind);
+        let drawn = registry.describe(kind, &Default::default());
 
         assert!(
             !drawn.is_empty(),
@@ -256,7 +256,7 @@ fn loose_text_has_exactly_one_action_on_enter() {
             "{mode} claimants wrong"
         );
         assert!(
-            registry.describe(*kind)[0].primary,
+            registry.describe(*kind, &Default::default())[0].primary,
             "{mode} draws a non-primary first"
         );
     }
@@ -707,7 +707,11 @@ fn reading_aloud_reaches_both_places_that_ask_for_text_actions() {
         let kind = sill_lib::object::ObjectKind::from_mode(mode)
             .unwrap_or_else(|| panic!("{mode} is a mode the window sends"));
 
-        let offered: Vec<&str> = registry.describe(kind).into_iter().map(|a| a.id).collect();
+        let offered: Vec<&str> = registry
+            .describe(kind, &Default::default())
+            .into_iter()
+            .map(|a| a.id)
+            .collect();
 
         assert!(
             offered.contains(&"sill.text.readAloud"),
@@ -828,7 +832,7 @@ fn quit_is_what_enter_does_to_a_process_and_force_quit_is_never() {
         primary.id()
     );
 
-    let drawn = registry.describe(ObjectKind::Process);
+    let drawn = registry.describe(ObjectKind::Process, &Default::default());
 
     let quit = drawn
         .iter()
@@ -892,7 +896,7 @@ fn nothing_but_a_running_process_can_be_ended() {
 fn uninstalling_is_offered_on_an_application_and_is_the_last_thing_offered() {
     let registry = builtins();
 
-    let drawn = registry.describe(ObjectKind::Application);
+    let drawn = registry.describe(ObjectKind::Application, &Default::default());
 
     let at = drawn
         .iter()
@@ -926,4 +930,225 @@ fn uninstalling_is_offered_on_an_application_and_is_the_last_thing_offered() {
             "{kind:?} is offered an uninstaller"
         );
     }
+}
+
+// ------------------------------------------------------- the keys they run on
+
+/// Every action that ships with a key, and the key it ships with.
+///
+/// Written out rather than read off the registry, which would assert nothing:
+/// a typo in a declared chord leaves the action with no key at all, and a test
+/// that asked the registry what it declared would agree with the typo.
+const DECLARED: &[(&str, &str)] = &[
+    ("sill.copyPath", "Ctrl+Shift+C"),
+    ("sill.copyName", "Ctrl+Shift+N"),
+    ("sill.revealInFolder", "Ctrl+Shift+E"),
+    ("sill.file.terminal", "Ctrl+Shift+T"),
+    ("sill.copyUrl", "Ctrl+Shift+C"),
+    ("sill.text.readAloud", "Ctrl+Shift+S"),
+];
+
+#[test]
+fn every_declared_shortcut_is_the_chord_it_names() {
+    let registry = builtins();
+    let all = registry.all();
+
+    for (id, chord) in DECLARED {
+        let (_, _, shortcut) = all
+            .iter()
+            .find(|(found, _, _)| found == id)
+            .unwrap_or_else(|| panic!("{id} is not a registered action"));
+
+        let shortcut = shortcut
+            .as_ref()
+            .unwrap_or_else(|| panic!("{id} declares no key, so its accelerator did not parse"));
+
+        assert_eq!(&shortcut.chord(), chord, "{id}");
+    }
+
+    // And nothing else has one. A default key is a decision, so an action
+    // acquiring one has to arrive here rather than only in a diff.
+    let carrying: Vec<&str> = all
+        .iter()
+        .filter(|(_, _, shortcut)| shortcut.is_some())
+        .map(|(id, _, _)| *id)
+        .collect();
+
+    assert_eq!(carrying.len(), DECLARED.len(), "{carrying:?}");
+}
+
+#[test]
+fn nothing_destructive_ships_with_a_key() {
+    // A key that recycles a file, quits a program or uninstalls one, given
+    // rather than chosen, is worse than no key. Everything here can still be
+    // bound by hand in Settings; none of it happens by default.
+    let registry = builtins();
+
+    for (id, _, shortcut) in registry.all() {
+        if shortcut.is_none() {
+            continue;
+        }
+
+        for word in ["delete", "recycle", "quit", "uninstall", "forget", "close"] {
+            assert!(
+                !id.to_ascii_lowercase().contains(word),
+                "{id} ships with a key and sounds like it destroys something"
+            );
+        }
+    }
+}
+
+#[test]
+fn no_two_actions_on_one_list_want_the_same_key() {
+    // Two actions on one panel sharing a chord means the second never fires
+    // and nothing on screen says which. The panel matcher takes the first, so
+    // this is the check that stops one shipping.
+    let registry = builtins();
+
+    for kind in ObjectKind::ALL {
+        let shown: Vec<(String, String, Option<sill_lib::action_keys::Shortcut>)> = registry
+            .describe(*kind, &Default::default())
+            .into_iter()
+            .map(|a| (a.id.to_string(), a.title.to_string(), a.shortcut))
+            .collect();
+
+        let clashes = sill_lib::action_keys::conflicts(&shown);
+        assert!(clashes.is_empty(), "{kind:?}: {clashes:?}");
+    }
+}
+
+#[test]
+fn no_default_key_is_one_the_launcher_already_uses_to_move() {
+    // The action matcher is asked before the chord map, so an action claiming
+    // Ctrl+J would take Next away from anybody using vim bindings, silently.
+    let registry = builtins();
+
+    for preset in sill_lib::navigation::Preset::ALL {
+        let navigation = sill_lib::navigation::Navigation {
+            preset,
+            ..Default::default()
+        };
+        let moves = sill_lib::navigation::chords(&navigation);
+
+        for (id, _, shortcut) in registry.all() {
+            let Some(shortcut) = shortcut else { continue };
+            let chord = shortcut.chord();
+
+            assert!(
+                !moves.contains_key(&chord),
+                "{id} ships with {chord}, which is how {preset:?} moves around the list"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_key_set_in_settings_is_the_one_the_panel_draws() {
+    // The whole point of the setting. The registry resolves the override, so
+    // the panel and the matcher are looking at one answer rather than at the
+    // default plus a correction applied somewhere else.
+    let registry = builtins();
+
+    let keys = sill_lib::action_keys::Settings {
+        overrides: [
+            ("sill.copyPath".to_string(), "Ctrl+Alt+P".to_string()),
+            // Cleared rather than changed, which has to be possible.
+            ("sill.copyName".to_string(), String::new()),
+        ]
+        .into_iter()
+        .collect(),
+    };
+
+    let drawn = registry.describe(ObjectKind::File, &keys);
+
+    let path = drawn
+        .iter()
+        .find(|a| a.id == "sill.copyPath")
+        .expect("Copy Path is offered on a file");
+    assert_eq!(
+        path.shortcut.as_ref().map(|s| s.chord()),
+        Some("Ctrl+Alt+P".to_string())
+    );
+
+    let name = drawn
+        .iter()
+        .find(|a| a.id == "sill.copyName")
+        .expect("Copy Name is offered on a file");
+    assert!(name.shortcut.is_none(), "a cleared key came back anyway");
+}
+
+#[test]
+fn a_conflict_somebody_creates_is_reported() {
+    // Somebody is allowed to set two actions to one key; what must not happen
+    // is both appearing to work. One fires, and the settings row for the other
+    // has to be able to say so.
+    let registry = builtins();
+
+    let keys = sill_lib::action_keys::Settings {
+        // Copy Name onto the key Copy Path already has, on every list the two
+        // of them share.
+        overrides: [("sill.copyName".to_string(), "Ctrl+Shift+C".to_string())]
+            .into_iter()
+            .collect(),
+    };
+
+    let shown: Vec<(String, String, Option<sill_lib::action_keys::Shortcut>)> = registry
+        .describe(ObjectKind::File, &keys)
+        .into_iter()
+        .map(|a| (a.id.to_string(), a.title.to_string(), a.shortcut))
+        .collect();
+
+    let clashes = sill_lib::action_keys::conflicts(&shown);
+
+    assert_eq!(clashes.len(), 1, "{clashes:?}");
+    assert_eq!(clashes[0].chord, "Ctrl+Shift+C");
+    assert_eq!(clashes[0].other, "Copy Path");
+}
+
+#[test]
+fn a_key_set_in_settings_is_still_the_key_after_a_restart() {
+    // The whole chain in one test, because each half passing separately is
+    // what `P0-01` looked like: the panel wrote a settings object, the object
+    // was correct, and nothing reached disk. So this saves a preferences file,
+    // reads it back the way startup does, and asks the registry what the
+    // action panel would draw from what came off disk.
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("preferences.json");
+
+    let mut prefs = sill_lib::preferences::Preferences::default();
+    prefs
+        .action_keys
+        .overrides
+        .insert("sill.copyPath".to_string(), "Ctrl+Alt+P".to_string());
+    prefs.save(&path).expect("saved");
+
+    // Nothing of the in-memory object survives past here. Everything below
+    // comes from the bytes on disk.
+    drop(prefs);
+    let reloaded = sill_lib::preferences::Preferences::load(&path);
+
+    let registry = builtins();
+    let drawn = registry.describe(ObjectKind::File, &reloaded.action_keys);
+
+    let path_action = drawn
+        .iter()
+        .find(|a| a.id == "sill.copyPath")
+        .expect("Copy Path is offered on a file");
+
+    let shortcut = path_action
+        .shortcut
+        .as_ref()
+        .expect("Copy Path came back with no key at all");
+
+    assert_eq!(shortcut.chord(), "Ctrl+Alt+P");
+    // And in the shape the window matches a keystroke against, which is the
+    // half a chord string alone would not prove.
+    assert_eq!(shortcut.key, "p");
+    assert_eq!(
+        shortcut.modifiers,
+        vec![
+            sill_lib::action_keys::Modifier::Ctrl,
+            sill_lib::action_keys::Modifier::Alt
+        ]
+    );
 }

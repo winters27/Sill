@@ -111,6 +111,17 @@ fn copy_with_undo(ctx: &ActionCtx, text: &str, message: &str) -> Result<Outcome,
     })
 }
 
+/// One default chord, written the way a settings row shows it.
+///
+/// Parsed from the accelerator rather than built by hand so that what an
+/// action declares reads as the thing somebody would press, and so that these
+/// go through the same bridge a recorded chord does. A string that cannot be
+/// parsed leaves the action with no chord, which
+/// `tests/actions.rs::every_declared_shortcut_is_the_chord_it_names` catches.
+fn chord(accelerator: &str) -> Option<crate::action_keys::Shortcut> {
+    crate::action_keys::Shortcut::parse(accelerator).ok()
+}
+
 // ------------------------------------------------------------------ launch
 
 /// Opens an application, a file or a folder through the shell.
@@ -1274,6 +1285,11 @@ impl Action for TerminalHere {
         "Open Terminal Here"
     }
 
+    fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
+        // T for terminal.
+        chord("Ctrl+Shift+T")
+    }
+
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(kind, ObjectKind::File | ObjectKind::Folder)
     }
@@ -1450,6 +1466,11 @@ impl Action for CopyPath {
         "Copy Path"
     }
 
+    fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
+        // C for copy, and Shift because Ctrl+C is the clipboard's own Copy.
+        chord("Ctrl+Shift+C")
+    }
+
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(
             kind,
@@ -1483,6 +1504,11 @@ impl Action for RevealInFolder {
 
     fn title(&self) -> &'static str {
         "Show in Folder"
+    }
+
+    fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
+        // E for Explorer, which is the window this opens.
+        chord("Ctrl+Shift+E")
     }
 
     fn accepts(&self, kind: ObjectKind) -> bool {
@@ -1524,6 +1550,11 @@ impl Action for CopyName {
 
     fn title(&self) -> &'static str {
         "Copy Name"
+    }
+
+    fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
+        // N for name. It sits beside Copy Path on nearly every row.
+        chord("Ctrl+Shift+N")
     }
 
     fn accepts(&self, kind: ObjectKind) -> bool {
@@ -1767,6 +1798,11 @@ impl Action for ReadAloud {
 
     fn title(&self) -> &'static str {
         "Read Aloud"
+    }
+
+    fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
+        // S for speak. R is taken by nothing yet, but reads as reload.
+        chord("Ctrl+Shift+S")
     }
 
     fn accepts(&self, kind: ObjectKind) -> bool {
@@ -2365,6 +2401,11 @@ impl Action for CopyUrl {
 
     fn title(&self) -> &'static str {
         "Copy Address"
+    }
+
+    fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
+        // The same key as Copy Path: a web address has no path, so the two are never on one list together.
+        chord("Ctrl+Shift+C")
     }
 
     fn accepts(&self, kind: ObjectKind) -> bool {

@@ -139,3 +139,71 @@ describe("finding the action a keystroke runs", () => {
     expect(actionFor(press("Enter", { ctrlKey: true }), bare)).toBe(-1);
   });
 });
+
+/**
+ * The chords the action registry declares in Rust, as they arrive over IPC.
+ *
+ * `Modifier` serialises to these exact lower-case names and the key is
+ * Raycast's, so this is the shape `matchesShortcut` is handed rather than a
+ * shape invented for the test. The list is the one pinned in
+ * `src-tauri/tests/actions.rs::DECLARED`; if the two ever disagree, the Rust
+ * side is the authority and this is the copy that is wrong.
+ */
+describe("a shortcut a registry action ships with", () => {
+  const declared = [
+    { title: "Copy Path", modifiers: ["ctrl", "shift"], key: "c", press: "C" },
+    { title: "Copy Name", modifiers: ["ctrl", "shift"], key: "n", press: "N" },
+    { title: "Show in Folder", modifiers: ["ctrl", "shift"], key: "e", press: "E" },
+    { title: "Open Terminal Here", modifiers: ["ctrl", "shift"], key: "t", press: "T" },
+    { title: "Copy Address", modifiers: ["ctrl", "shift"], key: "c", press: "C" },
+    { title: "Read Aloud", modifiers: ["ctrl", "shift"], key: "s", press: "S" },
+  ];
+
+  /**
+   * Every advertised chord fires.
+   *
+   * Shift makes the letter arrive upper case, which is the case this would
+   * quietly fail on: the chord is written lower case in Rust and the DOM
+   * hands over `C`.
+   */
+  it("fires on the key it advertises", () => {
+    for (const { title, modifiers, key, press: typed } of declared) {
+      const shortcut = { modifiers, key };
+
+      expect(
+        matchesShortcut(press(typed, { ctrlKey: true, shiftKey: true }), shortcut),
+        `${title} does not fire on the chord it draws`,
+      ).toBe(true);
+    }
+  });
+
+  it("does not fire on the same letter without Shift", () => {
+    for (const { title, modifiers, key } of declared) {
+      expect(
+        matchesShortcut(press(key, { ctrlKey: true }), { modifiers, key }),
+        `${title} fired on a chord it does not advertise`,
+      ).toBe(false);
+    }
+  });
+
+  /**
+   * A person can set two actions to one key, and Rust reports that on the
+   * settings row. What must never happen is both of them running: one thing
+   * happening and being told which is recoverable, two is not.
+   */
+  it("runs one action and not both when two claim the same chord", () => {
+    const contested = [
+      action("Copy Path", ["ctrl", "shift"], "c"),
+      action("Copy Name", ["ctrl", "shift"], "c"),
+    ];
+
+    const at = actionFor(press("C", { ctrlKey: true, shiftKey: true }), contested);
+
+    expect(at).toBe(0);
+    // `actionFor` returns one index, so the second cannot also run. Asserted
+    // rather than assumed, because a matcher that returned a list would be a
+    // silent change from "one of them" to "all of them".
+    expect(typeof at).toBe("number");
+    expect(contested.filter((a) => matchesShortcut(press("C", { ctrlKey: true, shiftKey: true }), a.shortcut!)).length).toBe(2);
+  });
+});
