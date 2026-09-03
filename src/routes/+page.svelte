@@ -6,6 +6,8 @@
   import { openQuicklink } from "$lib/quicklinks";
   import { saveWorkspace } from "$lib/workspaces";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { whenVisible } from "$lib/visible";
+  import { forgetUnreadable } from "$lib/status";
   import ListView from "$lib/components/ListView.svelte";
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
@@ -121,7 +123,8 @@
     | { kind: "setSearchText"; session: string; text: string }
     | { kind: "popToRoot"; session: string }
     | { kind: "closeMainWindow"; session: string }
-    | { kind: "crashed"; session: string; reason: string };
+    | { kind: "crashed"; session: string; reason: string }
+    | { kind: "closed"; session: string; reason: string };
 
   const tree = new ViewTree();
 
@@ -1678,6 +1681,15 @@
       if (command.mode === "script" || command.mode === "script-arg") {
         void recordUse(command.id, query);
 
+        /*
+         * Silent, and the fallback is the safe half of the choice.
+         *
+         * An empty list means the script runs with nothing filled in, which is
+         * what a script that declares no arguments does anyway, and the script
+         * then says for itself what it was missing in the output panel that is
+         * already open. The alternative reading, refusing to run, would turn a
+         * failed read into a launcher that will not launch things.
+         */
         const asks = await scriptArguments(command.entrypoint).catch(() => []);
 
         if (asks.length > 0) {
@@ -1712,6 +1724,9 @@
        * pasted by pressing Enter once, as it always was.
        */
       if (command.mode === "snippet") {
+        // Silent. An empty list pastes the snippet with its holes still in
+        // it, which is exactly what the keyword expander does with the same
+        // snippet, and it is visible in the text the moment it lands.
         const holes = await snippetFields(command.entrypoint).catch(() => []);
 
         if (holes.length > 0) {
@@ -2431,7 +2446,9 @@
           if (previewOf === wanted) preview = picture;
         })
         // A window that closed or refuses to be photographed is not an error
-        // worth a message. The strip is simply empty.
+        // worth a message, on the surface or anywhere else. The strip is
+        // simply empty, and `windowPreview` answers `null` for the same
+        // reasons without failing at all.
         .catch(() => {
           if (previewOf === wanted) preview = null;
         });
@@ -3454,6 +3471,28 @@
             status = `${title} stopped: ${payload.reason}`;
             break;
           }
+          case "closed": {
+            /*
+             * Sill let the command go, so what is on screen is a picture.
+             *
+             * A view is a worker holding a React tree, and Sill lets one go
+             * once nobody can see it: when the launcher has been put away long
+             * enough to sleep, and when the host has sat idle for minutes.
+             * Both happen while the window is hidden, and neither is a
+             * failure, so this says what happened rather than that something
+             * went wrong.
+             *
+             * Left alone, the window comes back showing the view it had. It
+             * looks like a working command and it is not: nothing renders into
+             * it again and every action on it fails with "no such session".
+             */
+            if (session !== payload.session) break;
+
+            const closed = running?.title ?? "That command";
+            void goBack();
+            status = `${closed} closed: ${payload.reason}`;
+            break;
+          }
         }
       });
 
@@ -3491,7 +3530,11 @@
         };
       });
 
-      shown = await listen("sill://shown", () => {
+      // Through `whenVisible` rather than a `listen` of its own, because an
+      // event reaches every window and only that module knows which one this
+      // page is. Taking focus and stamping a summon that another window was
+      // shown by would be this same mistake with worse consequences.
+      shown = whenVisible(() => {
         /*
          * Focus first, before anything that can wait.
          *
@@ -3506,6 +3549,21 @@
         // Measuring starts when the window appears and stops when Rust says
         // nobody is looking, so a launcher nobody can see costs nothing.
         startTicking();
+
+        /*
+         * What this window last failed to read, forgotten before it asks
+         * again.
+         *
+         * On the summon rather than on mount, because every read the launcher
+         * reports sits behind this one: file search below, and the clipboard
+         * view, which can only be opened after a summon. One message, on a
+         * path that is already several, and it is what stops a failure that
+         * has since been fixed from being reported for the life of the page.
+         *
+         * Scoped to this window. A flat group would mean opening settings, or
+         * the capture overlay, erased what the launcher had found.
+         */
+        void forgetUnreadable("launcher");
 
         // Re-asked on every summon. A file indexer can be started or stopped
         // between two uses of the launcher, and the alternative to asking here

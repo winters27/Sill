@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { orElse } from "$lib/status";
 
 /**
  * Picking a piece of the screen, and copying it.
@@ -92,9 +93,16 @@ export interface CaptureTarget {
  * Asked for once when the overlay opens, not per pointer move: the desk does
  * not rearrange itself while somebody is choosing, and enumerating windows on
  * every mouse move would be a Win32 walk per frame.
+ *
+ * Reported when it fails, because an empty list is indistinguishable from a
+ * desk with nothing on it and the overlay draws it the same way. Click a
+ * window is a setting, it reads as on, and clicking one would simply do
+ * nothing with no sign anywhere that the enumeration is what broke.
  */
 export function captureTargets(): Promise<CaptureTarget[]> {
-  return invoke<CaptureTarget[]>("capture_targets").catch(() => []);
+  return invoke<CaptureTarget[]>("capture_targets").catch(
+    orElse("capture", "which windows are on screen to capture", [], "screenshot"),
+  );
 }
 
 /** Copies one window, whole, even where something is sitting on top of it. */

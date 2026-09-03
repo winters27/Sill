@@ -142,7 +142,11 @@ fn what_is_written_back_is_what_was_read() {
 
     let prefs = sill_lib::preferences::Preferences::load(&path);
     let written = dir.path().join("written.json");
-    prefs.save(&written);
+    // Asserted rather than ignored. A save that refuses now returns an error
+    // instead of writing a placeholder over the file, which is the point of
+    // the change; a test that discards it would be reading the old file and
+    // calling that a pass.
+    prefs.save(&written).expect("the preferences saved");
 
     let again = sill_lib::preferences::Preferences::load(&written);
 

@@ -10,6 +10,8 @@
 
 import { isMainThread, Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
+import type { Readable } from "node:stream";
 import { encodeFrame, FrameDecoder } from "./proto/framing";
 import { RpcPeer, type RpcParams } from "./proto/rpc";
 import { workerMain, type LaunchData } from "./worker/worker";
@@ -67,6 +69,116 @@ const RUNAWAY_UTILISATION = 0.95;
 const RUNAWAY_MS = Number(process.env.SILL_RUNAWAY_MS ?? 30_000);
 const RUNAWAY_CHECK_MS = Number(process.env.SILL_RUNAWAY_CHECK_MS ?? 5_000);
 
+/**
+ * How much one command's console output is worth carrying.
+ *
+ * An author reading back their own `console.log` is what this exists for, and
+ * nobody writes sixty-four kilobytes of that. An extension in a loop writes it
+ * in about a second, and every line of it ends in Sill's log on a machine that
+ * is not being debugged. So the budget sits where the first case never reaches
+ * it and the second stops being paid for.
+ */
+const CONSOLE_BUDGET = 64 * 1024;
+
+/**
+ * The longest line carried whole.
+ *
+ * A line has no bound of its own: an extension logging a document it fetched
+ * writes one of a megabyte. Cut rather than dropped, because the beginning is
+ * where the answer usually is.
+ */
+const CONSOLE_LINE = 2000;
+
+/**
+ * Carries what an extension prints to somewhere a person can read it.
+ *
+ * Workers are created with `stdout` and `stderr` set, and that does not mean
+ * "let it through": it means Node hands this process two streams instead of
+ * forwarding the output. Nothing read them, so **every `console.log` an
+ * extension wrote went into a buffer nobody would ever drain**. The author saw
+ * nothing wherever they looked, and the text was held in memory for as long as
+ * the worker lived.
+ *
+ * Letting Node forward it instead is not available. This process's stdout
+ * carries framed protocol traffic, and an extension printing into the middle
+ * of a frame would corrupt it, which is why the streams were diverted in the
+ * first place. So everything goes to stderr, which the Rust side reads and
+ * writes into Sill's log.
+ *
+ * One of these per worker, so the budget below is per command rather than
+ * shared, and so a quiet extension pays nothing for a noisy one.
+ */
+class ExtensionOutput {
+  /** Named when a command is loaded, which is after the worker is spawned. */
+  private who = "an extension";
+
+  private left = CONSOLE_BUDGET;
+
+  /** Says whose output this is, as soon as there is an answer. */
+  belongsTo(extension: string, command: string): void {
+    this.who = `${extension}/${command}`;
+  }
+
+  /**
+   * Reads one of the worker's streams for as long as it lasts.
+   *
+   * A decoder rather than `String(chunk)`, because a chunk boundary can fall
+   * inside a character and the two halves decoded separately are two
+   * replacement characters rather than the letter somebody wrote.
+   */
+  carry(stream: Readable | null): void {
+    if (!stream) return;
+
+    const decoder = new StringDecoder("utf8");
+    let held = "";
+
+    stream.on("data", (chunk: Buffer) => {
+      held += decoder.write(chunk);
+
+      for (let end = held.indexOf("\n"); end !== -1; end = held.indexOf("\n")) {
+        this.say(held.slice(0, end));
+        held = held.slice(end + 1);
+      }
+
+      // Output with no newline in it is still output, and holding it would put
+      // back the unbounded buffer this whole class exists to drain.
+      if (held.length >= CONSOLE_LINE) {
+        this.say(held);
+        held = "";
+      }
+    });
+  }
+
+  private say(line: string): void {
+    if (this.left <= 0) return;
+
+    const text = line.trimEnd();
+    // A bare `console.log()` writes one newline. It says nothing, and a log
+    // full of blank lines is harder to read than one without them.
+    if (text === "") return;
+
+    const shown = text.length > CONSOLE_LINE ? `${text.slice(0, CONSOLE_LINE)} (cut)` : text;
+    this.left -= shown.length;
+
+    process.stderr.write(`${this.who}: ${shown}\n`);
+
+    // Said once, and only by the worker that spent the budget, so the reason
+    // its output stopped is in the same place its output was.
+    if (this.left <= 0) {
+      process.stderr.write(
+        `${this.who}: silenced after ${CONSOLE_BUDGET / 1024}KB of output. ` +
+          "An extension writing that much is logging in a loop.\n",
+      );
+    }
+  }
+}
+
+/** A worker, with the relay carrying whatever it prints. */
+interface Warm {
+  worker: Worker;
+  output: ExtensionOutput;
+}
+
 interface Session {
   id: string;
   worker: Worker;
@@ -90,7 +202,7 @@ class ExtensionHost {
    * the dominant cost of opening a command, and paying it before the user asks
    * is what keeps a launch feeling instant.
    */
-  private spare: Worker | undefined;
+  private spare: Warm | undefined;
 
   constructor() {
     this.rpc = new RpcPeer((data) => process.stdout.write(encodeFrame(data)));
@@ -111,19 +223,28 @@ class ExtensionHost {
     this.spare = this.spawnWorker();
   }
 
-  private spawnWorker(): Worker {
-    return new Worker(__filename, {
+  private spawnWorker(): Warm {
+    const worker = new Worker(__filename, {
       resourceLimits: { maxOldGenerationSizeMb: WORKER_MAX_HEAP_MB },
       stdout: true,
       stderr: true,
     });
+
+    // Read from the moment the worker exists rather than from the moment a
+    // command is loaded into it. A spare sits here warm, and anything it
+    // printed before it was claimed would otherwise be the buffer again.
+    const output = new ExtensionOutput();
+    output.carry(worker.stdout);
+    output.carry(worker.stderr);
+
+    return { worker, output };
   }
 
   /** Takes the warm worker and immediately starts warming the next one. */
-  private acquireWorker(): Worker {
-    const worker = this.spare ?? this.spawnWorker();
+  private acquireWorker(): Warm {
+    const warm = this.spare ?? this.spawnWorker();
     this.spare = this.spawnWorker();
-    return worker;
+    return warm;
   }
 
   /** Ticks only while something is loaded. */
@@ -199,7 +320,8 @@ class ExtensionHost {
   private async load(params: RpcParams): Promise<{ session_id: string }> {
     const opts = (params.opts ?? {}) as Record<string, unknown>;
     const sessionId = randomUUID();
-    const worker = this.acquireWorker();
+    const warm = this.acquireWorker();
+    const worker = warm.worker;
 
     const control = new RpcPeer((data) => worker.postMessage(data));
     const session: Session = {
@@ -268,6 +390,10 @@ class ExtensionHost {
         : [],
     };
 
+    // Before the launch, which is the first moment the extension can print
+    // anything: its module body runs inside that call.
+    warm.output.belongsTo(data.extensionName, data.commandName);
+
     // Not awaited: the extension's first render must be free to arrive while
     // Rust is still storing the session id. That is what the queue is for.
     void control.request("Lifecycle/launch", { data: data as unknown as RpcParams }).catch(
@@ -324,7 +450,7 @@ this.sessions.delete(sessionId);
 
   private shutdownAll(): void {
     for (const id of [...this.sessions.keys()]) void this.unload(id);
-    void this.spare?.terminate();
+    void this.spare?.worker.terminate();
   }
 }
 

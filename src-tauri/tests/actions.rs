@@ -383,8 +383,8 @@ fn only_the_recoverable_kind_of_deletion_is_offered() {
 fn a_terminal_opens_in_the_folder_and_not_inside_the_file() {
     use sill_lib::actions::folder_of;
 
-    let dir = std::env::temp_dir().join("sill-folder-of");
-    std::fs::create_dir_all(&dir).unwrap();
+    let scratch = tempfile::tempdir().expect("a temp directory");
+    let dir = scratch.path();
     let file = dir.join("README.md");
     std::fs::write(&file, "x").unwrap();
 
@@ -427,17 +427,22 @@ fn recycling_takes_a_file_away_and_the_bin_still_has_it() {
     // Tested against a real file, because a mock would only prove the mock.
     use sill_lib::actions::recycle;
 
-    let dir = std::env::temp_dir().join("sill-recycle-one");
-    std::fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("throwaway.txt");
+    /*
+     * A directory of its own, and it has to be.
+     *
+     * These recycle a file and then assert it is gone. Named after the test
+     * instead, two `cargo test` runs on one machine take turns writing and
+     * recycling the same file, and whichever loses recycles something that has
+     * already gone. `TempDir` names itself and removes itself on drop.
+     */
+    let dir = tempfile::tempdir().expect("a temp directory");
+    let file = dir.path().join("throwaway.txt");
     std::fs::write(&file, "not wanted").unwrap();
     assert!(file.exists());
 
     recycle(&file).expect("recycled");
 
     assert!(!file.exists(), "the file is still where it was");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[cfg(windows)]
@@ -445,15 +450,14 @@ fn recycling_takes_a_file_away_and_the_bin_still_has_it() {
 fn recycling_a_folder_takes_what_is_inside_it_too() {
     use sill_lib::actions::recycle;
 
-    let dir = std::env::temp_dir().join("sill-recycle-folder");
-    std::fs::create_dir_all(dir.join("inside")).unwrap();
-    std::fs::write(dir.join("inside").join("a.txt"), "x").unwrap();
+    let dir = tempfile::tempdir().expect("a temp directory");
+    let inside = dir.path().join("inside");
+    std::fs::create_dir_all(&inside).unwrap();
+    std::fs::write(inside.join("a.txt"), "x").unwrap();
 
-    recycle(&dir.join("inside")).expect("recycled");
+    recycle(&inside).expect("recycled");
 
-    assert!(!dir.join("inside").exists());
-
-    std::fs::remove_dir_all(&dir).ok();
+    assert!(!inside.exists());
 }
 
 #[cfg(windows)]
@@ -463,8 +467,11 @@ fn recycling_something_that_is_not_there_says_so_rather_than_claiming_success() 
     // failing, because nobody goes looking for the file afterwards.
     use sill_lib::actions::recycle;
 
-    let missing = std::env::temp_dir().join("sill-no-such-file-at-all.txt");
-    std::fs::remove_file(&missing).ok();
+    // Inside a fresh directory, so "not there" is a fact rather than the
+    // result of a delete that may not have worked. A shared name would also
+    // let another run of this create the file between the delete and the call.
+    let dir = tempfile::tempdir().expect("a temp directory");
+    let missing = dir.path().join("no-such-file-at-all.txt");
 
     assert!(recycle(&missing).is_err());
 }

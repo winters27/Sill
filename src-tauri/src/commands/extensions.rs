@@ -15,7 +15,7 @@ pub(crate) async fn load_extension(
     extension: String,
     command: String,
 ) -> Result<String, String> {
-    let host = host_of(&state).await?;
+    let host = host_of(&app, &state).await?;
     let mut opts = LoadOptions::view(entrypoint, &extension, &command);
     opts.capabilities = crate::exthost::grants::for_extension(&app, &extension);
     host.load(&opts).await.map_err(|e| e.to_string())

@@ -25,6 +25,7 @@
   } from "$lib/capture";
   import { windowUnder } from "$lib/markup";
   import { getPreferences } from "$lib/settings";
+  import { forgetUnreadable } from "$lib/status";
 
   /** Where the drag started, in this window's own pixels. */
   let from = $state<{ x: number; y: number } | null>(null);
@@ -191,9 +192,18 @@
 
     /** Everything the overlay needs to know, read fresh each time it opens. */
     async function ready() {
+      // Forgotten before the reads below, so a failure that has since been
+      // fixed is not still being reported. Scoped to this window, because a
+      // flat group would mean taking a screenshot erased what the launcher
+      // and the settings window had found.
+      void forgetUnreadable("capture");
+
       const [scale, position, prefs] = await Promise.all([
         window.scaleFactor(),
         window.outerPosition(),
+        // Silent. Every setting read from this has a default written beside
+        // it, and the overlay with its defaults is the overlay somebody who
+        // has never opened settings already uses.
         getPreferences().catch(() => null),
       ]);
 

@@ -286,7 +286,10 @@ pub fn show(window: &WebviewWindow) {
      * search field on every summon, not just once at startup while the window
      * is still hidden.
      */
-    let _ = window.emit("sill://shown", ());
+    // Carrying the label, for the reason `sleep::sleep_soon` explains about
+    // the other half of this pair: an emit reaches every window, so the page
+    // has to be able to tell whether it is the one being talked about.
+    let _ = window.emit("sill://shown", window.label());
 
     // The window is up and the page has been told. The other half of the
     // number comes back from the page, because only it knows when it painted.

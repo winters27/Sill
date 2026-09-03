@@ -101,10 +101,24 @@ fn the_log_does_not_outgrow_the_history_it_describes() {
     // with a 3.46 MB log beside it. SQLite waits for a thousand pages, about
     // four megabytes, and a clipboard writes a few kilobytes at a time, so
     // nothing ever wrote enough at once to reach the threshold.
-    let dir = std::env::temp_dir().join("sill-wal-growth");
-    std::fs::remove_dir_all(&dir).ok();
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("clipboard.db");
+    //
+    /*
+     * A directory of its own, like `store` above, rather than one named after
+     * the test.
+     *
+     * These two wanted the path as well as the store, and reached for
+     * `temp_dir().join("sill-wal-growth")` to get it. One name means one
+     * directory for every run on the machine, so a second `cargo test`, which
+     * this repository invites by keeping worktrees under `.claude/worktrees`,
+     * emptied this one part way through and the assertion failed on a number
+     * neither run produced. It passed alone every time, which is the worst
+     * shape a flake can have.
+     *
+     * `TempDir` names itself and removes itself when it goes out of scope, so
+     * the wipe at the top and the tidy-up at the bottom are gone with it.
+     */
+    let dir = tempfile::tempdir().expect("a temp directory");
+    let path = dir.path().join("clipboard.db");
 
     {
         let store = sill_lib::clipboard::store::Store::open(&path).unwrap();
@@ -125,7 +139,7 @@ fn the_log_does_not_outgrow_the_history_it_describes() {
                 .unwrap();
         }
 
-        let log = std::fs::metadata(dir.join("clipboard.db-wal"))
+        let log = std::fs::metadata(dir.path().join("clipboard.db-wal"))
             .map(|m| m.len())
             .unwrap_or(0);
         let history = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
@@ -140,8 +154,6 @@ fn the_log_does_not_outgrow_the_history_it_describes() {
             "log grew to {log} bytes against a {history} byte history"
         );
     }
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -149,10 +161,8 @@ fn opening_hands_back_a_log_that_already_grew() {
     // The setting bounds what happens next. Nothing else would ever shrink a
     // log that grew before it existed, and on a real machine that was three
     // and a half megabytes sitting there.
-    let dir = std::env::temp_dir().join("sill-wal-reclaim");
-    std::fs::remove_dir_all(&dir).ok();
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("clipboard.db");
+    let dir = tempfile::tempdir().expect("a temp directory");
+    let path = dir.path().join("clipboard.db");
 
     {
         let store = sill_lib::clipboard::store::Store::open(&path).unwrap();
@@ -177,11 +187,9 @@ fn opening_hands_back_a_log_that_already_grew() {
         let _store = sill_lib::clipboard::store::Store::open(&path).unwrap();
     }
 
-    let log = std::fs::metadata(dir.join("clipboard.db-wal"))
+    let log = std::fs::metadata(dir.path().join("clipboard.db-wal"))
         .map(|m| m.len())
         .unwrap_or(0);
 
     assert!(log < 65_536, "log kept {log} bytes after a checkpoint");
-
-    std::fs::remove_dir_all(&dir).ok();
 }

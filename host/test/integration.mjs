@@ -26,7 +26,31 @@ const child = spawn(process.execPath, [resolve(root, "dist/host.js")], {
   stdio: ["pipe", "pipe", "pipe"],
 });
 
-child.stderr.on("data", (d) => process.stderr.write(`[host stderr] ${d}`));
+/**
+ * Everything the host has said, kept as well as echoed.
+ *
+ * The host's stderr is where an extension's own `console.log` comes out, so
+ * this is the only place a test can see it. Rust reads the same stream and
+ * writes it into Sill's log.
+ */
+let said = "";
+
+child.stderr.on("data", (d) => {
+  said += d;
+  process.stderr.write(`[host stderr] ${d}`);
+});
+
+function waitForSaid(pattern, label, timeoutMs = 10000) {
+  return new Promise((ok, no) => {
+    const until = Date.now() + timeoutMs;
+    const look = () => {
+      if (pattern.test(said)) return ok(said);
+      if (Date.now() > until) return no(new Error(`timed out waiting for ${label}`));
+      setTimeout(look, 25);
+    };
+    look();
+  });
+}
 
 // ---- framing ----
 function send(msg) {
@@ -157,6 +181,59 @@ try {
   // ---- unload ----
   const unloadRes = await request("Manager/unload", { session_id: sessionId });
   assert(unloadRes.result === true, "unload succeeded");
+
+  // ---- what the extension itself says ----
+  //
+  // Workers are spawned with `stdout` and `stderr` set, which hands the host
+  // two streams rather than forwarding the output. Nothing read them, so an
+  // extension's console output went into a buffer nobody would ever drain:
+  // invisible to its author wherever they looked, and held in memory for as
+  // long as the worker lived.
+  const talker = await request("Manager/load", {
+    opts: {
+      mode: "View",
+      env: "Development",
+      entrypoint: resolve(root, "test/fixture/talks-to-the-console.js"),
+      extension_name: "chatty",
+      command_name: "fruit",
+      is_raycast: true,
+      preferences: {},
+      arguments: {},
+      launch_type: "User",
+      capabilities: [],
+    },
+  });
+
+  await waitForSaid(
+    /chatty\/fruit: the fruit list is being drawn/,
+    "an extension's console.log reached the host's stderr, named",
+  );
+  assert(
+    /chatty\/fruit: the fruit list is being drawn/.test(said),
+    "console.log arrives, under the extension and command that wrote it",
+  );
+
+  // Waited for separately: it comes up the other stream, and the two do not
+  // arrive in the order they were written.
+  await waitForSaid(
+    /chatty\/fruit: and something about it went wrong/,
+    "an extension's console.error",
+  );
+  assert(
+    /chatty\/fruit: and something about it went wrong/.test(said),
+    "and so does console.error, which is on the other stream",
+  );
+
+  // The long line, cut. Whole, it is four thousand characters of one
+  // extension's output in a log somebody else has to read.
+  await waitForSaid(/start-of-a-long-line/, "the long line");
+  assert(
+    /start-of-a-long-line/.test(said) && !said.includes("end-of-a-long-line"),
+    "a line longer than the limit is carried cut rather than whole",
+  );
+  assert(/ \(cut\)/.test(said), "and says that it was cut");
+
+  await request("Manager/unload", { session_id: talker.result?.session_id });
 
   // ---- the sandbox, both ways round ----
   //

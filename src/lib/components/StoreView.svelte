@@ -305,6 +305,10 @@
         working = null;
         workingOn = null;
         onstatus(`Fetching ${asked.title} again`);
+        // Silent, because the line below says it: a failed refetch falls
+        // through to `onstatus(said)` with the real error, in the panel the
+        // person is looking at. The status surface is for what has nowhere
+        // else to appear.
         deciding = await storePrepare(asked.name).catch(() => null);
         if (deciding) return await accept(true);
         onstatus(said);

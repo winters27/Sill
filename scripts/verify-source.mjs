@@ -793,6 +793,109 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Nothing Sill reports as broken can stay broken after it is fixed.
+ *
+ * A trouble is held until something withdraws it, so a `report` with no
+ * matching `resolved` is permanent: the tray keeps saying the startup entry
+ * could not be written long after it was, and a surface that keeps naming a
+ * fixed problem is one people stop reading. `HotkeyConflicts` grew a test for
+ * exactly this, because a key is very often taken by an application that is
+ * still closing and works on the retry a second later.
+ *
+ * Every id is a plain name or a string literal for this reason. The one that
+ * is built up, the group the settings window owns, is built inside `status.rs`
+ * behind a function that owns its withdrawal too, which is why that file is
+ * not read here.
+ */
+{
+  const withdrawn = new Set();
+  const reported = [];
+
+  for (const file of sources("src-tauri/src")) {
+    // `status.rs` builds the one id that is not a plain name, and owns the
+    // call that withdraws it, so reading it here would only find itself.
+    if (extname(file) !== ".rs" || file.endsWith("status.rs")) continue;
+
+    const text = readFileSync(file, "utf8");
+
+    for (const at of text.matchAll(/status::resolved\(\s*&?[\w.]+\s*,\s*([^,)\r\n]+)/g)) {
+      withdrawn.add(at[1].trim());
+    }
+
+    for (const at of text.matchAll(/status::report\(\s*&?[\w.]+\s*,\s*([^,\r\n]+),/g)) {
+      const id = at[1].trim();
+      const line = lineOf(text, at.index);
+
+      if (!/^([A-Z_][A-Z0-9_]*|"[^"]*")$/.test(id)) {
+        fail(
+          file,
+          line,
+          `\`status::report\` is given \`${id}\`, which is neither a named constant nor a ` +
+            "literal, so nothing can check that the trouble is ever withdrawn",
+        );
+        continue;
+      }
+
+      reported.push({ file, id, line });
+    }
+  }
+
+  for (const { file, id, line } of reported) {
+    if (withdrawn.has(id)) continue;
+
+    fail(
+      file,
+      line,
+      `\`${id}\` is reported as a trouble and never withdrawn by \`status::resolved\`, ` +
+        "so it would keep saying a fixed thing is broken",
+    );
+  }
+}
+
+/*
+ * A wrapper that swallows a refused command decides for every one of its
+ * callers.
+ *
+ * `.catch(() => [])` turns a refusal into an empty list and the pane then
+ * draws that list as if it were the answer: no search engines, no collections,
+ * no drives on this machine. Tauri denies a command to a window missing from
+ * `capabilities/default.json` **silently**, which is how the tray menu once
+ * shipped completely dead, so an empty pane is far more likely to be a
+ * permission than a fact.
+ *
+ * A catch taking no argument cannot report anything, because it threw the
+ * reason away. So this refuses that shape wherever it is chained straight onto
+ * an `invoke`, which is where the wrapper modules live and where one decision
+ * is made on behalf of every caller in the application. Both answers are
+ * available and both are named: `orElse` keeps the fallback and reports it,
+ * `silently` keeps the fallback and says why it is enough. Whichever is right,
+ * the code says which was chosen instead of defaulting to the one that is
+ * easiest to type.
+ *
+ * It deliberately does not reach a `.catch` a page puts on a call of its own.
+ * There the fallback, the failure and the reasoning are all on one screen for
+ * whoever reads it next, which is the thing a wrapper hides.
+ */
+for (const file of sources("src")) {
+  if (![".ts", ".svelte"].includes(extname(file)) || file.endsWith(".test.ts")) continue;
+
+  const text = readFileSync(file, "utf8");
+
+  // The call and its catch, across the line breaks a formatter puts in. The
+  // body is bounded so an `invoke` far above an unrelated catch cannot pair
+  // with it.
+  for (const at of text.matchAll(/\binvoke[<(][^;]{0,400}?\.catch\(\(\)\s*=>/g)) {
+    fail(
+      file,
+      lineOf(text, at.index),
+      "a catch that takes no argument throws the reason away, so a command this " +
+        "window was refused is drawn as an empty answer. Report it with `orElse`, " +
+        "or say why the fallback is enough with `silently`",
+    );
+  }
+}
+
+/*
  * Every custom property a component reads is one the theme defines.
  *
  * A `var(--nope)` with no fallback is not an error anywhere: the declaration

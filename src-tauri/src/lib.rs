@@ -53,6 +53,7 @@ pub mod shell;
 pub mod sleep;
 pub mod snippets;
 pub mod state;
+pub mod status;
 pub mod store;
 pub mod summon;
 pub mod synthetic;
@@ -469,7 +470,13 @@ pub(crate) fn apply_autostart(app: &AppHandle, enabled: bool) {
     let manager = app.autolaunch();
 
     match manager.is_enabled() {
-        Ok(current) if current == enabled => return,
+        Ok(current) if current == enabled => {
+            status::resolved(app, AUTOSTART_TROUBLE);
+            return;
+        }
+        // Logged and not reported. The write below is attempted anyway and its
+        // result is the one that decides whether the setting took, so a failed
+        // read on its own is nothing anybody can do anything about.
         Err(err) => crate::say!("could not read the startup entry: {err}"),
         _ => {}
     }
@@ -480,10 +487,31 @@ pub(crate) fn apply_autostart(app: &AppHandle, enabled: bool) {
         manager.disable()
     };
 
-    if let Err(err) = result {
-        crate::say!("could not change the startup entry: {err}");
+    /*
+     * Reported, because the toggle now says something untrue.
+     *
+     * Writing the `Run` entry is a registry write and it can be refused: by
+     * policy on a managed machine, by security software, or by the key being
+     * owned by another user. The switch stays where it was put, the settings
+     * row reads "on", and the next time the machine starts Sill does not.
+     * Nothing about that morning suggests a setting is the reason.
+     */
+    match result {
+        Ok(()) => status::resolved(app, AUTOSTART_TROUBLE),
+        Err(err) => status::report(
+            app,
+            AUTOSTART_TROUBLE,
+            format!(
+                "Sill could not change whether it opens at login, so it will not \
+                 start with Windows: {err}"
+            ),
+            Some("general"),
+        ),
     }
 }
+
+/// The one startup-entry trouble, named once so the row and the report agree.
+const AUTOSTART_TROUBLE: &str = "autostart";
 
 /// Sizes the launcher from the appearance preference.
 ///
@@ -570,7 +598,11 @@ pub(crate) fn apply_dictation(app: &AppHandle, settings: &dictation::models::Dic
     }
 }
 
-const TRAY_ID: &str = "sill-tray";
+pub(crate) const TRAY_ID: &str = "sill-tray";
+
+/// The one tray trouble, named once so the row that switches it on and the
+/// report that says it did not appear agree about which failure they mean.
+const TRAY_TROUBLE: &str = "tray";
 
 /// Shows or hides the notification area icon.
 ///
@@ -582,15 +614,24 @@ pub(crate) fn apply_tray(app: &AppHandle, enabled: bool) {
 
     if !enabled {
         app.remove_tray_by_id(TRAY_ID);
+        // Turning it off is not a failure to create it, and leaving the report
+        // standing would mark the row that had just been used correctly.
+        status::resolved(app, TRAY_TROUBLE);
         return;
     }
 
     if app.tray_by_id(TRAY_ID).is_some() {
+        status::resolved(app, TRAY_TROUBLE);
         return;
     }
 
     let Some(icon) = app.default_window_icon().cloned() else {
-        crate::say!("no bundled icon, so there is nothing to put in the tray");
+        status::report(
+            app,
+            TRAY_TROUBLE,
+            "Sill has no bundled icon, so there is nothing to put in the notification area.",
+            Some("general"),
+        );
         return;
     };
 
@@ -630,8 +671,29 @@ pub(crate) fn apply_tray(app: &AppHandle, enabled: bool) {
         Ok(())
     };
 
-    if let Err(err) = build() {
-        crate::say!("could not create the tray icon: {err}");
+    /*
+     * Reported, because the toggle is on and there is nothing there.
+     *
+     * This is the failure with the least to go on. Sill has no taskbar button
+     * by design, so with no tray icon a running launcher and a launcher that
+     * never started look identical, and the setting that was supposed to
+     * produce one still reads as on. It cannot be reported in the tray, which
+     * is the thing that failed, so the settings row is the whole of it.
+     */
+    match build() {
+        Ok(()) => {
+            status::resolved(app, TRAY_TROUBLE);
+            // The icon was built with its own tooltip, so anything already
+            // wrong has just been painted over. Turning the tray on must not
+            // be what silences the rest of the surface.
+            status::refresh(app);
+        }
+        Err(err) => status::report(
+            app,
+            TRAY_TROUBLE,
+            format!("Sill could not create its notification area icon: {err}"),
+            Some("general"),
+        ),
     }
 }
 
@@ -892,15 +954,25 @@ fn report_summon_trouble(app: &AppHandle, summon: &str) {
         return;
     }
 
-    crate::say!("{summon} is taken, so there is no way to summon Sill: opening settings");
-
-    // The tray is the other place somebody looks when a launcher seems dead,
-    // and its tooltip is the one label it has.
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        let _ = tray.set_tooltip(Some(&format!(
-            "Sill: {summon} is taken by another application, so the hotkey does nothing"
-        )));
-    }
+    /*
+     * Through the status surface rather than straight at the tray.
+     *
+     * This used to write the tooltip itself, which was right when it was the
+     * only thing that ever did. It is not any more: the tray icon, the startup
+     * entry, the clipboard and two saved files all report now, and two writers
+     * of one label means whichever ran last is the whole truth. Everything
+     * goes through the one set, and the tray shows a count when there is more
+     * than one thing wrong.
+     */
+    status::report(
+        app,
+        "summon-hotkey",
+        format!(
+            "{summon} is taken by another application, so there is no way to summon Sill. \
+             Choose a different combination."
+        ),
+        Some("general"),
+    );
 
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -927,7 +999,14 @@ fn register_summon_shortcut(app: &AppHandle, accelerator: &str) {
     }
 
     match result {
-        Ok(()) => println!("[sill] summon key registered: {accelerator}"),
+        Ok(()) => {
+            // Rebinding to a key that works is the fix for the trouble the
+            // startup check reported, so it withdraws it. Without this the
+            // tray would keep saying Sill cannot be summoned by the key that
+            // had just summoned it.
+            status::resolved(app, "summon-hotkey");
+            println!("[sill] summon key registered: {accelerator}");
+        }
         Err(err) => crate::say!("could not register {accelerator}: {err}"),
     }
 }
@@ -1205,6 +1284,10 @@ pub fn run() {
             // Before any shortcut is registered, so a refusal is recorded
             // rather than dropped.
             app.manage(HotkeyConflicts::default());
+
+            // Before anything that can fail quietly, for the same reason.
+            // Every report before this point reaches the log and nothing else.
+            app.manage(status::Status::default());
 
             // What was said before Sill was last closed, so the list of past
             // conversations is not empty every morning. Nothing is opened:
@@ -1553,6 +1636,9 @@ pub fn run() {
             commands::search::index_folder,
             commands::search::start_file_search,
             commands::settings::hotkey_conflicts,
+            commands::settings::status_troubles,
+            commands::settings::note_unreadable,
+            commands::settings::forget_unreadable,
             commands::settings::set_alias,
             commands::settings::index_rows,
             commands::settings::set_command_hotkey,

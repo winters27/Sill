@@ -30,6 +30,10 @@ const MAX_TEXT_BYTES: usize = 1_000_000;
 /// Largest image kept, before which it is noted but its bytes are dropped.
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
+/// The one report about images not being kept, named once so the copy that
+/// works withdraws the one that did not.
+const IMAGE_TROUBLE: &str = "clipboard-image";
+
 /// How often old entries are cleared out.
 ///
 /// Once a day, from whichever copy happens to be the first after that. The
@@ -569,9 +573,39 @@ fn capture_with(
             })
             .map_err(|e| e.to_string())?;
 
+        /*
+         * Reported, because the entry exists either way.
+         *
+         * A blob that does not get written leaves a row saying "Image 800x600"
+         * with nothing behind it, and choosing it pastes that label as text.
+         * Nothing about the list says the picture is gone, and the causes are
+         * all the ones that persist: a full disk, a database opened
+         * read-only, an image that grew past what SQLite would take.
+         *
+         * Keyed, so a hundred copies onto a full disk is one line rather than
+         * a hundred. The thing that is wrong is the clipboard not keeping
+         * images, and it is wrong once.
+         */
         if bytes <= MAX_IMAGE_BYTES {
-            if let Some(png) = encode_png(&image) {
-                let _ = store.put_blob(id, &png);
+            match encode_png(&image) {
+                Some(png) => match store.put_blob(id, &png) {
+                    Ok(()) => crate::status::resolved(app, IMAGE_TROUBLE),
+                    Err(err) => crate::status::report(
+                        app,
+                        IMAGE_TROUBLE,
+                        format!(
+                            "Sill is keeping copied images as their size only, because the \
+                             picture itself could not be stored: {err}"
+                        ),
+                        Some("clipboard"),
+                    ),
+                },
+                None => crate::status::report(
+                    app,
+                    IMAGE_TROUBLE,
+                    "Sill could not encode a copied image, so its entry has no picture behind it.",
+                    Some("clipboard"),
+                ),
             }
         }
         drop(store);

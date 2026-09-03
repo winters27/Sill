@@ -5,6 +5,7 @@
  * copy here loses a field rather than corrupting one.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { orElse, silently } from "$lib/status";
 
 export type ClipKind = "text" | "link" | "email" | "color" | "file" | "image";
 
@@ -165,7 +166,11 @@ export interface Skipped {
  * opened.
  */
 export function clipboardLastSkipped(): Promise<Skipped | null> {
-  return invoke<Skipped | null>("clipboard_last_skipped").catch(() => null);
+  // Silent, because `null` is what this answers nearly every time it is
+  // asked and the offer it produces is a courtesy rather than an answer.
+  // Nothing was going to be shown here, so nothing is missing from the view,
+  // and a sentence about it would be the surface talking about itself.
+  return invoke<Skipped | null>("clipboard_last_skipped").catch(silently(null));
 }
 
 /**
@@ -198,8 +203,18 @@ export interface Collection {
   count: number;
 }
 
+/**
+ * Every named group, for the rail that lists them.
+ *
+ * Reported when it fails. An empty list here is drawn as "you have not made
+ * any collections", which is a claim about somebody's own saved work, and it
+ * is wrong in the one direction that matters: the collections are still in the
+ * database and the view says they are not.
+ */
 export function clipboardCollections(): Promise<Collection[]> {
-  return invoke<Collection[]>("clipboard_collections").catch(() => []);
+  return invoke<Collection[]>("clipboard_collections").catch(
+    orElse("launcher", "the collections in the clipboard history", [], "clipboard"),
+  );
 }
 
 /** Makes a collection, or returns the one already called that. */
@@ -224,7 +239,15 @@ export function clipboardRemoveFromCollection(collection: number, id: number): P
   return invoke("clipboard_remove_from_collection", { collection, id });
 }
 
-/** What is in a collection, in the order it was arranged. */
+/**
+ * What is in a collection, in the order it was arranged.
+ *
+ * Reported for the same reason as the list of collections. A collection that
+ * opens empty reads as one somebody emptied, and the row above it is still
+ * showing the count of what is really in there.
+ */
 export function clipboardCollectionEntries(collection: number): Promise<ClipEntry[]> {
-  return invoke<ClipEntry[]>("clipboard_collection_entries", { collection }).catch(() => []);
+  return invoke<ClipEntry[]>("clipboard_collection_entries", { collection }).catch(
+    orElse("launcher", "what is in a clipboard collection", [], "clipboard"),
+  );
 }

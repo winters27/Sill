@@ -141,13 +141,15 @@ pub(crate) async fn search_commands(
     let inline = inline_emoji(&query, &index, &ranking, &emoji, tone);
     splice_suggestions(&mut results, inline);
 
-    // Above everything, because when a query IS a sum the answer is the only
-    // thing wanted. `evaluate` returns nothing for the ninety-nine queries in
-    // a hundred that are searches, so this costs those nothing.
-    // The calculator is asked first because it is the narrower question: it
-    // only answers something that parses as arithmetic. A utility keyword is
-    // never also a sum, so the order settles nothing contentious, but asking
-    // the stricter one first keeps it that way if either ever loosens.
+    /*
+     * Above everything, because when a query IS a sum, or a request for a
+     * UUID, the answer is the only thing wanted.
+     *
+     * Both return nothing for the ninety-nine queries in a hundred that are
+     * searches, so this costs those nothing. The calculator is asked first
+     * because its gate is the stricter of the two: it has to guess whether a
+     * string is arithmetic at all, while a utility is asked for by name.
+     */
     let answer = calculator::evaluate(&query).or_else(|| crate::utilities::evaluate(&query));
 
     if let Some(answer) = answer {

@@ -119,11 +119,19 @@ pub fn sleep_soon(window: &WebviewWindow) {
      * At the moment of hiding rather than when the renderer is suspended
      * twenty seconds later. Those twenty seconds are exactly the window a
      * once-a-second poll fills with work nobody asked for.
+     *
+     * The label is the payload, and it has to be. `emit` reaches every window
+     * in the application, and a page listening with the default target gets
+     * events aimed elsewhere as well, so there is no way to send this to one
+     * window. Every window Sill has comes through here, including the tray
+     * menu and the deferred ones, so without a label the launcher was told it
+     * had been hidden every time the tray menu was dismissed, and stopped its
+     * live readings while it was still on screen.
      */
     use tauri::Emitter;
     use tauri::Manager;
 
-    let _ = window.emit("sill://hidden", ());
+    let _ = window.emit("sill://hidden", window.label());
 
     /*
      * And the icons extracted since the last time, written now.
@@ -149,6 +157,30 @@ pub fn sleep_soon(window: &WebviewWindow) {
         // Shown by some other path than a summon, which is the same answer.
         if window.is_visible().unwrap_or(false) {
             return;
+        }
+
+        /*
+         * And the extension views go with it.
+         *
+         * A view is a Node worker holding a React tree so that a window can
+         * draw it. Once nothing of Sill's is on screen there is nothing to
+         * draw it into, and until now the only thing that ever noticed was the
+         * host's five minute idle sweep: dismissing the launcher by clicking
+         * away left a worker, and the whole Node process behind it, resident
+         * for the rest of those five minutes.
+         *
+         * Here rather than at the moment of the dismissal, because a dismissal
+         * is not always meant. This is the point where Sill has already decided
+         * that this one stood, which is the same conclusion, and the same
+         * twenty seconds, that the renderer's own sleep is based on. Coming
+         * straight back still finds the command where it was.
+         *
+         * Before the renderer is suspended rather than after, and blocking on
+         * purpose: the window has to be told its view has gone while it is
+         * still awake to hear it.
+         */
+        if !crate::summon::anything_visible(&window.app_handle()) {
+            crate::host::release_views(&window.app_handle());
         }
 
         suspend(&label, &window, armed);

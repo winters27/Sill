@@ -112,7 +112,7 @@ pub(crate) fn ai_transcript(chat: State<'_, Chat>) -> Vec<Turn> {
 #[tauri::command]
 pub(crate) fn ai_clear(app: AppHandle, chat: State<'_, Chat>) {
     chat.clear();
-    chat.save(&crate::state::data_dir(&app));
+    chat.save(&app);
 }
 
 /// Asks the first question of a new conversation.
@@ -148,10 +148,10 @@ pub(crate) async fn ai_ask(
 
     let chat = app.state::<Chat>();
     chat.begin(&naming, crate::state::now_seconds());
-    chat.save(&crate::state::data_dir(&app));
+    chat.save(&app);
 
     let answer = crate::ai::chat::ask(&app, &chosen, &question, attachments).await;
-    app.state::<Chat>().save(&crate::state::data_dir(&app));
+    app.state::<Chat>().save(&app);
     answer
 }
 
@@ -167,7 +167,7 @@ pub(crate) async fn ai_follow_up(
 
     let answer =
         crate::ai::chat::ask(&app, &chosen, &question, attachments.unwrap_or_default()).await;
-    app.state::<Chat>().save(&crate::state::data_dir(&app));
+    app.state::<Chat>().save(&app);
     answer
 }
 
@@ -315,7 +315,7 @@ pub(crate) fn ai_conversations(chat: State<'_, Chat>) -> Vec<Summary> {
 #[tauri::command]
 pub(crate) fn ai_forget(app: AppHandle, chat: State<'_, Chat>, id: String) -> Vec<Summary> {
     chat.forget(&id);
-    chat.save(&crate::state::data_dir(&app));
+    chat.save(&app);
     chat.summaries(crate::state::now_seconds())
 }
 
@@ -323,7 +323,7 @@ pub(crate) fn ai_forget(app: AppHandle, chat: State<'_, Chat>, id: String) -> Ve
 #[tauri::command]
 pub(crate) fn ai_forget_all(app: AppHandle, chat: State<'_, Chat>) {
     chat.clear();
-    chat.save(&crate::state::data_dir(&app));
+    chat.save(&app);
 }
 
 /// Sets the open conversation aside so the next question begins its own.
@@ -333,7 +333,7 @@ pub(crate) fn ai_forget_all(app: AppHandle, chat: State<'_, Chat>) {
 #[tauri::command]
 pub(crate) fn ai_new(app: AppHandle, chat: State<'_, Chat>) {
     chat.set_aside();
-    chat.save(&crate::state::data_dir(&app));
+    chat.save(&app);
 }
 
 /// Reopens a conversation, and answers with everything said in it.

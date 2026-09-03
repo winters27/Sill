@@ -232,6 +232,67 @@ pub(crate) async fn hotkey_conflicts(app: AppHandle) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Everything Sill is quietly not doing.
+///
+/// Read by the settings window, which is the surface with room to say what is
+/// wrong and where to fix it. The tray only ever gets a line.
+#[tauri::command]
+pub(crate) async fn status_troubles(app: AppHandle) -> Vec<crate::status::Trouble> {
+    app.try_state::<crate::status::Status>()
+        .map(|status| status.all())
+        .unwrap_or_default()
+}
+
+/// One thing a window asked Rust for and did not get.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Unreadable {
+    /// Which window, so it can withdraw its own reports without touching
+    /// anybody else's.
+    surface: crate::status::Surface,
+    /// The thing, named the way a sentence would name it, so the message reads
+    /// as English rather than as a command name.
+    what: String,
+    reason: String,
+    /// The settings panel that holds the control this is about, so the band
+    /// showing it can offer to go there. Empty when there is no such panel.
+    section: String,
+}
+
+/// Records that a window could not read something it needs.
+///
+/// Every one of these calls used to end in `.catch(() => [])`, which turns a
+/// refusal into an empty list and then draws that list as though it were the
+/// answer: no search engines, no browsers on this machine, no key conflicts.
+/// Tauri denies a command to a window missing from `capabilities/default.json`
+/// **silently**, which is exactly how the tray menu once shipped dead, so this
+/// is the failure most likely to be behind an empty settings pane.
+///
+/// The window still gets its fallback and still draws. The difference is that
+/// somewhere on screen says the list is not the truth.
+#[tauri::command]
+pub(crate) async fn note_unreadable(app: AppHandle, failed: Unreadable) {
+    crate::status::unreadable(
+        &app,
+        failed.surface,
+        &failed.what,
+        &failed.reason,
+        &failed.section,
+    );
+}
+
+/// Forgets what a window last failed to read, because it is about to try again.
+///
+/// A group rather than one at a time: the settings window re-reads all of them
+/// on every open, so whatever it found last time is stale before the first
+/// answer arrives. Clearing them individually would mean the window
+/// remembering which ones it had reported, which is a second copy of state
+/// Rust already holds.
+#[tauri::command]
+pub(crate) async fn forget_unreadable(app: AppHandle, surface: crate::status::Surface) {
+    crate::status::readable_again(&app, surface);
+}
+
 /// Gives a command a name of the user's own, or takes one away.
 ///
 /// An empty alias removes it. One command has at most one name and one name

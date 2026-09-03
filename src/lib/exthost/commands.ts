@@ -6,6 +6,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { orElse, silently } from "$lib/status";
 
 export interface RankedCommand {
   id: string;
@@ -493,7 +494,10 @@ export function recordUse(
   query?: string,
   history = true,
 ): Promise<void> {
-  return invoke<void>("record_use", { id, query, history }).catch(() => undefined);
+  // Silent. It answers with nothing, it is called on every launch, and all
+  // that is lost is one use going uncounted towards ranking. There is no
+  // screen it makes wrong and nothing anybody could do about it.
+  return invoke<void>("record_use", { id, query, history }).catch(silently(undefined));
 }
 
 /**
@@ -504,7 +508,11 @@ export function recordUse(
  * somebody abandoned would mostly be offering them their mistakes.
  */
 export function queryHistory(): Promise<string[]> {
-  return invoke<string[]>("query_history").catch(() => []);
+  // Silent. An empty list means Up recalls nothing, which announces itself to
+  // the person pressing Up in the instant they press it. This is also re-read
+  // on every summon, so a report would be a sentence about a key somebody has
+  // already discovered does not work.
+  return invoke<string[]>("query_history").catch(silently([]));
 }
 
 export function unloadExtension(session: string): Promise<boolean> {
@@ -564,11 +572,16 @@ export function appIcon(path: string): Promise<string | null> {
   const held = iconCache.get(path);
   if (held) return held;
 
-  const pending = invoke<string | null>("app_icon", { path }).catch(() => {
+  const pending = invoke<string | null>("app_icon", { path }).catch((reason) => {
     // Forgotten rather than remembered as "no icon", so the next row that
     // asks tries again.
+    //
+    // The reason then goes no further, and that is the judgment rather than an
+    // oversight: this is asked once per row drawn, so a report would land on
+    // the path that paints the list, and a row without an icon is one somebody
+    // can still read and still run.
     iconCache.delete(path);
-    return null;
+    return silently<string | null>(null)(reason);
   });
 
   iconCache.set(path, pending);
@@ -599,7 +612,18 @@ export type FileSearchMissing = "indexing" | "absent" | "asleep";
  * program starts or stops, which is not something typing does.
  */
 export function fileSearchMissing(): Promise<FileSearchMissing | null> {
-  return invoke<FileSearchMissing | null>("file_search_missing").catch(() => null);
+  /*
+   * Reported, because `null` here is a positive claim.
+   *
+   * Every other value names something standing in the way and the launcher
+   * shows a row saying so. `null` means nothing is, and the row is not drawn.
+   * A failure that produces `null` therefore tells somebody who is typing a
+   * filename and seeing nothing that file search is working fine, which is the
+   * one answer that stops them looking further.
+   */
+  return invoke<FileSearchMissing | null>("file_search_missing").catch(
+    orElse("launcher", "what is stopping file search from answering", null, "files"),
+  );
 }
 
 /** Does whatever the thing standing in the way needs. */
@@ -615,9 +639,18 @@ export interface Drive {
   indexed: boolean;
 }
 
-/** Every mounted drive, and whether Sill reads it. */
+/**
+ * Every mounted drive, and whether Sill reads it.
+ *
+ * Reported when it fails. The settings pane draws this as the list of drives
+ * on the machine, and no machine has none, so an empty one is never the truth.
+ * It is also the pane somebody opens precisely because file search is not
+ * finding things, which is the worst moment to be shown a blank list.
+ */
 export function listDrives(): Promise<Drive[]> {
-  return invoke<Drive[]>("list_drives").catch(() => []);
+  return invoke<Drive[]>("list_drives").catch(
+    orElse("settings", "which drives are on this machine", [], "files"),
+  );
 }
 
 /**
@@ -644,10 +677,14 @@ export interface Elsewhere {
 }
 
 export function searchElsewhere(query: string): Promise<Elsewhere> {
-  return invoke<Elsewhere>("search_elsewhere", { query }).catch(() => ({
-    files: [],
-    pages: [],
-  }));
+  // Silent, and the reason is shared with the two searches below it. This runs
+  // once per keystroke, so a report would be written and overwritten faster
+  // than anybody could read it, and it would put an extra message on the path
+  // whose whole job is to answer before the next character arrives. What a
+  // failure costs is one query's results, and the next keystroke asks again.
+  return invoke<Elsewhere>("search_elsewhere", { query }).catch(
+    silently({ files: [], pages: [] }),
+  );
 }
 
 /**
@@ -669,11 +706,13 @@ export function searchElsewhere(query: string): Promise<Elsewhere> {
  * so that typing "smile" could find an emoji as well as an application.
  */
 export function searchEmoji(query: string, inline = false): Promise<RankedCommand[]> {
-  return invoke<RankedCommand[]>("search_emoji", { query, inline }).catch(() => []);
+  // Per keystroke. See `searchElsewhere`.
+  return invoke<RankedCommand[]>("search_emoji", { query, inline }).catch(silently([]));
 }
 
 export function searchWindows(query: string): Promise<RankedCommand[]> {
-  return invoke<RankedCommand[]>("search_windows", { query }).catch(() => []);
+  // Per keystroke. See `searchElsewhere`.
+  return invoke<RankedCommand[]>("search_windows", { query }).catch(silently([]));
 }
 
 export interface Rect {
@@ -691,7 +730,10 @@ export interface MonitorInfo {
 }
 
 export function listMonitors(): Promise<MonitorInfo[]> {
-  return invoke<MonitorInfo[]>("list_monitors").catch(() => []);
+  // Silent, and nothing in the window calls this today: it is here for the
+  // extension surface. A wrapper nobody draws from cannot mislead anybody, and
+  // whoever gives it a caller can decide then whether an empty list would.
+  return invoke<MonitorInfo[]>("list_monitors").catch(silently([]));
 }
 
 export function openPath(path: string): Promise<void> {
@@ -777,7 +819,10 @@ export function extractTextFromLastImage(): Promise<string> {
  * does not change while somebody is typing.
  */
 export function defaultBrowser(): Promise<string | null> {
-  return invoke<string | null>("default_browser").catch(() => null);
+  // Silent. `null` is what this answers on a machine with no default browser
+  // set, and the row that reads it falls back to saying "browser" rather than
+  // naming one. The offer still works and still opens the address.
+  return invoke<string | null>("default_browser").catch(silently(null));
 }
 
 /**
