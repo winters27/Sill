@@ -1095,6 +1095,19 @@ fn manage_before_windows(app: &tauri::App) {
     app.manage(weather::Forecast::default());
 
     /*
+     * Icons, remembered across runs.
+     *
+     * Extraction is shell and GDI calls, about a millisecond each, which is
+     * nothing until the first list of a run asks for thirty at once and every
+     * one of them is work the last run already did.
+     *
+     * Managed here rather than in setup for the same reason as the two above:
+     * a first question can arrive before the setup hook runs. The file is only
+     * *read* later, after the hotkey has been answered.
+     */
+    app.manage(icons::Icons::new(Some(data_dir.join("icons.json"))));
+
+    /*
      * The file index's container, empty, whether or not anything will fill it.
      *
      * It used to be managed only when there were folders to index, which made
@@ -1421,6 +1434,11 @@ pub fn run() {
                             handle.manage(watcher);
                         }
                     }
+
+                    // Last run's icons, so the first list does not re-extract
+                    // what has already been extracted. After the ready stamp,
+                    // like everything else here.
+                    handle.state::<icons::Icons>().warm();
 
                     // After the registry and the expander are both managed,
                     // since these fill in each of them.

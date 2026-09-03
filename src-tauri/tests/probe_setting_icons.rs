@@ -20,6 +20,9 @@ fn report_generic_pages() {
 #[test]
 #[ignore = "reads this machine's System32"]
 fn report_section_icons() {
+    // One cache for this probe, rather than a process-wide one.
+    let icons = sill_lib::icons::Icons::new(None);
+
     let mut by_icon: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for record in sill_lib::settings_catalog::load() {
@@ -40,7 +43,7 @@ fn report_section_icons() {
 
         let size = path
             .as_deref()
-            .and_then(sill_lib::icons::icon_data_uri)
+            .and_then(|path| icons.data_uri(path))
             .map(|uri| format!("{} bytes", uri.len()))
             .unwrap_or_else(|| "NO ICON".to_string());
 
@@ -56,13 +59,15 @@ fn report_section_icons() {
 #[test]
 #[ignore = "reads this machine's System32"]
 fn sections_do_not_all_look_the_same() {
+    // One cache for this probe, rather than a process-wide one.
+    let icons = sill_lib::icons::Icons::new(None);
     let mut pictures: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for record in sill_lib::settings_catalog::load() {
         let Some(icon) = record.icon.as_deref() else {
             continue;
         };
-        let Some(uri) = sill_lib::icons::icon_data_uri(icon) else {
+        let Some(uri) = icons.data_uri(icon) else {
             continue;
         };
 
@@ -89,8 +94,10 @@ fn sections_do_not_all_look_the_same() {
 /// this is exactly the kind of thing nobody looks at twice.
 #[test]
 fn the_bluetooth_switch_is_not_wearing_a_warning_triangle() {
+    // One cache for this probe, rather than a process-wide one.
+    let icons = sill_lib::icons::Icons::new(None);
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
-    let triangle = sill_lib::icons::icon_data_uri(&format!(r"{root}\System32\bthprops.cpl,0"));
+    let triangle = icons.data_uri(&format!(r"{root}\System32\bthprops.cpl,0"));
 
     // Not `else { return }`. The first version of this test built the path
     // wrong, so this came back `None`, so the test returned before comparing
@@ -102,7 +109,7 @@ fn the_bluetooth_switch_is_not_wearing_a_warning_triangle() {
         let Some(icon) = row.icon.as_deref() else {
             continue;
         };
-        let Some(drawn) = sill_lib::icons::icon_data_uri(icon) else {
+        let Some(drawn) = icons.data_uri(icon) else {
             continue;
         };
 
@@ -133,6 +140,8 @@ fn the_bluetooth_switch_is_not_wearing_a_warning_triangle() {
 #[test]
 #[ignore = "reads this machine's System32"]
 fn compare_candidates() {
+    // One cache for this probe, rather than a process-wide one.
+    let icons = sill_lib::icons::Icons::new(None);
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
 
     let candidates = [
@@ -157,9 +166,7 @@ fn compare_candidates() {
             println!("{name:28} missing");
             continue;
         }
-        let size = sill_lib::icons::icon_data_uri(&path)
-            .map(|u| u.len())
-            .unwrap_or(0);
+        let size = icons.data_uri(&path).map(|u| u.len()).unwrap_or(0);
         println!("{name:28} {size:>7} bytes");
     }
 }

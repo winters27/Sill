@@ -659,12 +659,16 @@ fn report_icon_coverage() {
     let all = sill_lib::apps::scan_all();
     let settings = sill_lib::settings_catalog::load();
 
+    // One cache for this probe. It used to reach for a process-wide one, which
+    // is what rule 2 refuses and which meant no test could have its own.
+    let icons = sill_lib::icons::Icons::new(None);
+
     let mut with = 0usize;
     let mut without = Vec::new();
 
     for app in &all {
         let source = app.icon_source.clone().unwrap_or_else(|| app.path.clone());
-        match sill_lib::icons::icon_data_uri(&source) {
+        match icons.data_uri(&source) {
             Some(_) => with += 1,
             None => without.push(app.name.as_str()),
         }
@@ -675,7 +679,7 @@ fn report_icon_coverage() {
         .filter(|s| {
             s.icon
                 .as_deref()
-                .and_then(sill_lib::icons::icon_data_uri)
+                .and_then(|path| icons.data_uri(path))
                 .is_some()
         })
         .count();

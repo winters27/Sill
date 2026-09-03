@@ -65,8 +65,13 @@ pub(crate) async fn clear_usage_history(registry: State<'_, RegistryState>) -> R
 /// machine has hundreds of Start Menu entries and only a handful are ever on
 /// screen. Results are cached, misses included.
 #[tauri::command]
-pub(crate) async fn app_icon(path: String) -> Option<String> {
-    icons::icon_data_uri(&path)
+pub(crate) async fn app_icon(
+    icons: State<'_, icons::Icons>,
+    path: String,
+) -> Result<Option<String>, String> {
+    // A `Result` because the command takes a borrowed `State`, and Tauri
+    // requires that of any async command that does. Nothing here fails.
+    Ok(icons.data_uri(&path))
 }
 
 /// Closes Sill entirely.

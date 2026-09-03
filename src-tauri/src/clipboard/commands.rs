@@ -45,7 +45,11 @@ pub fn clipboard_search(
 /// Separate from the list because a listing of four hundred rows must not
 /// carry four hundred screenshots with it.
 #[tauri::command]
-pub fn clipboard_entry(clipboard: State<'_, Clipboard>, id: i64) -> Result<Option<Detail>, String> {
+pub fn clipboard_entry(
+    clipboard: State<'_, Clipboard>,
+    icons: State<'_, crate::icons::Icons>,
+    id: i64,
+) -> Result<Option<Detail>, String> {
     let store = clipboard.store();
     let Some(entry) = store.get(id).map_err(|e| e.to_string())? else {
         return Ok(None);
@@ -65,7 +69,7 @@ pub fn clipboard_entry(clipboard: State<'_, Clipboard>, id: i64) -> Result<Optio
     let app_icon = entry
         .app_path
         .as_deref()
-        .and_then(crate::icons::icon_data_uri);
+        .and_then(|path| icons.data_uri(path));
 
     Ok(Some(Detail {
         entry,

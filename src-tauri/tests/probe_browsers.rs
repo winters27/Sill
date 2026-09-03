@@ -112,10 +112,14 @@ fn report_programs_behind_the_browsers() {
 #[test]
 #[ignore = "reads the browsers installed on this machine"]
 fn report_icons_resolve() {
+    // One cache for this probe, rather than the process-wide one this used
+    // to reach for.
+    let icons = sill_lib::icons::Icons::new(None);
+
     let mut checked = 0;
 
     for (name, path) in browsers::installed_browsers() {
-        let icon = sill_lib::icons::icon_data_uri(&path.to_string_lossy());
+        let icon = icons.data_uri(&path.to_string_lossy());
         println!(
             "   {name:24} {}",
             icon.as_ref()
@@ -128,7 +132,7 @@ fn report_icons_resolve() {
     assert!(checked > 0, "no browsers to check");
 
     let default = browsers::default_browser().expect("a default browser");
-    let icon = sill_lib::icons::icon_data_uri(&default.to_string_lossy());
+    let icon = icons.data_uri(&default.to_string_lossy());
     println!();
     println!("default browser icon: {:?}", icon.map(|u| u.len()));
 }

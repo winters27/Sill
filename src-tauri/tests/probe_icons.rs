@@ -2,6 +2,9 @@
 #[test]
 #[ignore]
 fn contact_sheet() {
+    // One cache for this probe, rather than a process-wide one.
+    let icons = sill_lib::icons::Icons::new(None);
+
     use base64::Engine;
 
     let file = std::env::var("FILE").unwrap();
@@ -26,7 +29,7 @@ fn contact_sheet() {
 
     for step in 0..count {
         let index = from + step;
-        let Some(uri) = sill_lib::icons::icon_data_uri(&format!("{file},{index}")) else {
+        let Some(uri) = icons.data_uri(&format!("{file},{index}")) else {
             continue;
         };
         let Some(b64) = uri.split(',').next_back() else {

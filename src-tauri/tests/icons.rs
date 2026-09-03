@@ -1,10 +1,20 @@
 //! Icon extraction against real files on this machine.
 
+/// A cache of its own for each test.
+///
+/// The point of the change this follows: the cache was a `static`, so every
+/// test in this file shared one and none could be given a fresh one. Without a
+/// file, so nothing here reads or writes what a real run left behind.
+fn icons() -> sill_lib::icons::Icons {
+    sill_lib::icons::Icons::new(None)
+}
+
 #[test]
 #[cfg(windows)]
 fn extracts_an_icon_from_a_system_executable() {
     // explorer.exe is present on every Windows install and always has an icon.
-    let uri = sill_lib::icons::icon_data_uri(r"C:\Windows\explorer.exe")
+    let uri = icons()
+        .data_uri(r"C:\Windows\explorer.exe")
         .expect("explorer.exe should have an icon");
 
     assert!(
@@ -38,17 +48,31 @@ fn extracts_an_icon_from_a_system_executable() {
 #[test]
 #[cfg(windows)]
 fn a_missing_file_yields_no_icon_rather_than_failing() {
-    let uri = sill_lib::icons::icon_data_uri(r"C:\definitely\not\here\nope.lnk");
+    let uri = icons().data_uri(r"C:\definitely\not\here\nope.lnk");
     assert!(uri.is_none(), "a path that does not exist has no icon");
 }
 
 #[test]
 #[cfg(windows)]
 fn results_are_cached() {
+    // One cache, asked twice. Two caches would only show that extraction is
+    // deterministic, which is a different and much weaker claim.
+    let icons = icons();
     let path = r"C:\Windows\explorer.exe";
-    let first = sill_lib::icons::icon_data_uri(path);
-    let second = sill_lib::icons::icon_data_uri(path);
+
+    let began = std::time::Instant::now();
+    let first = icons.data_uri(path);
+    let extracting = began.elapsed();
+
+    let again = std::time::Instant::now();
+    let second = icons.data_uri(path);
+    let remembering = again.elapsed();
+
     assert_eq!(first, second, "the cache must return the same icon");
+    assert!(
+        remembering < extracting / 4 || remembering < std::time::Duration::from_micros(200),
+        "the second answer took {remembering:?} against {extracting:?} for the first,          which is not a remembered answer"
+    );
 }
 
 /// Reports which extraction path each real shortcut takes. Diagnostic, not a
@@ -72,7 +96,7 @@ fn report_icon_paths_for_real_shortcuts() {
             no_target.push(app.name.as_str());
         }
 
-        match sill_lib::icons::icon_data_uri(source) {
+        match icons().data_uri(source) {
             Some(_) => with_icon += 1,
             None => without.push(app.name.as_str()),
         }
@@ -101,7 +125,7 @@ fn a_plain_executable_still_gets_an_icon() {
         r"C:\Windows\System32\notepad.exe",
     ] {
         assert!(
-            sill_lib::icons::icon_data_uri(exe).is_some(),
+            icons().data_uri(exe).is_some(),
             "{exe} should have an icon; the badge rule must not apply to non-shortcuts"
         );
     }
@@ -117,7 +141,8 @@ fn icons_arrive_with_more_pixels_than_they_are_drawn_at() {
     // which is soft at exactly the size the launcher shows it. Anyone
     // reverting to `ExtractIconExW`, which cannot be asked for a size, gets
     // caught here.
-    let uri = sill_lib::icons::icon_data_uri(r"C:\Windows\explorer.exe")
+    let uri = icons()
+        .data_uri(r"C:\Windows\explorer.exe")
         .expect("explorer.exe should have an icon");
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(uri.trim_start_matches("data:image/png;base64,"))

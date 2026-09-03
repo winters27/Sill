@@ -68,6 +68,7 @@ outside the code.
 | Cold start to the hotkey answering | 465 ms best, 505 mean over five runs |
 | Clipboard listing, 135 entries | 11 KB of text |
 | Finding Node once | about 40 ms |
+| Icons remembered between runs | 298 icons, 964 KB on disk |
 | Rust core before the file index existed | 11.3 MB private |
 | Rust core with a whole drive indexed | 41 MB private |
 | File index, home folder | 49,402 entries, 1.3 s to walk, 5.8 MB on disk |

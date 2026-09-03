@@ -121,7 +121,18 @@ pub fn sleep_soon(window: &WebviewWindow) {
      * once-a-second poll fills with work nobody asked for.
      */
     use tauri::Emitter;
+    use tauri::Manager;
+
     let _ = window.emit("sill://hidden", ());
+
+    /*
+     * And the icons extracted since the last time, written now.
+     *
+     * This is the moment nobody is waiting for anything: the launcher has just
+     * gone away. Writing on every insert instead would mean a megabyte of
+     * base64 written while somebody scrolls a list.
+     */
+    window.app_handle().state::<crate::icons::Icons>().save();
 
     let label = window.label().to_string();
     let armed = arm(&label);

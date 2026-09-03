@@ -9,6 +9,7 @@
 //! a lot of COM work for a known answer.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// How many icons are kept.
@@ -28,6 +29,17 @@ const CAPACITY: usize = 512;
 struct Entry {
     icon: Option<String>,
     used: u64,
+    /// When the file the icon came from was last written.
+    ///
+    /// Kept so a remembered icon can be told from a stale one. An application
+    /// that updates gets a new icon and the same path, so a cache keyed on the
+    /// path alone would show the old one until something evicted it, which for
+    /// something you launch every day is never.
+    ///
+    /// Zero when the file could not be stat-ed, which is treated as "cannot be
+    /// checked" rather than "unchanged": the entry is then only trusted for
+    /// this run.
+    stamped: u64,
 }
 
 #[derive(Default)]
@@ -35,55 +47,203 @@ struct Cache {
     entries: HashMap<String, Entry>,
     /// Monotonic, so "least recently used" is just the smallest.
     clock: u64,
+    /// Whether anything has changed since the last save.
+    dirty: bool,
 }
 
-static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
-
-/// A `data:` URI for the icon of a file, or `None` if it has none.
+/// Icons, extracted once and remembered across runs.
 ///
-/// The lock is held across the extraction rather than only around the map.
-/// Checking and inserting under separate locks lets two callers extract the
-/// same icon at once, and concurrent GDI work can fail transiently, which the
-/// cache would then make permanent. Serialising also avoids doing the same
-/// work twice. Extraction is a millisecond of shell and GDI calls, and rows
-/// ask for icons lazily, so there is nothing to gain from overlapping it.
-pub fn icon_data_uri(path: &str) -> Option<String> {
-    /*
-     * Poisoning is recovered from rather than propagated.
-     *
-     * The lock is held across `extract`, which is shell and GDI calls on paths
-     * that come from the disk, so it is the most likely thing in this file to
-     * panic. `expect` here meant that one bad icon poisoned the cache and
-     * **every later call panicked**, for the life of the process. `app_icon`
-     * is a synchronous command, so that is a panic on the main thread with no
-     * unwinding across the boundary: the whole launcher goes, silently.
-     *
-     * The map is only ever left mid-insert, so the worst a recovered lock
-     * holds is a missing entry, which the next call fills in. Same reasoning
-     * as `clipboard::monitor::store`.
-     */
-    let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    let cache = guard.get_or_insert_with(Cache::default);
+/// A managed service rather than a `static`, which is what rule 2 refuses.
+///
+/// ## Why it is on disk
+///
+/// Extraction is shell and GDI calls: about a millisecond each, which is
+/// nothing until the first list of a run asks for thirty of them at once and
+/// every one of those is work the last run already did. The file is written
+/// when the launcher is put away, which is the moment nobody is waiting.
+pub struct Icons {
+    cache: Mutex<Cache>,
+    /// Where the icons are kept between runs, when there is anywhere to keep
+    /// them. `None` in tests, which then behave exactly as before.
+    file: Option<PathBuf>,
+}
 
-    cache.clock += 1;
-    let now = cache.clock;
-
-    if let Some(entry) = cache.entries.get_mut(path) {
-        entry.used = now;
-        return entry.icon.clone();
+impl Icons {
+    pub fn new(file: Option<PathBuf>) -> Self {
+        Self {
+            cache: Mutex::new(Cache::default()),
+            file,
+        }
     }
 
-    let icon = extract(path);
-    evict_if_full(cache);
-    cache.entries.insert(
-        path.to_string(),
-        Entry {
-            icon: icon.clone(),
-            used: now,
-        },
-    );
+    /// A `data:` URI for the icon of a file, or `None` if it has none.
+    ///
+    /// The lock is held across the extraction rather than only around the map.
+    /// Checking and inserting under separate locks lets two callers extract
+    /// the same icon at once, and concurrent GDI work can fail transiently,
+    /// which the cache would then make permanent. Serialising also avoids
+    /// doing the same work twice. Extraction is a millisecond of shell and GDI
+    /// calls, and rows ask for icons lazily, so there is nothing to gain from
+    /// overlapping it.
+    pub fn data_uri(&self, path: &str) -> Option<String> {
+        /*
+         * Poisoning is recovered from rather than propagated.
+         *
+         * The lock is held across `extract`, which is shell and GDI calls on
+         * paths that come from the disk, so it is the most likely thing in
+         * this file to panic. `expect` here meant that one bad icon poisoned
+         * the cache and **every later call panicked**, for the life of the
+         * process. `app_icon` is a synchronous command, so that is a panic on
+         * the main thread with no unwinding across the boundary: the whole
+         * launcher goes, silently.
+         *
+         * The map is only ever left mid-insert, so the worst a recovered lock
+         * holds is a missing entry, which the next call fills in. Same
+         * reasoning as `clipboard::monitor::store`.
+         */
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
 
-    icon
+        cache.clock += 1;
+        let now = cache.clock;
+        let stamped = written_at(path);
+
+        if let Some(entry) = cache.entries.get_mut(path) {
+            // A remembered icon is only good while the file behind it has not
+            // been written since. Zero means the file could not be stat-ed, in
+            // which case nothing can be concluded and the entry is refreshed.
+            if entry.stamped != 0 && entry.stamped == stamped {
+                entry.used = now;
+                return entry.icon.clone();
+            }
+        }
+
+        let icon = extract(path);
+        evict_if_full(&mut cache);
+        cache.entries.insert(
+            path.to_string(),
+            Entry {
+                icon: icon.clone(),
+                used: now,
+                stamped,
+            },
+        );
+        cache.dirty = true;
+
+        icon
+    }
+
+    /// Reads what the last run extracted.
+    ///
+    /// Silent about everything: a cache that cannot be read is a slower first
+    /// list, which is what would have happened anyway. Never called before the
+    /// hotkey is answered, for the reason `verify-source` checks.
+    pub fn warm(&self) {
+        let Some(file) = self.file.as_ref() else {
+            return;
+        };
+
+        let Ok(text) = std::fs::read_to_string(file) else {
+            return;
+        };
+
+        let Ok(saved) = serde_json::from_str::<Vec<Saved>>(&text) else {
+            return;
+        };
+
+        let Ok(mut cache) = self.cache.lock() else {
+            return;
+        };
+
+        for (at, one) in saved.into_iter().take(CAPACITY).enumerate() {
+            cache.entries.insert(
+                one.path,
+                Entry {
+                    icon: one.icon,
+                    used: at as u64,
+                    stamped: one.stamped,
+                },
+            );
+        }
+
+        cache.clock = cache.entries.len() as u64;
+        crate::say!("icons: {} read from last run", cache.entries.len());
+    }
+
+    /// Writes what has been extracted, if anything has changed.
+    ///
+    /// Called when the launcher is put away, which is the moment nobody is
+    /// waiting for anything. Writing on every insert would mean a megabyte of
+    /// base64 written while somebody scrolls.
+    pub fn save(&self) {
+        let Some(file) = self.file.as_ref() else {
+            return;
+        };
+
+        let saved = {
+            let Ok(mut cache) = self.cache.lock() else {
+                return;
+            };
+
+            if !cache.dirty {
+                return;
+            }
+
+            cache.dirty = false;
+
+            // Newest first, so a truncated read keeps what was used most
+            // recently rather than whatever happened to sort first.
+            let mut all: Vec<Saved> = cache
+                .entries
+                .iter()
+                .map(|(path, entry)| Saved {
+                    path: path.clone(),
+                    icon: entry.icon.clone(),
+                    stamped: entry.stamped,
+                    used: entry.used,
+                })
+                .collect();
+
+            all.sort_by(|a, b| b.used.cmp(&a.used));
+            all
+        };
+
+        let Ok(text) = serde_json::to_string(&saved) else {
+            return;
+        };
+
+        // Staged and renamed, so a run that ends mid-write leaves the previous
+        // file rather than half of this one.
+        let beside = file.with_extension("writing");
+        if std::fs::write(&beside, text).is_ok() {
+            let _ = std::fs::rename(&beside, file);
+        }
+    }
+}
+
+/// One icon as it is kept between runs.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Saved {
+    path: String,
+    icon: Option<String>,
+    stamped: u64,
+    /// Only used to order the file. Not read back as a clock.
+    #[serde(default)]
+    used: u64,
+}
+
+/// When a file was last written, as whole seconds, or zero if it cannot be
+/// said.
+///
+/// Whole seconds because the only question asked of it is "is this the same
+/// file as last time", and a finer stamp would differ between two reads of an
+/// unchanged file on some filesystems.
+fn written_at(path: &str) -> u64 {
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|when| when.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|since| since.as_secs())
+        .unwrap_or(0)
 }
 
 /// Drops the coldest entry when there is no room for another.
@@ -118,6 +278,8 @@ mod cache_tests {
             Entry {
                 icon: Some(path.to_string()),
                 used: at,
+                // The tests here are about eviction order, not staleness.
+                stamped: 1,
             },
         );
     }
@@ -665,4 +827,96 @@ fn encode_png(rgba: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
 fn base64_encode(bytes: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+#[cfg(test)]
+mod across_runs {
+    use super::{Icons, Saved};
+
+    /// What one run extracted, the next run does not extract again.
+    ///
+    /// Extraction is shell and GDI calls, about a millisecond each, which is
+    /// nothing until the first list of a run asks for thirty at once and every
+    /// one of them is work the last run already did.
+    #[test]
+    fn a_saved_icon_is_there_on_the_next_run() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("icons.json");
+
+        // A real file, so it has a real modification time to be stamped with.
+        let subject = dir.path().join("thing.exe");
+        std::fs::write(&subject, b"not really an executable").expect("written");
+        let path = subject.to_string_lossy().to_string();
+
+        // Written as though a previous run had extracted it. `extract` itself
+        // needs the shell, which a test has no business calling.
+        let saved = vec![Saved {
+            path: path.clone(),
+            icon: Some("data:image/png;base64,AAAA".to_string()),
+            stamped: super::written_at(&path),
+            used: 1,
+        }];
+        std::fs::write(&file, serde_json::to_string(&saved).expect("json")).expect("written");
+
+        let icons = Icons::new(Some(file));
+        icons.warm();
+
+        assert_eq!(
+            icons.data_uri(&path),
+            Some("data:image/png;base64,AAAA".to_string()),
+            "the icon from the last run was not used"
+        );
+    }
+
+    /// An application that updates gets its icon read again.
+    ///
+    /// The file behind an icon keeps its path, so a cache keyed on the path
+    /// alone would show the old icon until something evicted it, which for
+    /// something launched every day is never.
+    #[test]
+    fn an_icon_whose_file_has_changed_is_not_reused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("icons.json");
+
+        let subject = dir.path().join("thing.exe");
+        std::fs::write(&subject, b"version one").expect("written");
+        let path = subject.to_string_lossy().to_string();
+
+        // Stamped with a time that is not this file's.
+        let saved = vec![Saved {
+            path: path.clone(),
+            icon: Some("data:image/png;base64,OLD".to_string()),
+            stamped: super::written_at(&path).saturating_sub(60),
+            used: 1,
+        }];
+        std::fs::write(&file, serde_json::to_string(&saved).expect("json")).expect("written");
+
+        let icons = Icons::new(Some(file));
+        icons.warm();
+
+        assert_ne!(
+            icons.data_uri(&path),
+            Some("data:image/png;base64,OLD".to_string()),
+            "a stale icon was handed back for a file that had been written since"
+        );
+    }
+
+    /// Nothing to read is not a problem.
+    #[test]
+    fn a_missing_file_is_not_a_problem() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let icons = Icons::new(Some(dir.path().join("nothing-here.json")));
+
+        icons.warm();
+        icons.save();
+    }
+
+    /// Nowhere to write is not a problem either, which is how tests run.
+    #[test]
+    fn no_file_at_all_still_caches_for_this_run() {
+        let icons = Icons::new(None);
+
+        icons.warm();
+        icons.save();
+    }
 }
