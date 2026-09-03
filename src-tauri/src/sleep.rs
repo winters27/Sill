@@ -119,11 +119,19 @@ pub fn sleep_soon(window: &WebviewWindow) {
      * At the moment of hiding rather than when the renderer is suspended
      * twenty seconds later. Those twenty seconds are exactly the window a
      * once-a-second poll fills with work nobody asked for.
+     *
+     * The label is the payload, and it has to be. `emit` reaches every window
+     * in the application, and a page listening with the default target gets
+     * events aimed elsewhere as well, so there is no way to send this to one
+     * window. Every window Sill has comes through here, including the tray
+     * menu and the deferred ones, so without a label the launcher was told it
+     * had been hidden every time the tray menu was dismissed, and stopped its
+     * live readings while it was still on screen.
      */
     use tauri::Emitter;
     use tauri::Manager;
 
-    let _ = window.emit("sill://hidden", ());
+    let _ = window.emit("sill://hidden", window.label());
 
     /*
      * And the icons extracted since the last time, written now.

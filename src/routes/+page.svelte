@@ -6,6 +6,7 @@
   import { openQuicklink } from "$lib/quicklinks";
   import { saveWorkspace } from "$lib/workspaces";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { whenVisible } from "$lib/visible";
   import ListView from "$lib/components/ListView.svelte";
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
@@ -3514,7 +3515,11 @@
         };
       });
 
-      shown = await listen("sill://shown", () => {
+      // Through `whenVisible` rather than a `listen` of its own, because an
+      // event reaches every window and only that module knows which one this
+      // page is. Taking focus and stamping a summon that another window was
+      // shown by would be this same mistake with worse consequences.
+      shown = whenVisible(() => {
         /*
          * Focus first, before anything that can wait.
          *
