@@ -60,6 +60,8 @@ tauri-plugin-single-instance = "2"
 cpal = "0.18"
 rubato = "5"
 audioadapter-buffers = "5"
+sha1 = "0.11"
+uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 tempfile = "3"
 zip = "8.6.0"
