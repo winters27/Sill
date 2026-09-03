@@ -92,6 +92,7 @@
   label="Weather"
   description="Only a latitude and a longitude are ever sent, and only for the place you name here. Sill does not ask the machine where it is."
 >
+  <!-- not a setting: one pinned widget, drawn again for every other one -->
   <Row
     title="Where"
     description={place.name
@@ -121,6 +122,7 @@
     was handed the wrong Portland, needs to be able to say exactly where rather
     than keep retyping a name at a geocoder until it agrees with them.
   -->
+  <!-- not a setting: one pinned widget, drawn again for every other one -->
   <Row
     title="Coordinates"
     description="Set directly if the search found the wrong place. Positive is north and east."
@@ -145,6 +147,7 @@
     {/snippet}
   </Row>
 
+  <!-- not a setting: one pinned widget, drawn again for every other one -->
   <Row title="Called" description="What the widget shows underneath the temperature.">
     {#snippet control()}
       <TextField
@@ -159,6 +162,7 @@
     {/snippet}
   </Row>
 
+  <!-- not a setting: one pinned widget, drawn again for every other one -->
   <Row title="Degrees">
     {#snippet control()}
       <Segmented
@@ -182,6 +186,7 @@
 </Section>
 
 <Section label="Clock">
+  <!-- not a setting: one pinned widget, drawn again for every other one -->
   <Row
     title="Count the seconds"
     description="Off by default, and that is about cost rather than taste: seconds mean a redraw every second for as long as the launcher is open, and a clock nobody is watching should cost a redraw a minute."

@@ -427,7 +427,7 @@ export interface SearchEngine {
  * two edits that can disagree.
  */
 export function searchEngines(): Promise<SearchEngine[]> {
-  return invoke<SearchEngine[]>("search_engines").catch(orElse("settings", "the search engines", [], "websearch"));
+  return invoke<SearchEngine[]>("search_engines").catch(orElse("settings", "the search engines", [], "sources"));
 }
 
 /**
@@ -444,7 +444,7 @@ export interface KnownBrowser {
 }
 
 export function browserProfiles(): Promise<KnownBrowser[]> {
-  return invoke<KnownBrowser[]>("browser_profiles").catch(orElse("settings", "which browsers are on this machine", [], "browsers"));
+  return invoke<KnownBrowser[]>("browser_profiles").catch(orElse("settings", "which browsers are on this machine", [], "sources"));
 }
 
 export function rebuildIndex(): Promise<void> {

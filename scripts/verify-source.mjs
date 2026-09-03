@@ -1582,6 +1582,316 @@ for (const file of sources("src-tauri/src")) {
   }
 }
 
+/*
+ * Every labelled line in settings is in the catalogue, in the panel that draws
+ * it.
+ *
+ * `settings_index.rs` is what the launcher searches when somebody types the
+ * name of a setting instead of hunting for it, and it is a hand-written table
+ * beside a two thousand line page. Nothing made the two agree. Three ways they
+ * had already come apart:
+ *
+ * - a row nobody added to the table is invisible to search, and on screen it
+ *   looks exactly like a row that is in it;
+ * - a row whose entry names a different panel opens settings somewhere it is
+ *   not, which is worse than not finding it, because the person is now looking
+ *   at the wrong screen believing it is the right one. "Screenshot hotkey"
+ *   pointed at Shortcuts while the control sat in General;
+ * - a panel in the table with no branch to draw it is a dead deep link.
+ *
+ * So this runs in both directions. Every static `<Row title="...">` on a
+ * settings surface must be in the catalogue under the panel whose branch
+ * renders it, and every panel the catalogue names must be in the sidebar and
+ * have a branch of its own.
+ *
+ * A row that is not a setting says so, in a comment above it that also says
+ * why: a per-item control inside a list, or a reading rather than a switch.
+ * That is a sentence somebody has to write on purpose, which is the point.
+ *
+ * A run of rows written as a table and drawn in an `{#each}` counts too, and
+ * has to: the switcher and screenshot keys are three entries in `BINDABLE`,
+ * and reading only `title="..."` would have let a table of four rows sit in
+ * one panel while the catalogue filed them under another. That is the shape
+ * the check exists for. Every other `title={...}` is skipped, because what it
+ * says is not in the file.
+ */
+{
+  const SKIP_ROW = /<!--\s*not a setting:/;
+  const CATALOGUE = "src-tauri/src/settings_index.rs";
+  const catalogue = readFileSync(CATALOGUE, "utf8");
+
+  /** The `PANELS` list in Rust, which is what a catalogue entry may name. */
+  const rustPanels = new Set(
+    [
+      ...(catalogue.match(/pub const PANELS: &\[&str\] = &\[([\s\S]*?)\];/)?.[1] ?? "").matchAll(
+        /"([^"]+)"/g,
+      ),
+    ].map((m) => m[1]),
+  );
+
+  /** Every catalogue entry, keyed by its panel and its title together. */
+  const entries = new Map();
+
+  for (const m of catalogue.matchAll(
+    /\bs\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",?\s*\)/g,
+  )) {
+    entries.set(`${m[1]} ${m[3]}`, {
+      panel: m[1],
+      title: m[3],
+      line: lineOf(catalogue, m.index),
+    });
+  }
+
+  /**
+   * The panels the page offers, in the order the sidebar lists them.
+   *
+   * Read from the `PANELS` array rather than from the branches, because the
+   * array is what puts an entry in the sidebar and a branch is what fills the
+   * pane. A panel in one and not the other is a blank screen either way.
+   */
+  const sidebar = new Set(
+    [...(page.match(/const PANELS: Panel\[\] = \[([\s\S]*?)\n {2}\];/)?.[1] ?? "").matchAll(
+      /id: "([^"]+)"/g,
+    )].map((m) => m[1]),
+  );
+
+  /**
+   * Which panel each line of the page belongs to.
+   *
+   * The pane is one `{#if active === "..."}` chain, so walking the file and
+   * remembering the last branch seen is the whole mapping.
+   */
+  const lines = page.split("\n");
+  const drawn = [];
+  let holding = null;
+
+  for (const line of lines) {
+    const branch = line.match(/\{(?:#if|:else if) active === "([^"]+)"\}/);
+    if (branch) holding = branch[1];
+    drawn.push(holding);
+  }
+
+  const branches = new Set(drawn.filter(Boolean));
+
+  /**
+   * Every settings row, with the panel that draws it.
+   *
+   * A panel component is attributed to whichever branch renders it, and so is
+   * anything that component renders in turn, so a row two files down from the
+   * branch is still known to belong to that panel.
+   */
+  const COMPONENTS = "src/lib/components/settings";
+  const rows = [];
+
+  function collect(file, text, panel) {
+    const own = text.split("\n");
+
+    for (const m of text.matchAll(/<Row\b[^>]*?\btitle="([^"]*)"/g)) {
+      const line = lineOf(text, m.index);
+
+      // The reason goes above the row, where somebody reading the row sees it.
+      if (SKIP_ROW.test(own[line - 2] ?? "")) continue;
+
+      rows.push({ file, line, panel, title: m[1] });
+    }
+  }
+
+  function walk(file, panel, seen) {
+    if (seen.has(file)) return;
+    seen.add(file);
+
+    const text = readFileSync(file, "utf8");
+    collect(file, text, panel);
+
+    for (const m of text.matchAll(/<([A-Z][A-Za-z]*)\b/g)) {
+      const child = join(COMPONENTS, `${m[1]}.svelte`);
+
+      try {
+        statSync(child);
+      } catch {
+        continue;
+      }
+
+      walk(child, panel, seen);
+    }
+  }
+
+  for (let at = 0; at < lines.length; at += 1) {
+    if (!drawn[at]) continue;
+
+    for (const m of lines[at].matchAll(/<([A-Z][A-Za-z]*)\b/g)) {
+      const child = join(COMPONENTS, `${m[1]}.svelte`);
+
+      try {
+        statSync(child);
+      } catch {
+        continue;
+      }
+
+      walk(child, drawn[at], new Set());
+    }
+  }
+
+  for (const m of page.matchAll(/<Row\b[^>]*?\btitle="([^"]*)"/g)) {
+    const line = lineOf(page, m.index);
+
+    if (SKIP_ROW.test(lines[line - 2] ?? "")) continue;
+    if (!drawn[line - 1]) continue;
+
+    rows.push({ file: SETTINGS_PAGE, line, panel: drawn[line - 1], title: m[1] });
+  }
+
+  /**
+   * The rows written as a table and drawn by an `{#each}`.
+   *
+   * The titles are literals like any other, one indirection further away. A
+   * table is looked up by the name the loop walks, so a table declared and
+   * never drawn is not judged.
+   */
+  for (let at = 0; at < lines.length; at += 1) {
+    if (!drawn[at]) continue;
+
+    const loop = lines[at].match(/\{#each ([A-Za-z_$][\w$]*)\b/);
+    if (!loop) continue;
+
+    const table = page.match(
+      new RegExp(`\\n {2}const ${loop[1]}(?::[^=]*)? = \\[([\\s\\S]*?)\\n {2}\\];`),
+    );
+
+    if (!table) continue;
+
+    for (const m of table[1].matchAll(/\btitle: "([^"]*)"/g)) {
+      rows.push({
+        file: SETTINGS_PAGE,
+        line: lineOf(page, page.indexOf(table[1]) + m.index),
+        panel: drawn[at],
+        title: m[1],
+      });
+    }
+  }
+
+  for (const row of rows) {
+    if (entries.has(`${row.panel} ${row.title}`)) continue;
+
+    const elsewhere = [...entries.keys()]
+      .filter((key) => key.endsWith(` ${row.title}`))
+      .map((key) => entries.get(key).panel);
+
+    fail(
+      row.file,
+      row.line,
+      elsewhere.length
+        ? `${JSON.stringify(row.title)} is drawn in the ${row.panel} panel and ` +
+            `the catalogue files it under ${elsewhere.join(", ")}, so searching ` +
+            `for it opens a panel it is not in. Fix ${CATALOGUE}`
+        : `${JSON.stringify(row.title)} is not in ${CATALOGUE}, so nobody can ` +
+            "find it by searching. Add it there, or say above the row why it " +
+            "is not a setting",
+    );
+  }
+
+  for (const { panel, title, line } of entries.values()) {
+    if (!branches.has(panel)) {
+      fail(
+        CATALOGUE,
+        line,
+        `${JSON.stringify(title)} names the ${panel} panel, which ` +
+          `${SETTINGS_PAGE} has no branch for, so opening it lands on whatever ` +
+          "was last shown",
+      );
+    }
+  }
+
+  for (const panel of rustPanels) {
+    if (sidebar.has(panel)) continue;
+
+    fail(
+      CATALOGUE,
+      null,
+      `the catalogue lists a ${panel} panel and the sidebar has no entry for it`,
+    );
+  }
+
+  for (const panel of sidebar) {
+    if (!rustPanels.has(panel)) {
+      fail(
+        SETTINGS_PAGE,
+        null,
+        `the sidebar has a ${panel} panel and ${CATALOGUE} does not, so nothing ` +
+          "in it can be found from the launcher",
+      );
+    }
+
+    if (!branches.has(panel)) {
+      fail(SETTINGS_PAGE, null, `the sidebar has a ${panel} panel and nothing draws it`);
+    }
+  }
+}
+
+/*
+ * Everything `Redo` names is acted on when preferences are saved.
+ *
+ * `Redo` is the list of settings the index has to be told about: the source
+ * switches, the script folders, the folders the file index covers. Working out
+ * that one of them changed and then not doing anything about it is the exact
+ * failure this whole comparison exists to end, and it is invisible, because
+ * the panel saves, the file is written, and the setting is simply not true
+ * yet.
+ *
+ * Checked against the struct rather than against a list here, so a fourth
+ * thing added to `Redo` arrives with the same obligation as the first three
+ * instead of being computed and dropped.
+ */
+{
+  const WHERE = "src-tauri/src/commands/settings.rs";
+  const OWNER = "src-tauri/src/preferences.rs";
+  const owner = readFileSync(OWNER, "utf8");
+  const acts = readFileSync(WHERE, "utf8");
+
+  const body = owner.match(/pub struct Redo \{([\s\S]*?)\n\}/)?.[1];
+
+  if (!body) {
+    fail(OWNER, null, "`Redo` is gone, and it is what the settings save acts on");
+  } else {
+    /** What the arm guarded by `redo.<field>` actually does, comments aside. */
+    function armAfter(at) {
+      const opens = acts.indexOf("{", at);
+      if (opens === -1) return "";
+
+      let depth = 0;
+
+      for (let i = opens; i < acts.length; i += 1) {
+        if (acts[i] === "{") depth += 1;
+        if (acts[i] === "}") depth -= 1;
+        if (depth === 0) {
+          return acts
+            .slice(opens + 1, i)
+            .split("\n")
+            .map((line) => line.replace(/\/\/.*$/, ""))
+            .join("\n");
+        }
+      }
+
+      return "";
+    }
+
+    for (const m of body.matchAll(/\n {4}pub ([a-z_]+):/g)) {
+      const at = acts.indexOf(`redo.${m[1]}`);
+
+      // A call, not merely a mention. An arm holding a comment and nothing
+      // else reads as handled and is the failure itself.
+      if (at !== -1 && /\w\s*\(/.test(armAfter(at))) continue;
+
+      fail(
+        WHERE,
+        null,
+        `\`Redo\` says whether ${m[1]} changed and nothing here acts on it, so ` +
+          "that setting is saved and not applied until the next start",
+      );
+    }
+  }
+}
+
 const FONTS = /\.(woff2?|ttf|otf|eot)$/i;
 const tracked = spawnSync("git", ["ls-files"], { encoding: "utf8" });
 

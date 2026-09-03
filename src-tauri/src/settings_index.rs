@@ -45,8 +45,6 @@ pub const PANELS: &[&str] = &[
     "clipboard",
     "sources",
     "files",
-    "browsers",
-    "websearch",
     "screenshot",
     "scripts",
     "extensions",
@@ -102,18 +100,6 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "general",
         "General",
-        "Summon hotkey",
-        "shortcut keybind alt space keyboard",
-    ),
-    s(
-        "general",
-        "General",
-        "Window switcher hotkey",
-        "alt tab window switch cycle shortcut keybind",
-    ),
-    s(
-        "general",
-        "General",
         "Hide when it loses focus",
         "blur dismiss escape close",
     ),
@@ -135,6 +121,12 @@ pub const SETTINGS: &[Setting] = &[
         "Appearance",
         "Theme",
         "colour color palette accent oilslick graphite ember moss aberration \n         chromatic prism fringe chroma gradient dark",
+    ),
+    s(
+        "appearance",
+        "Appearance",
+        "Chroma",
+        "iridescent wash colour strength prism spectral",
     ),
     s(
         "appearance",
@@ -232,8 +224,26 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "tts",
         "Text to Speech",
-        "Which voice reads",
-        "engine provider openai piper system sapi natural neural elevenlabs kokoro",
+        "Voice",
+        "who reads speaker aloud engine provider openai piper system sapi \n         natural neural elevenlabs kokoro",
+    ),
+    s(
+        "tts",
+        "Text to Speech",
+        "Address",
+        "endpoint url server speech host",
+    ),
+    s(
+        "tts",
+        "Text to Speech",
+        "Key",
+        "api key token speech credential",
+    ),
+    s(
+        "tts",
+        "Text to Speech",
+        "Model",
+        "speech model voice engine",
     ),
     s(
         "tts",
@@ -263,20 +273,20 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "dictation",
         "Dictation",
-        "Use the system default microphone",
-        "input device audio mic",
+        "Use the system default",
+        "microphone input device audio mic default",
     ),
     s(
         "dictation",
         "Dictation",
-        "Microphone priority order",
-        "input device headset rank",
+        "Priority order",
+        "microphone input device headset rank order",
     ),
     s(
         "dictation",
         "Dictation",
-        "Mute while recording",
-        "audio speakers music silence",
+        "Mute everything else while recording",
+        "audio speakers music silence mute",
     ),
     s(
         "dictation",
@@ -311,8 +321,14 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "dictation",
         "Dictation",
-        "Transcription backend",
-        "local whisper openai groq api",
+        "Keep transcripts for",
+        "history retention days delete transcripts",
+    ),
+    s(
+        "dictation",
+        "Dictation",
+        "Backend",
+        "transcription local whisper openai groq api engine",
     ),
     s(
         "dictation",
@@ -382,6 +398,12 @@ pub const SETTINGS: &[Setting] = &[
         "Snippets",
         "template saved text signature placeholder",
     ),
+    s(
+        "snippets",
+        "Snippets",
+        "Snippets as a file",
+        "import export backup json file",
+    ),
     // --------------------------------------------------------------- emoji
     s(
         "emoji",
@@ -395,7 +417,49 @@ pub const SETTINGS: &[Setting] = &[
         "What Enter does",
         "emoji paste copy primary action",
     ),
+    s(
+        "emoji",
+        "Emoji",
+        "Learning what you call things",
+        "learned names nicknames emoji search remember",
+    ),
     // ----------------------------------------------------------- shortcuts
+    s(
+        "shortcuts",
+        "Shortcuts",
+        "Summon hotkey",
+        "shortcut keybind alt space keyboard hotkey",
+    ),
+    s(
+        "shortcuts",
+        "Shortcuts",
+        "Window switcher hotkey",
+        "alt tab window switch cycle shortcut keybind",
+    ),
+    s(
+        "shortcuts",
+        "Shortcuts",
+        "Put the result back",
+        "paste replace selection result back",
+    ),
+    s(
+        "shortcuts",
+        "Shortcuts",
+        "Open with a double-tap",
+        "double tap modifier open shortcut",
+    ),
+    s(
+        "shortcuts",
+        "Shortcuts",
+        "Extra keys",
+        "extra modifier keys action shortcut",
+    ),
+    s(
+        "shortcuts",
+        "Shortcuts",
+        "Jump to a row by number",
+        "number row jump select digit",
+    ),
     s(
         "shortcuts",
         "Shortcuts",
@@ -427,6 +491,12 @@ pub const SETTINGS: &[Setting] = &[
         "Open with",
         "browser application default chrome",
     ),
+    s(
+        "quicklinks",
+        "Quicklinks",
+        "Quicklinks as a file",
+        "import export backup json file",
+    ),
     // ----------------------------------------------------------- clipboard
     s(
         "clipboard",
@@ -455,8 +525,8 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "clipboard",
         "Clipboard History",
-        "Excluded applications",
-        "ignore private password exclude",
+        "Never record from",
+        "excluded applications ignore private password exclude",
     ),
     s(
         "clipboard",
@@ -562,49 +632,49 @@ pub const SETTINGS: &[Setting] = &[
         "Stroke width",
         "screenshot editor markup default weight size",
     ),
-    // ----------------------------------------------------------- websearch
+    // ------------------------------------------------- sources, the web
     s(
-        "websearch",
-        "Web Search",
+        "sources",
+        "Sources",
         "Offer to search the web",
-        "google duckduckgo bing brave engine internet lookup enable",
+        "web internet lookup enable google duckduckgo bing brave engine",
     ),
     s(
-        "websearch",
-        "Web Search",
+        "sources",
+        "Sources",
         "Engine",
-        "google duckduckgo bing brave startpage",
+        "web search google duckduckgo bing brave startpage provider",
     ),
     s(
-        "websearch",
-        "Web Search",
+        "sources",
+        "Sources",
         "Your own address",
-        "custom engine url query template",
+        "custom web search engine url query template",
     ),
-    // ------------------------------------------------------------ browsers
+    // -------------------------------------------- sources, browser pages
     s(
-        "browsers",
-        "Browser Search",
+        "sources",
+        "Sources",
         "Search browser pages",
-        "browser history bookmarks chrome edge firefox zen web enable",
+        "browser history bookmarks pages chrome edge firefox zen web enable",
     ),
     s(
-        "browsers",
-        "Browser Search",
+        "sources",
+        "Sources",
         "Bookmarks",
-        "browser saved favourites favorites starred",
+        "browser saved favourites favorites starred pages",
     ),
     s(
-        "browsers",
-        "Browser Search",
+        "sources",
+        "Sources",
         "History",
         "browser visited pages recently",
     ),
     s(
-        "browsers",
-        "Browser Search",
+        "sources",
+        "Sources",
         "Maximum browser results",
-        "limit count results",
+        "browser limit count results pages",
     ),
     // --------------------------------------------------------------- files
     s(
@@ -635,8 +705,20 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "files",
         "File Search",
-        "Folders to search",
-        "scope only restrict directories",
+        "Folders",
+        "folders to search scope restrict directories roots indexed",
+    ),
+    s(
+        "files",
+        "File Search",
+        "Drives",
+        "whole drive volume index read",
+    ),
+    s(
+        "files",
+        "File Search",
+        "Only show results in",
+        "narrow filter folders results limit",
     ),
     // ---------------------------------------------------------- extensions
     s(
@@ -691,6 +773,18 @@ pub const SETTINGS: &[Setting] = &[
     ),
     // --------------------------------------------------------------- about
     s("about", "About", "Version", "build release licence credits"),
+    s(
+        "about",
+        "About",
+        "Licence",
+        "mit open source licence licensing",
+    ),
+    s(
+        "about",
+        "About",
+        "Indexed entries",
+        "how many entries index count",
+    ),
 ];
 
 const fn s(
@@ -845,15 +939,21 @@ mod tests {
     }
 
     #[test]
-    fn no_two_settings_share_a_title() {
-        // Titles are the id, and a duplicate would make one of them
+    fn no_panel_holds_the_same_title_twice() {
+        // The panel and the title together are the id, because the title on
+        // its own is what the row is called on screen and two panels are
+        // allowed to call a row the same thing: the address of an AI provider
+        // and the address of a speech server are both "Address", and
+        // `verify:source` requires each entry to spell its row exactly. Twice
+        // in one panel is still a duplicate, and would make one of the two
         // unreachable from the launcher.
         let mut seen = HashSet::new();
         for setting in SETTINGS {
             assert!(
-                seen.insert(setting.title),
-                "{:?} appears twice",
-                setting.title
+                seen.insert((setting.panel, setting.title)),
+                "{:?} appears twice in {}",
+                setting.title,
+                setting.panel
             );
         }
     }

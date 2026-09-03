@@ -850,32 +850,55 @@ pub(crate) fn reload_scripts(app: &AppHandle) {
 
 /// Rebuilds the index in the background.
 pub(crate) fn reload_index(app: &AppHandle) {
+    use std::sync::atomic::Ordering;
+
     let handle = app.clone();
     let state = app.state::<RegistryState>().inner().clone();
-    let sources = app
-        .state::<PrefsState>()
-        .inner
-        .blocking_lock()
-        .sources
-        .clone();
+
+    // One scan at a time. Six source switches pressed in a row are six saves,
+    // and each scan is a PowerShell round trip plus every Start Menu shortcut
+    // on the machine. The request that arrives during one is remembered rather
+    // than dropped, so the last switch pressed is in the index that ends up
+    // being kept: dropping it would leave the list disagreeing with the screen
+    // until something else asked for a scan.
+    if state
+        .scanning
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        state.rescan.store(true, Ordering::Release);
+        return;
+    }
+
+    let prefs = app.state::<PrefsState>().inner.clone();
     let index_paths = index_paths(app);
     let workspaces = profiles_store::path(app);
 
     tauri::async_runtime::spawn(async move {
-        let fresh = tokio::task::spawn_blocking(move || {
-            scan_everything(&sources, &index_paths, &workspaces)
-        })
-        .await
-        .unwrap_or_default();
+        loop {
+            // Read per pass rather than once, because the pass exists to pick
+            // up whatever changed while the previous one was running.
+            let sources = prefs.lock().await.sources.clone();
+            let (paths, places) = (index_paths.clone(), workspaces.clone());
 
-        if fresh.is_empty() {
-            return;
+            let fresh =
+                tokio::task::spawn_blocking(move || scan_everything(&sources, &paths, &places))
+                    .await
+                    .unwrap_or_default();
+
+            if !fresh.is_empty() {
+                let total = fresh.len();
+                state.update_index(move |index| index.commands = fresh);
+                println!("[sill] reindexed {total} entries");
+                let _ = handle.emit("sill://registry-updated", total);
+            }
+
+            state.scanning.store(false, Ordering::Release);
+
+            if !state::take_repeat(&state.rescan, &state.scanning) {
+                return;
+            }
         }
-
-        let total = fresh.len();
-        state.update_index(move |index| index.commands = fresh);
-        println!("[sill] reindexed {total} entries");
-        let _ = handle.emit("sill://registry-updated", total);
     });
 }
 
@@ -1286,6 +1309,8 @@ pub fn run() {
             })),
             ranking: Arc::new(arc_swap::ArcSwap::default()),
             recording: Arc::new(std::sync::Mutex::new(())),
+            scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            rescan: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
         .setup(|app| {
             let handle = app.handle().clone();

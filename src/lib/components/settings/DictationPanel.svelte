@@ -261,6 +261,8 @@
   {#if prefs.dictation.enabled && hook}
     {@const h = hook}
     {@const stuck = h.listening && !h.recording}
+    <!-- not a setting: a reading of whether the trigger is working, not a control -->
+    <!-- not a setting: a reading of whether the trigger is working, not a control -->
     <Row
       title="Trigger status"
       description={diagnosis(h, stuck)}
@@ -355,6 +357,7 @@
   </Row>
 
   {#if prefs.dictation.useSystemMicrophone}
+    <!-- not a setting: a reading of the microphone in use, not a control -->
     <Row
       title="Current input"
       description="A microphone blocked by Windows privacy settings returns silence rather than an error, so a flat waveform in the panel is the sign."

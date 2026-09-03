@@ -527,6 +527,7 @@
   label="Hyper key"
   description="One key that stands in for Ctrl, Alt, Shift and Windows together, so every letter becomes a shortcut nothing else has claimed. The key stops doing what is printed on it while this is on."
 >
+  <!-- not a setting: one command in the list, drawn again for every other one -->
   <Row
     title="Key"
     description="Off by default. Each keystroke sends the whole chord and releases it in the same breath, so nothing can be left held down if Sill stops."
