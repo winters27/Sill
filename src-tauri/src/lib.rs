@@ -61,6 +61,9 @@ pub mod snippets;
 pub mod state;
 pub mod status;
 pub mod store;
+/// Behaviour tests that used to be a Cargo binary each. See `suite/mod.rs`.
+#[cfg(test)]
+mod suite;
 pub mod summon;
 pub mod synthetic;
 pub mod system;

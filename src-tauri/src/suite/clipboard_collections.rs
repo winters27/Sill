@@ -1,11 +1,12 @@
 //! Named groups of history entries.
 //!
-//! An integration test for the same reason the others are: a lib unit-test
-//! binary that retains these paths also retains the dialog plugin, which needs
-//! a manifest only test targets can be given. See `build.rs`.
+//! Was an integration test "for the same reason the others are", which turned
+//! out not to apply here: nothing in this file reaches the dialog plugin, so
+//! the manifest `build.rs` gives `tests/` targets is not needed and the
+//! library's own test binary runs these perfectly well. See `suite/mod.rs`.
 
-use sill_lib::clipboard::kind::Kind;
-use sill_lib::clipboard::store::{Recording, Store};
+use crate::clipboard::kind::Kind;
+use crate::clipboard::store::{Recording, Store};
 
 const NOW: i64 = 1_700_000_000;
 

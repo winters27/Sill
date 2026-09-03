@@ -3,14 +3,14 @@
 //! This is the part of a launcher users judge hardest, so the tests are about
 //! ordering outcomes rather than the arithmetic that produces them.
 
-use sill_lib::registry::{self, search, Alias, Aliases, CommandRecord, Excluded, Frecency};
+use crate::registry::{self, search, Alias, Aliases, CommandRecord, Excluded, Frecency};
 
 const NOW: i64 = 1_756_000_000;
 const HOUR: i64 = 3600;
 const DAY: i64 = 86_400;
 
-fn snippet(name: &str, keyword: &str, content: &str) -> sill_lib::snippets::store::Snippet {
-    sill_lib::snippets::store::Snippet {
+fn snippet(name: &str, keyword: &str, content: &str) -> crate::snippets::store::Snippet {
+    crate::snippets::store::Snippet {
         id: "s1".to_string(),
         name: name.to_string(),
         keyword: keyword.to_string(),
@@ -58,7 +58,7 @@ fn corpus() -> Vec<CommandRecord> {
     ]
 }
 
-fn titles(results: &[sill_lib::registry::RankedCommand]) -> Vec<&str> {
+fn titles(results: &[crate::registry::RankedCommand]) -> Vec<&str> {
     results.iter().map(|r| r.command.title.as_str()).collect()
 }
 
@@ -205,7 +205,21 @@ fn the_limit_is_respected() {
 }
 
 /// Exercises the ranker against whatever is actually built, rather than only
-/// a hand-written corpus. Skipped when nothing has been built yet.
+/// a hand-written corpus.
+///
+/// **This proved nothing for as long as it existed.** `extensions/build` is
+/// gitignored, and in CI `verify:rust` runs before `gate:views`, which is the
+/// only thing that builds it. So the file was never there when this ran, the
+/// skip was taken every time, and the test reported a passing ranker on an
+/// empty corpus. Confirmed by sabotage: `search` was made to return an empty
+/// vector for every query and this still passed in 0.01 seconds. With the
+/// index present the same sabotage failed it at once.
+///
+/// So the skip is now a decision somebody made rather than an accident of what
+/// happens to be on disk. `SILL_BUILT_INDEX=required` turns a missing index
+/// into a failure, and the workflow sets it after building the extensions.
+/// Locally, where somebody may never have cloned the upstream tree, it still
+/// skips and says so.
 #[test]
 fn ranks_the_real_built_index() {
     let index = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -215,8 +229,16 @@ fn ranks_the_real_built_index() {
         .join("build")
         .join("index.json");
 
-    let commands = sill_lib::registry::load_index(&index);
+    let commands = crate::registry::load_index(&index);
     if commands.is_empty() {
+        assert_ne!(
+            std::env::var("SILL_BUILT_INDEX").as_deref(),
+            Ok("required"),
+            "SILL_BUILT_INDEX=required, and {} lists nothing. Build the \
+             extensions before the Rust suite, or this test measures an empty \
+             corpus and calls the ranker correct",
+            index.display()
+        );
         eprintln!("no built extensions; skipping");
         return;
     }
@@ -249,13 +271,13 @@ fn ranks_the_real_built_index() {
 #[test]
 fn applications_are_searchable_alongside_commands() {
     let mut corpus = corpus();
-    corpus.push(sill_lib::registry::app_record(
+    corpus.push(crate::registry::app_record(
         "Visual Studio Code",
         r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Visual Studio Code.lnk",
         None,
         "Application",
     ));
-    corpus.push(sill_lib::registry::app_record(
+    corpus.push(crate::registry::app_record(
         "Firefox",
         r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Firefox.lnk",
         None,
@@ -291,133 +313,6 @@ fn applications_are_searchable_alongside_commands() {
 }
 
 #[test]
-fn the_start_menu_scan_finds_something() {
-    // Not asserting a specific app: this is about the walk working at all on
-    // whatever machine runs it. An empty result on Windows means the roots or
-    // the extension filter are wrong.
-    let found = sill_lib::apps::scan_shortcuts();
-
-    if cfg!(windows) {
-        assert!(
-            !found.is_empty(),
-            "the Start Menu scan found no applications at all"
-        );
-        assert!(
-            found.iter().all(|a| !a.name.is_empty()),
-            "every application needs a display name"
-        );
-
-        let lowered: Vec<String> = found.iter().map(|a| a.name.to_lowercase()).collect();
-        assert!(
-            !lowered.iter().any(|n| n.starts_with("uninstall")),
-            "uninstallers should be filtered out of a launcher"
-        );
-    }
-}
-
-#[test]
-#[cfg(windows)]
-fn the_apps_folder_finds_what_the_start_menu_walk_misses() {
-    let shortcuts = sill_lib::apps::scan_shortcuts();
-    let packaged = sill_lib::apps::scan_apps_folder();
-
-    assert!(
-        !packaged.is_empty(),
-        "Get-StartApps returned nothing; the Apps folder scan is broken"
-    );
-
-    let known: std::collections::HashSet<String> =
-        shortcuts.iter().map(|a| a.name.to_lowercase()).collect();
-
-    let extra: Vec<&str> = packaged
-        .iter()
-        .filter(|a| !known.contains(&a.name.to_lowercase()))
-        .map(|a| a.name.as_str())
-        .collect();
-
-    // The whole reason for the second scan: the Start Menu walk cannot see
-    // packaged apps, so the Apps folder must contribute entries of its own.
-    assert!(
-        !extra.is_empty(),
-        "the Apps folder added nothing over the Start Menu walk, so one of the two scans is wrong"
-    );
-
-    eprintln!(
-        "shortcuts: {}, apps folder: {}, only in apps folder: {} (e.g. {:?})",
-        shortcuts.len(),
-        packaged.len(),
-        extra.len(),
-        &extra[..extra.len().min(5)]
-    );
-
-    // The scan returns two kinds. Apps folder entries launch by
-    // AppUserModelID; App Paths entries are bare executables and launch by
-    // path. Every entry must be one or the other, never something in between.
-    let (by_id, by_path): (Vec<_>, Vec<_>) = packaged
-        .iter()
-        .partition(|a| a.path.starts_with(sill_lib::apps::APPS_FOLDER));
-
-    assert!(!by_id.is_empty(), "no Apps folder entries at all");
-    assert!(
-        by_path
-            .iter()
-            .all(|a| std::path::Path::new(&a.path).is_file()),
-        "an App Paths entry must point at a file that exists"
-    );
-
-    eprintln!(
-        "by AppUserModelID: {}, by path: {}",
-        by_id.len(),
-        by_path.len()
-    );
-}
-
-#[test]
-#[cfg(windows)]
-fn app_paths_entries_do_not_duplicate_shortcuts() {
-    // Deliberately NOT "no two entries share a target". Shortcuts routinely
-    // point at the same host executable with different arguments, and those
-    // are genuinely different commands: "Developer Command Prompt for VS 2022"
-    // and "Node.js command prompt" both run cmd.exe and both belong in the
-    // list. What must not happen is an App Paths entry, which is a bare
-    // executable with no arguments, shadowing a shortcut that already runs it.
-    let shortcuts = sill_lib::apps::scan_shortcuts();
-    let all = sill_lib::apps::scan_all();
-
-    assert!(!all.is_empty(), "the merged scan found nothing");
-    assert!(
-        all.len() >= shortcuts.len(),
-        "merging must never lose entries: {} shortcuts became {}",
-        shortcuts.len(),
-        all.len()
-    );
-
-    let shortcut_targets: std::collections::HashSet<String> = shortcuts
-        .iter()
-        .filter_map(sill_lib::apps::target_key)
-        .collect();
-
-    // Anything in the merged list that is not a shortcut came from the second
-    // scan, so it must bring a target no shortcut already covers.
-    let shortcut_paths: std::collections::HashSet<&str> =
-        shortcuts.iter().map(|a| a.path.as_str()).collect();
-
-    let shadowing: Vec<&str> = all
-        .iter()
-        .filter(|a| !shortcut_paths.contains(a.path.as_str()))
-        .filter(|a| sill_lib::apps::target_key(a).is_some_and(|t| shortcut_targets.contains(&t)))
-        .map(|a| a.name.as_str())
-        .collect();
-
-    eprintln!("shortcuts {}, merged {}", shortcuts.len(), all.len());
-    assert!(
-        shadowing.is_empty(),
-        "these duplicate a shortcut's executable: {:?}",
-        &shadowing[..shadowing.len().min(8)]
-    );
-}
-
-#[test]
 fn installer_metadata_is_trimmed_from_names() {
     // Exercised through the public scan on Windows; the intent is documented
     // here so the conservative rule does not get loosened by accident.
@@ -432,7 +327,7 @@ fn installer_metadata_is_trimmed_from_names() {
 
     for (input, want) in cases {
         assert_eq!(
-            sill_lib::apps::tidy_name_for_test(input),
+            crate::apps::tidy_name_for_test(input),
             want,
             "tidying {input:?}"
         );
@@ -445,8 +340,8 @@ fn a_real_application_outranks_a_path_executable() {
     // applications, an unweighted ranker lets a CLI tool win any short query.
     let corpus = vec![
         command("app:code", "Code", "Application"),
-        sill_lib::registry::executable_record("code", r"C:\tools\code.exe", "Command Line"),
-        sill_lib::registry::executable_record("codesign", r"C:\tools\codesign.exe", "Command Line"),
+        crate::registry::executable_record("code", r"C:\tools\code.exe", "Command Line"),
+        crate::registry::executable_record("codesign", r"C:\tools\codesign.exe", "Command Line"),
     ];
 
     let results = search(&corpus, "code", &Frecency::default(), NOW, 10);
@@ -470,83 +365,8 @@ fn a_real_application_outranks_a_path_executable() {
 
 #[test]
 #[cfg(windows)]
-fn nothing_past_the_root_list_cap_becomes_unreachable() {
-    // This started life asserting the root list returned at least 200 entries,
-    // back when the limit had been set to 50 and was silently hiding most of
-    // the index. That was the wrong invariant to freeze: the limit is now a
-    // deliberate 120, because sending the whole index over IPC on every
-    // keystroke cost half a megabyte to draw fifteen rows.
-    //
-    // What actually has to hold is not "the list is long". It is that **a cap
-    // hides nothing**, because anything below it is still found by typing. So
-    // that is what this checks, against the machine's real index.
-    let all: Vec<_> = sill_lib::apps::scan_all()
-        .iter()
-        .map(|a| {
-            sill_lib::registry::app_record(&a.name, &a.path, None, sill_lib::apps::categorize(a))
-        })
-        .collect();
-
-    let limit = sill_lib::registry::SEARCH_LIMIT;
-    let shown = search(&all, "", &Frecency::default(), NOW, limit);
-
-    eprintln!("indexed {}, root list shows {}", all.len(), shown.len());
-
-    assert_eq!(
-        shown.len(),
-        all.len().min(limit),
-        "the empty root list should be exactly the cap, or everything if there is less"
-    );
-    assert!(
-        limit >= 100,
-        "a cap this small ({limit}) stops being a window and starts being a wall"
-    );
-
-    // Only titles that identify one entry: several vendors ship an "Uninstall"
-    // and no query can be expected to pick between them.
-    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for record in &all {
-        *seen.entry(record.title.as_str()).or_default() += 1;
-    }
-
-    // Sampled from **past the cap**, which is precisely the region the empty
-    // root list can never show. Spread across the tail rather than taken from
-    // its start, and sampled rather than exhaustive because this runs a fuzzy
-    // match over the whole corpus per probe.
-    let beyond: Vec<_> = all
-        .iter()
-        .skip(limit)
-        .filter(|record| seen.get(record.title.as_str()) == Some(&1))
-        .collect();
-
-    if beyond.is_empty() {
-        eprintln!("index is smaller than the cap; nothing is past it to check");
-        return;
-    }
-
-    let step = (beyond.len() / 25).max(1);
-    let mut checked = 0;
-
-    for record in beyond.iter().step_by(step) {
-        let results = search(&all, &record.title, &Frecency::default(), NOW, limit);
-        assert!(
-            results.iter().any(|r| r.command.id == record.id),
-            "{:?} sits past the root list cap and typing its own name does not find it",
-            record.title
-        );
-        checked += 1;
-    }
-
-    eprintln!(
-        "{checked} of {} entries past the cap are all reachable by name",
-        beyond.len()
-    );
-}
-
-#[test]
-#[cfg(windows)]
 fn entries_are_categorised_by_where_they_resolve() {
-    use sill_lib::apps::{categorize, AppRecord};
+    use crate::apps::{categorize, AppRecord};
 
     let record = |name: &str, path: &str| AppRecord {
         name: name.to_string(),
@@ -595,27 +415,9 @@ fn entries_are_categorised_by_where_they_resolve() {
     );
 }
 
-/// Reports the category spread across the real index. Diagnostic, run with
-/// --nocapture.
-#[test]
-#[cfg(windows)]
-fn report_category_distribution() {
-    let all = sill_lib::apps::scan_all();
-    let mut counts = std::collections::BTreeMap::<&str, usize>::new();
-
-    for app in &all {
-        *counts.entry(sill_lib::apps::categorize(app)).or_default() += 1;
-    }
-
-    eprintln!("{} entries", all.len());
-    for (kind, n) in &counts {
-        eprintln!("  {kind:<14} {n}");
-    }
-}
-
 #[test]
 fn windows_settings_are_searchable() {
-    let settings = sill_lib::settings_catalog::load();
+    let settings = crate::settings_catalog::load();
     assert!(
         settings.len() > 250,
         "the embedded settings catalog looks wrong: {} entries",
@@ -653,51 +455,9 @@ fn windows_settings_are_searchable() {
     eprintln!("{} settings across kinds {:?}", settings.len(), kinds);
 }
 
-/// Icon coverage across everything in the index. Diagnostic; --nocapture.
-#[test]
-#[cfg(windows)]
-fn report_icon_coverage() {
-    let all = sill_lib::apps::scan_all();
-    let settings = sill_lib::settings_catalog::load();
-
-    // One cache for this probe. It used to reach for a process-wide one, which
-    // is what rule 2 refuses and which meant no test could have its own.
-    let icons = sill_lib::icons::Icons::new(None);
-
-    let mut with = 0usize;
-    let mut without = Vec::new();
-
-    for app in &all {
-        let source = app.icon_source.clone().unwrap_or_else(|| app.path.clone());
-        match icons.data_uri(&source) {
-            Some(_) => with += 1,
-            None => without.push(app.name.as_str()),
-        }
-    }
-
-    let settings_with = settings
-        .iter()
-        .filter(|s| {
-            s.icon
-                .as_deref()
-                .and_then(|path| icons.data_uri(path))
-                .is_some()
-        })
-        .count();
-
-    eprintln!(
-        "apps {}/{} have icons, settings {}/{}",
-        with,
-        all.len(),
-        settings_with,
-        settings.len()
-    );
-    eprintln!("missing: {:?}", &without[..without.len().min(15)]);
-}
-
 #[test]
 fn sill_settings_is_reachable_by_typing() {
-    let commands = sill_lib::registry::builtins();
+    let commands = crate::registry::builtins();
     let frecency = Frecency::default();
 
     // The whole point of a built-in: someone who does not know the shortcut
@@ -729,7 +489,7 @@ fn an_exclusion_term_hides_matching_entries() {
     let commands = corpus();
     let frecency = Frecency::default();
 
-    let before = sill_lib::registry::search_excluding(
+    let before = crate::registry::search_excluding(
         &commands,
         "",
         &frecency,
@@ -739,7 +499,7 @@ fn an_exclusion_term_hides_matching_entries() {
         Excluded::none(),
         &[],
     );
-    let after = sill_lib::registry::search_excluding(
+    let after = crate::registry::search_excluding(
         &commands,
         "",
         &frecency,
@@ -775,7 +535,7 @@ fn an_exclusion_term_is_case_insensitive_and_ignores_blanks() {
     let commands = corpus();
     let frecency = Frecency::default();
 
-    let results = sill_lib::registry::search_excluding(
+    let results = crate::registry::search_excluding(
         &commands,
         "",
         &frecency,
@@ -806,13 +566,13 @@ fn searching_borrows_its_corpus_from_more_than_one_source() {
     // and a signature taking a slice is what forced that. Anything narrowing
     // it back to `&[CommandRecord]` fails to compile here.
     let index = corpus();
-    let extra = vec![sill_lib::registry::snippet_record(&snippet(
+    let extra = vec![crate::registry::snippet_record(&snippet(
         "Signature",
         ";sig",
         "Best,\nBrandon",
     ))];
 
-    let results = sill_lib::registry::search_excluding(
+    let results = crate::registry::search_excluding(
         index.iter().chain(extra.iter()),
         "sig",
         &Frecency::default(),
@@ -834,13 +594,13 @@ fn searching_borrows_its_corpus_from_more_than_one_source() {
 fn a_snippet_is_findable_by_what_is_inside_it() {
     // Half the point of searching snippets: you remember the text, not the
     // name you gave it.
-    let extra = vec![sill_lib::registry::snippet_record(&snippet(
+    let extra = vec![crate::registry::snippet_record(&snippet(
         "Signature",
         ";sig",
         "Kind regards, Brandon Winters",
     ))];
 
-    let results = sill_lib::registry::search_excluding(
+    let results = crate::registry::search_excluding(
         extra.iter(),
         "regards",
         &Frecency::default(),
@@ -856,7 +616,7 @@ fn a_snippet_is_findable_by_what_is_inside_it() {
 
 // ------------------------------------------------------- ranking stability
 
-use sill_lib::registry::{match_class, MatchClass};
+use crate::registry::{match_class, MatchClass};
 
 /// A corpus with the collisions a real index has: several things that start
 /// the same way, several that merely contain the letters.
@@ -873,7 +633,7 @@ fn crowded() -> Vec<CommandRecord> {
     ]
 }
 
-fn ids(results: &[sill_lib::registry::RankedCommand]) -> Vec<String> {
+fn ids(results: &[crate::registry::RankedCommand]) -> Vec<String> {
     results.iter().map(|r| r.command.id.clone()).collect()
 }
 
@@ -936,7 +696,8 @@ fn two_results_only_swap_when_one_of_them_matches_differently() {
 
                         assert!(
                             a_moved || b_moved,
-                            "typing {was_query:?} then {now_query:?} swapped {a} past {b}                              without either changing how it matched"
+                            "typing {was_query:?} then {now_query:?} swapped {a} past \
+                             {b} without either changing how it matched"
                         );
                     }
                 }
@@ -2001,7 +1762,7 @@ fn typing_the_name_of_an_emoji_does_volunteer_it() {
 fn volunteered(query: &str) -> Vec<String> {
     let frecency = Frecency::default();
     let aliases = Aliases::default();
-    let records = sill_lib::emoji::records(sill_lib::emoji::Tone::Default);
+    let records = crate::emoji::records(crate::emoji::Tone::Default);
 
     registry::search_excluding(
         records.iter(),
@@ -2628,7 +2389,7 @@ fn the_system_switches_are_reachable_by_the_words_people_use() {
 fn the_power_commands_are_rows_and_none_of_them_draws_a_switch() {
     let corpus = registry::builtins();
 
-    for power in sill_lib::system::Power::ALL {
+    for power in crate::system::Power::ALL {
         let row = corpus
             .iter()
             .find(|row| row.entrypoint == power.id())
@@ -2641,7 +2402,7 @@ fn the_power_commands_are_rows_and_none_of_them_draws_a_switch() {
         assert!(row.icon.is_some(), "{} wears nothing", row.id);
 
         assert!(
-            !sill_lib::system::is_switch(&row.entrypoint),
+            !crate::system::is_switch(&row.entrypoint),
             "{} would be drawn as something with an on and an off",
             row.id,
         );
@@ -2668,7 +2429,7 @@ fn the_recycle_bin_row_exists_and_is_not_drawn_as_something_with_an_off() {
     assert!(!row.subtitle.is_empty(), "{} says nothing", row.id);
 
     assert!(
-        !sill_lib::system::is_switch(&row.entrypoint),
+        !crate::system::is_switch(&row.entrypoint),
         "{} would be drawn as something with an on and an off",
         row.id,
     );
@@ -2732,7 +2493,7 @@ fn a_system_switch_says_what_it_does_rather_than_what_the_machine_is_doing() {
          * a fixture has no radios in it, so every radio came back "not a
          * switch" and this asked them for a subtitle after all.
          */
-        let drawn_as_a_switch = sill_lib::system::is_switch(&switch.entrypoint);
+        let drawn_as_a_switch = crate::system::is_switch(&switch.entrypoint);
 
         if !drawn_as_a_switch {
             assert!(!switch.subtitle.is_empty(), "{} says nothing", switch.id);
@@ -2930,7 +2691,7 @@ mod the_store_is_findable {
 
         let mut corpus = registry::builtins();
         for (name, kind) in COMPETITORS {
-            corpus.push(sill_lib::registry::app_record(
+            corpus.push(crate::registry::app_record(
                 name,
                 &format!(r"C:\Program Files\{name}.exe"),
                 None,
@@ -3043,7 +2804,7 @@ mod sills_own_settings_are_findable {
 
     fn found(query: &str) -> Vec<String> {
         let commands = registry::builtins();
-        let own = sill_lib::settings_index::records();
+        let own = crate::settings_index::records();
 
         registry::search_excluding(
             commands.iter().chain(own.iter()),
@@ -3135,7 +2896,7 @@ mod a_switch_answers_to_its_own_name {
 /// whether the program is.
 mod a_program_volume_row {
     use super::*;
-    use sill_lib::app_volume::Session;
+    use crate::app_volume::Session;
 
     fn session(name: &str, volume: f32, muted: bool) -> Session {
         Session {
@@ -3231,7 +2992,8 @@ fn saving_the_ranking_history_leaves_nothing_half_written_behind() {
 
     assert!(
         !path.with_extension("json.partial").exists(),
-        "the staging file outlived the save, so the next reader sees two files          and one of them is a half-written copy of the other"
+        "the staging file outlived the save, so the next reader sees two files \
+         and one of them is a half-written copy of the other"
     );
 
     // Twice, because the rename has to land on a file that already exists.

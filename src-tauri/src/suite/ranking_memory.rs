@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 
-use sill_lib::registry::{self, Aliases, CommandRecord, Excluded, Frecency};
+use crate::registry::{self, Aliases, CommandRecord, Excluded, Frecency};
 
 const NOW: i64 = 1_756_000_000;
 const DAY: i64 = 60 * 60 * 24;
@@ -41,6 +41,11 @@ fn titles(query: &str, records: &[CommandRecord], ranking: &Frecency) -> Vec<Str
         NOW,
         registry::SEARCH_LIMIT,
         Excluded::none(),
+        // Nothing pinned: this is the plain ranking, not a root list somebody
+        // has arranged. Added when `search_excluding` grew the parameter, and
+        // **this file did not compile for however long that took**: it was one
+        // of forty-five separate binaries, ordinary work runs `--lib`, and
+        // nothing that a person runs ever built it.
         &[],
     )
     .into_iter()

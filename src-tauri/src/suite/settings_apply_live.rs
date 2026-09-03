@@ -13,7 +13,7 @@
 
 use std::fs;
 
-use sill_lib::preferences::{Preferences, Redo};
+use crate::preferences::{Preferences, Redo};
 
 /// A settings change that costs nothing is not made to cost a scan.
 #[test]
@@ -142,9 +142,9 @@ fn walking_the_script_folders_again_changes_the_commands() {
     )
     .expect("a script on disk");
 
-    let found: Vec<_> = sill_lib::scripts::scan(&[dir.clone()])
+    let found: Vec<_> = crate::scripts::scan(&[dir.clone()])
         .iter()
-        .map(sill_lib::registry::script_record)
+        .map(crate::registry::script_record)
         .collect();
 
     assert_eq!(found.len(), 1, "the folder holds one script command");
@@ -152,9 +152,9 @@ fn walking_the_script_folders_again_changes_the_commands() {
 
     // Off is no folders at all, which is what `reload_scripts` passes, and the
     // index it produces is empty rather than filtered afterwards.
-    let none: Vec<_> = sill_lib::scripts::scan(&[])
+    let none: Vec<_> = crate::scripts::scan(&[])
         .iter()
-        .map(sill_lib::registry::script_record)
+        .map(crate::registry::script_record)
         .collect();
 
     assert!(

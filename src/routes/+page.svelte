@@ -23,6 +23,7 @@
   import { askedForTheKeys, deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import { asUrl, isPath, isUrl } from "$lib/typed";
   import {
+    afterLaunch,
     behaviourOf,
     drawsItsOwn,
     handlesItsOwnEscape,
@@ -2072,63 +2073,46 @@
         const launched = await launchCommand(command.id, query);
 
         /*
-         * A switch flips under the cursor instead of the launcher closing.
+         * What happens next is decided in `afterLaunch`, not here.
          *
-         * Turning Wi-Fi off and having the window vanish gives no answer to
-         * the only question worth asking, which is whether it went off. The
-         * row shows the new state, so the switch is watched happening and can
-         * be pressed straight back.
-         *
-         * The state is written onto the row rather than searched for again:
-         * one row changed, and re-ranking the whole index would also move it.
-         * Whether to close is Rust's decision and it has already made it, so
-         * there is nothing to do here for a one-shot like Lock Screen.
+         * It was four branches of prose in this function, which no test can
+         * reach: the one that claimed to cover them compared a copy of the
+         * list against itself, and stayed green with the `system` branch
+         * deleted. The reasoning moved to `$lib/modes` with the branches; this
+         * is now only the doing.
          */
-        if (launched.mode === "system") {
-          status = launched.message;
+        switch (afterLaunch(launched)) {
+          /*
+           * A switch flips under the cursor instead of the launcher closing.
+           *
+           * Turning Wi-Fi off and having the window vanish gives no answer to
+           * the only question worth asking, which is whether it went off. The
+           * row shows the new state, so the switch is watched happening and
+           * can be pressed straight back.
+           *
+           * The state is written onto the row rather than searched for again:
+           * one row changed, and re-ranking the whole index would also move
+           * it.
+           */
+          case "switch":
+            status = launched.message;
+            await refreshSwitches();
+            return;
 
-          // Absent means Rust is closing the window: a volume nudge has no
-          // state for a row to show, so there is nothing left to draw and
-          // drawing it would be work on a window nobody is looking at.
-          if (launched.toggle === undefined) return;
+          case "stay":
+            // A switch with no state to show says what it did; anything else
+            // reaching here ran and exited without rendering.
+            status =
+              launched.mode === "system" ? launched.message : `Ran ${launched.title}`;
+            return;
 
-          await refreshSwitches();
-          return;
-        }
+          case "dismiss":
+            if (launched.message) status = launched.message;
+            await dismiss();
+            return;
 
-        // A no-view command does its work and exits without rendering, so
-        // switching to the command view would strand the UI on an empty
-        // screen waiting for a tree that never arrives.
-        if (launched.mode === "no-view") {
-          status = `Ran ${launched.title}`;
-          return;
-        }
-
-        /*
-         * Nothing to render, so nothing to switch to.
-         *
-         * A command view draws what an extension renders, and Rust hands back
-         * the session it renders into. An empty session means the work is
-         * already finished: an application was launched, a link was opened, an
-         * arrangement was restored, a setting was shown in a window of its own.
-         *
-         * This used to be a list of four modes checked *before* the two
-         * branches above, and **the modes it left out are the bug**. Anything
-         * unlisted fell through to the command view below and sat there with
-         * an empty session, so the next summon came back to a blank screen
-         * wearing the title of whatever was last opened, with Escape the only
-         * way out. `sill-setting`, `quicklink`, `workspace` and
-         * `audio-session` all reached it.
-         *
-         * Written as the rule rather than the cases, because the cases are
-         * what went stale. The two modes that have no session and are not
-         * finished either are answered above, deliberately, and that ordering
-         * is why this is here rather than where the list was.
-         */
-        if (launched.session === "") {
-          if (launched.message) status = launched.message;
-          await dismiss();
-          return;
+          case "view":
+            break;
         }
 
         /*

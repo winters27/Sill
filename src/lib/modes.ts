@@ -203,6 +203,74 @@ export function behaviourOf(mode: string): Behaviour | undefined {
   return behaviour[mode as Mode];
 }
 
+/** What the window does with what a launch handed back. */
+export type AfterLaunch =
+  /** Redraw the row with its new state and stay on screen. */
+  | "switch"
+  /** Say what happened and stay; there is nothing left to draw. */
+  | "stay"
+  /** The work is finished, so step aside. */
+  | "dismiss"
+  /** There is a tree coming, so enter the command view. */
+  | "view";
+
+/** The part of a launch's answer this decision reads. */
+export interface Launched {
+  mode: string;
+  /** The extension session to render into. Empty when there is nothing. */
+  session: string;
+  /** Where a switch ended up, when the thing run was one. */
+  toggle?: boolean;
+}
+
+/**
+ * What to do once `launch_command` has answered.
+ *
+ * ## Why this is a function rather than a list of modes
+ *
+ * It used to be a list of four modes checked before everything else, and **the
+ * modes it left out were the bug**: anything unlisted fell through to the
+ * command view and sat there with an empty session, so the next summon came
+ * back to a blank screen wearing the title of whatever was last opened, with
+ * Escape the only way out. `sill-setting`, `quicklink`, `workspace` and
+ * `audio-session` all reached it.
+ *
+ * So the rule is written rather than the cases: **no session means the work is
+ * finished.** The two modes that have no session and are not finished either
+ * are named above it, deliberately, and that ordering is the whole content of
+ * this function.
+ *
+ * ## Why it is here and not in the window
+ *
+ * It was in `openSelected`, which no test can reach, and the test that claimed
+ * to cover it compared a copy of the list against itself. Removing the `system`
+ * branch from the window left every frontend test green. This is the same
+ * decision, in a place a test can call.
+ */
+export function afterLaunch(launched: Launched): AfterLaunch {
+  // A switch flips under the cursor instead of the launcher closing: turning
+  // Wi-Fi off and having the window vanish gives no answer to the only
+  // question worth asking, which is whether it went off.
+  if (launched.mode === "system") {
+    // Absent means Rust is closing the window itself: a volume nudge has no
+    // state for a row to show, so there is nothing left to draw and drawing it
+    // would be work on a window nobody is looking at.
+    return launched.toggle === undefined ? "stay" : "switch";
+  }
+
+  // A no-view command does its work and exits without rendering, so switching
+  // to the command view would strand the UI on an empty screen waiting for a
+  // tree that never arrives.
+  if (launched.mode === "no-view") return "stay";
+
+  // An empty session means the work is already finished: an application was
+  // launched, a link was opened, an arrangement was restored, a setting was
+  // shown in a window of its own.
+  if (launched.session === "") return "dismiss";
+
+  return "view";
+}
+
 /**
  * Whether this mode walks the ranked results.
  *

@@ -49,6 +49,9 @@ fn where_the_switches_land() {
             NOW,
             registry::SEARCH_LIMIT,
             Excluded::none(),
+            // Nothing pinned. Added when search_excluding grew the
+            // parameter; this file was one of forty-five separate binaries
+            // and had not compiled since.
             &[],
         );
 
@@ -109,6 +112,9 @@ fn what_ordinary_queries_return() {
             NOW,
             registry::SEARCH_LIMIT,
             Excluded::none(),
+            // Nothing pinned. Added when search_excluding grew the
+            // parameter; this file was one of forty-five separate binaries
+            // and had not compiled since.
             &[],
         );
 

@@ -8,7 +8,7 @@
 //! Every test here calls the code the watcher calls. An earlier version of
 //! this file re-implemented both judgements, which meant it could pass while
 //! the watcher was wrong, and a deliberate break confirmed exactly that.
-use sill_lib::catalog::{changes_the_index, worth_indexing, NOISE, SYSTEM};
+use crate::catalog::{changes_the_index, worth_indexing, NOISE, SYSTEM};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -165,7 +165,7 @@ fn a_platform_that_will_not_say_is_taken_at_its_word() {
 
 #[test]
 fn a_drive_root_is_recognised_however_it_is_written() {
-    use sill_lib::catalog::same_folder;
+    use crate::catalog::same_folder;
 
     // Somebody may type any of these, and all mean the same disk. Reading them
     // as different folders is how a root ends up in the list twice and the
@@ -180,7 +180,7 @@ fn a_drive_root_is_recognised_however_it_is_written() {
 
 #[test]
 fn a_folder_is_recognised_however_its_separators_lean() {
-    use sill_lib::catalog::same_folder;
+    use crate::catalog::same_folder;
 
     assert!(same_folder(r"C:\work\thing", "C:/work/thing"));
     assert!(same_folder(r"C:\work\thing\", r"C:\work\thing"));
@@ -191,7 +191,7 @@ fn a_folder_is_recognised_however_its_separators_lean() {
 
 #[test]
 fn a_costlier_walk_earns_a_longer_rest() {
-    use sill_lib::state::quiet_after;
+    use crate::state::quiet_after;
     use std::time::Duration;
 
     // The wait is the last walk's cost multiplied out, so indexing takes about
@@ -218,7 +218,7 @@ fn a_costlier_walk_earns_a_longer_rest() {
 
 #[test]
 fn a_very_fast_walk_still_gets_a_rest() {
-    use sill_lib::state::quiet_after;
+    use crate::state::quiet_after;
     use std::time::Duration;
 
     // A tiny folder walks in milliseconds, and multiplying that out would let

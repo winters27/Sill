@@ -589,8 +589,18 @@ fn the_built_index_carries_preferences_through_to_the_record() {
         .join("build")
         .join("index.json");
 
+    // The same skip `ranks_the_real_built_index` had, and the same fix. An
+    // index that is never built is a test that always passes, so CI says the
+    // index has to be there and this refuses to be silently satisfied.
     let commands = sill_lib::registry::load_index(&index);
     if commands.is_empty() {
+        assert_ne!(
+            std::env::var("SILL_BUILT_INDEX").as_deref(),
+            Ok("required"),
+            "SILL_BUILT_INDEX=required, and {} lists nothing. Build the \
+             extensions before the Rust suite",
+            index.display()
+        );
         eprintln!("no built extensions; skipping");
         return;
     }

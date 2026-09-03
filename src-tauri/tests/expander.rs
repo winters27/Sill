@@ -1,13 +1,18 @@
 //! The snippet hook's lifetime.
 //!
-//! An integration test for the same reason the others are: a lib unit-test
-//! binary that retains these code paths also retains the dialog plugin, which
-//! needs a manifest only test targets can be given. See `build.rs`.
-//!
 //! This installs a real low-level keyboard hook for a moment. That is the
 //! thing under test and there is no way to check it without one; the hook
 //! passes every key straight through while it is up, because expansion is
 //! never switched on here.
+//!
+//! Which is why it is still a binary of its own, now that the rest of the
+//! suite has moved into the library. The header used to give the dialog-plugin
+//! manifest as the reason and that is not the reason: `WH_KEYBOARD_LL` is
+//! system-wide while it is installed, and **Windows silently removes a hook
+//! that takes too long to answer**. Arming one inside a process that is running
+//! fifteen hundred other tests in parallel makes every keystroke on the machine
+//! wait behind them, and makes the thing under test depend on how busy the
+//! machine is. A process that does nothing else is worth one link.
 
 #![cfg(windows)]
 

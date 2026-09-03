@@ -1,12 +1,15 @@
 //! Merging several history entries into one.
 //!
-//! An integration test rather than a unit test for the same reason the action
-//! registry's are: a lib unit-test binary that retains these code paths also
-//! retains the dialog plugin, which needs a manifest only test targets can be
-//! given. See `build.rs`.
+//! This was an integration test, and its header said it had to be, "for the
+//! same reason the action registry's are: a lib unit-test binary that retains
+//! these code paths also retains the dialog plugin". That is true of the action
+//! registry and it is not true of this. Nothing here reaches the dialog plugin,
+//! the library's test binary starts and these seven tests pass in it. The
+//! reason had been copied from a neighbouring file rather than checked, and it
+//! cost a linked executable per `cargo test` for as long as it stood.
 
-use sill_lib::clipboard::kind::Kind;
-use sill_lib::clipboard::store::{Recording, Store};
+use crate::clipboard::kind::Kind;
+use crate::clipboard::store::{Recording, Store};
 
 fn store() -> (Store, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temp directory");
@@ -121,7 +124,7 @@ fn the_log_does_not_outgrow_the_history_it_describes() {
     let path = dir.path().join("clipboard.db");
 
     {
-        let store = sill_lib::clipboard::store::Store::open(&path).unwrap();
+        let store = crate::clipboard::store::Store::open(&path).unwrap();
 
         // Enough copies to have blown past the default threshold.
         for n in 0..1_500 {
@@ -165,7 +168,7 @@ fn opening_hands_back_a_log_that_already_grew() {
     let path = dir.path().join("clipboard.db");
 
     {
-        let store = sill_lib::clipboard::store::Store::open(&path).unwrap();
+        let store = crate::clipboard::store::Store::open(&path).unwrap();
         for n in 0..300 {
             store
                 .record(Recording {
@@ -184,7 +187,7 @@ fn opening_hands_back_a_log_that_already_grew() {
 
     // Reopening runs the checkpoint.
     {
-        let _store = sill_lib::clipboard::store::Store::open(&path).unwrap();
+        let _store = crate::clipboard::store::Store::open(&path).unwrap();
     }
 
     let log = std::fs::metadata(dir.path().join("clipboard.db-wal"))

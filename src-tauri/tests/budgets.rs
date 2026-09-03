@@ -78,6 +78,8 @@ fn rank(corpus: &[CommandRecord], query: &str) -> u128 {
         NOW,
         registry::SEARCH_LIMIT,
         Excluded::none(),
+        // Nothing pinned. Added when `search_excluding` grew the parameter,
+        // and this file did not compile from then until it was found.
         &[],
     );
 

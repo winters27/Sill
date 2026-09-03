@@ -1,4 +1,11 @@
 //! Icon extraction against real files on this machine.
+//!
+//! Kept as a binary of its own while the rest of the suite moved into the
+//! library, because it is not a function over values and it is not cheap:
+//! **271 seconds** for these six on this machine, against 3.5 for the library's
+//! entire test binary. Extracting an icon means opening somebody's executable
+//! through GDI and shell APIs, and what that costs is a property of the disk
+//! rather than of the code.
 
 /// A cache of its own for each test.
 ///
