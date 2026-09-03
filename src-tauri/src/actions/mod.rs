@@ -2037,6 +2037,13 @@ fn transforms() -> Vec<Box<dyn Action>> {
 ///
 /// The primary action for a clipboard entry, and the one thing every other
 /// transform is a variation on.
+///
+/// "Unchanged" is the whole difficulty. The object carries the row's text, and
+/// **an image row's text is a caption Sill wrote**: copying a screenshot out of
+/// the history put the words "Image 1920x1080" on the clipboard and lost the
+/// picture. So this reads the row back by id and asks
+/// [`crate::clipboard::write::payload_for`] what the entry actually is, which
+/// is the same question the paste path asks.
 struct CopyClipboardEntry;
 
 #[async_trait]
@@ -2067,8 +2074,65 @@ impl Action for CopyClipboardEntry {
     }
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
-        copy_with_undo(ctx, &object.target, "Copied")
+        let Some(payload) = stored_payload(ctx, object) else {
+            // A selection or an emoji, which is text and nothing else.
+            return copy_with_undo(ctx, &object.target, "Copied");
+        };
+
+        // The same undo every other copy offers: whatever was on the clipboard
+        // a moment ago, which is a string already in memory. Reading it can
+        // fail perfectly normally, and that is a reason to offer no undo
+        // rather than a reason to refuse the copy.
+        let previous = ctx.app.clipboard().read_text().ok();
+
+        let mut board =
+            arboard::Clipboard::new().map_err(|err| format!("Could not copy: {err}"))?;
+
+        // Sill's own write, so the watcher must not see it as a fresh copy and
+        // move the row to the top of the list under the user's hands. The same
+        // reservation `clipboard_paste` makes, and taken back when the write it
+        // was reserved for does not happen: a reservation nothing consumes
+        // swallows whatever the user really copies next.
+        let history = ctx.app.try_state::<crate::clipboard::monitor::Clipboard>();
+        if let Some(history) = &history {
+            history.ignore_next();
+        }
+
+        if let Err(err) = crate::clipboard::write::put(&mut board, &payload) {
+            if let Some(history) = &history {
+                history.forget_ignored();
+            }
+            return Err(err);
+        }
+
+        let message = match payload {
+            crate::clipboard::write::Payload::Image(_) => "Copied the picture",
+            _ => "Copied",
+        };
+
+        Ok(match previous {
+            Some(text) => Outcome::undoable(message, Undo::RestoreClipboard { text }),
+            None => Outcome::done(message),
+        })
     }
+}
+
+/// What a clipboard row holds, read back by id.
+///
+/// `None` when the object is not a history row at all, or when the row is gone
+/// between being chosen and being acted on. Both fall back to the text the
+/// window sent, which is the only thing left to copy.
+fn stored_payload(ctx: &ActionCtx, object: &Object) -> Option<crate::clipboard::write::Payload> {
+    if object.kind != ObjectKind::ClipboardEntry {
+        return None;
+    }
+
+    let id: i64 = object.id.parse().ok()?;
+    let history = ctx
+        .app
+        .try_state::<crate::clipboard::monitor::Clipboard>()?;
+    let store = history.store();
+    crate::clipboard::write::payload_for(&store, id, false).ok()?
 }
 
 // ------------------------------------------------------------------ windows

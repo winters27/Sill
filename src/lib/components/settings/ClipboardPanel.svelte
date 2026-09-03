@@ -45,6 +45,18 @@
     { value: "0", label: "Forever" },
   ];
 
+  /**
+   * The other bound. An age says nothing about a week spent copying, and a
+   * count says nothing about a code from last month that nothing has pushed
+   * out yet, so both exist and neither replaces the other.
+   */
+  const LIMIT = [
+    { value: "100", label: "100" },
+    { value: "1000", label: "1,000" },
+    { value: "10000", label: "10,000" },
+    { value: "0", label: "No limit" },
+  ];
+
   async function refresh() {
     try {
       count = await clipboardCount();
@@ -103,6 +115,23 @@
   </Row>
 
   <Row
+    title="Keep at most"
+    description="The oldest entries are deleted once there are more than this. Pinned entries, entries in a collection and whatever is open in the history are never counted or deleted."
+  >
+    {#snippet control()}
+      <Segmented
+        label="Keep at most"
+        value={String(prefs.clipboard.maxEntries)}
+        options={LIMIT}
+        onchange={(next) => {
+          prefs.clipboard.maxEntries = Number(next);
+          commit();
+        }}
+      />
+    {/snippet}
+  </Row>
+
+  <Row
     title="Things that look like passwords"
     description="Tokens, API keys and private keys are recognised by their published shapes, so a value that carries no such marker is never guessed at. The history is a plain file that anything running as you can read, which is why not storing it is the default."
     disabled={!prefs.clipboard.enabled}
@@ -127,6 +156,19 @@
   >
     {#snippet control()}
       <Toggle bind:checked={prefs.clipboard.keepImages} onchange={commit} label="Keep images" />
+    {/snippet}
+  </Row>
+
+  <Row
+    title="Lock stored pictures"
+    description="Pictures are kept so that only your Windows account can open them. Another account on this PC cannot, and neither can anyone holding a copy of the history file from a backup, a synced folder or the drive itself. It does not hide them from programs already running as you, which can unlock them exactly the way Sill does. Pictures already in the history are converted whichever way you change this, so nothing is lost by turning it on or off again. Text is not covered, because searching it means keeping it readable."
+  >
+    {#snippet control()}
+      <Toggle
+        bind:checked={prefs.clipboard.encryptImages}
+        onchange={commit}
+        label="Lock stored pictures"
+      />
     {/snippet}
   </Row>
 </Section>

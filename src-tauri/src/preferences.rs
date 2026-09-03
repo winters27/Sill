@@ -344,9 +344,31 @@ pub struct ClipboardHistory {
     /// password field, so a history with no end date is a liability rather
     /// than a feature.
     pub retain_days: u32,
+    /// How many unpinned entries are kept. Zero keeps as many as arrive.
+    ///
+    /// Beside the retention rather than instead of it. An age bounds how long
+    /// something survives and says nothing about how much arrives in that
+    /// time; a count is the other way round. Ten thousand is generous enough
+    /// that nobody meets it by using the launcher normally, and small enough
+    /// that a runaway script copying in a loop does not fill the disk.
+    pub max_entries: u32,
     /// Keep images as well as text. They are much the largest thing a
     /// clipboard carries, so this is worth being able to decline.
     pub keep_images: bool,
+    /// Lock stored pictures to this Windows account.
+    ///
+    /// Off by default, because it is a promise with edges and the person
+    /// should be the one to accept them. What it buys: another account on this
+    /// machine cannot open them, and neither can anyone holding a copy of the
+    /// file, from a backup, a synced folder or a drive taken out of the
+    /// machine. What it does not buy: anything running as this user can unlock
+    /// them exactly the way Sill does.
+    ///
+    /// Pictures only. The text of an entry is what full-text search reads, so
+    /// encrypting it would mean either losing search or keeping a plaintext
+    /// index beside the ciphertext, and the second is a promise that is not
+    /// true.
+    pub encrypt_images: bool,
     /// Applications whose copies are never recorded.
     ///
     /// Matched against the source application's name. Password managers
@@ -368,7 +390,9 @@ impl Default for ClipboardHistory {
         Self {
             enabled: true,
             retain_days: 30,
+            max_entries: 10_000,
             keep_images: true,
+            encrypt_images: false,
             ignored_apps: Vec::new(),
             secrets: crate::clipboard::sensitive::Policy::default(),
         }
@@ -1072,6 +1096,44 @@ mod tests {
         );
         assert!(p.sources.shortcuts);
         assert!(p.files.enabled);
+    }
+
+    /// Both clipboard bounds survive a write and a read.
+    ///
+    /// A setting a person can choose has to outlive a restart, and the two
+    /// ways that quietly fails are a name the window spells differently and a
+    /// field nothing serialises. Both would look like the setting reverting
+    /// itself with no message anywhere.
+    #[test]
+    fn the_clipboard_limit_and_the_picture_lock_are_written_and_read_back() {
+        let mut prefs = Preferences::default();
+        prefs.clipboard.max_entries = 500;
+        prefs.clipboard.encrypt_images = true;
+
+        let json = serde_json::to_string(&prefs).expect("serialises");
+        assert!(json.contains("\"maxEntries\":500"), "{json}");
+        assert!(json.contains("\"encryptImages\":true"));
+
+        let back: Preferences = serde_json::from_str(&json).expect("parses");
+        assert_eq!(back.clipboard.max_entries, 500);
+        assert!(back.clipboard.encrypt_images);
+    }
+
+    /// And a history file written before either existed gets the defaults.
+    #[test]
+    fn a_clipboard_section_from_an_older_build_keeps_the_new_defaults() {
+        let json = r#"{"clipboard":{"retainDays":7}}"#;
+        let parsed: Preferences = serde_json::from_str(json).expect("parses");
+
+        assert_eq!(parsed.clipboard.retain_days, 7, "the stated value wins");
+        assert_eq!(
+            parsed.clipboard.max_entries, 10_000,
+            "a bound added later must not arrive as zero or as one"
+        );
+        assert!(
+            !parsed.clipboard.encrypt_images,
+            "and a promise about encryption is never made by default"
+        );
     }
 
     #[test]

@@ -24,6 +24,14 @@
 /// and re-sealed the next time preferences are saved.
 const PREFIX: &str = "dpapi:v1:";
 
+/// The same marker, for a value that is bytes rather than text.
+///
+/// A clipboard image is already binary, so base64 would be a third of its size
+/// again for nothing. The marker is the prefix's own ASCII, which no PNG or
+/// JPEG can begin with: every image format this stores starts with a signature
+/// byte outside the printable range.
+pub const BYTE_PREFIX: &[u8] = b"dpapi:v1:";
+
 /// Mixed into the encryption so a sealed value is bound to this application.
 ///
 /// Worth little on its own, since it is a constant inside a binary anyone can
@@ -36,11 +44,21 @@ pub fn is_sealed(value: &str) -> bool {
     value.starts_with(PREFIX)
 }
 
+/// Whether a stored blob has already been sealed.
+///
+/// Asked of the bytes rather than of the setting, deliberately. Turning the
+/// setting on converts what is already stored, and a conversion interrupted
+/// half way leaves a database with both kinds in it. Reading has to work
+/// either way or that interruption would be lost pictures.
+pub fn is_sealed_bytes(value: &[u8]) -> bool {
+    value.starts_with(BYTE_PREFIX)
+}
+
 #[cfg(windows)]
 mod windows_impl {
     use base64::Engine;
 
-    use super::{ENTROPY, PREFIX};
+    use super::{BYTE_PREFIX, ENTROPY, PREFIX};
 
     /// Mirrors Win32's `DATA_BLOB`.
     #[repr(C)]
@@ -100,8 +118,14 @@ mod windows_impl {
         copied
     }
 
-    pub fn seal(plaintext: &str) -> Option<String> {
-        let input = blob(plaintext.as_bytes());
+    /// The encryption itself, over bytes.
+    ///
+    /// Everything below is a wrapper that decides how the result is written
+    /// down. One call to DPAPI, in one place: a settings key and a clipboard
+    /// picture are protected identically, and a second implementation would be
+    /// a second set of flags to get wrong.
+    fn protect(plaintext: &[u8]) -> Option<Vec<u8>> {
+        let input = blob(plaintext);
         let entropy = blob(ENTROPY);
         let mut out = DataBlob {
             cb_data: 0,
@@ -128,20 +152,11 @@ mod windows_impl {
         }
 
         // SAFETY: the call succeeded, so `out` owns a LocalAlloc'ed buffer.
-        let sealed = unsafe { take(out) };
-        Some(format!(
-            "{PREFIX}{}",
-            base64::engine::general_purpose::STANDARD.encode(sealed)
-        ))
+        Some(unsafe { take(out) })
     }
 
-    pub fn unseal(sealed: &str) -> Option<String> {
-        let encoded = sealed.strip_prefix(PREFIX)?;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .ok()?;
-
-        let input = blob(&bytes);
+    fn unprotect(sealed: &[u8]) -> Option<Vec<u8>> {
+        let input = blob(sealed);
         let entropy = blob(ENTROPY);
         let mut out = DataBlob {
             cb_data: 0,
@@ -167,13 +182,42 @@ mod windows_impl {
         }
 
         // SAFETY: the call succeeded, so `out` owns a LocalAlloc'ed buffer.
-        let plaintext = unsafe { take(out) };
-        String::from_utf8(plaintext).ok()
+        Some(unsafe { take(out) })
+    }
+
+    pub fn seal(plaintext: &str) -> Option<String> {
+        let sealed = protect(plaintext.as_bytes())?;
+        Some(format!(
+            "{PREFIX}{}",
+            base64::engine::general_purpose::STANDARD.encode(sealed)
+        ))
+    }
+
+    pub fn unseal(sealed: &str) -> Option<String> {
+        let encoded = sealed.strip_prefix(PREFIX)?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .ok()?;
+
+        String::from_utf8(unprotect(&bytes)?).ok()
+    }
+
+    pub fn seal_bytes(plaintext: &[u8]) -> Option<Vec<u8>> {
+        let sealed = protect(plaintext)?;
+
+        let mut out = Vec::with_capacity(BYTE_PREFIX.len() + sealed.len());
+        out.extend_from_slice(BYTE_PREFIX);
+        out.extend_from_slice(&sealed);
+        Some(out)
+    }
+
+    pub fn unseal_bytes(sealed: &[u8]) -> Option<Vec<u8>> {
+        unprotect(sealed.strip_prefix(BYTE_PREFIX)?)
     }
 }
 
 #[cfg(windows)]
-pub use windows_impl::{seal, unseal};
+pub use windows_impl::{seal, seal_bytes, unseal, unseal_bytes};
 
 /// No DPAPI off Windows, so nothing is sealed and nothing pretends to be.
 ///
@@ -187,6 +231,16 @@ pub fn seal(_plaintext: &str) -> Option<String> {
 
 #[cfg(not(windows))]
 pub fn unseal(_sealed: &str) -> Option<String> {
+    None
+}
+
+#[cfg(not(windows))]
+pub fn seal_bytes(_plaintext: &[u8]) -> Option<Vec<u8>> {
+    None
+}
+
+#[cfg(not(windows))]
+pub fn unseal_bytes(_sealed: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
@@ -234,6 +288,42 @@ mod tests {
         assert_eq!(unseal("dpapi:v1:not-base64!!"), None);
         assert_eq!(unseal("dpapi:v1:AQAAAA=="), None, "truncated blob");
         assert_eq!(unseal("plain text"), None, "no prefix, so not ours");
+    }
+
+    #[test]
+    fn a_picture_that_was_never_sealed_is_not_mistaken_for_one() {
+        // The migration case again, from the blob side. A PNG signature byte
+        // is outside the printable range, so no image can begin with the
+        // marker and no unsealed blob is ever run through the decrypt path.
+        assert!(!is_sealed_bytes(&[0x89, b'P', b'N', b'G']));
+        assert!(!is_sealed_bytes(&[]));
+        assert!(is_sealed_bytes(b"dpapi:v1:\x01\x02"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_sealed_picture_comes_back_byte_for_byte() {
+        // A PNG with a NUL and a high byte in it, which is every PNG: the
+        // bytes path must not be quietly going through a string anywhere.
+        let png: Vec<u8> = vec![
+            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0xff, 0xfe,
+        ];
+
+        let sealed = seal_bytes(&png).expect("DPAPI is available on Windows");
+        assert!(is_sealed_bytes(&sealed), "the marker is missing");
+        assert!(
+            !sealed.windows(png.len()).any(|w| w == png.as_slice()),
+            "the picture survived into the sealed form"
+        );
+        assert_eq!(unseal_bytes(&sealed).as_deref(), Some(png.as_slice()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_corrupt_or_foreign_blob_fails_rather_than_returning_rubbish() {
+        assert_eq!(unseal_bytes(b"dpapi:v1:nonsense"), None);
+        assert_eq!(unseal_bytes(&[0x89, b'P', b'N', b'G']), None, "not ours");
+        assert_eq!(unseal_bytes(&[]), None);
     }
 
     #[cfg(windows)]

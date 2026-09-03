@@ -50,6 +50,13 @@ pub fn clipboard_entry(
     icons: State<'_, crate::icons::Icons>,
     id: i64,
 ) -> Result<Option<Detail>, String> {
+    // The window asks for exactly the row it is showing, once, as the
+    // selection settles. That makes this the one place that already knows
+    // which entry somebody is looking at, and the count cap needs to know so
+    // it does not delete that row out from under them. Nothing new crosses
+    // the boundary to say so.
+    clipboard.now_viewing(id);
+
     let store = clipboard.store();
     let Some(entry) = store.get(id).map_err(|e| e.to_string())? else {
         return Ok(None);
@@ -98,26 +105,16 @@ pub async fn clipboard_paste(
 ) -> Result<(), String> {
     let plain = plain_text.unwrap_or(false);
 
-    let (text, html, image) = {
+    // What this entry actually is, decided in one place. An image row's text
+    // is a caption, so anything that reads `entry.text` and copies it hands
+    // back the words "Image 1920x1080" instead of the picture.
+    let payload = {
         let store = clipboard.store();
-        let entry = store
-            .get(id)
+        let payload = crate::clipboard::write::payload_for(&store, id, plain)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "That entry is no longer in the history".to_string())?;
-        let image = if entry.kind == Kind::Image {
-            store.blob(id).map_err(|e| e.to_string())?
-        } else {
-            None
-        };
-        // Read only when it is going to be used. Markup is routinely several
-        // times the size of the text it formats.
-        let html = if plain || !entry.rich {
-            None
-        } else {
-            store.html(id).map_err(|e| e.to_string())?
-        };
         store.touch(id, now_seconds()).map_err(|e| e.to_string())?;
-        (entry.text, html, image)
+        payload
     };
 
     // The watcher would otherwise see Sill's own write and move the entry to
@@ -125,18 +122,7 @@ pub async fn clipboard_paste(
     clipboard.ignore_next();
 
     let mut board = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    match (image, html) {
-        (Some(png), _) => write_image(&mut board, &png)?,
-        // Both formats in one write, and the plain text is the alternative
-        // rather than a second write: whichever the target understands, it
-        // takes, and a plain field still gets sensible text rather than
-        // markup as literal characters.
-        (None, Some(html)) => board
-            .set()
-            .html(html, Some(text))
-            .map_err(|e| e.to_string())?,
-        (None, None) => board.set_text(text).map_err(|e| e.to_string())?,
-    }
+    crate::clipboard::write::put(&mut board, &payload)?;
 
     if !paste {
         return Ok(());
@@ -151,23 +137,6 @@ pub async fn clipboard_paste(
     std::thread::sleep(std::time::Duration::from_millis(60));
     crate::dictation::paste::chord();
     Ok(())
-}
-
-/// Decodes a stored PNG and puts the pixels back on the clipboard.
-fn write_image(board: &mut arboard::Clipboard, png: &[u8]) -> Result<(), String> {
-    let decoder = png::Decoder::new(std::io::Cursor::new(png));
-    let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
-    let mut buffer = vec![0; reader.output_buffer_size().unwrap_or(0)];
-    let info = reader.next_frame(&mut buffer).map_err(|e| e.to_string())?;
-    buffer.truncate(info.buffer_size());
-
-    board
-        .set_image(arboard::ImageData {
-            width: info.width as usize,
-            height: info.height as usize,
-            bytes: buffer.into(),
-        })
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -9,3 +9,4 @@ pub mod kind;
 pub mod monitor;
 pub mod sensitive;
 pub mod store;
+pub mod write;

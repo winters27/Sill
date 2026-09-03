@@ -30,6 +30,13 @@ const MAX_TEXT_BYTES: usize = 1_000_000;
 /// Largest image kept, before which it is noted but its bytes are dropped.
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
+/// Most paths taken from one file copy.
+///
+/// A selection in Explorer can be a hundred thousand files. Past this the copy
+/// is not recorded at all, which is what already happened to every file copy
+/// before now, rather than recorded as a list quietly missing most of it.
+const MAX_FILES: u32 = 10_000;
+
 /// The one report about images not being kept, named once so the copy that
 /// works withdraws the one that did not.
 const IMAGE_TROUBLE: &str = "clipboard-image";
@@ -75,6 +82,47 @@ fn prune_occasionally(clipboard: &Clipboard, retain_days: u32) {
     }
 }
 
+/// The housekeeping every recorded copy is followed by.
+///
+/// One function called from each branch rather than a line at the end of each,
+/// **because that is exactly how the pruning got lost**: the text branch
+/// returns as soon as it has emitted, so the call that sat below it ran only
+/// when the thing copied happened to be a picture. Retention was therefore
+/// honoured on a machine where somebody screenshots and not on one where they
+/// copy words.
+///
+/// Neither half runs on a timer. A copy is the only moment the history grows,
+/// so it is the only moment either bound can be exceeded.
+fn after_recording(app: &AppHandle, clipboard: &Clipboard, rules: &Rules) {
+    prune_occasionally(clipboard, rules.retain_days);
+    cap_rows(clipboard, rules.max_entries);
+
+    let _ = app.emit("clipboard:changed", ());
+}
+
+/// Holds the history to a number of entries as well as to an age.
+///
+/// Unthrottled, unlike the daily prune, and cheap enough to be: one statement
+/// that deletes nothing at all until the cap is passed, over an index the
+/// listing already uses. Throttling it would let a burst of copying put tens
+/// of thousands of rows in before anything noticed, which is the case the cap
+/// exists for.
+///
+/// **The row somebody is reading is never one of them.** See
+/// [`Clipboard::viewing`].
+fn cap_rows(clipboard: &Clipboard, max_entries: u32) {
+    if max_entries == 0 {
+        return;
+    }
+
+    let viewing = clipboard.viewing();
+    match clipboard.store().trim_to(max_entries, viewing) {
+        Ok(0) => {}
+        Ok(gone) => crate::say!("trimmed {gone} clipboard entries past the limit"),
+        Err(err) => crate::say!("could not trim the clipboard: {err}"),
+    }
+}
+
 /// How many times the clipboard is reached for before giving up.
 ///
 /// The clipboard is a single system-wide resource held under a lock, and the
@@ -99,6 +147,19 @@ pub struct Clipboard {
     /// struct is already the managed state for the clipboard and the fact
     /// belongs to it. It also means a test can have its own.
     pruned: Arc<Mutex<Option<std::time::Instant>>>,
+    /// The entry the open history window last asked to see in full.
+    ///
+    /// The count cap deletes the oldest rows, and the oldest row is exactly
+    /// what somebody scrolled to the bottom of the list to read. Deleting the
+    /// thing under the cursor while they are looking at it is the one failure
+    /// a cap must not have.
+    ///
+    /// Nothing new crosses the boundary to keep this: `clipboard_entry` is
+    /// already called once per row as the selection settles, so the window
+    /// says which row it is on by asking for it. A cap that needed its own
+    /// notification would be an invoke per arrow key, which is the chatter
+    /// rules 18 and 23 refuse.
+    viewing: Arc<Mutex<Option<i64>>>,
     /// Set while Sill is itself writing to the clipboard, so a paste out of
     /// the history does not come straight back in as a new entry.
     ignoring: Arc<AtomicUsize>,
@@ -160,6 +221,19 @@ pub struct Rules {
     /// setting, and the entry somebody expected to expire yesterday is still
     /// there.
     pub retain_days: u32,
+    /// How many unpinned entries are kept. Zero means as many as arrive.
+    ///
+    /// Beside the retention rather than instead of it: they bound different
+    /// things. Thirty days says nothing about a week spent copying, and a
+    /// thousand rows says nothing about a code copied a month ago that is
+    /// still there because nothing has pushed it out.
+    pub max_entries: u32,
+    /// Lock stored pictures to this Windows account.
+    ///
+    /// Only the pictures. The text is what full-text search reads, so
+    /// encrypting it would mean either no search or an index holding the
+    /// plaintext anyway, and neither is worth pretending about.
+    pub encrypt_images: bool,
 }
 
 impl Clipboard {
@@ -182,6 +256,7 @@ impl Clipboard {
         Self {
             store: Arc::new(Mutex::new(Store::open(&path).expect("a temp store opens"))),
             pruned: Arc::new(Mutex::new(None)),
+            viewing: Arc::new(Mutex::new(None)),
             ignoring: Arc::new(AtomicUsize::new(0)),
             suspended: Arc::new(AtomicBool::new(false)),
             skipped: Arc::new(Mutex::new(None)),
@@ -198,6 +273,7 @@ impl Clipboard {
             Ok(store) => Some(Self {
                 store: Arc::new(Mutex::new(store)),
                 pruned: Arc::new(Mutex::new(None)),
+                viewing: Arc::new(Mutex::new(None)),
                 ignoring: Arc::new(AtomicUsize::new(0)),
                 suspended: Arc::new(AtomicBool::new(false)),
                 skipped: Arc::new(Mutex::new(None)),
@@ -209,9 +285,13 @@ impl Clipboard {
                     ignored_apps: Vec::new(),
                     secrets: sensitive::Policy::default(),
                     // Replaced by the real setting the moment preferences are
-                    // read; zero here means nothing is pruned before then,
-                    // which is the safe way round for a default.
+                    // read; zero here means nothing is pruned or trimmed
+                    // before then, which is the safe way round for a default.
                     retain_days: 0,
+                    max_entries: 0,
+                    // Same reasoning, the other way up: nothing is written
+                    // under a promise the setting may not actually make.
+                    encrypt_images: false,
                 })),
             }),
             Err(err) => {
@@ -301,7 +381,28 @@ impl Clipboard {
         }
     }
 
+    /// Remembers which row the history window is showing in full.
+    ///
+    /// Set by `clipboard_entry`, which the window already calls once per row
+    /// as the selection settles. Read by the count cap, which must not delete
+    /// it out from under whoever is reading it.
+    pub fn now_viewing(&self, id: i64) {
+        if let Ok(mut slot) = self.viewing.lock() {
+            *slot = Some(id);
+        }
+    }
+
+    pub fn viewing(&self) -> Option<i64> {
+        self.viewing.lock().ok().and_then(|slot| *slot)
+    }
+
     pub fn set_rules(&self, rules: Rules) {
+        // The store is what writes a blob, so it is what has to know whether
+        // to lock one. Set before the rules are published so a copy arriving
+        // in between is written under the setting that is already in force
+        // rather than the one about to be.
+        self.store().encrypt_blobs(rules.encrypt_images);
+
         if let Ok(mut current) = self.rules.lock() {
             *current = rules;
         }
@@ -545,8 +646,47 @@ fn capture_with(
         // clipboard has moved on and there is nothing left to keep.
         clipboard.note_skipped(None);
 
-        let _ = app.emit("clipboard:changed", ());
+        after_recording(app, clipboard, &rules);
         return Ok(());
+    }
+
+    /*
+     * A copy made in Explorer.
+     *
+     * It puts no text on the clipboard at all: `CF_HDROP`, a list of paths,
+     * plus some shell formats, and neither `arboard` nor `clipboard-master`
+     * reads any of them. So selecting five files and pressing Ctrl+C recorded
+     * **nothing**, and the history simply had a gap where a copy had been.
+     *
+     * After the text rather than before it, so nothing that already worked
+     * changes: an application that offers both keeps being recorded as its
+     * text, which is what it was yesterday.
+     */
+    if let Some(paths) = read_files() {
+        if let Some(text) = file_list(&paths) {
+            if text.len() <= MAX_TEXT_BYTES {
+                let store = clipboard.store();
+                store
+                    .record(Recording {
+                        hash: &hash(text.as_bytes()),
+                        // Known rather than guessed. `classify` reads a
+                        // multi-line value as prose, which a list of paths is
+                        // not, and this came from the shell as file names.
+                        kind: Kind::File,
+                        text: &text,
+                        html: None,
+                        app: name.as_deref(),
+                        app_path: exe.as_deref(),
+                        bytes: text.len() as i64,
+                        now,
+                    })
+                    .map_err(|e| e.to_string())?;
+                drop(store);
+
+                after_recording(app, clipboard, &rules);
+            }
+            return Ok(());
+        }
     }
 
     if !rules.keep_images {
@@ -587,7 +727,7 @@ fn capture_with(
          * images, and it is wrong once.
          */
         if bytes <= MAX_IMAGE_BYTES {
-            match encode_png(&image) {
+            match crate::clipboard::write::encode_png(&image) {
                 Some(png) => match store.put_blob(id, &png) {
                     Ok(()) => crate::status::resolved(app, IMAGE_TROUBLE),
                     Err(err) => crate::status::report(
@@ -610,9 +750,7 @@ fn capture_with(
         }
         drop(store);
 
-        prune_occasionally(clipboard, rules.retain_days);
-
-        let _ = app.emit("clipboard:changed", ());
+        after_recording(app, clipboard, &rules);
     }
 
     Ok(())
@@ -698,6 +836,121 @@ fn read_text(board: &mut arboard::Clipboard) -> Option<String> {
     None
 }
 
+/// The paths a file copy is recorded as, one per line.
+///
+/// `\r\n` because these go back onto the clipboard as text and land in Windows
+/// text fields, where a bare `\n` is one long line. Empty paths are dropped
+/// rather than left as blank lines; an empty list is nothing to record.
+fn file_list(paths: &[String]) -> Option<String> {
+    let joined = paths
+        .iter()
+        .map(|path| path.trim())
+        .filter(|path| !path.is_empty())
+        .collect::<Vec<_>>()
+        .join("\r\n");
+
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// `CF_HDROP`, the format Explorer copies files as.
+///
+/// The number rather than the constant, which lives in a `windows` feature
+/// this crate does not enable. It has been 15 since Windows 3.1 and is part of
+/// the ABI.
+#[cfg(windows)]
+const CF_HDROP: u32 = 15;
+
+/// The list of files on the clipboard, if there is one.
+///
+/// Retried like every other clipboard read: the application that just copied
+/// is usually still holding the lock when Windows announces the change.
+#[cfg(windows)]
+fn read_files() -> Option<Vec<String>> {
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    };
+    use windows::Win32::UI::Shell::HDROP;
+
+    // SAFETY: takes a format number and returns a plain result. Asked before
+    // the clipboard is opened, because on almost every copy the answer is no
+    // and opening it would be a lock taken for nothing.
+    if unsafe { IsClipboardFormatAvailable(CF_HDROP) }.is_err() {
+        return None;
+    }
+
+    for attempt in 0..CLIPBOARD_ATTEMPTS {
+        // SAFETY: a null owner window is documented as allowed and means the
+        // clipboard is associated with the current task.
+        if unsafe { OpenClipboard(None) }.is_ok() {
+            // SAFETY: the clipboard is open, so the handle it hands back is
+            // valid until it is closed, which is the next statement but one.
+            // The handle stays owned by the clipboard and is never freed here.
+            let paths = unsafe {
+                GetClipboardData(CF_HDROP)
+                    .ok()
+                    .map(|handle| paths_from(HDROP(handle.0)))
+            };
+
+            // SAFETY: paired with the successful open above.
+            let _ = unsafe { CloseClipboard() };
+            return paths.flatten();
+        }
+
+        if attempt + 1 == CLIPBOARD_ATTEMPTS {
+            break;
+        }
+        std::thread::sleep(RETRY_DELAY);
+    }
+
+    None
+}
+
+/// Reads the paths out of an `HDROP`.
+///
+/// Split from the clipboard handling so it can be tested against a handle
+/// built by hand. Standing up a real file copy would mean writing over
+/// whatever the person running the tests had on their clipboard.
+///
+/// # Safety
+///
+/// `drop` must be a live `HDROP`, which is the only thing `CF_HDROP` ever is.
+#[cfg(windows)]
+unsafe fn paths_from(drop: windows::Win32::UI::Shell::HDROP) -> Option<Vec<String>> {
+    use windows::Win32::UI::Shell::DragQueryFileW;
+
+    // `0xFFFFFFFF` asks how many files there are rather than for one of them.
+    let count = unsafe { DragQueryFileW(drop, u32::MAX, None) };
+    if count == 0 || count > MAX_FILES {
+        return None;
+    }
+
+    let mut paths = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        // With no buffer it returns the length, excluding the terminator.
+        let needed = unsafe { DragQueryFileW(drop, index, None) };
+        if needed == 0 {
+            continue;
+        }
+
+        // Room for the terminator, which the call writes and does not count.
+        let mut buffer = vec![0u16; needed as usize + 1];
+        let written = unsafe { DragQueryFileW(drop, index, Some(&mut buffer)) };
+        if written == 0 {
+            continue;
+        }
+
+        paths.push(String::from_utf16_lossy(&buffer[..written as usize]));
+    }
+
+    (!paths.is_empty()).then_some(paths)
+}
+
+/// No shell, no file list.
+#[cfg(not(windows))]
+fn read_files() -> Option<Vec<String>> {
+    None
+}
+
 /// Whether the owner of the clipboard asked for its contents not to be kept.
 ///
 /// Password managers register `ExcludeClipboardContentFromMonitorProcessing`
@@ -730,19 +983,6 @@ fn is_confidential() -> bool {
 #[cfg(not(windows))]
 fn is_confidential() -> bool {
     false
-}
-
-/// PNG bytes for a clipboard image.
-fn encode_png(image: &arboard::ImageData<'_>) -> Option<Vec<u8>> {
-    let mut out = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut out, image.width as u32, image.height as u32);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().ok()?;
-        writer.write_image_data(&image.bytes).ok()?;
-    }
-    Some(out)
 }
 
 /// The deduplication key.
@@ -884,6 +1124,223 @@ mod tests {
             Some("Slack"),
             &["".to_string(), "  ".to_string()]
         ));
+    }
+
+    // ----------------------------------------------------------- file lists
+
+    #[test]
+    fn a_file_copy_is_recorded_as_one_path_per_line() {
+        // These go back onto the clipboard as text and land in Windows text
+        // fields, where a bare newline is one long line.
+        assert_eq!(
+            file_list(&[r"C:\a.txt".into(), r"C:\b.txt".into()]),
+            Some("C:\\a.txt\r\nC:\\b.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn one_file_is_still_a_list_of_one() {
+        assert_eq!(
+            file_list(&[r"C:\only.txt".into()]),
+            Some(r"C:\only.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn nothing_to_list_is_nothing_to_record() {
+        // A blank line in the middle of a paste is worse than a shorter list,
+        // and an empty list is not a copy at all.
+        assert_eq!(file_list(&[]), None);
+        assert_eq!(file_list(&["".into(), "   ".into()]), None);
+        assert_eq!(
+            file_list(&[r"C:\a.txt".into(), "".into()]),
+            Some(r"C:\a.txt".to_string()),
+            "an empty path must not leave a blank line"
+        );
+    }
+
+    /// The `HDROP` parse, against a handle built by hand.
+    ///
+    /// Standing up a real file copy would mean writing over whatever the
+    /// person running the tests had on their clipboard, so the handle is
+    /// assembled here in the shape Windows uses: a `DROPFILES` header, then a
+    /// double-null-terminated run of wide strings.
+    #[cfg(windows)]
+    #[test]
+    fn a_real_hdrop_yields_the_paths_inside_it() {
+        use windows::Win32::UI::Shell::HDROP;
+
+        // Declared by hand rather than by enabling another `windows` feature,
+        // the same reasoning as `secrets.rs`: this crate's feature list has
+        // already pushed rustc into an out-of-memory abort once by
+        // accumulating, and these are three extern declarations.
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GlobalAlloc(flags: u32, bytes: usize) -> *mut core::ffi::c_void;
+            fn GlobalLock(handle: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+            fn GlobalUnlock(handle: *mut core::ffi::c_void) -> i32;
+            fn GlobalFree(handle: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+        }
+
+        const GMEM_MOVEABLE: u32 = 0x0002;
+        /// `DROPFILES`: the offset, a POINT, and two BOOLs.
+        const HEADER: usize = 20;
+
+        let paths = [r"C:\one.txt", r"C:\a folder\two.txt"];
+        let mut wide: Vec<u16> = Vec::new();
+        for path in paths {
+            wide.extend(path.encode_utf16());
+            wide.push(0);
+        }
+        wide.push(0);
+
+        // SAFETY: the block is sized for the header plus the list, written
+        // once while locked, and freed at the end of the test. `paths_from`
+        // only reads it.
+        let found = unsafe {
+            let bytes = HEADER + wide.len() * 2;
+            let handle = GlobalAlloc(GMEM_MOVEABLE, bytes);
+            assert!(!handle.is_null(), "the allocation failed");
+
+            let base = GlobalLock(handle) as *mut u8;
+            assert!(!base.is_null(), "the lock failed");
+            std::ptr::write_bytes(base, 0, bytes);
+            // `pFiles`, the offset the list starts at.
+            (base as *mut u32).write_unaligned(HEADER as u32);
+            // `fWide`, which says the list is UTF-16 rather than ANSI.
+            (base.add(16) as *mut u32).write_unaligned(1);
+            std::ptr::copy_nonoverlapping(
+                wide.as_ptr() as *const u8,
+                base.add(HEADER),
+                wide.len() * 2,
+            );
+            GlobalUnlock(handle);
+
+            let found = paths_from(HDROP(handle));
+            GlobalFree(handle);
+            found
+        };
+
+        assert_eq!(
+            found,
+            Some(vec![
+                r"C:\one.txt".to_string(),
+                r"C:\a folder\two.txt".to_string()
+            ])
+        );
+    }
+
+    // -------------------------------------------------------- the count cap
+
+    #[test]
+    fn the_cap_holds_the_history_to_its_limit() {
+        let clipboard = Clipboard::for_test();
+        {
+            let store = clipboard.store();
+            store.clear(true).expect("starts empty");
+            for age in 0..6 {
+                store
+                    .record(Recording {
+                        hash: &format!("entry {age}"),
+                        kind: Kind::Text,
+                        text: &format!("entry {age}"),
+                        html: None,
+                        app: None,
+                        app_path: None,
+                        bytes: 7,
+                        now: now_seconds() - age,
+                    })
+                    .expect("records");
+            }
+        }
+
+        cap_rows(&clipboard, 2);
+
+        assert_eq!(clipboard.store().count().expect("counts"), 2);
+    }
+
+    #[test]
+    fn a_cap_of_zero_does_not_touch_the_history() {
+        // What every existing history starts at, and what somebody chooses
+        // when they want everything kept.
+        let clipboard = Clipboard::for_test();
+        {
+            let store = clipboard.store();
+            store.clear(true).expect("starts empty");
+            for age in 0..4 {
+                store
+                    .record(Recording {
+                        hash: &format!("kept {age}"),
+                        kind: Kind::Text,
+                        text: "kept",
+                        html: None,
+                        app: None,
+                        app_path: None,
+                        bytes: 4,
+                        now: now_seconds() - age,
+                    })
+                    .expect("records");
+            }
+        }
+
+        cap_rows(&clipboard, 0);
+
+        assert_eq!(clipboard.store().count().expect("counts"), 4);
+    }
+
+    /// The window says which row it is on by asking for it, and the cap reads
+    /// that rather than deleting whatever is oldest.
+    #[test]
+    fn the_cap_spares_the_row_the_window_is_showing() {
+        let clipboard = Clipboard::for_test();
+        let oldest = {
+            let store = clipboard.store();
+            store.clear(true).expect("starts empty");
+            let oldest = store
+                .record(Recording {
+                    hash: "on screen",
+                    kind: Kind::Text,
+                    text: "on screen",
+                    html: None,
+                    app: None,
+                    app_path: None,
+                    bytes: 9,
+                    now: now_seconds() - 10_000,
+                })
+                .expect("records");
+            for age in 0..5 {
+                store
+                    .record(Recording {
+                        hash: &format!("later {age}"),
+                        kind: Kind::Text,
+                        text: "later",
+                        html: None,
+                        app: None,
+                        app_path: None,
+                        bytes: 5,
+                        now: now_seconds() - age,
+                    })
+                    .expect("records");
+            }
+            oldest
+        };
+
+        clipboard.now_viewing(oldest);
+        cap_rows(&clipboard, 2);
+
+        assert!(
+            clipboard.store().get(oldest).expect("reads").is_some(),
+            "the cap deleted the row somebody was reading"
+        );
+    }
+
+    #[test]
+    fn the_default_rules_bound_nothing_until_they_are_set() {
+        // Same reasoning as `enabled`: acting on a limit nobody has read yet
+        // would be deleting history under a setting that may not exist.
+        assert_eq!(Rules::default().max_entries, 0);
+        assert_eq!(Rules::default().retain_days, 0);
+        assert!(!Rules::default().encrypt_images);
     }
 
     #[test]

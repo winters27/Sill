@@ -1503,7 +1503,18 @@ pub fn run() {
                     ignored_apps: prefs.clipboard.ignored_apps.clone(),
                     secrets: prefs.clipboard.secrets,
                     retain_days: prefs.clipboard.retain_days,
+                    max_entries: prefs.clipboard.max_entries,
+                    encrypt_images: prefs.clipboard.encrypt_images,
                 });
+
+                // The count cap, once, beside the retention prune above. Both
+                // run again from the recording path; this is for the history
+                // that grew past a limit set while Sill was not running.
+                match history.store().trim_to(prefs.clipboard.max_entries, None) {
+                    Ok(0) => {}
+                    Ok(gone) => crate::say!("trimmed {gone} clipboard entries past the limit"),
+                    Err(err) => crate::say!("could not trim the clipboard: {err}"),
+                }
                 if prefs.clipboard.enabled {
                     clipboard::monitor::watch(&handle, &history);
                 }

@@ -519,6 +519,12 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "clipboard",
         "Clipboard History",
+        "Keep at most",
+        "limit count cap entries maximum number trim oldest",
+    ),
+    s(
+        "clipboard",
+        "Clipboard History",
         "Things that look like passwords",
         "secret token api key credential password redact skip private",
     ),
@@ -527,6 +533,12 @@ pub const SETTINGS: &[Setting] = &[
         "Clipboard History",
         "Keep images",
         "screenshots pictures clipboard",
+    ),
+    s(
+        "clipboard",
+        "Clipboard History",
+        "Lock stored pictures",
+        "encrypt encryption secure protect screenshots pictures at rest account",
     ),
     s(
         "clipboard",

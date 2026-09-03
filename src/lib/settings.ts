@@ -202,7 +202,11 @@ export interface ClipboardHistorySettings {
   enabled: boolean;
   /** Days an unpinned entry is kept. Zero keeps everything. */
   retainDays: number;
+  /** How many unpinned entries are kept. Zero keeps as many as arrive. */
+  maxEntries: number;
   keepImages: boolean;
+  /** Lock stored pictures to this Windows account. */
+  encryptImages: boolean;
   /** Applications whose copies are never recorded. */
   ignoredApps: string[];
   /** What to do with something that looks like a credential. */
