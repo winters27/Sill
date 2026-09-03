@@ -871,6 +871,17 @@ pub fn merge(
 /// Returns nothing when file search is switched off, because then there is no
 /// problem to report: somebody turned it off on purpose.
 #[tauri::command]
+/// Finishes a path somebody is part way through typing.
+///
+/// Reads one folder, which is why it is a command rather than something the
+/// window works out: the window cannot see the disk, and asking the file
+/// index instead would answer with names from anywhere rather than from the
+/// folder that was actually typed.
+pub(crate) fn complete_path(typed: String) -> Option<String> {
+    crate::complete::complete(&typed)
+}
+
+#[tauri::command]
 pub(crate) async fn file_search_missing(
     state: State<'_, PrefsState>,
     catalog: State<'_, CatalogState>,

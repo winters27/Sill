@@ -657,8 +657,12 @@ fn icon_without_overlay(path: &str) -> Option<windows::Win32::UI::WindowsAndMess
 /// Written by hand rather than calling `ExpandEnvironmentStringsW`, which
 /// would mean another `windows` crate feature, and feature accumulation in
 /// that crate has already aborted this build once.
+///
+/// Shared rather than private, because typing a path into the launcher
+/// expands the same variables for the same reason, and two of these would
+/// drift the first time one learned something the other did not.
 #[cfg(windows)]
-fn expand_env(input: &str) -> String {
+pub fn expand_env(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut rest = input;
 

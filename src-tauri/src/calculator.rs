@@ -27,6 +27,13 @@ pub struct Answer {
 /// This runs on every keystroke. fend can be asked things that take a very
 /// long time (`10^10^10`), and a launcher that stops accepting input while it
 /// works them out is broken in a way a slightly late answer is not.
+///
+/// A test that asks whether an expression evaluates passes its own, far
+/// longer, deadline to [`within`]. Forty milliseconds of wall clock is a
+/// statement about the machine as much as about the expression: the same test
+/// binary run twice in a row, unchanged, gave 16 passed and then 5 failed
+/// while three compilers were running beside it. Only the test that is
+/// actually about giving up uses this one.
 const BUDGET: Duration = Duration::from_millis(40);
 
 /// Evaluates `input`, or returns `None` when it is not a calculation.
@@ -35,6 +42,14 @@ const BUDGET: Duration = Duration::from_millis(40);
 /// search. Anything ambiguous is refused rather than guessed at, because a
 /// wrong number at the top of the list is worse than no number.
 pub fn evaluate(input: &str) -> Option<Answer> {
+    within(input, BUDGET)
+}
+
+/// The same, with the deadline named.
+///
+/// Exists so a correctness test can ask whether something evaluates without
+/// also asking whether this machine was busy at the time.
+fn within(input: &str, budget: Duration) -> Option<Answer> {
     let trimmed = input.trim();
     if !looks_like_a_calculation(trimmed) {
         return None;
@@ -45,7 +60,7 @@ pub fn evaluate(input: &str) -> Option<Answer> {
     // right for a REPL and wrong for a launcher row.
     context.set_exchange_rate_handler_v2(NoRates);
 
-    let deadline = Deadline::new(BUDGET);
+    let deadline = Deadline::new(budget);
     let prepared = apply_percentage_convention(trimmed);
     let result = fend_core::evaluate_with_interrupt(&prepared, &mut context, &deadline).ok()?;
 
@@ -323,7 +338,7 @@ mod tests {
     use super::*;
 
     fn text_of(input: &str) -> String {
-        evaluate(input)
+        answers(input)
             .unwrap_or_else(|| panic!("{input:?} should evaluate"))
             .text
     }
@@ -342,7 +357,7 @@ mod tests {
             "m",
             "settings",
         ] {
-            assert!(evaluate(query).is_none(), "{query:?} should not calculate");
+            assert!(answers(query).is_none(), "{query:?} should not calculate");
         }
     }
 
@@ -357,7 +372,7 @@ mod tests {
             "my-project-2024",
             "docker-compose-override",
         ] {
-            assert!(evaluate(query).is_none(), "{query:?} should not calculate");
+            assert!(answers(query).is_none(), "{query:?} should not calculate");
         }
     }
 
@@ -384,6 +399,18 @@ mod tests {
         assert_eq!(text_of("0xff + 1"), "0x100");
         assert_eq!(text_of("255 to hex"), "ff");
         assert_eq!(text_of("10 to binary"), "1010");
+    }
+
+    /// Evaluate with a deadline long enough that a busy machine cannot fail
+    /// the assertion.
+    ///
+    /// Every test below asks whether an expression *is* a calculation. That
+    /// question has nothing to do with how loaded this machine is, and the
+    /// product deadline of forty milliseconds made it a race: the same binary
+    /// run twice gave 16 passed and then 5 failed. The one test that is about
+    /// giving up deliberately uses the real budget instead.
+    fn answers(input: &str) -> Option<Answer> {
+        within(input, Duration::from_secs(5))
     }
 
     #[test]
@@ -425,15 +452,15 @@ mod tests {
     fn an_answer_that_repeats_the_question_is_not_shown() {
         // fend echoes what it cannot reduce, and a row saying 2024 equals
         // 2024 is noise.
-        assert!(evaluate("2024").is_none());
-        assert!(evaluate("0xff").is_none());
+        assert!(answers("2024").is_none());
+        assert!(answers("0xff").is_none());
     }
 
     #[test]
     fn nonsense_refuses_rather_than_erroring_into_the_list() {
-        assert!(evaluate("2 +").is_none());
-        assert!(evaluate("frobnicate(2)").is_none());
-        assert!(evaluate("1/0").is_none());
+        assert!(answers("2 +").is_none());
+        assert!(answers("frobnicate(2)").is_none());
+        assert!(answers("1/0").is_none());
     }
 
     #[test]
@@ -449,7 +476,7 @@ mod tests {
     fn currency_is_refused_rather_than_answered_with_a_stale_rate() {
         // A launcher should not make a network call on every keystroke, and
         // a wrong exchange rate is worse than none.
-        assert!(evaluate("100 USD to EUR").is_none());
+        assert!(answers("100 USD to EUR").is_none());
     }
 
     #[test]
@@ -518,7 +545,7 @@ mod tests {
             "1024 bytes in kib",
         ] {
             assert!(
-                evaluate(input).is_some(),
+                answers(input).is_some(),
                 "{input:?} is a calculation and answered nothing"
             );
         }
@@ -574,9 +601,9 @@ mod tests {
             "one-off",
         ] {
             assert!(
-                evaluate(input).is_none(),
+                answers(input).is_none(),
                 "{input:?} is not a calculation and answered {:?}",
-                evaluate(input).map(|a| a.text)
+                answers(input).map(|a| a.text)
             );
         }
     }

@@ -13,6 +13,7 @@ pub mod capture;
 pub mod catalog;
 pub mod clipboard;
 pub mod commands;
+pub mod complete;
 pub mod dictation;
 pub mod emoji;
 pub mod everything_ipc;
@@ -1594,6 +1595,7 @@ pub fn run() {
             commands::system::quit_app,
             commands::search::search_commands,
             commands::search::search_elsewhere,
+            commands::search::complete_path,
             commands::search::browser_profiles,
             commands::search::search_engines,
             commands::search::default_browser,

@@ -57,6 +57,7 @@
     aiRefusePending,
     aiClear,
     aiReady,
+    completePath as finishPath,
     aiTranscript,
     forgetPreviews,
     searchAppVolume,
@@ -2775,6 +2776,25 @@
     }
   }
 
+  /**
+   * Finishes the path in the field, if the folder has anything to add.
+   *
+   * Silent when there is nothing to add, which is the ordinary case while
+   * somebody is still typing a folder that does not exist yet. A message
+   * for that would fire on most key presses.
+   */
+  async function completePath() {
+    const typed = query.trim();
+    const done = await finishPath(typed);
+
+    // Compared against what is in the field now, not against what was sent.
+    // Reading a folder takes a moment, and replacing the field with the
+    // answer to an older question would undo whatever was typed meanwhile.
+    if (!done || query.trim() !== typed) return;
+
+    query = done;
+  }
+
   async function askAi(question: string) {
     let ready;
     try {
@@ -3155,7 +3175,19 @@
         // closed the launcher.
         event.preventDefault();
 
-        if (mode === "root" && query.trim()) void askAi(query.trim());
+        /*
+         * A path finishes itself; anything else is a question for the model.
+         *
+         * Tab on `C:\Users\Bra` means the same thing here as it does in
+         * every shell and every address bar, and somebody typing a path is
+         * not asking anything. Asked first for that reason: the completion
+         * refuses everything that is not a path, so the model still gets
+         * every query that was one.
+         */
+        if (mode === "root" && query.trim()) {
+          if (isPath(query.trim())) void completePath();
+          else void askAi(query.trim());
+        }
       }
 
       return;

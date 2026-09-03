@@ -323,6 +323,19 @@ export interface AiReady {
  * press Tab and then saying "no provider" wastes the keystroke and the
  * sentence they typed.
  */
+/**
+  * Finishes a path somebody is part way through typing.
+  *
+  * `null` when the folder has nothing to add, which is the ordinary answer
+  * while a folder that does not exist yet is being typed.
+  *
+  * Silent on failure for the same reason the searches are: this is a key
+  * press, and the cost of a failure is that Tab does nothing once.
+  */
+export function completePath(typed: string): Promise<string | null> {
+  return invoke<string | null>("complete_path", { typed }).catch(silently(null));
+}
+
 export function aiReady(): Promise<AiReady> {
   return invoke<AiReady>("ai_ready");
 }
