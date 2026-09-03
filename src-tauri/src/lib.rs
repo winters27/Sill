@@ -978,7 +978,7 @@ fn watch_focus(app: &AppHandle, dismiss_on_blur: bool) {
             // way this window goes, so a dismissal that skipped it would mean
             // the launcher almost never slept.
             let _ = handle.hide();
-            crate::sleep::sleep_soon(&handle);
+            summon::went_away(&handle);
         }
     });
 }
@@ -1172,6 +1172,9 @@ pub fn run() {
         // to Claude Code, which on most days is never.
         .manage(ai::mcp::link::Link::new())
         .manage(commands::system::Marking::default())
+        // Nothing is asked at rest: a lock around a `None` until somebody
+        // presses Enter on a row that would end the session.
+        .manage(system::Asked::default())
         .manage(activity::Activity::default())
         .manage(meter::Meter::default())
         // Empty until somebody opens the store, and empty again the moment

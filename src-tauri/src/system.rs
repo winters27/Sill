@@ -186,6 +186,307 @@ pub fn lock() -> Result<(), String> {
     Err("Only Windows has this.".to_string())
 }
 
+// ------------------------------------------------------------------- power
+
+/// One of the ways a session or a machine can be ended.
+///
+/// An enum rather than five row ids compared as strings, because these are the
+/// only things the launcher does that nothing can take back, and the compiler
+/// should be what holds the list. A sixth stops both the question and the deed
+/// from compiling until somebody has decided what each of them says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Power {
+    Sleep,
+    Hibernate,
+    SignOut,
+    Restart,
+    Shutdown,
+}
+
+/// How soon after the question an answer is too soon to be one.
+///
+/// Enter repeats while it is held, and the first repeat lands about thirty
+/// milliseconds after the press that asked. Without a floor, resting a finger
+/// on the key over a row called "Shut Down" would ask and answer in the same
+/// breath, which is the exact thing the question exists to prevent. Every
+/// too-early press restarts the wait, so a key held for a minute never matures
+/// into an answer.
+pub const SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// How long a question stays open.
+///
+/// Short, because it is asked in a launcher rather than in a dialog: the row
+/// is on screen, the answer is the next key, and a question still open half a
+/// minute later belongs to somebody who has gone to do something else. Nothing
+/// happens when it lapses. The next press asks it again.
+pub const STILL_ASKED: std::time::Duration = std::time::Duration::from_secs(10);
+
+impl Power {
+    /// Every one of them, which is what the rows are built from.
+    pub const ALL: &'static [Self] = &[
+        Self::Sleep,
+        Self::Hibernate,
+        Self::SignOut,
+        Self::Restart,
+        Self::Shutdown,
+    ];
+
+    /// The row this belongs to, and what the action dispatches on.
+    ///
+    /// Under `system.power.` so that reading a row id says how much of the
+    /// machine it reaches. The prefix is not matched anywhere: these are
+    /// exactly five and naming them one at a time is what makes an id nobody
+    /// wrote here fail to be a power command at all.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Sleep => "system.power.sleep",
+            Self::Hibernate => "system.power.hibernate",
+            Self::SignOut => "system.power.signout",
+            Self::Restart => "system.power.restart",
+            Self::Shutdown => "system.power.shutdown",
+        }
+    }
+
+    /// Which one a row names, or `None` for a row that is not one of these.
+    ///
+    /// The gate as well as the lookup. Everything that runs a system row asks
+    /// this first, so a row that answers `None` cannot reach the code that
+    /// stops to ask, and one that answers `Some` cannot reach the code that
+    /// does not.
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|power| power.id() == id)
+    }
+
+    /// The question, in the words of the key that answers it.
+    ///
+    /// Naming the key rather than asking "are you sure" because the answer is
+    /// a keystroke and somebody who has just pressed Enter needs to be told
+    /// that Enter is also the answer. Anything else they do, including walking
+    /// away, leaves the machine alone.
+    pub fn question(self) -> &'static str {
+        match self {
+            Self::Sleep => "Press Enter again to sleep",
+            Self::Hibernate => "Press Enter again to hibernate",
+            Self::SignOut => "Press Enter again to sign out",
+            Self::Restart => "Press Enter again to restart",
+            Self::Shutdown => "Press Enter again to shut down",
+        }
+    }
+
+    /// What is said once it is under way.
+    ///
+    /// Present tense, unlike everything else the launcher reports, and that is
+    /// honest rather than sloppy: the others are finished by the time the line
+    /// is written and this one is a request Windows has accepted and is still
+    /// carrying out.
+    pub fn under_way(self) -> &'static str {
+        match self {
+            Self::Sleep => "Sleeping",
+            Self::Hibernate => "Hibernating",
+            Self::SignOut => "Signing out",
+            Self::Restart => "Restarting",
+            Self::Shutdown => "Shutting down",
+        }
+    }
+
+    /// Does it.
+    ///
+    /// Nothing here asks anything. [`Asked`] is the asking, and this is only
+    /// ever reached once it has been answered.
+    #[cfg(windows)]
+    pub fn apply(self) -> Result<(), String> {
+        match self {
+            Self::Sleep => suspend(false),
+            Self::Hibernate => suspend(true),
+            Self::SignOut => end_the_session(&["/l"]),
+            Self::Restart => end_the_session(&["/r", "/t", "0"]),
+            Self::Shutdown => end_the_session(&["/s", "/t", "0"]),
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn apply(self) -> Result<(), String> {
+        Err("Only Windows has this.".to_string())
+    }
+}
+
+/// Suspends the machine, to memory or to disk.
+///
+/// On a thread of its own and never waited on, because `SetSuspendState` does
+/// not return until the machine wakes up again, which may be tomorrow. Waiting
+/// for it would hold the launcher's answer open across the sleep and leave the
+/// window still saying "Sleeping" on a machine that has been awake for hours.
+///
+/// What the thread does with the answer is write it down. There is nobody left
+/// to tell by then, and the two ways this fails quietly are worth having a
+/// line about: hibernation turned off, and a driver refusing to suspend.
+#[cfg(windows)]
+fn suspend(hibernate: bool) -> Result<(), String> {
+    std::thread::spawn(move || {
+        // SAFETY: three flags in and a success code out. It touches nothing
+        // this process owns and borrows nothing.
+        //
+        // The middle flag is documented as having no effect and is passed as
+        // false rather than guessed at.
+        let went =
+            unsafe { windows::Win32::System::Power::SetSuspendState(hibernate, false, false) };
+
+        if !went {
+            crate::say!(
+                "the machine would not {}",
+                if hibernate { "hibernate" } else { "sleep" }
+            );
+        }
+    });
+
+    Ok(())
+}
+
+/// Ends the session, through Windows' own shutdown command.
+///
+/// Rather than `ExitWindowsEx`, which refuses unless the shutdown privilege
+/// has first been enabled on the process token: `shutdown.exe` acquires it for
+/// itself, and it is also what puts up the screen listing the programs that
+/// are blocking, which is the part somebody needs when it does not work.
+///
+/// Named by its full path rather than found on `%PATH%`. A launcher must not
+/// run whatever happens to be first on the path for something that cannot be
+/// undone.
+///
+/// Waited for, unlike a suspend. `/t 0` returns as soon as Windows has
+/// accepted the request, and the exit code is the only place a refusal appears.
+#[cfg(windows)]
+fn end_the_session(arguments: &[&str]) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    // A console program started from a windowed one flashes a window unless it
+    // is told to open none.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+
+    let said = std::process::Command::new(format!(r"{root}\System32\shutdown.exe"))
+        .args(arguments)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|err| format!("could not ask Windows to do that: {err}"))?;
+
+    if said.status.success() {
+        return Ok(());
+    }
+
+    // Whatever it printed, because that is where the reason is: no privilege,
+    // a shutdown already pending, hibernation turned off.
+    let why = String::from_utf8_lossy(&said.stderr);
+    let why = why.trim();
+
+    Err(if why.is_empty() {
+        "Windows refused.".to_string()
+    } else {
+        why.to_string()
+    })
+}
+
+/// What a press on a power row means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Press {
+    /// Nothing has been asked about this one, so ask.
+    Asks,
+    /// Too soon after the question to be the answer to it.
+    TooSoon,
+    /// Asked, waited, and pressed again.
+    Answers,
+}
+
+/// What a press means, given what was asked and when.
+///
+/// Its own function, taking the moment rather than reading it, so the one rule
+/// worth proving can be proved without a clock, a window, or a machine to shut
+/// down: no single press ever means yes.
+pub fn press_means(
+    asked: Option<(Power, std::time::Instant)>,
+    about: Power,
+    now: std::time::Instant,
+) -> Press {
+    let Some((open, when)) = asked else {
+        return Press::Asks;
+    };
+
+    // A question about something else. Letting it answer for this one is how
+    // "sleep" ends up shutting the machine down.
+    if open != about {
+        return Press::Asks;
+    }
+
+    match now.saturating_duration_since(when) {
+        waited if waited < SETTLE => Press::TooSoon,
+        waited if waited <= STILL_ASKED => Press::Answers,
+        // Long enough ago to belong to a different visit to the launcher.
+        _ => Press::Asks,
+    }
+}
+
+/// The power command that has been asked about and is waiting for an answer.
+///
+/// One at a time, because the question is about the row in front of somebody
+/// and there is only ever one of those.
+///
+/// Managed state rather than a static, which is rule 2, and also what lets a
+/// test hold one of its own instead of reaching into whatever the running
+/// launcher happens to have in it.
+///
+/// Idle cost is a lock around a `None`. Nothing wakes up and nothing expires
+/// on a timer: how long ago the question was asked is worked out from the
+/// stamp at the moment the next press arrives, and if no press ever arrives
+/// there is nothing to work out.
+#[derive(Default)]
+pub struct Asked {
+    open: std::sync::Mutex<Option<(Power, std::time::Instant)>>,
+}
+
+impl Asked {
+    /// What this press means, remembering it for the next one.
+    pub fn press(&self, about: Power) -> Press {
+        self.pressed_at(about, std::time::Instant::now())
+    }
+
+    /// The same, with the moment given rather than read.
+    pub fn pressed_at(&self, about: Power, now: std::time::Instant) -> Press {
+        let mut open = match self.open.lock() {
+            Ok(open) => open,
+            // A panic somewhere else must not turn this into a lock nobody can
+            // take. Refusing here would leave every power row inert.
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        let means = press_means(*open, about, now);
+
+        *open = match means {
+            // Stamped now rather than left where it was, so the repeats of a
+            // held key keep pushing the answer out of reach instead of walking
+            // up to it.
+            Press::Asks | Press::TooSoon => Some((about, now)),
+            // Spent. Whatever comes next is a new question.
+            Press::Answers => None,
+        };
+
+        means
+    }
+
+    /// Forgets whatever was asked.
+    ///
+    /// Called when the launcher goes away, because the question was asked of
+    /// somebody looking at a row and there is nobody looking any more. Without
+    /// it, asking about "Shut Down", dismissing, and coming back to press
+    /// Enter once would shut the machine down on a single press.
+    pub fn forget(&self) {
+        match self.open.lock() {
+            Ok(mut open) => *open = None,
+            Err(poisoned) => *poisoned.into_inner() = None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------- plumbing
 
 /// Runs one call against the default output device.
@@ -526,6 +827,192 @@ mod tests {
 
         set_dark(before).expect("put back");
         assert_eq!(dark(), Some(before));
+    }
+
+    /// The five rows that cannot be taken back, and the question in front.
+    ///
+    /// Everything here is about the question rather than about the deed. The
+    /// deed is `Power::apply`, and it cannot be run by a test at all: passing
+    /// would mean the machine it ran on had switched off. So what is proved is
+    /// the thing that stands between a mistyped query and that: no single
+    /// press, and no run of presses a held key can produce, ever means yes.
+    mod a_power_command {
+        use super::*;
+        use std::time::{Duration, Instant};
+
+        #[test]
+        fn asks_rather_than_doing_anything_on_the_first_press() {
+            let asked = Asked::default();
+
+            for power in Power::ALL {
+                assert_eq!(
+                    asked.press(*power),
+                    Press::Asks,
+                    "{power:?} went ahead on the press that should have asked",
+                );
+            }
+        }
+
+        /// The property the whole row exists to have.
+        ///
+        /// A counter stands in for the machine, because the branch this
+        /// mirrors is the one in `power_once_answered` that calls `apply`, and
+        /// a test that called the real one would pass by switching off the
+        /// computer it was running on.
+        #[test]
+        fn a_mistyped_query_cannot_reach_the_machine() {
+            let asked = Asked::default();
+            let mut done = 0;
+
+            // Somebody types something that happens to land on "Shut Down" and
+            // presses Enter, then gives up and tries another one.
+            for power in Power::ALL {
+                if asked.press(*power) == Press::Answers {
+                    done += 1;
+                }
+            }
+
+            assert_eq!(done, 0, "a first press ran a power command");
+        }
+
+        #[test]
+        fn is_run_by_the_second_press_and_not_the_first() {
+            let asked = Asked::default();
+            let at = Instant::now();
+
+            assert_eq!(asked.pressed_at(Power::Shutdown, at), Press::Asks);
+            assert_eq!(
+                asked.pressed_at(Power::Shutdown, at + Duration::from_secs(1)),
+                Press::Answers,
+            );
+        }
+
+        #[test]
+        fn is_asked_about_again_once_it_has_been_answered() {
+            // Otherwise one answer would stand for the rest of the session and
+            // the next press would go straight through.
+            let asked = Asked::default();
+            let at = Instant::now();
+
+            asked.pressed_at(Power::Restart, at);
+            assert_eq!(
+                asked.pressed_at(Power::Restart, at + Duration::from_secs(1)),
+                Press::Answers,
+            );
+            assert_eq!(
+                asked.pressed_at(Power::Restart, at + Duration::from_secs(2)),
+                Press::Asks,
+                "the answer was spent and still let a single press through",
+            );
+        }
+
+        #[test]
+        fn does_not_take_the_repeats_of_a_held_key_for_an_answer() {
+            /*
+             * Enter repeats about thirty times a second while it is held, and
+             * every repeat arrives as another press on the selected row. A
+             * question that only checked "has it been asked already" would be
+             * answered by the first of them, roughly thirty milliseconds after
+             * it was asked, by somebody who has not let go of the key yet.
+             */
+            let asked = Asked::default();
+            let at = Instant::now();
+
+            assert_eq!(asked.pressed_at(Power::Shutdown, at), Press::Asks);
+
+            for repeat in 1..=200 {
+                let held = at + Duration::from_millis(repeat * 30);
+
+                assert_eq!(
+                    asked.pressed_at(Power::Shutdown, held),
+                    Press::TooSoon,
+                    "a key held for {} ms shut the machine down",
+                    repeat * 30,
+                );
+            }
+        }
+
+        #[test]
+        fn a_question_nobody_answered_is_asked_again_rather_than_left_open() {
+            let asked = Asked::default();
+            let at = Instant::now();
+
+            asked.pressed_at(Power::Shutdown, at);
+
+            // Long enough afterwards to be a different visit to the launcher.
+            assert_eq!(
+                asked.pressed_at(Power::Shutdown, at + STILL_ASKED + Duration::from_secs(1)),
+                Press::Asks,
+            );
+        }
+
+        #[test]
+        fn one_question_never_answers_for_another() {
+            // Asking about sleeping and then pressing Enter on the row below
+            // it must not inherit the open question. That is how "sleep" ends
+            // up shutting the machine down.
+            let asked = Asked::default();
+            let at = Instant::now();
+
+            asked.pressed_at(Power::Sleep, at);
+
+            assert_eq!(
+                asked.pressed_at(Power::Shutdown, at + Duration::from_secs(1)),
+                Press::Asks,
+            );
+            assert_eq!(
+                asked.pressed_at(Power::Shutdown, at + Duration::from_secs(2)),
+                Press::Answers,
+                "the new question could not be answered either",
+            );
+        }
+
+        #[test]
+        fn the_launcher_going_away_takes_the_question_with_it() {
+            // Dismissing and coming back is a new visit. Without this, asking
+            // about "Shut Down", pressing Escape, and finding the row again a
+            // moment later would need one press rather than two.
+            let asked = Asked::default();
+            let at = Instant::now();
+
+            asked.pressed_at(Power::Shutdown, at);
+            asked.forget();
+
+            assert_eq!(
+                asked.pressed_at(Power::Shutdown, at + Duration::from_secs(1)),
+                Press::Asks,
+            );
+        }
+
+        #[test]
+        fn every_one_of_them_has_a_row_of_its_own() {
+            let mut seen = std::collections::HashSet::new();
+
+            for power in Power::ALL {
+                assert!(
+                    power.id().starts_with("system.power."),
+                    "{power:?} is filed somewhere else: {}",
+                    power.id(),
+                );
+                assert!(seen.insert(power.id()), "two of them share {}", power.id());
+                assert_eq!(Power::from_id(power.id()), Some(*power));
+                assert!(!power.question().is_empty());
+                assert!(!power.under_way().is_empty());
+            }
+
+            assert_eq!(seen.len(), 5, "there are five ways to end a session");
+        }
+
+        #[test]
+        fn a_row_that_is_not_one_of_them_is_not_one_of_them() {
+            // The gate as well as the lookup: a row that answers `None` here
+            // never reaches the asking, so a switch that got a power id by
+            // accident would be flipped rather than questioned.
+            assert_eq!(Power::from_id("system.lock"), None);
+            assert_eq!(Power::from_id("system.mute"), None);
+            assert_eq!(Power::from_id("system.power"), None);
+            assert_eq!(Power::from_id(""), None);
+        }
     }
 }
 

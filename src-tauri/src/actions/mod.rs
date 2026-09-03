@@ -433,6 +433,21 @@ impl Action for ToggleSystem {
     }
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        /*
+         * Asked about first, and only these are.
+         *
+         * Everything else on this list is one keystroke to put back: the
+         * volume goes the other way, a radio goes back on, the theme goes back
+         * to light. Sleeping, signing out, restarting and switching off are
+         * not, and the second of them takes whatever was unsaved with it.
+         *
+         * The gate is `from_id`, so a row that is not one of the five cannot
+         * reach the asking and one that is cannot reach the line below it.
+         */
+        if let Some(power) = crate::system::Power::from_id(&object.target) {
+            return power_once_answered(ctx, power);
+        }
+
         // Each says what it did rather than what it was asked to do, because
         // "Volume 60%" is the useful sentence and "Turned the volume up" is
         // not, and it stays true if something else changed it in between.
@@ -699,6 +714,37 @@ pub(crate) const RADIO: &str = "system.radio:";
 
 /// What an audio output row's id starts with, before the device's own.
 pub(crate) const AUDIO_OUTPUT: &str = "system.audio.output:";
+
+/// Runs a power command, but never on the press that asked about it.
+///
+/// The launcher deliberately stays open while a question is open. That is what
+/// makes a second press possible at all, and it is also the answer to "did it
+/// hear me": the row is still there with the question written under it.
+///
+/// The same gate covers the model, which reaches actions through this registry
+/// like everything else. Being told to shut the machine down, and having asked
+/// its own permission card, it still gets a question back rather than a
+/// shutdown, and it has to decide to say yes a second time.
+fn power_once_answered(ctx: &ActionCtx, power: crate::system::Power) -> Result<Outcome, String> {
+    use crate::system::Press;
+
+    match ctx.app.state::<crate::system::Asked>().press(power) {
+        // A press that came too soon is the repeat of a held key rather than
+        // an answer, and repeating the question is the whole of the response
+        // to it: nothing has changed, and the question is still open.
+        Press::Asks | Press::TooSoon => Ok(Outcome::done(power.question())),
+
+        Press::Answers => {
+            power.apply()?;
+
+            // The screen is about to belong to a sign-in prompt or to nothing
+            // at all. Sitting on top of it until then helps nobody.
+            crate::dismiss_main(&ctx.app);
+
+            Ok(Outcome::done(power.under_way()))
+        }
+    }
+}
 
 fn run_system(id: &str) -> Result<String, String> {
     use crate::system;

@@ -716,6 +716,22 @@ fn system_commands() -> Vec<CommandRecord> {
      * second smallest is the right one. Size does not say which is which.
      */
     let bluetooth = format!(r"{root}\System32\bthprops.cpl,2");
+    /*
+     * Two marks for five rows, and which row gets which is the meaning.
+     *
+     * `shell32.dll,27` is the red power symbol Windows has used for ending a
+     * session since it had a Start menu, and `shell32.dll,25` is the moon over
+     * a monitor it uses for standby. So the three rows that close everything
+     * wear the one that means stop and the two that put the machine down for a
+     * while wear the one that means it is coming back.
+     *
+     * Found by extracting them and looking, the way the Bluetooth index above
+     * had to be. There is no power icon anywhere in `imageres.dll`, which is
+     * where the rest of these come from, and the numbering of `shell32.dll` is
+     * not something to take on trust from a web page.
+     */
+    let power_icon = format!(r"{root}\System32\shell32.dll,27");
+    let standby = format!(r"{root}\System32\shell32.dll,25");
 
     let mut rows = vec![
         system_switch(
@@ -778,6 +794,71 @@ fn system_commands() -> Vec<CommandRecord> {
             &["lock", "away", "screen", "afk", "system"],
         ),
     ];
+
+    /*
+     * The five ways to end a session, each of which stops to ask first.
+     *
+     * Walked out of `Power::ALL` rather than written out, because the enum is
+     * what the action dispatches on and a row written here with an id nobody
+     * recognises is a row that does nothing. The match is exhaustive, so a
+     * sixth way to switch a machine off cannot be added to the enum and
+     * forgotten here: it stops compiling until it has a title and the words
+     * somebody would type to find it.
+     *
+     * The keywords are deliberately narrow. Every other row on this list takes
+     * whatever synonyms might help; these take the ones that mean this and
+     * nothing else, because a word that is loosely related brings a row that
+     * closes everything into a search that was about something else.
+     */
+    for power in crate::system::Power::ALL {
+        use crate::system::Power;
+
+        let (icon, title, subtitle, keywords): (&str, &str, &str, &[&str]) = match power {
+            Power::Sleep => (
+                &standby,
+                "Sleep",
+                "Suspends the machine, leaving everything open",
+                &["sleep", "suspend", "standby", "power", "system"],
+            ),
+            Power::Hibernate => (
+                &standby,
+                "Hibernate",
+                "Writes memory to disk and switches off",
+                &["hibernate", "hibernation", "suspend", "power", "system"],
+            ),
+            Power::SignOut => (
+                &power_icon,
+                "Sign Out",
+                "Closes everything and returns to the sign-in screen",
+                &[
+                    "sign out", "signout", "log off", "logoff", "log out", "logout", "session",
+                    "user", "power", "system",
+                ],
+            ),
+            Power::Restart => (
+                &power_icon,
+                "Restart",
+                "Closes everything and starts Windows again",
+                &["restart", "reboot", "power", "system"],
+            ),
+            Power::Shutdown => (
+                &power_icon,
+                "Shut Down",
+                "Closes everything and switches the machine off",
+                &[
+                    "shut down",
+                    "shutdown",
+                    "power off",
+                    "poweroff",
+                    "turn off",
+                    "power",
+                    "system",
+                ],
+            ),
+        };
+
+        rows.push(system_switch(power.id(), icon, title, subtitle, keywords));
+    }
 
     /*
      * One row per thing sound can come out of.
