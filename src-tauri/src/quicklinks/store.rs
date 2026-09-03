@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::json_store;
+
 /// One quicklink.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -69,24 +71,29 @@ pub fn data_dir(app: &AppHandle) -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("."))
 }
 
+/// How the file is kept. See `json_store` for what each part buys.
+///
+/// Readable, because a quicklink is a URL with a placeholder in it and editing
+/// twenty of them by hand is faster than clicking through twenty forms.
+const SCHEMA: json_store::Schema = json_store::Schema {
+    version: 1,
+    shape: json_store::Shape::Around,
+    layout: json_store::Layout::Readable,
+    unreadable: json_store::Unreadable::KeepAside,
+    what: "quicklinks",
+};
+
 /// Everything on disk, newest first.
 ///
-/// A missing or unreadable file is an empty list rather than an error: the
-/// launcher has to open either way, and a quicklink nobody has created yet is
+/// A missing file is an empty list rather than an error: the launcher has to
+/// open either way, and a quicklink nobody has created yet is
 /// indistinguishable from a file that has not been written.
 pub fn load(path: &Path) -> Vec<Quicklink> {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    serde_json::from_str(&text).unwrap_or_default()
+    json_store::load_list(path, &SCHEMA)
 }
 
 pub fn save(path: &Path, links: &[Quicklink]) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let text = serde_json::to_string_pretty(links).unwrap_or_else(|_| "[]".into());
-    std::fs::write(path, text)
+    json_store::save_atomic(path, &links, &SCHEMA)
 }
 
 #[cfg(test)]
@@ -112,5 +119,81 @@ mod tests {
     #[test]
     fn a_missing_file_is_an_empty_list_not_an_error() {
         assert!(load(Path::new("does-not-exist.json")).is_empty());
+    }
+
+    fn named(name: &str) -> Quicklink {
+        Quicklink {
+            id: name.to_string(),
+            name: name.to_string(),
+            link: "https://example.com".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Every quicklinks file on disk is a bare list with no version in it.
+    #[test]
+    fn a_file_written_before_versioning_still_reads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("quicklinks.json");
+        std::fs::write(
+            &file,
+            r#"[{"id":"a","name":"Search","link":"https://example.com/{query}"}]"#,
+        )
+        .expect("writes");
+
+        let all = load(&file);
+
+        assert_eq!(all.len(), 1, "the file this build inherits has to read");
+        assert_eq!(all[0].name, "Search");
+    }
+
+    /// This file was written in place, so a torn write lost every quicklink.
+    #[test]
+    fn saving_stages_the_write_and_leaves_nothing_behind() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("quicklinks.json");
+
+        save(&file, &[named("one")]).expect("saves");
+
+        assert_eq!(load(&file).len(), 1);
+        assert!(
+            !file.with_extension("json.partial").exists(),
+            "the staging file was left on disk"
+        );
+    }
+
+    /// Notepad writes a byte order mark, and this used to empty the file.
+    #[test]
+    fn a_file_saved_with_a_byte_order_mark_still_reads() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("quicklinks.json");
+        std::fs::write(
+            &file,
+            "\u{feff}[{\"id\":\"a\",\"name\":\"Hand edited\",\"link\":\"https://example.com\"}]",
+        )
+        .expect("writes");
+
+        let all = load(&file);
+
+        assert_eq!(
+            all.len(),
+            1,
+            "three bytes of encoding threw away every quicklink"
+        );
+        assert_eq!(all[0].name, "Hand edited");
+    }
+
+    /// A file this build cannot read is kept, not left for the next save.
+    #[test]
+    fn an_unreadable_file_is_kept_aside() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("quicklinks.json");
+        std::fs::write(&file, "[ not json").expect("writes");
+
+        assert!(load(&file).is_empty());
+        assert_eq!(
+            std::fs::read_to_string(file.with_extension("json.broken")).expect("kept aside"),
+            "[ not json"
+        );
     }
 }

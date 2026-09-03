@@ -8,7 +8,7 @@
 //! cargo test --manifest-path src-tauri/Cargo.toml \
 //!   --test probe_switch_rank -- --ignored --nocapture
 //! ```
-use sill_lib::registry::{self, Aliases, CommandRecord, Excluded, Frecency};
+use sill_lib::registry::{self, Aliases, Excluded, Frecency};
 
 const NOW: i64 = 1_756_000_000;
 
@@ -18,8 +18,9 @@ fn where_the_switches_land() {
     let path = std::path::PathBuf::from(std::env::var("APPDATA").unwrap())
         .join("app.winters.sill")
         .join("index-cache.json");
-    let raw = std::fs::read_to_string(&path).expect("an index to rank");
-    let cached: Vec<CommandRecord> = serde_json::from_str(&raw).expect("an index");
+    // Through the store rather than serde, so this reads whatever shape the
+    // running app writes rather than the one it wrote when this was authored.
+    let cached = registry::load_cache(&path);
 
     // Through `one_per_id`, the way the running app loads it. Without that
     // every builtin appears twice, because the cache holds them too, and a
@@ -85,9 +86,8 @@ fn what_ordinary_queries_return() {
     let path = std::path::PathBuf::from(std::env::var("APPDATA").unwrap())
         .join("app.winters.sill")
         .join("index-cache.json");
-    let raw = std::fs::read_to_string(&path).expect("an index to rank");
     let mut records = registry::builtins();
-    records.extend(serde_json::from_str::<Vec<CommandRecord>>(&raw).expect("an index"));
+    records.extend(registry::load_cache(&path));
     let records = registry::one_per_id(records);
 
     for query in [

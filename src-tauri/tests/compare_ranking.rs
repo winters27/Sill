@@ -17,8 +17,9 @@ use sill_lib::registry::{self, Aliases, CommandRecord, Excluded, Frecency};
 #[ignore]
 fn rank_the_real_index() {
     let path = std::env::var("INDEX").unwrap();
-    let raw = std::fs::read_to_string(&path).unwrap();
-    let records: Vec<CommandRecord> = serde_json::from_str(&raw).unwrap();
+    // Through the store rather than serde, so this reads whatever shape the
+    // running app writes rather than the one it wrote when this was authored.
+    let records: Vec<CommandRecord> = registry::load_cache(std::path::Path::new(&path));
     eprintln!("index: {} entries", records.len());
 
     for query in [

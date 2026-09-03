@@ -26,6 +26,7 @@ pub mod hyper;
 pub mod icons;
 pub mod input;
 pub mod job;
+pub mod json_store;
 pub mod lazy_windows;
 pub mod live;
 pub mod lnk;
