@@ -2085,16 +2085,25 @@ impl Action for CopyClipboardEntry {
         // rather than a reason to refuse the copy.
         let previous = ctx.app.clipboard().read_text().ok();
 
+        let mut board =
+            arboard::Clipboard::new().map_err(|err| format!("Could not copy: {err}"))?;
+
         // Sill's own write, so the watcher must not see it as a fresh copy and
         // move the row to the top of the list under the user's hands. The same
-        // reservation `clipboard_paste` makes.
-        if let Some(history) = ctx.app.try_state::<crate::clipboard::monitor::Clipboard>() {
+        // reservation `clipboard_paste` makes, and taken back when the write it
+        // was reserved for does not happen: a reservation nothing consumes
+        // swallows whatever the user really copies next.
+        let history = ctx.app.try_state::<crate::clipboard::monitor::Clipboard>();
+        if let Some(history) = &history {
             history.ignore_next();
         }
 
-        let mut board =
-            arboard::Clipboard::new().map_err(|err| format!("Could not copy: {err}"))?;
-        crate::clipboard::write::put(&mut board, &payload)?;
+        if let Err(err) = crate::clipboard::write::put(&mut board, &payload) {
+            if let Some(history) = &history {
+                history.forget_ignored();
+            }
+            return Err(err);
+        }
 
         let message = match payload {
             crate::clipboard::write::Payload::Image(_) => "Copied the picture",
