@@ -483,6 +483,11 @@ pub fn load() -> Vec<CommandRecord> {
 /// Only the first is a URL, so the others are spawned as processes.
 pub fn launch(command: &str) -> Result<(), String> {
     if command.starts_with("ms-settings:") {
+        // The catalogue is Sill's own, so this is uniformity rather than
+        // suspicion: one guard in front of every opener call is a rule the
+        // next person can follow, and an exception is a hole with a reason
+        // attached.
+        let command = crate::reach::url(command)?;
         return tauri_plugin_opener::open_url(command, None::<&str>).map_err(|e| e.to_string());
     }
 

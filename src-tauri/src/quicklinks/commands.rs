@@ -92,7 +92,17 @@ pub fn open_quicklink(app: AppHandle, id: String, query: String) -> Result<Strin
 }
 
 /// Hands the target to a specific application, or to the shell.
+///
+/// Checked first, and checked here rather than at the editor, because a
+/// quicklink does not have to have been typed by the person opening it:
+/// `import_quicklinks` reads a file anybody can write, and a `javascript:`
+/// link in one runs in whatever browser is default the moment somebody picks
+/// the row. The named-application branch needs it just as much; passing an
+/// address as an argument does not make it text.
 fn open(target: &str, open_with: &str) -> Result<(), String> {
+    let target = crate::reach::target(target)?;
+    let target = target.as_str();
+
     if open_with.trim().is_empty() {
         return tauri_plugin_opener::open_url(target, None::<&str>)
             .or_else(|_| tauri_plugin_opener::open_path(target, None::<&str>))

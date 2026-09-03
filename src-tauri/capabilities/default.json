@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "The floor every window needs: invoke, listen and emit, and the read-only window, path and app questions in the core set. Nothing here changes anything. Everything a window can act with is granted by a file named after what it is for, to the windows that were shown to reach it.",
   "windows": [
     "ask",
     "capture",
@@ -11,26 +11,5 @@
     "settings",
     "traymenu"
   ],
-  "permissions": [
-    "core:default",
-    "opener:default",
-    "global-shortcut:default",
-    "core:window:allow-hide",
-    "core:window:allow-show",
-    "core:window:allow-set-focus",
-    "clipboard-manager:allow-write-text",
-    "clipboard-manager:allow-read-text",
-    "core:webview:allow-create-webview-window",
-    "core:window:allow-center",
-    "core:window:allow-close",
-    "core:window:allow-minimize",
-    "core:window:allow-start-dragging",
-    "core:window:allow-toggle-maximize",
-    "dialog:allow-open",
-    "core:window:allow-set-size",
-    "core:window:allow-current-monitor",
-    "core:window:allow-scale-factor",
-    "core:window:allow-outer-position",
-    "clipboard-manager:allow-write-image"
-  ]
+  "permissions": ["core:default"]
 }

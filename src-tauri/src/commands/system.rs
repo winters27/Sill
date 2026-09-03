@@ -33,8 +33,9 @@ pub(crate) fn summon_with(app: AppHandle, command: Option<String>) {
 #[tauri::command]
 pub(crate) fn open_log() -> Result<(), String> {
     let path = log::path().ok_or_else(|| "The log has not been opened".to_string())?;
-    tauri_plugin_opener::open_path(path.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|e| e.to_string())
+    let path = crate::reach::target(&path.to_string_lossy())?;
+
+    tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Reveals the folder holding preferences, the index cache and the log.
@@ -43,8 +44,9 @@ pub(crate) fn open_data_folder(app: AppHandle) -> Result<(), String> {
     let dir = data_dir(&app);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-    tauri_plugin_opener::open_path(dir.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|e| e.to_string())
+    let dir = crate::reach::target(&dir.to_string_lossy())?;
+
+    tauri_plugin_opener::open_path(dir, None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Forgets which entries have been launched, so ranking starts over.
@@ -765,8 +767,14 @@ pub(crate) async fn restore_workspace(
      */
     let wanted = crate::profiles::missing(&profile, &crate::windowing::list());
 
+    // An arrangement is a saved file, and a saved file can be handed to
+    // somebody. Restoring one must not be a way of running an address.
     for path in &wanted {
-        if let Err(err) = tauri_plugin_opener::open_path(path, None::<&str>) {
+        let started = crate::reach::target(path).and_then(|path| {
+            tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|err| err.to_string())
+        });
+
+        if let Err(err) = started {
             crate::say!("workspace: could not start {path}: {err}");
         }
     }

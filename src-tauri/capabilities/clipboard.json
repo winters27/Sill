@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "clipboard",
+  "description": "Copying out of the interface: the copy button on a code block, which the launcher and the chat window both draw, and the one on a row of dictation history in settings. Writing text only. Nothing reads the clipboard from the frontend, because clipboard history is a Rust service and the frontend asks it rather than asking the system.",
+  "windows": ["ask", "main", "settings"],
+  "permissions": ["clipboard-manager:allow-write-text"]
+}

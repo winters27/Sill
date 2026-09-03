@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "file-picker",
+  "description": "The two windows with a button that opens a file picker: attaching a file to a question, and choosing a folder to index in settings. Opening only. Nothing saves through a dialog from the frontend, because the one export that does runs in Rust and Rust does not answer to this list.",
+  "windows": ["ask", "settings"],
+  "permissions": ["dialog:allow-open"]
+}

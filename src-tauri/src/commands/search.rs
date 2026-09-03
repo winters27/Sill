@@ -1034,6 +1034,10 @@ pub(crate) async fn index_folder(
 /// Opens a file or folder in its default application.
 #[tauri::command]
 pub(crate) async fn open_path(path: String) -> Result<(), String> {
+    // The extension host reaches this one, so the argument is whatever an
+    // extension put in an action, and an extension is third-party code.
+    let path = crate::reach::target(&path)?;
+
     tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|e| e.to_string())
 }
 

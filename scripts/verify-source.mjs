@@ -1250,6 +1250,53 @@ for (const file of sources("src-tauri/src")) {
   }
 }
 
+/*
+ * Nothing reaches the shell without going past `reach` first.
+ *
+ * `tauri_plugin_opener` hands a string to the operating system, and the
+ * operating system decides what a string means. `javascript:` runs in whatever
+ * browser is default, `file:` reads the disk, and Windows keeps discovering
+ * that one more of its own protocol handlers executes something. None of that
+ * is a problem while the string is Sill's; all of it is a problem the moment
+ * the string arrives in an imported quicklink, in an extension's action
+ * payload, or from a model that has just read a web page telling it what to
+ * open.
+ *
+ * There were six call sites and not one of them checked. The failure this
+ * catches is the seventh: a new one, written by somebody with no reason to
+ * know that opening is guarded, which compiles and works perfectly on every
+ * address anybody tries by hand.
+ *
+ * A literal `https://` passes without a guard, because a target the source
+ * spells out cannot be somebody else's text.
+ */
+{
+  const OPENS = /tauri_plugin_opener::open_(?:url|path)\(/g;
+
+  for (const file of sources("src-tauri/src")) {
+    const text = readFileSync(file, "utf8");
+
+    for (const found of text.matchAll(OPENS)) {
+      const before = text
+        .slice(0, found.index)
+        .split("\n")
+        .slice(-15)
+        .join("\n");
+      const argument = text.slice(found.index, found.index + 200);
+
+      if (before.includes("crate::reach::")) continue;
+      if (/\(\s*(?:format!\()?"https:\/\//.test(argument)) continue;
+
+      fail(
+        file,
+        lineOf(text, found.index),
+        "this opens something with no `crate::reach::url` or `crate::reach::target` " +
+          "above it, so a javascript:, data: or file: address reaches the shell",
+      );
+    }
+  }
+}
+
 const FONTS = /\.(woff2?|ttf|otf|eot)$/i;
 const tracked = spawnSync("git", ["ls-files"], { encoding: "utf8" });
 

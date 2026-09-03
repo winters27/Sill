@@ -100,11 +100,16 @@ impl Bridge for SillBridge {
     }
 
     fn open(&self, target: &str, with: Option<&str>) -> Result<(), String> {
+        // Third-party code asking the launcher to open something. An
+        // extension may legitimately open a file it wrote and a page it found,
+        // and neither of those is a scheme that runs.
+        let target = crate::reach::target(target)?;
+
         self.step_aside();
 
         // `open_path` handles both: given a URL it hands off to the shell the
         // same way, and unlike `open_url` it accepts the application argument.
-        tauri_plugin_opener::open_path(target, with)
+        tauri_plugin_opener::open_path(&target, with)
             .map_err(|err| format!("could not open {target}: {err}"))
     }
 

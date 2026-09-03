@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "markup",
+  "description": "The markup editor sizes itself to the image it was handed and then centres, which no other window does. Reading the monitor and the scale factor is already in the core set, so only the two calls that move the window are here.",
+  "windows": ["markup"],
+  "permissions": ["core:window:allow-set-size", "core:window:allow-center"]
+}
