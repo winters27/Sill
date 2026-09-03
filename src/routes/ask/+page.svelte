@@ -24,6 +24,8 @@
   import Markdown from "$lib/components/Markdown.svelte";
   import AiMark from "$lib/components/settings/AiMark.svelte";
   import Steps from "$lib/components/Steps.svelte";
+  import Instead from "$lib/components/Instead.svelte";
+  import { standing } from "$lib/instead";
   import { open as pickFiles } from "@tauri-apps/plugin-dialog";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import {
@@ -583,9 +585,12 @@
           </div>
         {/each}
 
-        {#if past.length === 0}
-          <p class="nothing">Nothing asked yet.</p>
-        {/if}
+        <Instead
+          tone={standing({ failed: false, loading: false, count: past.length })}
+          inline
+          headline="Nothing asked yet"
+          hint="Conversations you start are kept here."
+        />
       </div>
     </aside>
 
@@ -827,13 +832,24 @@
     border-right: 1px solid var(--hairline);
   }
 
+  /*
+   * Neutral, and its hover is neutral too.
+   *
+   * The accent means selection, match, focus or an affirmative state, and this
+   * is none of them: it is a button that starts a conversation. It wore
+   * `--accent-fill` at rest and deepened to `--accent-fill-strong` on hover,
+   * which broke the rule twice, and the rest state broke it in the way that
+   * shows: `--accent-fill` is also what `.row.open` uses for the conversation
+   * being read, four pixels below, so the button looked like a selected row
+   * that could not be deselected.
+   */
   .fresh {
     flex: none;
     padding: var(--space-2);
     border: 0;
     border-radius: var(--radius-md);
-    background: var(--accent-fill);
-    color: var(--accent);
+    background: var(--fill-2);
+    color: var(--text-1);
     font: inherit;
     font-size: var(--text-meta);
     font-weight: var(--weight-medium);
@@ -842,7 +858,7 @@
   }
 
   .fresh:hover:not(:disabled) {
-    background: var(--accent-fill-strong);
+    background: var(--fill-3);
   }
 
   .fresh:disabled {
@@ -938,12 +954,6 @@
 
   .bin:hover {
     color: var(--danger);
-  }
-
-  .nothing {
-    margin: var(--space-2);
-    color: var(--text-3);
-    font-size: var(--text-meta);
   }
 
   /* --------------------------------------------------------- the conversation */

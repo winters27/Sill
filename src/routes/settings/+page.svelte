@@ -6,6 +6,7 @@
   import { COLOURS as MARKUP_COLOURS } from "$lib/markup";
   import TitleBar from "$lib/components/TitleBar.svelte";
   import Toggle from "$lib/components/Toggle.svelte";
+  import Instead from "$lib/components/Instead.svelte";
   import Section from "$lib/components/settings/Section.svelte";
   import Row from "$lib/components/settings/Row.svelte";
   import Segmented from "$lib/components/settings/Segmented.svelte";
@@ -771,7 +772,7 @@
 
       <div class="content">
         {#if !prefs}
-          <div class="loading">{status || "Loading…"}</div>
+          <Instead tone="loading" headline={status || "Reading your settings"} />
         {:else}
           {@const p = prefs}
           <!--
@@ -2014,7 +2015,6 @@
     padding: var(--space-5) var(--space-8) var(--space-6);
   }
 
-
   .hero-text {
     min-width: 0;
   }
@@ -2113,12 +2113,6 @@
     grid-area: 1 / 1;
     min-width: 0;
   }
-
-  .loading {
-    padding: var(--space-6) 0;
-    color: var(--text-3);
-  }
-
 
   .recorder {
     min-width: 150px;

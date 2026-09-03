@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { ElementNode, ViewTree } from "$lib/exthost/tree";
+  import Instead from "./Instead.svelte";
+  import { standing } from "$lib/instead";
 
   interface Props {
     tree: ViewTree;
@@ -89,13 +91,11 @@
     {/if}
   {/each}
 
-  {#if rows.length === 0}
-    <div class="sill-empty">
-      <img src="/sill.png" alt="" width="32" height="32" draggable="false" />
-      <span class="headline">No results</span>
-      <span class="hint">This command found nothing to show.</span>
-    </div>
-  {/if}
+  <Instead
+    tone={standing({ failed: false, loading: false, count: rows.length })}
+    headline="No results"
+    hint="This command found nothing to show."
+  />
 </div>
 
 <style>
@@ -110,10 +110,13 @@
     color: var(--text-3);
   }
 
+  /* An extension's own words about the section, so it is read. --text-4 is
+     declared decorative-only and is not the step for something that says what
+     a group of rows is. */
   .section-sub {
     margin-left: var(--space-1);
     font-weight: 400;
-    color: var(--text-4);
+    color: var(--text-3);
   }
 
   .title {

@@ -3,6 +3,8 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { visible, whenVisible } from "$lib/visible";
   import ClipKindIcon from "./ClipKindIcon.svelte";
+  import Instead from "./Instead.svelte";
+  import { couldNot, noMatch, standing } from "$lib/instead";
   import {
     clipboardDelete,
     clipboardEntry,
@@ -62,6 +64,20 @@
   }: Props = $props();
 
   let entries = $state<ClipEntry[]>([]);
+  /**
+   * The last read that threw, until one after it succeeds.
+   *
+   * This view had no failure state at all. `clipboard_search` throwing left
+   * `entries` at whatever they held, which on the first read is nothing, and
+   * the pane then said "Nothing copied yet. Everything you copy lands here."
+   * That is a sentence about the reader's own clipboard, and it is false: what
+   * failed was Sill reading the database, and everything is still in it.
+   *
+   * Cleared on the read that works rather than on the one that starts, so a
+   * pane that is retrying keeps saying what it last knew instead of blinking
+   * through "reading" on its way back to the same error.
+   */
+  let failed = $state(false);
   let kind = $state<ClipKind | "all">("all");
   let detail = $state<ClipDetail | null>(null);
 
@@ -137,6 +153,27 @@
     // ends here, so this is the one place the held details have to go.
     fetched.clear();
 
+    try {
+      await read();
+      failed = false;
+    } catch (err) {
+      /*
+       * Said here rather than reported through `status.ts`.
+       *
+       * The pane the read is for is on screen, so the sentence belongs in it:
+       * the reader is looking at the empty space this failure made. `orElse`
+       * is for a read whose failure leaves nowhere to say so.
+       */
+      console.error("[sill] could not read the clipboard history", err);
+      failed = true;
+      entries = [];
+    }
+
+    oncount(entries.length);
+  }
+
+  /** The query itself, so `refresh` owns only what happens around it. */
+  async function read() {
     if (inside) {
       // Arranged order, and filtered here rather than in SQL: a collection is
       // a set somebody curated by hand, so it is small, and a second query
@@ -151,9 +188,35 @@
     } else {
       entries = await clipboardSearch(query, kind);
     }
-
-    oncount(entries.length);
   }
+
+  /*
+   * No loading state, and that is a decision rather than an omission.
+   *
+   * The read is SQLite with an index and it answers in well under a frame, so
+   * a "Reading..." between every keystroke and its results would be a flicker
+   * that reported nothing: by the time it could be seen it would already be
+   * wrong. The two states worth having here are the two that last.
+   */
+  const showing = $derived(standing({ failed, loading: false, count: entries.length }));
+
+  /**
+   * What the pane says when it has no rows.
+   *
+   * Three different sentences, because three different things have happened.
+   * A collection you are inside is not the whole history, and telling somebody
+   * looking at an empty collection that nothing has been copied yet would be
+   * wrong twice over.
+   */
+  const saying = $derived(
+    showing === "failed"
+      ? couldNot("read your clipboard history")
+      : query
+        ? noMatch(query, "entries")
+        : inside
+          ? `Nothing in ${inside.name} yet`
+          : "Nothing copied yet",
+  );
 
   // The list re-queries on every keystroke and whenever the filter changes.
   // SQLite with an index answers this in well under a frame.
@@ -377,7 +440,6 @@
    */
   let missed = false;
 
-
   async function keepSkipped() {
     try {
       await clipboardKeepCurrent();
@@ -509,7 +571,12 @@
             role="presentation"
             onclick={() => (collectionsOpen = false)}
           ></div>
-          <div class="menu" role="menu">
+          <!-- `sill-menu` is the surface. Without it this popover was
+               transparent and the clipboard rows showed through the collection
+               names, while the kind popover four lines below had it and looked
+               correct, which is how a menu can be wrong for months without
+               anybody deciding it should be. -->
+          <div class="menu sill-menu" role="menu">
             {#each collections as collection (collection.id)}
               <button
                 class="option"
@@ -626,11 +693,16 @@
         </div>
       {/each}
 
-      {#if entries.length === 0}
-        <p class="empty">
-          {query ? "Nothing matches that." : "Nothing copied yet. Everything you copy lands here."}
-        </p>
-      {/if}
+      <Instead
+        tone={showing}
+        inline
+        headline={saying}
+        hint={showing === "failed"
+          ? "Nothing has been lost. Close this and open it again."
+          : showing === "empty" && !query && !inside
+            ? "Everything you copy lands here."
+            : ""}
+      />
     </div>
 
     <div class="detail">
@@ -921,14 +993,6 @@
   .pin {
     flex: none;
     color: var(--core-accent);
-  }
-
-  .empty {
-    margin: 0;
-    padding: var(--space-6) var(--space-2);
-    font-size: var(--text-body);
-    line-height: 1.6;
-    color: var(--text-3);
   }
 
   .detail {

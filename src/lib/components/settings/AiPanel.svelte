@@ -4,6 +4,7 @@
   import Select from "./Select.svelte";
   import TextField from "./TextField.svelte";
   import AiMark from "./AiMark.svelte";
+  import Instead from "../Instead.svelte";
   import { drawer } from "$lib/motion";
   import {
     aiKnown,
@@ -307,11 +308,12 @@
   description="Press Tab in the launcher to ask whatever you have typed. One of these answers; the rest stay set up and unused."
 >
   {#if providers.length === 0}
-    <p class="empty">
-      Nothing set up yet. Claude Code uses the subscription you already have,
-      and a model running on this machine costs nothing and sends nothing
-      anywhere.
-    </p>
+    <Instead
+      tone="empty"
+      inline
+      headline="Nothing set up yet"
+      hint="Claude Code uses the subscription you already have, and a model running on this machine costs nothing and sends nothing anywhere."
+    />
   {:else}
     <div class="stack" role="radiogroup" aria-label="Who answers">
       {#each providers as one (one.id)}
@@ -726,14 +728,5 @@
 
   .spacer {
     flex: 1;
-  }
-
-  .empty {
-    margin: 0;
-    max-width: 62ch;
-    padding: var(--space-2) 0;
-    color: var(--text-2);
-    font-size: var(--text-meta);
-    line-height: 1.65;
   }
 </style>

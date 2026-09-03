@@ -9,6 +9,8 @@
   import { onMount } from "svelte";
   import Toggle from "$lib/components/Toggle.svelte";
   import { listDrives, indexFolder, type Drive } from "$lib/exthost/commands";
+  import Instead from "../Instead.svelte";
+  import { couldNot, standing } from "$lib/instead";
 
   interface Props {
     /** Told after a change, so the panel showing the roots can catch up. */
@@ -63,7 +65,13 @@
       onchange?.(roots);
       await refresh();
     } catch (err) {
-      trouble = `${err}`;
+      // The errand rather than the call. `${err}` here was the Rust side of
+      // `index_folder` reported to somebody who pressed a switch labelled with
+      // a drive letter, and it named neither the drive nor the switch.
+      console.error("[sill] could not change which drives are indexed", err);
+      trouble = couldNot(
+        `${wanted ? "start" : "stop"} indexing ${name(drive)}. Try the switch again.`,
+      );
       await refresh();
     } finally {
       working = null;
@@ -87,9 +95,12 @@
     </div>
   {/each}
 
-  {#if drives.length === 0}
-    <p class="empty">No drives found.</p>
-  {/if}
+  <Instead
+    tone={standing({ failed: false, loading: false, count: drives.length })}
+    inline
+    headline="No drives found"
+    hint="Sill asks Windows which volumes are mounted, and it answered with none."
+  />
 
   {#if trouble}
     <p class="trouble">{trouble}</p>
@@ -134,15 +145,12 @@
     color: var(--text-2);
   }
 
-  .empty,
+  /* An action that failed, not a state the list is in: the drives are still
+     listed and one switch did not move. */
   .trouble {
     margin: 0;
     padding: var(--space-1) 0;
     font-size: var(--text-meta);
-    color: var(--text-2);
-  }
-
-  .trouble {
     color: var(--danger);
   }
 </style>

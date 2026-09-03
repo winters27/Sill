@@ -12,6 +12,7 @@
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
   import RootList from "$lib/components/RootList.svelte";
+  import Instead from "$lib/components/Instead.svelte";
   import AiMark from "$lib/components/settings/AiMark.svelte";
   import Markdown from "$lib/components/Markdown.svelte";
   import Steps from "$lib/components/Steps.svelte";
@@ -283,6 +284,26 @@
    * is a bounds check rather than a rule. A number means nothing once the list
    * it counted into has been replaced: typing another character kept row five
    * selected, and row five was now a different row.
+   *
+   * ## How many times this runs for one keystroke
+   *
+   * Twice, and the second time is optional. The audit counted up to five
+   * visible steps; `P1-01` folded windows, emoji and the two slow sources into
+   * one answer, and this is what is left.
+   *
+   * 1. The search comes back and the list is drawn. Anything appended in the
+   *    same breath, such as the row offering to set file search up, happens
+   *    with no `await` in between, so Svelte writes both in one update and it
+   *    is one paint rather than two.
+   * 2. A debounce later, files, browser pages, and the offers to open an
+   *    address or look words up arrive together. Also one paint, and also with
+   *    no `await` splitting it.
+   *
+   * That second step is deliberate and not worth removing: it is what stops a
+   * slow query against somebody else's files delaying the results Sill already
+   * has, and it only ever appends below what is on screen, so nothing a reader
+   * is looking at moves. **A new source that awaits between two `show` calls
+   * puts a step back**, which is the thing to watch for.
    */
   function show(rows: RankedCommand[], forQuery: string) {
     selected = selectionAfter(
@@ -4109,6 +4130,7 @@
       <RootList
         commands={conversationRows}
         {selected}
+        {query}
         numeric={false}
         asking={`conversations:${query}`}
         onselect={(i) => (selected = i)}
@@ -4128,6 +4150,7 @@
         {commands}
         {selected}
         {live}
+        {query}
         numeric={prefs?.navigation.numeric ?? false}
         asking={`${mode}:${query}`}
         onselect={(i) => (selected = i)}
@@ -4184,10 +4207,7 @@
     <!-- No spinner. The launcher is meant to feel instant and a spinner
          advertises that it is not; the mark plus a line of text says the same
          thing without making the wait the subject. -->
-    <div class="sill-empty">
-      <img src="/sill.png" alt="" width="32" height="32" draggable="false" />
-      <span class="headline">{status || "Starting the command"}</span>
-    </div>
+    <Instead tone="loading" headline={status || "Starting the command"} />
   {/if}
 
   {#if panelOpen}

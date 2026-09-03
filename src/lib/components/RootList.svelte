@@ -2,6 +2,8 @@
   import type { RankedCommand } from "$lib/exthost/commands";
   import { LISTBOX, optionId } from "$lib/results";
   import { groupOf, linesOf, scrollFor, type Line } from "$lib/list";
+  import Instead from "./Instead.svelte";
+  import { noMatch, standing } from "$lib/instead";
   import LaunchIcon from "./LaunchIcon.svelte";
   import SettingsIcon, { type IconName } from "./SettingsIcon.svelte";
 
@@ -31,6 +33,13 @@
      */
     asking?: string;
     /**
+     * What was typed, for the sentence shown when nothing matched it.
+     *
+     * Separate from `asking`, which is a scroll key built out of the mode and
+     * the query together and is deliberately not readable prose.
+     */
+    query?: string;
+    /**
      * Whether Ctrl and a digit jumps to a row, from `navigation.numeric`.
      *
      * Only used to decide whether to draw the hint. The binding itself has
@@ -40,8 +49,16 @@
     numeric?: boolean;
   }
 
-  let { commands, selected, onselect, onrun, live, asking = "", numeric = false }: Props =
-    $props();
+  let {
+    commands,
+    selected,
+    onselect,
+    onrun,
+    live,
+    asking = "",
+    query = "",
+    numeric = false,
+  }: Props = $props();
 
 
 
@@ -553,13 +570,11 @@
     {/if}
   {/each}
 
-  {#if commands.length === 0}
-    <div class="sill-empty">
-      <img src="/sill.png" alt="" width="32" height="32" draggable="false" />
-      <span class="headline">Nothing found</span>
-      <span class="hint">Try fewer letters, or a word from further along the name.</span>
-    </div>
-  {/if}
+  <Instead
+    tone={standing({ failed: false, loading: false, count: commands.length })}
+    headline={noMatch(query)}
+    hint="Try fewer letters, or a word from further along the name."
+  />
 </div>
 
 <style>

@@ -28,6 +28,8 @@
   import Row from "./Row.svelte";
   import Toggle from "../Toggle.svelte";
   import Button from "./Button.svelte";
+  import Instead from "../Instead.svelte";
+  import { standing } from "$lib/instead";
   import {
     grantPermission,
     installedExtensions,
@@ -112,16 +114,16 @@
   <p class="said">{status}</p>
 {/if}
 
-{#if loading && installed.length === 0}
+{#if installed.length === 0}
   <Section label="Installed" bare>
-    <p class="empty">Reading what is installed…</p>
-  </Section>
-{:else if installed.length === 0}
-  <Section label="Installed" bare>
-    <p class="empty">
-      Nothing installed yet. Open the launcher and search for Extension Store to browse them, or
-      Install Extension to build one from a folder.
-    </p>
+    <Instead
+      tone={standing({ failed: false, loading, count: installed.length })}
+      inline
+      headline={loading ? "Reading what is installed" : "Nothing installed yet"}
+      hint={loading
+        ? ""
+        : "Open the launcher and search for Extension Store to browse them, or Install Extension to build one from a folder."}
+    />
   </Section>
 {/if}
 
@@ -175,7 +177,6 @@
 {/each}
 
 <style>
-  .empty,
   .said {
     margin: 0;
     padding: var(--space-3);

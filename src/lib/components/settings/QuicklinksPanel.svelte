@@ -3,6 +3,8 @@
   import Section from "./Section.svelte";
   import Row from "./Row.svelte";
   import Button from "./Button.svelte";
+  import Instead from "../Instead.svelte";
+  import { standing } from "$lib/instead";
   import {
     blankQuicklink,
     deleteQuicklink,
@@ -253,12 +255,14 @@
       </Row>
     {/each}
 
-    {#if links.length === 0}
-      <p class="empty">
-        No quicklinks yet. A good first one is your search engine, with the query placeholder
-        where the words go: <code>{EXAMPLE}</code>
-      </p>
-    {/if}
+    <Instead
+      tone={standing({ failed: false, loading: false, count: links.length })}
+      inline
+      headline="No quicklinks yet"
+    >
+      A good first one is your search engine, with the query placeholder where the words go:
+      <code>{EXAMPLE}</code>
+    </Instead>
   {/if}
 </Section>
 
@@ -359,17 +363,12 @@
     color: var(--text-1);
   }
 
-  .note,
-  .empty {
+  .note {
     margin: 0;
     max-width: 62ch;
     font-size: var(--text-meta);
     line-height: 1.65;
     color: var(--text-2);
-  }
-
-  .empty {
-    padding: var(--space-4) 0;
   }
 
   .error {

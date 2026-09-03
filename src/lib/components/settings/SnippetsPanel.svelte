@@ -4,6 +4,8 @@
   import Row from "./Row.svelte";
   import Button from "./Button.svelte";
   import Toggle from "../Toggle.svelte";
+  import Instead from "../Instead.svelte";
+  import { standing } from "$lib/instead";
   import {
     deleteSnippet,
     emptySnippet,
@@ -476,12 +478,12 @@
       {/each}
     {/each}
 
-    {#if snippets.length === 0}
-      <p class="empty">
-        No snippets yet. One with a keyword expands wherever you type it; one without is still
-        reachable from the launcher.
-      </p>
-    {/if}
+    <Instead
+      tone={standing({ failed: false, loading: false, count: snippets.length })}
+      inline
+      headline="No snippets yet"
+      hint="One with a keyword expands wherever you type it; one without is still reachable from the launcher."
+    />
   {/if}
 </Section>
 
@@ -716,15 +718,6 @@
     margin: 0;
     padding: var(--space-half) 0 var(--space-1);
     font-size: var(--text-meta);
-    color: var(--text-2);
-  }
-
-  .empty {
-    margin: 0;
-    padding: var(--space-4) 0;
-    max-width: 56ch;
-    font-size: var(--text-body);
-    line-height: 1.7;
     color: var(--text-2);
   }
 </style>

@@ -26,7 +26,16 @@
   import Section from "$lib/components/settings/Section.svelte";
   import Row from "$lib/components/settings/Row.svelte";
   import ThemeCards from "$lib/components/settings/ThemeCards.svelte";
+  import Instead from "$lib/components/Instead.svelte";
+  import type { Standing } from "$lib/instead";
   import { popover, swap } from "$lib/motion";
+
+  /** One of each, so the three are compared side by side rather than found. */
+  const STATES: [Standing, string, string][] = [
+    ["empty", "No results for tada", "Try fewer letters, or a word from further along the name."],
+    ["loading", "Reading the extension store", ""],
+    ["failed", "Sill could not read your clipboard history", "Nothing has been lost. Close this and open it again."],
+  ];
 
   const WALLS = {
     dark: "radial-gradient(120% 90% at 20% 10%, #23262b, #0a0a0b 70%)",
@@ -360,15 +369,20 @@
     </main>
   </div>
 
-  <h2>Empty and loading states</h2>
+  <h2>Empty, loading and failed states</h2>
   <div class="states">
-    {#each [["Nothing found", "Try fewer letters, or a word from further along the name."], ["No results", "This command found nothing to show."], ["Starting the command", ""], ["This form has no fields", "The extension declared a form with nothing in it."]] as [head, hint] (head)}
+    {#each STATES as [tone, head, hint] (head)}
       <div class="launcher tiny">
-        <div class="sill-empty">
-          <img src="/sill.png" alt="" width="32" height="32" />
-          <span class="headline">{head}</span>
-          {#if hint}<span class="hint">{hint}</span>{/if}
-        </div>
+        <Instead tone={tone as Standing} headline={head} {hint} />
+      </div>
+    {/each}
+  </div>
+
+  <h2>The same three inside a panel</h2>
+  <div class="states">
+    {#each STATES as [tone, head, hint] (head)}
+      <div class="launcher tiny">
+        <Instead tone={tone as Standing} inline headline={head} {hint} />
       </div>
     {/each}
   </div>

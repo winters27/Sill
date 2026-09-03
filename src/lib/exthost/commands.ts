@@ -566,11 +566,57 @@ export function performBuiltin(
  */
 const ICONS_KEPT = 400;
 
-const iconCache = new Map<string, Promise<string | null>>();
+/**
+ * One remembered answer, and whether it has arrived yet.
+ *
+ * The answer was held only as a promise, and a promise cannot be read without
+ * waiting: a row drawn for a path this session had already resolved still had
+ * to await it, so it rendered its lettered tile first and swapped the icon in
+ * afterwards. That is the flash. Typing makes new rows every keystroke and
+ * nearly all of them are applications that were on screen a moment ago, so it
+ * was a flash per row per keystroke for icons already sitting in this map.
+ *
+ * `uri` is written when the promise settles, which is what makes the answer
+ * readable without waiting. `undefined` there means "not answered yet", which
+ * is a third state and is why this is a record rather than a nullable string:
+ * `null` is a real answer meaning the file has no icon.
+ */
+interface Held {
+  asked: Promise<string | null>;
+  uri?: string | null;
+}
+
+const iconCache = new Map<string, Held>();
+
+/**
+ * The icon for a path, if the answer is already here.
+ *
+ * `undefined` when nothing is known yet, which a caller draws as a reserved
+ * empty tile rather than as a guess. Synchronous on purpose: a component that
+ * has to await cannot help but paint something first, and what it painted was
+ * wrong.
+ */
+/**
+ * Whether the shell can make an icon out of this at all.
+ *
+ * Extension commands have no icon of their own yet, so only applications are
+ * worth asking about. A packaged app is identified by an AppUserModelID rather
+ * than a file and the shell cannot make an icon out of that, so those are
+ * known to have none without a round trip, and a row drawing one gets its
+ * lettered tile on the first frame rather than after a refusal.
+ */
+export function hasShellIcon(path: string, resolvable: boolean): boolean {
+  return resolvable && Boolean(path) && !path.startsWith("shell:AppsFolder");
+}
+
+export function knownIcon(path: string): { uri: string | null } | undefined {
+  const held = iconCache.get(path);
+  return held && "uri" in held ? { uri: held.uri ?? null } : undefined;
+}
 
 export function appIcon(path: string): Promise<string | null> {
   const held = iconCache.get(path);
-  if (held) return held;
+  if (held) return held.asked;
 
   const pending = invoke<string | null>("app_icon", { path }).catch((reason) => {
     // Forgotten rather than remembered as "no icon", so the next row that
@@ -584,7 +630,15 @@ export function appIcon(path: string): Promise<string | null> {
     return silently<string | null>(null)(reason);
   });
 
-  iconCache.set(path, pending);
+  const entry: Held = { asked: pending };
+  iconCache.set(path, entry);
+
+  void pending.then((uri) => {
+    // Only if this entry is still the one being held. A failure deletes itself
+    // above and a later ask makes a new record, so writing the answer onto
+    // whatever is in the map now would revive an entry that was dropped.
+    if (iconCache.get(path) === entry) entry.uri = uri;
+  });
 
   // A `Map` iterates in insertion order, so the first key is the oldest.
   while (iconCache.size > ICONS_KEPT) {
