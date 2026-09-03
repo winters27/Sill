@@ -199,7 +199,7 @@ impl Action for RunExtensionCommand {
             .unwrap_or(crate::exthost::CommandMode::View);
 
         let hosts = ctx.app.state::<crate::state::HostState>();
-        let host = crate::host::host_of(&hosts).await?;
+        let host = crate::host::host_of(&ctx.app, &hosts).await?;
 
         let mut opts = crate::exthost::LoadOptions::with_preferences(
             record.entrypoint.clone(),
@@ -1397,7 +1397,7 @@ impl Action for ForgetConversation {
             return Err("That conversation is already gone.".to_string());
         }
 
-        chat.save(&crate::state::data_dir(&ctx.app));
+        chat.save(&ctx.app);
         Ok(Outcome::done(format!("Forgot {}", object.title)))
     }
 }

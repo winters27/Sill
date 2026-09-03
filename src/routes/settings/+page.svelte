@@ -805,7 +805,7 @@
             </Row>
             <Row
               title="Return to the root list"
-              description="Otherwise Sill reopens on whatever command was last running."
+              description="Otherwise Sill reopens on whatever command was last running, as long as you come straight back to it."
             >
               {#snippet control()}
                 <Toggle

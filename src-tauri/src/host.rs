@@ -202,7 +202,10 @@ pub(crate) async fn running_host(state: &HostState) -> Option<Arc<ExtHost>> {
 ///
 /// The lock is held across the spawn on purpose: two commands launched at
 /// once must wait for one host rather than race and start two.
-pub(crate) async fn host_of(state: &HostState) -> Result<Arc<ExtHost>, String> {
+///
+/// The handle is here for the watchdog this starts, which has to be able to
+/// ask whether anybody is looking at Sill before it lets a command go.
+pub(crate) async fn host_of(app: &AppHandle, state: &HostState) -> Result<Arc<ExtHost>, String> {
     // Recovered rather than propagated: a poisoned clock must not stop
     // every later extension launch. The worst it holds is a stale instant,
     // which the idle watchdog corrects on its next pass.
@@ -251,7 +254,7 @@ pub(crate) async fn host_of(state: &HostState) -> Result<Arc<ExtHost>, String> {
     drop(slot);
 
     crate::say!("extension host started");
-    start_host_watchdog(state.clone());
+    start_host_watchdog(app.clone(), state.clone());
 
     Ok(host)
 }
@@ -265,13 +268,129 @@ pub(crate) async fn extension_of(state: &HostState, session: &str) -> Option<Str
     running_host(state).await?.extension_of(session)
 }
 
+/// What one pass of the idle watchdog concludes.
+#[derive(Debug, PartialEq, Eq)]
+enum Idle {
+    /// Not long enough yet.
+    TooSoon,
+    /// Long enough, but Sill is on screen with a command loaded.
+    Watched,
+    /// Nothing is looking and nothing has been used. Let it all go.
+    LetGo,
+}
+
+/// Whether an idle pass may take the host away.
+///
+/// Separated from the loop so the rule can be read and tested without a
+/// window, a Node process or a five minute wait. What it encodes is that
+/// **elapsed time alone is not evidence that nobody is there**: the clock only
+/// moves when the host is asked for, and somebody five minutes into an
+/// extension's form has not asked for anything since it opened. Every
+/// keystroke of that goes into the window, not across the boundary, so a
+/// watchdog reading the clock alone concludes the user has gone and closes the
+/// form they are typing into.
+fn idle_pass(idle: std::time::Duration, on_screen: bool, sessions: usize) -> Idle {
+    if idle < HOST_IDLE_TIMEOUT {
+        return Idle::TooSoon;
+    }
+
+    // On screen with nothing loaded is not somebody watching an extension, so
+    // the host still goes. It is the pairing that means "in use".
+    if on_screen && sessions > 0 {
+        return Idle::Watched;
+    }
+
+    Idle::LetGo
+}
+
+/// Lets go of every command view that is loaded, and says so to the window.
+///
+/// Two callers mean the same thing by this: a launcher put away long enough to
+/// sleep, and a host nothing has touched for five minutes. In both, the view is
+/// one nobody can see.
+///
+/// **Telling the window is half the job.** It is holding a tree of a worker
+/// that no longer exists, and a view left on screen after its session has gone
+/// looks exactly like a working one until something is pressed, at which point
+/// every action fails with "no such session".
+///
+/// Emitted straight at the window rather than through the channel that carries
+/// renders. Ordering is what that channel is for, and a session being closed
+/// has nothing further to render; the caller that matters here suspends the
+/// renderer immediately afterwards and needs the message posted before it does.
+async fn close_views(app: &AppHandle, host: &ExtHost, why: &str) -> usize {
+    let views = host.view_session_ids();
+
+    for session in &views {
+        // Said before the unload rather than after it, because the unload is a
+        // round trip to Node and the worker gets five seconds to unmount. That
+        // is long enough for a caller waiting on this to give up and suspend
+        // the renderer first, which is the one outcome this ordering is for.
+        // The window's own way out unloads the session as well, so a message
+        // arriving before the worker is gone costs nothing.
+        let _ = app.emit(
+            "sill://ui",
+            UiEvent::Closed {
+                session: session.clone(),
+                reason: why.to_string(),
+            },
+        );
+
+        let _ = host.unload(session).await;
+    }
+
+    views.len()
+}
+
+/// How long a dismissal waits for the views to go before the renderer sleeps.
+///
+/// A deadline rather than a promise. Unloading talks to Node, and a host that
+/// has wedged answers nothing; the renderer going to sleep is worth more than
+/// the window being told tidily, so the wait gives up and lets the sleep
+/// happen.
+const RELEASE_WITHIN: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Lets go of the views once the launcher has been put away for good.
+///
+/// Called from the sleep timer, at the moment a dismissal has stood long
+/// enough that the renderer is about to be suspended. That is the honest
+/// signal for this: a view exists to be looked at, and Sill has just concluded
+/// that nobody is going to.
+///
+/// Blocking, deliberately, on a thread that is only sleeping anyway. The
+/// caller suspends the renderer next, and a suspended renderer is a poor place
+/// to send an event: at best the message waits until the window is summoned,
+/// and at worst evaluating it is what wakes the renderer back up, which would
+/// undo the saving the sleep exists for.
+pub(crate) fn release_views(app: &AppHandle) {
+    let (done, finished) = std::sync::mpsc::channel();
+    let app = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        // `try_state`, because a window can be put away before the setup hook
+        // has managed anything: Tauri creates them all first.
+        if let Some(state) = app.try_state::<HostState>().map(|held| held.inner().clone()) {
+            if let Some(host) = running_host(&state).await {
+                let closed = close_views(&app, &host, "the launcher was put away").await;
+                if closed > 0 {
+                    crate::say!("let go of {closed} extension view(s): the launcher was put away");
+                }
+            }
+        }
+
+        let _ = done.send(());
+    });
+
+    let _ = finished.recv_timeout(RELEASE_WITHIN);
+}
+
 /// Shuts the host down once nothing has used it for a while.
 ///
 /// Started when the host is spawned and returns when it fires, so a machine
 /// that never opens an extension never runs this timer at all. A permanent
 /// one-minute tick waiting for a process that is usually not there is exactly
 /// the "why are we waking up?" this is meant to avoid.
-pub(crate) fn start_host_watchdog(state: HostState) {
+pub(crate) fn start_host_watchdog(app: AppHandle, state: HostState) {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(HOST_IDLE_CHECK).await;
@@ -287,31 +406,6 @@ pub(crate) fn start_host_watchdog(state: HostState) {
             // Somebody else already shut it down. Nothing left to watch.
             let Some(host) = slot.as_ref() else { return };
 
-            if idle < HOST_IDLE_TIMEOUT {
-                continue;
-            }
-
-            /*
-             * A session that sat through the whole timeout is let go.
-             *
-             * This used to read "a loaded command is a reason to stay up
-             * however long it has sat there: the user is looking at it". They
-             * are not. The launcher dismisses itself when it loses focus, so
-             * nobody is watching an extension view through five minutes of
-             * touching nothing, and the only way a session lives that long is
-             * that whoever loaded it never unloaded it.
-             *
-             * The window did that: `unloadExtension` is called when Escape
-             * goes back to the root list and on no other path out. Every other
-             * way of leaving left a worker running and, because a live session
-             * vetoed the shutdown, kept the whole Node host resident for the
-             * rest of the session. An idle pass that any window can veto by
-             * forgetting one call is not an idle pass.
-             *
-             * Unloaded here rather than fixed only in the window, because this
-             * is the layer that can see the truth: the window knows what it
-             * meant to do, and this knows what is actually still running.
-             */
             /*
              * The lock is dropped before any of this is awaited.
              *
@@ -324,6 +418,68 @@ pub(crate) fn start_host_watchdog(state: HostState) {
              */
             let host = host.clone();
             drop(slot);
+
+            match idle_pass(
+                idle,
+                crate::summon::anything_visible(&app),
+                host.session_count(),
+            ) {
+                Idle::TooSoon => continue,
+
+                Idle::Watched => {
+                    /*
+                     * Counted as a use, so the clock starts again from here.
+                     *
+                     * Otherwise the moment the window is put away the host is
+                     * already five minutes idle and goes at the next tick,
+                     * which spends a Node start on somebody who dismissed the
+                     * launcher and came back. What "idle" is supposed to mean
+                     * is five minutes since anybody wanted it.
+                     */
+                    *state
+                        .last_used
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        std::time::Instant::now();
+                    continue;
+                }
+
+                Idle::LetGo => {}
+            }
+
+            /*
+             * A session that sat through the whole timeout is let go.
+             *
+             * This used to read "a loaded command is a reason to stay up
+             * however long it has sat there: the user is looking at it". They
+             * are not, and this now asks rather than assuming: a window that is
+             * on screen with a command loaded is answered above, and everything
+             * that gets here is a view nobody can see.
+             *
+             * The window did not clean up either: `unloadExtension` is called
+             * when Escape goes back to the root list and on no other path out.
+             * Every other way of leaving left a worker running and, because a
+             * live session vetoed the shutdown, kept the whole Node host
+             * resident for the rest of the session. An idle pass that any
+             * window can veto by forgetting one call is not an idle pass.
+             *
+             * Unloaded here rather than fixed only in the window, because this
+             * is the layer that can see the truth: the window knows what it
+             * meant to do, and this knows what is actually still running.
+             */
+            let closed = close_views(
+                &app,
+                &host,
+                &format!(
+                    "nothing had happened in it for {} minutes",
+                    HOST_IDLE_TIMEOUT.as_secs() / 60
+                ),
+            )
+            .await;
+
+            if closed > 0 {
+                crate::say!("let go of {closed} extension view(s): idle {}s", idle.as_secs());
+            }
 
             for session in host.session_ids() {
                 crate::say!(
@@ -358,6 +514,61 @@ pub(crate) fn forward_events(app: AppHandle, mut events: mpsc::UnboundedReceiver
             }
         }
     });
+}
+
+#[cfg(test)]
+mod idle_sweep {
+    use super::{idle_pass, Idle, HOST_IDLE_TIMEOUT};
+    use std::time::Duration;
+
+    /// The bug this rule exists for.
+    ///
+    /// The idle clock only moves when something asks for the host, and filling
+    /// in an extension's form asks for nothing: every keystroke goes into the
+    /// window. So somebody five minutes into a form looked exactly like
+    /// somebody who had walked away, and the sweep closed the form under them.
+    #[test]
+    fn a_view_on_screen_is_not_an_idle_host() {
+        assert_eq!(
+            idle_pass(HOST_IDLE_TIMEOUT + Duration::from_secs(60), true, 1),
+            Idle::Watched
+        );
+    }
+
+    /// And the same host, with the launcher put away, is let go.
+    ///
+    /// The other half. A rule that never lets anything go would keep Node
+    /// resident for the rest of the run, which is what this whole sweep exists
+    /// to prevent.
+    #[test]
+    fn the_same_view_with_nobody_looking_goes() {
+        assert_eq!(
+            idle_pass(HOST_IDLE_TIMEOUT + Duration::from_secs(60), false, 1),
+            Idle::LetGo
+        );
+    }
+
+    /// Being on screen is not on its own a reason to keep a Node process.
+    ///
+    /// The launcher can sit open for an hour with nothing loaded. Nothing is
+    /// being pulled out from under anybody there, and holding the host would
+    /// be residency bought with nothing.
+    #[test]
+    fn a_window_with_nothing_loaded_is_not_using_the_host() {
+        assert_eq!(
+            idle_pass(HOST_IDLE_TIMEOUT + Duration::from_secs(60), true, 0),
+            Idle::LetGo
+        );
+    }
+
+    #[test]
+    fn nothing_happens_before_the_timeout() {
+        assert_eq!(
+            idle_pass(HOST_IDLE_TIMEOUT / 2, false, 1),
+            Idle::TooSoon,
+            "a host was taken away before it had been idle for the timeout"
+        );
+    }
 }
 
 #[cfg(test)]

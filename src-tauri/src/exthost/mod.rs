@@ -38,6 +38,12 @@ struct Session {
     extension: String,
     /// The API-layer conversation with this extension.
     peer: RpcPeer,
+    /// Whether anybody is looking at this, or it is off doing something.
+    ///
+    /// The difference decides what a dismissal may do. A view exists to be on
+    /// screen and is worth nothing once the launcher is not, while a no-view
+    /// command is work in flight that unloads itself when it finishes.
+    mode: CommandMode,
 }
 
 /**
@@ -151,12 +157,20 @@ impl ExtHost {
             reader_peer.give_up_on_everything("the extension host stopped");
         });
 
-        // The host's stderr is where extension console output and our own
-        // warnings surface, so it must not be swallowed.
+        /*
+         * The host's stderr is where extension console output and the host's
+         * own warnings surface, so it must not be swallowed.
+         *
+         * Said rather than printed. `eprintln!` alone goes nowhere in a release
+         * build, which is compiled without a console, so an extension's own
+         * account of what it was doing was invisible in the only build anybody
+         * runs. The whole point of carrying it this far is that somebody can
+         * read it, and `sill.log` is where they would look.
+         */
         tokio::spawn(async move {
             let mut lines = tokio::io::AsyncBufReadExt::lines(tokio::io::BufReader::new(stderr));
             while let Ok(Some(line)) = lines.next_line().await {
-                eprintln!("[host] {line}");
+                crate::say!("[host] {line}");
             }
         });
 
@@ -191,8 +205,8 @@ impl ExtHost {
 
                             match peer {
                                 Some(peer) => peer.receive(payload),
-                                None => eprintln!(
-                                    "[sill] message for unknown session {session_id}, dropped"
+                                None => crate::say!(
+                                    "message for unknown session {session_id}, dropped"
                                 ),
                             }
                         }
@@ -254,6 +268,7 @@ impl ExtHost {
             Session {
                 extension: opts.extension_id.clone(),
                 peer: peer.clone(),
+                mode: opts.mode,
             },
         );
 
@@ -373,6 +388,17 @@ impl ExtHost {
         self.sessions.lock().expect("sessions poisoned").len()
     }
 
+    /// Every session that is drawing something, so a dismissal can let it go.
+    ///
+    /// Views only, and that is the whole reason this exists next to
+    /// [`Self::session_ids`]. A no-view command is doing a piece of work rather
+    /// than showing a screen: the launcher going away is not a reason to kill
+    /// it half way through, and it asks to be unloaded itself the moment it
+    /// finishes.
+    pub fn view_session_ids(&self) -> Vec<String> {
+        views_in(&self.sessions.lock().expect("sessions poisoned"))
+    }
+
     /// Name of the extension backing a session, if it is still loaded.
     /// The host process's id, for a test that needs to kill it.
     ///
@@ -395,5 +421,49 @@ impl ExtHost {
             .expect("sessions poisoned")
             .get(session_id)
             .map(|s| s.extension.clone())
+    }
+}
+
+/// Which of these sessions are drawing something.
+///
+/// A free function over the map rather than a method, so it can be asked about
+/// sessions somebody made up. Standing up an [`ExtHost`] costs a Node process,
+/// which is a poor thing to need in order to ask which of two loaded commands
+/// is a view.
+fn views_in(sessions: &HashMap<String, Session>) -> Vec<String> {
+    sessions
+        .iter()
+        .filter(|(_, session)| session.mode == CommandMode::View)
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
+#[cfg(test)]
+mod letting_views_go {
+    use super::*;
+
+    fn session(mode: CommandMode) -> Session {
+        let (peer, _outbound, _incoming) = RpcPeer::new();
+        Session {
+            extension: "fixture".to_string(),
+            peer,
+            mode,
+        }
+    }
+
+    /// A dismissal closes the screens, not the work.
+    ///
+    /// The launcher going away means nobody can see a view, which is the whole
+    /// reason a view is running. It means nothing about a no-view command:
+    /// that is a piece of work somebody started, it usually finishes after the
+    /// window has gone, and it unloads itself when it does. Closing those on a
+    /// dismissal would kill every background command half way through.
+    #[test]
+    fn only_the_ones_somebody_was_looking_at() {
+        let mut sessions = HashMap::new();
+        sessions.insert("drawing".to_string(), session(CommandMode::View));
+        sessions.insert("working".to_string(), session(CommandMode::NoView));
+
+        assert_eq!(views_in(&sessions), vec!["drawing".to_string()]);
     }
 }

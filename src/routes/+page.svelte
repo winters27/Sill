@@ -121,7 +121,8 @@
     | { kind: "setSearchText"; session: string; text: string }
     | { kind: "popToRoot"; session: string }
     | { kind: "closeMainWindow"; session: string }
-    | { kind: "crashed"; session: string; reason: string };
+    | { kind: "crashed"; session: string; reason: string }
+    | { kind: "closed"; session: string; reason: string };
 
   const tree = new ViewTree();
 
@@ -3452,6 +3453,28 @@
             // load, and nothing would ever arrive to correct the impression.
             void goBack();
             status = `${title} stopped: ${payload.reason}`;
+            break;
+          }
+          case "closed": {
+            /*
+             * Sill let the command go, so what is on screen is a picture.
+             *
+             * A view is a worker holding a React tree, and Sill lets one go
+             * once nobody can see it: when the launcher has been put away long
+             * enough to sleep, and when the host has sat idle for minutes.
+             * Both happen while the window is hidden, and neither is a
+             * failure, so this says what happened rather than that something
+             * went wrong.
+             *
+             * Left alone, the window comes back showing the view it had. It
+             * looks like a working command and it is not: nothing renders into
+             * it again and every action on it fails with "no such session".
+             */
+            if (session !== payload.session) break;
+
+            const closed = running?.title ?? "That command";
+            void goBack();
+            status = `${closed} closed: ${payload.reason}`;
             break;
           }
         }

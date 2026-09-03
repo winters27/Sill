@@ -71,6 +71,17 @@ pub enum UiEvent {
         session: String,
         reason: String,
     },
+    /// A command Sill closed, rather than one that ended.
+    ///
+    /// Separate from [`Self::Crashed`] because nothing went wrong and the
+    /// window should not say that anything did. Sill lets a view go when
+    /// nobody can see it any more, and a window still drawing that view has to
+    /// be told: the tree it is holding is a picture of a worker that is gone,
+    /// and every action on it would fail with "no such session".
+    Closed {
+        session: String,
+        reason: String,
+    },
 }
 
 pub struct ApiLayer {
