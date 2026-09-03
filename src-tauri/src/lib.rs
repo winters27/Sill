@@ -43,6 +43,7 @@ pub mod profiles;
 pub mod profiles_store;
 pub mod quicklinks;
 pub mod radios;
+pub mod reach;
 pub mod registry;
 pub mod scripts;
 pub mod secrets;

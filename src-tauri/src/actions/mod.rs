@@ -140,7 +140,12 @@ impl Action for Launch {
                 .spawn()
                 .map_err(|err| format!("could not launch {}: {err}", object.title))?;
         } else {
-            tauri_plugin_opener::open_path(&object.target, None::<&str>)
+            // A record in the index is normally a path, but an extension
+            // supplies its own rows and a model can name a target, so what
+            // gets launched is not always something Sill put there.
+            let target = crate::reach::target(&object.target)?;
+
+            tauri_plugin_opener::open_path(&target, None::<&str>)
                 .map_err(|err| format!("could not launch {}: {err}", object.title))?;
         }
 
@@ -2034,6 +2039,10 @@ impl Action for SearchWeb {
 
         let url = crate::websearch::url_for(&settings.engine, &settings.custom_url, &object.target);
 
+        // A custom engine is a template somebody typed into settings, so the
+        // scheme is theirs rather than Sill's.
+        let url = crate::reach::url(&url)?;
+
         tauri_plugin_opener::open_url(url, None::<&str>)
             .map_err(|err| format!("Could not open the search: {err}"))?;
 
@@ -2072,7 +2081,12 @@ impl Action for OpenUrl {
     }
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
-        tauri_plugin_opener::open_url(object.target.clone(), None::<&str>)
+        // The address arrived from somewhere: a search result, the clipboard,
+        // or a model that has just read a web page telling it what to open.
+        // None of those is Sill's own text.
+        let address = crate::reach::url(&object.target)?;
+
+        tauri_plugin_opener::open_url(address, None::<&str>)
             .map_err(|err| format!("Could not open that address: {err}"))?;
 
         crate::dismiss_main(&ctx.app);

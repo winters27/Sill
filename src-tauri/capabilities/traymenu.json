@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "traymenu",
+  "description": "The tray menu puts itself away: on Escape, on losing focus, and after a row is picked. It is the only window that hides itself, because every other one is hidden by Rust through summon or lazy_windows so that the renderer's sleep is armed at the same moment.",
+  "windows": ["traymenu"],
+  "permissions": ["core:window:allow-hide"]
+}

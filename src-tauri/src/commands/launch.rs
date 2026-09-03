@@ -251,6 +251,11 @@ pub(crate) async fn perform_builtin(
                 .and_then(Value::as_str)
                 .ok_or_else(|| "that action carried nothing to open".to_string())?;
 
+            // An extension wrote this. `Action.Open` carries a path as often
+            // as an address, so both shapes are allowed and only the schemes
+            // Sill opens get through.
+            let target = crate::reach::target(target)?;
+
             tauri_plugin_opener::open_url(target, None::<&str>).map_err(|e| e.to_string())?;
             Ok("Opened".to_string())
         }
