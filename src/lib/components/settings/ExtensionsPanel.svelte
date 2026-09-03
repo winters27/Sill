@@ -103,6 +103,7 @@
   label="Runs extensions in"
   description="Extensions are Node programs and Sill runs them in a Node process, so one has to be on the machine. Nothing else in Sill needs it."
 >
+  <!-- not a setting: a reading of whether Node was found, not a control -->
   <Row
     title="Node.js"
     description={nodeInstalled
@@ -166,6 +167,7 @@
       </Row>
     {/each}
 
+    <!-- not a setting: one installed extension, drawn again for every other one -->
     <Row
       title="Remove"
       description="Deletes its commands and forgets every permission it was given."

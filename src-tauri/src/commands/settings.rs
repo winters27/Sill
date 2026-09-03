@@ -144,6 +144,37 @@ pub(crate) async fn set_preferences(
         crate::apply_backdrops(&app, prefs.appearance.backdrop, prefs.appearance.tint_alpha);
     }
 
+    // Everything that decides what is *in* the index, rather than how the
+    // index is drawn. Each of these used to be read once and never again, so
+    // the panel said one thing and search did another until a rebuild or a
+    // restart. Compared rather than applied unconditionally: a scan is a
+    // PowerShell round trip and every shortcut on the machine, and the
+    // appearance slider must not pay for it.
+    let redo = preferences::Redo::between(&previous, &prefs);
+
+    if redo.sources {
+        crate::reload_index(&app);
+    }
+
+    if redo.scripts {
+        crate::reload_scripts(&app);
+    }
+
+    if let Some(roots) = redo.file_roots {
+        // The watcher first and then the walk, which is what `index_folder`
+        // does for the drive switches beside this list. Moving the watcher
+        // matters as much as the rebuild: left where it was it would go on
+        // waking the index for a folder nobody asked about, and say nothing
+        // about the folder somebody just named.
+        if let (Some(catalog), Some(watching)) = (
+            app.try_state::<crate::state::CatalogState>(),
+            app.try_state::<crate::state::Watching>(),
+        ) {
+            watching.re_root(catalog.inner().clone(), roots.clone());
+            catalog.rebuild(roots);
+        }
+    }
+
     // The launcher window re-reads whatever it renders from.
     let _ = app.emit("sill://preferences-changed", &prefs);
     Ok(())

@@ -58,7 +58,7 @@ describe("a read Rust refuses", () => {
       surface: "settings",
       what: "the search engines",
       reason: "Error: denied",
-      section: "websearch",
+      section: "sources",
     });
   });
 

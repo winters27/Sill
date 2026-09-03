@@ -376,7 +376,7 @@ impl Default for ClipboardHistory {
 }
 
 /// Which places are searched for launchable things.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Sources {
     /// Start Menu, Desktop and taskbar pins.
@@ -565,7 +565,7 @@ impl Default for Sources {
 /// asks a whole-volume indexer when one happens to be running. The two answer
 /// different questions: ours knows the files somebody works on, and a
 /// whole-volume index knows every file on the machine.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct FileSearch {
     pub enabled: bool,
@@ -688,7 +688,7 @@ pub struct HyperKey {
 }
 
 /// Script commands: files somebody keeps that the launcher can run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Scripts {
     /// Whether the folders below are scanned at all.
@@ -975,6 +975,70 @@ impl Preferences {
     /// cost does not matter.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         crate::json_store::save_atomic_with(path, self, &SCHEMA, seal_secrets)
+    }
+}
+
+impl Sources {
+    /// The switches that decide what a scan goes and looks at.
+    ///
+    /// `excluded` and `hidden` are deliberately not here. They are read on
+    /// every query, so a word added to either takes effect on the next
+    /// keystroke and asking the machine to scan itself again for them would
+    /// be a minute of work to change nothing.
+    fn scanned(&self) -> [bool; 6] {
+        [
+            self.shortcuts,
+            self.packaged_apps,
+            self.app_paths,
+            self.installed_programs,
+            self.path_executables,
+            self.windows_settings,
+        ]
+    }
+}
+
+/// What a save changed that somebody has to go and redo.
+///
+/// Three settings used to be read once and then never again: the source
+/// switches gate a scan, the script folders are walked when they change, and
+/// the indexed roots decide what the file index holds. Turning one on left the
+/// panel saying it was on and the index saying it was not, with nothing but a
+/// restart or the Rebuild button in between, and the Sources panel said in so
+/// many words that the change had already happened.
+///
+/// A plain comparison, apart from the command that acts on it, so the rule
+/// "this setting is one the index has to be told about" can be read in one
+/// place and tested without an application.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Redo {
+    /// The switches that gate the scan changed, so the sources are read again.
+    pub sources: bool,
+    /// Script scanning changed, so the folders are walked again.
+    pub scripts: bool,
+    /// The folders the file index covers changed. `Some` carries the new set,
+    /// because the rebuild and the watcher both need it and resolving the
+    /// default twice could disagree.
+    pub file_roots: Option<Vec<std::path::PathBuf>>,
+}
+
+impl Redo {
+    /// What has to happen for the new preferences to be true.
+    pub fn between(previous: &Preferences, next: &Preferences) -> Self {
+        let roots = next.files.indexed_roots();
+
+        Self {
+            sources: previous.sources.scanned() != next.sources.scanned(),
+            // The timeout is read when a script is run, so changing it is not
+            // a reason to walk the folders again.
+            scripts: previous.scripts.enabled != next.scripts.enabled
+                || previous.scripts.folders != next.scripts.folders,
+            file_roots: (previous.files.indexed_roots() != roots).then_some(roots),
+        }
+    }
+
+    /// Whether anything at all has to be redone.
+    pub fn is_empty(&self) -> bool {
+        !self.sources && !self.scripts && self.file_roots.is_none()
     }
 }
 

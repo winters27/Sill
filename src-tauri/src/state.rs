@@ -293,7 +293,7 @@ impl CatalogState {
 /// two threads walking at once when a request arrives in the moment between
 /// the flag being cleared and this being asked, and it is why the claim is a
 /// compare-exchange rather than a store.
-fn take_repeat(
+pub(crate) fn take_repeat(
     again: &std::sync::atomic::AtomicBool,
     building: &std::sync::atomic::AtomicBool,
 ) -> bool {
@@ -590,6 +590,19 @@ pub(crate) struct RegistryState {
     held, so an async one would only add a scheduling point.
     */
     pub(crate) recording: Arc<std::sync::Mutex<()>>,
+    /// Set while a scan of the sources is running, so two do not overlap.
+    ///
+    /// A scan asks PowerShell about the registry hives, walks every Start Menu
+    /// folder and reads every shortcut on the machine. Turning six sources on
+    /// one after another is six saves, and without this it was six scans, five
+    /// of which produce an answer that is thrown away before anybody sees it.
+    pub(crate) scanning: Arc<std::sync::atomic::AtomicBool>,
+    /// Set when the sources changed while a scan was running.
+    ///
+    /// The scan already read the old preferences, so the index it produces
+    /// does not hold the change. Remembered rather than started at once, for
+    /// the same reason the flag above exists.
+    pub(crate) rescan: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl RegistryState {
@@ -935,6 +948,8 @@ mod tests {
             index: Arc::new(arc_swap::ArcSwap::from_pointee(registry())),
             ranking: Arc::new(arc_swap::ArcSwap::default()),
             recording: Arc::new(std::sync::Mutex::new(())),
+            scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            rescan: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -1055,6 +1070,65 @@ mod tests {
             counted,
             "a list of records is not in `everything`",
         );
+    }
+
+    /// Naming a different folder changes what the file index holds, now.
+    ///
+    /// The typed folder list used to be read once at startup and never again,
+    /// so a folder added in settings was not searched until the next start and
+    /// nothing said so. `set_preferences` calls `rebuild` when the list
+    /// changes, and this is that call: a real walk on a real folder, and the
+    /// index it produces read back out of the same live state a search reads
+    /// from. Waiting for the walk rather than sleeping through it, because a
+    /// sleep long enough to be safe is a slow test and a sleep short enough to
+    /// be quick is a flaky one.
+    #[test]
+    fn rebuilding_on_new_roots_swaps_the_index_without_a_restart() {
+        let dir = std::env::temp_dir().join(format!("sill-roots-{}", std::process::id()));
+        let (one, two) = (dir.join("one"), dir.join("two"));
+
+        std::fs::create_dir_all(&one).expect("a folder");
+        std::fs::create_dir_all(&two).expect("a folder");
+        std::fs::write(one.join("alpha-note.txt"), "one").expect("a file");
+        std::fs::write(two.join("bravo-note.txt"), "two").expect("a file");
+
+        let state = CatalogState::default();
+
+        let settle = |state: &CatalogState| {
+            // Bounded, so a walk that never finishes fails the test rather
+            // than hanging the suite.
+            for _ in 0..600 {
+                if !state.building.load(std::sync::atomic::Ordering::Acquire)
+                    && !state.inner.load().is_empty()
+                {
+                    return;
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+
+            panic!("the walk never finished");
+        };
+
+        state.rebuild(vec![one.clone()]);
+        settle(&state);
+
+        let found = state.inner.load().search("alpha-note", 10, &[]);
+        assert_eq!(found.len(), 1, "the first folder is what is searched");
+        assert!(state.inner.load().search("bravo-note", 10, &[]).is_empty());
+
+        // The same state, no restart, a different list of folders.
+        state.rebuild(vec![two.clone()]);
+        settle(&state);
+
+        let found = state.inner.load().search("bravo-note", 10, &[]);
+        assert_eq!(found.len(), 1, "the new folder is searched straight away");
+        assert!(
+            state.inner.load().search("alpha-note", 10, &[]).is_empty(),
+            "and the folder that was taken out is not"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

@@ -85,7 +85,7 @@
     {
       id: "general",
       name: "General",
-      blurb: "Startup, the summon hotkey and what Sill does when it opens",
+      blurb: "Startup, the tray icon and what Sill does when it opens",
     },
     {
       id: "appearance",
@@ -116,33 +116,23 @@
     {
       id: "shortcuts",
       name: "Shortcuts",
-      blurb: "Keys that act on the selected text without opening the launcher",
+      blurb: "Every key Sill answers to, from the summon key down to the action keys",
+    },
+    {
+      id: "screenshot",
+      name: "Screenshots",
+      blurb: "What happens after you take one, and what the editor opens with",
     },
     {
       id: "sources",
       name: "Sources",
-      blurb: "Where Sill looks for applications, commands and settings pages",
+      blurb: "Where results come from: installed programs, browser pages and the web",
       group: "Search",
     },
     {
       id: "files",
       name: "File Search",
       blurb: "Everything integration, match rules and the folders it covers",
-    },
-    {
-      id: "browsers",
-      name: "Browser Search",
-      blurb: "Pages your browsers remember, and which of them Sill may read",
-    },
-    {
-      id: "screenshot",
-      name: "Screenshots",
-      blurb: "The keys that take one, and what the editor opens with",
-    },
-    {
-      id: "websearch",
-      name: "Web Search",
-      blurb: "The engine behind the row that offers to look up what you typed",
     },
     {
       id: "extensions",
@@ -203,37 +193,38 @@
 
   type SourceKey = Exclude<keyof Preferences["sources"], "excluded" | "hidden">;
 
-  const SOURCES: [SourceKey, string, string][] = [
-    [
-      "shortcuts",
-      "Start Menu, Desktop and taskbar",
-      "Shortcuts from every folder Windows itself lists, including pinned items",
-    ],
-    [
-      "packagedApps",
-      "Store and packaged applications",
-      "Calculator, Terminal, Photos and anything installed from the Microsoft Store",
-    ],
-    [
-      "appPaths",
-      "Registered executables",
-      "Programs an installer registered by name, resolved the way the Run dialog does",
-    ],
-    [
-      "installedPrograms",
-      "Installed programs",
-      "Read from the uninstall registry, filtered to the entries that can actually launch",
-    ],
-    [
-      "pathExecutables",
-      "Executables on PATH",
-      "Around 1,200 command line tools. Always ranked below real applications",
-    ],
-    [
-      "windowsSettings",
-      "Windows settings pages",
-      "Settings pages, Control Panel applets and management consoles",
-    ],
+  /** The switches that decide what a scan goes and looks at. */
+  const SOURCES: { key: SourceKey; title: string; hint: string }[] = [
+    {
+      key: "shortcuts",
+      title: "Start Menu, Desktop and taskbar",
+      hint: "Shortcuts from every folder Windows itself lists, including pinned items",
+    },
+    {
+      key: "packagedApps",
+      title: "Store and packaged applications",
+      hint: "Calculator, Terminal, Photos and anything installed from the Microsoft Store",
+    },
+    {
+      key: "appPaths",
+      title: "Registered executables",
+      hint: "Programs an installer registered by name, resolved the way the Run dialog does",
+    },
+    {
+      key: "installedPrograms",
+      title: "Installed programs",
+      hint: "Read from the uninstall registry, filtered to the entries that can actually launch",
+    },
+    {
+      key: "pathExecutables",
+      title: "Executables on PATH",
+      hint: "Around 1,200 command line tools. Always ranked below real applications",
+    },
+    {
+      key: "windowsSettings",
+      title: "Windows settings pages",
+      hint: "Settings pages, Control Panel applets and management consoles",
+    },
   ];
 
   /**
@@ -826,55 +817,6 @@
             </Row>
           </Section>
 
-          <Section
-            label="Hotkey"
-            description="The combination that brings Sill to the front from anywhere."
-          >
-            <Row
-              title="Summon hotkey"
-              description={conflicts.includes(p.hotkey.summon)
-                ? "Another application already has this combination, so it does nothing. Choose a different one."
-                : "Press the combination you want, or Escape to keep the current one."}
-            >
-              {#snippet control()}
-                <button
-                  class="recorder"
-                  class:taken={conflicts.includes(p.hotkey.summon)}
-                  class:recording={recording === "summon"}
-                  onclick={() => (recording = recording === "summon" ? null : "summon")}
-                >
-                  {recording === "summon"
-                    ? "Press a combination"
-                    : p.hotkey.summon.split("+").join(" ")}
-                </button>
-              {/snippet}
-            </Row>
-
-            {#each BINDABLE as key (key.id)}
-              <Row
-                title={key.title}
-                description={p.hotkey[key.id] && conflicts.includes(p.hotkey[key.id])
-                  ? "Another application already has this combination, so it does nothing. Choose a different one."
-                  : key.description}
-              >
-                {#snippet control()}
-                  <button
-                    class="recorder"
-                    class:taken={!!p.hotkey[key.id] && conflicts.includes(p.hotkey[key.id])}
-                    class:recording={recording === key.id}
-                    onclick={() => (recording = recording === key.id ? null : key.id)}
-                  >
-                    {recording === key.id
-                      ? "Press a combination"
-                      : p.hotkey[key.id]
-                        ? p.hotkey[key.id].split("+").join(" ")
-                        : "Off"}
-                  </button>
-                {/snippet}
-              </Row>
-            {/each}
-          </Section>
-
           <Section label="Opening and closing">
             <Row
               title="Hide when it loses focus"
@@ -1094,6 +1036,55 @@
           {:else if active === "snippets"}
             <SnippetsPanel prefs={p} {commit} />
           {:else if active === "shortcuts"}
+          <Section
+            label="From anywhere"
+            description="Combinations Sill answers to whatever application is in front."
+          >
+            <Row
+              title="Summon hotkey"
+              description={conflicts.includes(p.hotkey.summon)
+                ? "Another application already has this combination, so it does nothing. Choose a different one."
+                : "Press the combination you want, or Escape to keep the current one."}
+            >
+              {#snippet control()}
+                <button
+                  class="recorder"
+                  class:taken={conflicts.includes(p.hotkey.summon)}
+                  class:recording={recording === "summon"}
+                  onclick={() => (recording = recording === "summon" ? null : "summon")}
+                >
+                  {recording === "summon"
+                    ? "Press a combination"
+                    : p.hotkey.summon.split("+").join(" ")}
+                </button>
+              {/snippet}
+            </Row>
+
+            {#each BINDABLE as key (key.id)}
+              <Row
+                title={key.title}
+                description={p.hotkey[key.id] && conflicts.includes(p.hotkey[key.id])
+                  ? "Another application already has this combination, so it does nothing. Choose a different one."
+                  : key.description}
+              >
+                {#snippet control()}
+                  <button
+                    class="recorder"
+                    class:taken={!!p.hotkey[key.id] && conflicts.includes(p.hotkey[key.id])}
+                    class:recording={recording === key.id}
+                    onclick={() => (recording = recording === key.id ? null : key.id)}
+                  >
+                    {recording === key.id
+                      ? "Press a combination"
+                      : p.hotkey[key.id]
+                        ? p.hotkey[key.id].split("+").join(" ")
+                        : "Off"}
+                  </button>
+                {/snippet}
+              </Row>
+            {/each}
+          </Section>
+
             <ShortcutsPanel prefs={p} commit={commitWith} {conflicts} />
           {:else if active === "quicklinks"}
             <QuicklinksPanel />
@@ -1104,15 +1095,153 @@
           {:else if active === "sources"}
           <Section
             label="What Sill indexes"
-            description="Turning a source off removes its entries from the next search. Nothing is rescanned."
+            description="Turning one off takes its entries out. Turning one on goes and looks for them, which takes a few seconds and happens in the background."
           >
-            {#each SOURCES as [key, name, hint] (key)}
-              <Row title={name} description={hint}>
+            {#each SOURCES as source (source.key)}
+              <Row title={source.title} description={source.hint}>
                 {#snippet control()}
-                  <Toggle bind:checked={p.sources[key]} onchange={commit} label={name} />
+                  <Toggle
+                    bind:checked={p.sources[source.key]}
+                    onchange={commit}
+                    label={source.title}
+                  />
                 {/snippet}
               </Row>
             {/each}
+          </Section>
+
+          <Section
+            label="Browser search"
+            description="Pages your browsers remember, alongside everything else. Nothing is copied or read until you type, and it stays on this machine."
+          >
+            <Row
+              title="Search browser pages"
+              description={browsersFound
+                ? `Reads ${browsersFound}.`
+                : "No browser Sill knows how to read is installed on this machine."}
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.browsers.enabled}
+                  onchange={commit}
+                  label="Search browser pages"
+                />
+              {/snippet}
+            </Row>
+            {#if browsers.length}
+              <!--
+                The browsers themselves, wearing their own marks.
+                Naming what will be read is the point of this pane, and a row of
+                logos says it faster than a sentence and is harder to misread.
+              -->
+              <div class="browsers">
+                {#each browsers as found (found.name)}
+                  <span class="browser">
+                    <LaunchIcon
+                      path={found.program ?? ""}
+                      label={found.name}
+                      resolvable={!!found.program}
+                    />
+                    {found.name}
+                  </span>
+                {/each}
+              </div>
+            {/if}
+            <Row
+              title="Bookmarks"
+              description="Pages you saved. The smaller and more deliberate set, so these rank above history."
+              disabled={!p.browsers.enabled}
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.browsers.bookmarks}
+                  onchange={commit}
+                  label="Bookmarks"
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="History"
+              description="Pages you visited. Much the larger of the two, and the more revealing."
+              disabled={!p.browsers.enabled}
+            >
+              {#snippet control()}
+                <Toggle bind:checked={p.browsers.history} onchange={commit} label="History" />
+              {/snippet}
+            </Row>
+            <Row
+              title="Maximum browser results"
+              description="These rank below commands and files, so a high number mostly costs scrolling."
+              disabled={!p.browsers.enabled}
+            >
+              {#snippet control()}
+                <Slider
+                  bind:value={p.browsers.maxResults}
+                  min={2}
+                  max={20}
+                  step={2}
+                  label="Maximum browser results"
+                  format={(v) => `${v} pages`}
+                  onchange={commit}
+                />
+              {/snippet}
+            </Row>
+          </Section>
+
+          <Section
+            label="Web search"
+            description="The last row Sill offers, after everything that actually matched. It reads nothing and sends nothing until you choose it."
+          >
+            <Row
+              title="Offer to search the web"
+              description="Appears at the bottom of the list whenever you have typed something, so it never displaces a result."
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.webSearch.enabled}
+                  onchange={commit}
+                  label="Offer to search the web"
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="Engine"
+              description="DuckDuckGo by default: it is the one that does not build a profile of whoever is typing."
+              disabled={!p.webSearch.enabled || p.webSearch.customUrl.trim() !== ""}
+            >
+              {#snippet control()}
+                <Select
+                  value={p.webSearch.engine}
+                  options={engines.map((option) => ({ value: option.id, label: option.name }))}
+                  onchange={(next) => {
+                    if (!prefs) return;
+                    p.webSearch.engine = next;
+                    void commit();
+                  }}
+                  ariaLabel="Engine"
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="Your own address"
+              description="Put {'{query}'} where the words go. Anything here is used instead of the engine above."
+              disabled={!p.webSearch.enabled}
+            >
+              {#snippet children()}
+                <TextField
+                  value={p.webSearch.customUrl}
+                  oninput={(next) => {
+                    if (!prefs) return;
+                    p.webSearch.customUrl = next;
+                    void commit();
+                  }}
+                  placeholder="https://example.com/search?q={'{query}'}"
+                  ariaLabel="Your own address"
+                  full
+                  mono
+                />
+              {/snippet}
+            </Row>
           </Section>
 
           <Section
@@ -1366,140 +1495,6 @@
               {/snippet}
             </Row>
           </Section>
-          {:else if active === "websearch"}
-          <Section
-            label="Web search"
-            description="The last row Sill offers, after everything that actually matched. It reads nothing and sends nothing until you choose it."
-          >
-            <Row
-              title="Offer to search the web"
-              description="Appears at the bottom of the list whenever you have typed something, so it never displaces a result."
-            >
-              {#snippet control()}
-                <Toggle
-                  bind:checked={p.webSearch.enabled}
-                  onchange={commit}
-                  label="Offer to search the web"
-                />
-              {/snippet}
-            </Row>
-            <Row
-              title="Engine"
-              description="DuckDuckGo by default: it is the one that does not build a profile of whoever is typing."
-              disabled={!p.webSearch.enabled || p.webSearch.customUrl.trim() !== ""}
-            >
-              {#snippet control()}
-                <Select
-                  value={p.webSearch.engine}
-                  options={engines.map((option) => ({ value: option.id, label: option.name }))}
-                  onchange={(next) => {
-                    if (!prefs) return;
-                    p.webSearch.engine = next;
-                    void commit();
-                  }}
-                  ariaLabel="Engine"
-                />
-              {/snippet}
-            </Row>
-            <Row
-              title="Your own address"
-              description="Put {'{query}'} where the words go. Anything here is used instead of the engine above."
-              disabled={!p.webSearch.enabled}
-            >
-              {#snippet children()}
-                <TextField
-                  value={p.webSearch.customUrl}
-                  oninput={(next) => {
-                    if (!prefs) return;
-                    p.webSearch.customUrl = next;
-                    void commit();
-                  }}
-                  placeholder="https://example.com/search?q={'{query}'}"
-                  ariaLabel="Your own address"
-                  full
-                  mono
-                />
-              {/snippet}
-            </Row>
-          </Section>
-          {:else if active === "browsers"}
-          <Section
-            label="Browser search"
-            description="Pages your browsers remember, alongside everything else. Nothing is copied or read until you type, and it stays on this machine."
-          >
-            <Row
-              title="Search browser pages"
-              description={browsersFound
-                ? `Reads ${browsersFound}.`
-                : "No browser Sill knows how to read is installed on this machine."}
-            >
-              {#snippet control()}
-                <Toggle
-                  bind:checked={p.browsers.enabled}
-                  onchange={commit}
-                  label="Search browser pages"
-                />
-              {/snippet}
-            </Row>
-            {#if browsers.length}
-              <!--
-                The browsers themselves, wearing their own marks.
-                Naming what will be read is the point of this pane, and a row of
-                logos says it faster than a sentence and is harder to misread.
-              -->
-              <div class="browsers">
-                {#each browsers as found (found.name)}
-                  <span class="browser">
-                    <LaunchIcon
-                      path={found.program ?? ""}
-                      label={found.name}
-                      resolvable={!!found.program}
-                    />
-                    {found.name}
-                  </span>
-                {/each}
-              </div>
-            {/if}
-            <Row
-              title="Bookmarks"
-              description="Pages you saved. The smaller and more deliberate set, so these rank above history."
-              disabled={!p.browsers.enabled}
-            >
-              {#snippet control()}
-                <Toggle
-                  bind:checked={p.browsers.bookmarks}
-                  onchange={commit}
-                  label="Bookmarks"
-                />
-              {/snippet}
-            </Row>
-            <Row
-              title="History"
-              description="Pages you visited. Much the larger of the two, and the more revealing."
-              disabled={!p.browsers.enabled}
-            >
-              {#snippet control()}
-                <Toggle bind:checked={p.browsers.history} onchange={commit} label="History" />
-              {/snippet}
-            </Row>
-            <Row
-              title="Maximum browser results"
-              description="These rank below commands and files, so a high number mostly costs scrolling."
-              disabled={!p.browsers.enabled}
-            >
-              {#snippet control()}
-                <Slider
-                  bind:value={p.browsers.maxResults}
-                  min={2}
-                  max={20}
-                  step={2}
-                  label="Maximum browser results"
-                  format={(v) => `${v} pages`}
-                  onchange={commit}
-                />
-              {/snippet}
-            </Row>
-          </Section>
           {:else if active === "scripts"}
           <Section
             label="Script commands"
@@ -1624,6 +1619,7 @@
             label="Reaching the launcher"
             description="Timed by Sill itself, from the key being pressed to the moment you can type. The middle of the recent ones, because an occasional slow summon is a display waking rather than the launcher."
           >
+            <!-- not a setting: a reading of how long the last summon took, not a control -->
             <Row
               title="Summon"
               description={timings?.summons.length
@@ -1637,6 +1633,7 @@
               {/snippet}
             </Row>
 
+            <!-- not a setting: a reading of how long the last start took, not a control -->
             <Row
               title="Starting up"
               description="From the process starting to the hotkey working."
@@ -1653,6 +1650,7 @@
             label="Keyboard"
             description="Snippet expansion, the hyper key and double-tap all run on one low-level hook. Windows removes such a hook silently if it ever runs slow, and everything on it stops at once."
           >
+            <!-- not a setting: a reading of what the keyboard hook is costing, not a control -->
             <Row
               title="Keyboard hook"
               description={hookStory}
@@ -1703,7 +1701,7 @@
               {/snippet}
             </Row>
           </Section>
-          {:else}
+          {:else if active === "about"}
             <Section label="Sill" bare>
             <div class="about">
               <img src="/sill.png" alt="" width="52" height="52" />
@@ -1736,18 +1734,22 @@
           </Section>
 
           <Section label="Built on">
+            <!-- not a setting: a credit, and the words mean other things in a search -->
             <Row
               title="Tauri and Rust"
               description="The window, the Windows integration and the index."
             />
+            <!-- not a setting: a credit, and the word means other things in a search -->
             <Row
               title="Svelte"
               description="Everything drawn on screen, including a command's own views."
             />
+            <!-- not a setting: a credit, and the word means other things in a search -->
             <Row
               title="Node"
               description="The extension host, which runs each command in its own worker."
             />
+            <!-- not a setting: a credit, and the word means other things in a search -->
             <Row
               title="Everything"
               description="File search, by voidtools. Optional, and talked to over IPC."
