@@ -1,63 +1,55 @@
 <script lang="ts">
-  import type { ElementNode, ViewTree } from "$lib/exthost/tree";
+  import type { ElementNode } from "$lib/exthost/tree";
+  import type { Row } from "$lib/exthost/search";
   import Instead from "./Instead.svelte";
-  import { standing } from "$lib/instead";
+  import { whileEmpty } from "$lib/instead";
   import { LISTBOX, optionId } from "$lib/results";
 
   interface Props {
-    tree: ViewTree;
     node: ElementNode;
+    /**
+     * The rows to draw, already flattened and already narrowed.
+     *
+     * Built by the page rather than here, because the page has to walk the
+     * same sequence to know what Enter runs and how far the arrow keys go.
+     * This component used to derive its own from the tree, by the same rules,
+     * written twice; the moment a filter narrowed one of the two they stopped
+     * agreeing and the highlight pointed at a different row from the one that
+     * would have run.
+     *
+     * Sections share the item index space, because selection moves through
+     * what the reader sees as one list however the extension grouped it.
+     */
+    rows: Row[];
+    /** What is in the field, so an empty list can name what emptied it. */
+    query: string;
+    /** Whether the extension says an answer is still coming. */
+    loading: boolean;
     selected: number;
     onselect: (index: number) => void;
     onrun: (index: number) => void;
   }
 
-  let { tree, node, selected, onselect, onrun }: Props = $props();
-
-  /**
-   * Sections are flattened into the same index space as loose items, because
-   * selection moves through what the user sees as one list regardless of how
-   * the extension grouped it.
-   */
-  /**
-   * A section heading or a selectable item, told apart by `kind`.
-   *
-   * Two shapes rather than one with an optional index, so the index is a
-   * number wherever the markup has narrowed to an item. It was optional, and
-   * every use of it carried an `index !== undefined` guard that could never be
-   * false; the row id below is the first thing that would have been silently
-   * wrong if one of those guards had ever gone the other way.
-   */
-  type Row =
-    | { kind: "section"; node: ElementNode }
-    | { kind: "item"; node: ElementNode; index: number };
-
-  const rows = $derived.by(() => {
-    const out: Row[] = [];
-    let index = 0;
-
-    const pushItem = (item: ElementNode) => {
-      out.push({ kind: "item", node: item, index: index++ });
-    };
-
-    for (const child of tree.elementChildren(node)) {
-      if (child.tag === "List.Section") {
-        out.push({ kind: "section", node: child });
-        for (const item of tree.elementChildren(child)) {
-          if (item.tag === "List.Item") pushItem(item);
-        }
-      } else if (child.tag === "List.Item") {
-        pushItem(child);
-      }
-    }
-
-    return out;
-  });
+  let { node, rows, query, loading, selected, onselect, onrun }: Props = $props();
 
   const str = (n: ElementNode, key: string): string => {
     const value = n.props[key];
     return typeof value === "string" ? value : "";
   };
+
+  /**
+   * What the pane says when it has no rows, which is three different things.
+   *
+   * The choice lives in `$lib/instead` with the rest of it, so a list and a
+   * grid say the same thing about the same situation and the rule can be
+   * tested without mounting anything.
+   */
+  const saying = $derived(
+    whileEmpty({ failed: false, loading, count: rows.length }, query, {
+      headline: "No results",
+      hint: "This command found nothing to show.",
+    }),
+  );
 </script>
 
 <!--
@@ -116,11 +108,7 @@
     {/if}
   {/each}
 
-  <Instead
-    tone={standing({ failed: false, loading: false, count: rows.length })}
-    headline="No results"
-    hint="This command found nothing to show."
-  />
+  <Instead tone={saying.tone} headline={saying.headline} hint={saying.hint} />
 </div>
 
 <style>

@@ -18,6 +18,17 @@ node scripts/build-extension.mjs extensions/raycast-src/extensions/uuid-generato
 node scripts/run-extension.mjs extensions/build/uuid-generator/viewHistory.js uuid-generator \
   --seed "$SEED" --expect-root List --expect-items 3 --expect-actions 4
 
+# The half of the search field Sill owns. This list declares no `filtering`
+# and registers no `onSearchTextChange`, which in Raycast's rules means the
+# launcher narrows it, so typing part of one of the three seeded ids has to
+# leave exactly that one on screen. Both halves ran through the same flattening
+# the window draws from, so a filter that narrowed only what is drawn and not
+# what Enter runs fails here.
+echo
+echo "--- List filtering: uuid-generator viewHistory narrowed by Sill ---"
+node scripts/run-extension.mjs extensions/build/uuid-generator/viewHistory.js uuid-generator \
+  --seed "$SEED" --type 01J9 --expect-filtering sill --expect-rows 1
+
 echo
 echo "--- Form: password-generator (real extension) ---"
 node scripts/build-extension.mjs extensions/raycast-src/extensions/password-generator generate-random-password > /dev/null
@@ -36,3 +47,22 @@ node scripts/build-extension.mjs extensions/raycast-src/extensions/uuid-generato
 # React call the async entry point repeatedly, which is the bug this catches.
 node scripts/run-extension.mjs extensions/build/uuid-generator/generateV7.js uuid-generator --no-view   | tee /tmp/sill-noview.log
 grep -q "UI/showHud x1" /tmp/sill-noview.log   && echo "ok   no-view command ran exactly once"   || { echo "FAIL no-view command did not run exactly once"; exit 1; }
+
+# The other half of the search field, and it needs an extension that does its
+# own searching. Emoji Search sets `onSearchTextChange` and filters in memory
+# with Fuse, so a word typed here reaches the extension and comes back as a
+# different list. Its grants are wide because its dependency tree pulls in
+# `child_process` and `http` at module load whether or not it ever uses them,
+# and its assets are where its emoji data lives.
+#
+# Last on purpose. It is by far the heaviest case here, two thousand rows built
+# in a worker on a machine that may also be compiling Rust, and ahead of a
+# lighter one it left the next command short of its settle window and failed a
+# step that was fine.
+echo
+echo "--- List onSearchTextChange: emoji (real extension) ---"
+node scripts/build-extension.mjs extensions/raycast-src/extensions/emoji emoji > /dev/null
+node scripts/run-extension.mjs extensions/build/emoji/emoji.js emoji \
+  --grant fileRead,fileWrite,network,processLaunch \
+  --assets extensions/raycast-src/extensions/emoji/assets \
+  --type tada --expect-filtering extension --expect-heard

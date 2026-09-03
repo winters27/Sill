@@ -69,6 +69,49 @@ export function noMatch(query: string, what = "results"): string {
   return asked ? `No ${what} for ${asked}` : `No ${what}`;
 }
 
+/** The words a view falls back on when nothing else explains the emptiness. */
+export interface EmptyWords {
+  headline: string;
+  hint: string;
+}
+
+/**
+ * What a list an extension rendered says when it has no rows in it.
+ *
+ * Three sentences again, and the middle one is the reason this exists.
+ * `isLoading` is the prop an extension sets while it is fetching its first
+ * page, and Sill read it nowhere: a command that had not answered yet drew
+ * "No results", which is a claim about somebody's data made before the answer
+ * arrived. The list is not empty, it is early, and those are different things
+ * to be told.
+ *
+ * Then the query, because a list narrowed to nothing should name the word that
+ * narrowed it, and only then the view's own words for a command that genuinely
+ * returned nothing. The order is `standing`'s and this follows it.
+ *
+ * The words for the last case are the caller's: a list with nothing in it and
+ * a grid with nothing in it are not the same sentence, and neither is worth a
+ * flag inside here.
+ *
+ * No failure branch. An extension that fails does not render an empty list, it
+ * crashes its session, and the launcher says so where it says everything else.
+ */
+export function whileEmpty(
+  reading: Reading,
+  query: string,
+  empty: EmptyWords,
+): EmptyWords & { tone: Standing } {
+  const tone = standing(reading);
+
+  if (tone === "loading") {
+    return { tone, headline: "Still looking", hint: "This command has not finished fetching." };
+  }
+
+  if (query) return { tone, headline: noMatch(query), hint: "" };
+
+  return { tone, ...empty };
+}
+
 /**
  * What a failed read says.
  *
