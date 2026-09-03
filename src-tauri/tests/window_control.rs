@@ -138,20 +138,61 @@ fn the_list_is_frontmost_first() {
     // The switcher's whole value is that the first entry is the window you
     // were last in. That order comes from EnumWindows walking the Z-order,
     // so it survives only as long as nothing re-sorts it.
-    let found = windowing::list();
-    if found.len() < 2 {
-        // Nothing to order. Not a failure: the desktop is whatever is open.
-        return;
+    //
+    /*
+     * Read until one reading holds still, and judge that one.
+     *
+     * The claim is about the order Windows keeps, not about how long the
+     * desktop stands still, and a desktop that is changing gives two calls two
+     * different worlds: the list is walked before a window appears and the
+     * foreground is read after it. **A second copy of this binary does that
+     * continuously**, opening and closing test windows of its own, and the
+     * failure it produced named a window this process had never created.
+     *
+     * Own-process windows cannot cause it. They are left out of the list on
+     * purpose and `foreground` answers `None` for them, so churn from the
+     * sibling tests running beside this one is silence rather than a wrong
+     * answer.
+     *
+     * On a still desktop the first reading is the only one, so this costs
+     * nothing in the ordinary case.
+     */
+    let mut disagreed = None;
+
+    for _ in 0..5 {
+        let before = windowing::foreground().map(|window| window.id);
+        let found = windowing::list();
+        let front = windowing::foreground();
+
+        if found.len() < 2 {
+            // Nothing to order. Not a failure: the desktop is whatever is open.
+            return;
+        }
+
+        let Some(front) = front else {
+            // Sill's own windows are not in the list and one of them is at the
+            // front, so there is nothing here to compare.
+            return;
+        };
+
+        if before == Some(front.id) {
+            if found[0].id == front.id {
+                return;
+            }
+
+            disagreed = Some(format!(
+                "the list starts with {:?} but the foreground window is {:?}",
+                found[0].title, front.title
+            ));
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 
-    // The frontmost window, from Windows rather than from the list.
-    let front = windowing::foreground();
-    if let Some(front) = front {
-        assert_eq!(
-            found[0].id, front.id,
-            "the list starts with {:?} but the foreground window is {:?}",
-            found[0].title, front.title
-        );
+    // Every reading that held still put the wrong window first, which is the
+    // order being wrong rather than the desktop being busy.
+    if let Some(why) = disagreed {
+        panic!("{why}");
     }
 }
 

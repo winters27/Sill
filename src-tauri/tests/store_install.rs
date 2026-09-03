@@ -247,8 +247,12 @@ async fn a_real_extension_installs_from_the_store() {
 /// without a network.
 #[test]
 fn removing_an_extension_takes_its_commands_out_of_the_index() {
-    let root = std::env::temp_dir().join("sill-store-remove");
-    let _ = std::fs::remove_dir_all(&root);
+    // A directory of its own. This one runs in an ordinary `cargo test`, and
+    // named after the test it would be wiped and rebuilt by every run on the
+    // machine at once, which is a second run deleting the bundles this one is
+    // about to assert are there.
+    let scratch = tempfile::tempdir().expect("a temp directory");
+    let root = scratch.path();
 
     let home = root.join("extensions");
     std::fs::create_dir_all(home.join("demo")).expect("a directory to remove");
@@ -278,6 +282,4 @@ fn removing_an_extension_takes_its_commands_out_of_the_index() {
     let kept = sill_lib::registry::load_index(&home.join("index.json"));
     let ids: Vec<&str> = kept.iter().map(|record| record.id.as_str()).collect();
     assert_eq!(ids, ["other:go"], "its commands are out of the index too");
-
-    let _ = std::fs::remove_dir_all(&root);
 }
