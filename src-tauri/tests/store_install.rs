@@ -273,7 +273,10 @@ fn removing_an_extension_takes_its_commands_out_of_the_index() {
     ]"#;
     std::fs::write(home.join("index.json"), index).expect("an index");
 
-    let had = install::uninstall(&root, "demo").expect("it is removed");
+    // A store of its own, because removal empties an extension's
+    // `LocalStorage` and the one the application holds is not this test's.
+    let storage = sill_lib::exthost::Storage::memory().expect("a store");
+    let had = install::uninstall(root, &storage, "demo").expect("it is removed");
 
     assert!(had);
     assert!(!home.join("demo").exists(), "the bundles are gone");

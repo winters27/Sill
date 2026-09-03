@@ -49,6 +49,7 @@ fn where_the_switches_land() {
             NOW,
             registry::SEARCH_LIMIT,
             Excluded::none(),
+            &[],
         );
 
         let at = found
@@ -108,6 +109,7 @@ fn what_ordinary_queries_return() {
             NOW,
             registry::SEARCH_LIMIT,
             Excluded::none(),
+            &[],
         );
 
         eprintln!("{query:?}  {} match", found.len());

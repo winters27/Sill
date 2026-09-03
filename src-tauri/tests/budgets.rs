@@ -28,6 +28,7 @@ fn command(id: &str, title: &str) -> CommandRecord {
         icon: None,
         panel: None,
         preferences: serde_json::Value::Null,
+        manifest: None,
         toggle: None,
     }
 }
@@ -77,6 +78,7 @@ fn rank(corpus: &[CommandRecord], query: &str) -> u128 {
         NOW,
         registry::SEARCH_LIMIT,
         Excluded::none(),
+        &[],
     );
 
     // Used so the work cannot be optimised away.

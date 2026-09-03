@@ -929,6 +929,7 @@ mod tests {
             toggle: None,
             panel: None,
             preferences: serde_json::Value::Null,
+            manifest: None,
         }
     }
 

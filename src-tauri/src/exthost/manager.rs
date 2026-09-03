@@ -139,6 +139,35 @@ impl LoadOptions {
             cwd: None,
         }
     }
+
+    /// An argument object with a key for everything the command declared.
+    ///
+    /// Raycast collects these in the launcher's own bar before the command
+    /// starts; nothing here collects them yet, so every one is absent. Absent
+    /// is `""` rather than missing on purpose: an extension destructuring
+    /// `props.arguments` and handing the result to a search is the ordinary
+    /// shape, and `undefined` there is a crash where an empty string is an
+    /// empty search.
+    ///
+    /// A dropdown with a first choice starts on it, because a dropdown with no
+    /// selection is not a state Raycast's own bar can be in.
+    pub fn blank_arguments(declared: &[crate::extension_install::Argument]) -> Value {
+        let mut answer = serde_json::Map::new();
+
+        for argument in declared {
+            let value = match argument.kind.as_deref() {
+                Some("dropdown") => argument
+                    .data
+                    .first()
+                    .map(|choice| choice.value.clone())
+                    .unwrap_or_else(|| json!("")),
+                _ => json!(""),
+            };
+            answer.insert(argument.name.clone(), value);
+        }
+
+        Value::Object(answer)
+    }
 }
 
 /// Client half of the Manager layer.
@@ -208,5 +237,55 @@ impl ManagerClient {
             )
             .await?;
         Ok(result.as_bool().unwrap_or(false))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arguments(json: &str) -> Vec<crate::extension_install::Argument> {
+        serde_json::from_str(json).expect("arguments parse")
+    }
+
+    /// A command that declares one used to get an object with nothing in it.
+    ///
+    /// `const { query } = props.arguments` then leaves `query` undefined, and
+    /// an extension that hands it to a search throws in its first line, which
+    /// reads as the extension being broken.
+    #[test]
+    fn every_declared_argument_has_a_key_before_the_command_starts() {
+        let declared = arguments(
+            r#"[
+                { "name": "query", "type": "text" },
+                { "name": "secret", "type": "password" }
+            ]"#,
+        );
+
+        let blank = LoadOptions::blank_arguments(&declared);
+
+        assert_eq!(blank["query"], "", "absent is an empty search, not a crash");
+        assert_eq!(blank["secret"], "");
+        assert_eq!(blank.as_object().expect("an object").len(), 2);
+    }
+
+    /// A dropdown with no selection is not a state Raycast's bar can be in.
+    #[test]
+    fn a_dropdown_starts_on_its_first_choice() {
+        let declared = arguments(
+            r#"[{
+                "name": "scope",
+                "type": "dropdown",
+                "data": [{ "title": "All", "value": "all" }, { "title": "Mine", "value": "mine" }]
+            }]"#,
+        );
+
+        assert_eq!(LoadOptions::blank_arguments(&declared)["scope"], "all");
+    }
+
+    #[test]
+    fn a_command_declaring_nothing_still_gets_an_object() {
+        // The host spreads this, and spreading anything but an object throws.
+        assert!(LoadOptions::blank_arguments(&[]).is_object());
     }
 }

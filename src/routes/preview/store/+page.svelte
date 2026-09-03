@@ -249,6 +249,8 @@
     ],
     packages: ["@spotify/web-api-ts-sdk", "node-fetch", "swr"],
     secrets: ["Client Secret"],
+    apiWarning: "It asks for @raycast/api ^1.120.0 and Sill implements 1.104.0. Anything added since then will be missing.",
+    refused: ["menu-bar: it is a menu bar command, which is a status item beside the clock, and a launcher has nowhere to put one"],
     notEnforced:
       "Sill does not sandbox extensions. This is what the code appears to use, not a limit on " +
       "what it can do: an extension runs as a Node program with your account's access, and a " +

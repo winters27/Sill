@@ -28,14 +28,19 @@
   import Row from "./Row.svelte";
   import Toggle from "../Toggle.svelte";
   import Button from "./Button.svelte";
+  import Select from "./Select.svelte";
+  import TextField from "./TextField.svelte";
   import Instead from "../Instead.svelte";
   import { standing } from "$lib/instead";
   import {
+    extensionPreferences,
     grantPermission,
     installedExtensions,
     revokePermission,
+    setExtensionPreference,
     shortRevision,
     storeUninstall,
+    type ExtensionPreference,
     type InstalledExtension,
   } from "$lib/store";
 
@@ -50,15 +55,73 @@
   let loading = $state(true);
   let status = $state("");
 
+  /**
+   * The settings each extension declares, keyed by its name.
+   *
+   * Read alongside the list rather than on demand, because the alternative is
+   * a section that appears a moment after the one above it and moves the page
+   * under whoever is reading it.
+   */
+  let settings = $state<Record<string, ExtensionPreference[]>>({});
+
   async function refresh() {
     loading = true;
     try {
       installed = await installedExtensions();
+      settings = Object.fromEntries(
+        await Promise.all(
+          installed.map(
+            async (one) => [one.extension, await extensionPreferences(one.extension)] as const,
+          ),
+        ),
+      );
     } catch (err) {
       status = `${err}`;
     } finally {
       loading = false;
     }
+  }
+
+  /**
+   * Saves one setting.
+   *
+   * On change rather than on every keystroke, so a text field writes once when
+   * it is left instead of once per character. Nothing is held here waiting to
+   * be flushed: a debounced write with an unmount to remember is how a setting
+   * gets lost, and this window can be closed at any moment.
+   */
+  async function setPreference(
+    extension: string,
+    preference: ExtensionPreference,
+    value: unknown,
+  ) {
+    try {
+      await setExtensionPreference(extension, preference.command, preference.name, value);
+      settings[extension] = await extensionPreferences(extension);
+    } catch (err) {
+      status = `${err}`;
+    }
+  }
+
+  /** What a row says under its title. */
+  function about(preference: ExtensionPreference): string {
+    const parts = [preference.description];
+
+    if (preference.required && preference.isDefault) {
+      parts.push("Required. Commands that need it will not start until it is set.");
+    }
+    if (preference.commandTitle) {
+      parts.push(`Only for ${preference.commandTitle}.`);
+    }
+
+    return parts.filter(Boolean).join(" ");
+  }
+
+  /** A preference's value as a string, for the controls that take one. */
+  function asText(preference: ExtensionPreference): string {
+    const value = preference.value;
+    if (value === null || value === undefined) return "";
+    return typeof value === "string" ? value : JSON.stringify(value);
   }
 
   $effect(() => {
@@ -147,6 +210,58 @@
           ? command.subtitle
           : `${command.mode}, which Sill has nowhere to run`}
       />
+    {/each}
+
+    <!--
+      What the extension can be told. Half the store needs an API key to do
+      anything at all, and until this existed the answer to "set your token in
+      preferences" was a screen that did not exist.
+    -->
+    {#each settings[one.extension] ?? [] as preference (`${preference.command}/${preference.name}`)}
+      <Row title={preference.title} description={about(preference)}>
+        {#snippet control()}
+          {#if preference.kind === "checkbox"}
+            <Toggle
+              checked={preference.value === true}
+              onchange={(next: boolean) => void setPreference(one.extension, preference, next)}
+              label={preference.title}
+            />
+          {:else if preference.kind === "dropdown" && preference.choices.length > 0}
+            <Select
+              value={asText(preference)}
+              options={preference.choices.map((choice) => ({
+                value: String(choice.value),
+                label: choice.title,
+              }))}
+              onchange={(next: string) => void setPreference(one.extension, preference, next)}
+              steady
+              ariaLabel={preference.title}
+            />
+          {:else if preference.kind === "password"}
+            <!--
+              Never the value. What is stored is sealed and what arrives here
+              is whether anything is set, so the field is blank and typing into
+              it replaces what is there.
+            -->
+            <TextField
+              value=""
+              secret
+              mono
+              placeholder={preference.value === true ? "Set" : "Not set"}
+
+              onchange={(next: string) => void setPreference(one.extension, preference, next)}
+              ariaLabel={preference.title}
+            />
+          {:else}
+            <TextField
+              value={asText(preference)}
+              onchange={(next: string) => void setPreference(one.extension, preference, next)}
+
+              ariaLabel={preference.title}
+            />
+          {/if}
+        {/snippet}
+      </Row>
     {/each}
 
     <!--

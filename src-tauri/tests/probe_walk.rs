@@ -122,6 +122,7 @@ fn ranking_cost() {
                 icon: None,
                 panel: None,
                 preferences: serde_json::Value::Null,
+                manifest: None,
                 toggle: None,
             }
         })
@@ -139,6 +140,7 @@ fn ranking_cost() {
             1_756_000_000,
             60,
             Excluded::none(),
+            &[],
         );
         println!(
             "  {query:>12} -> {:>5} hits in {:>5} ms",

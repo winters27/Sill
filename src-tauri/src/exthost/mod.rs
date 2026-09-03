@@ -12,6 +12,7 @@ pub mod framing;
 pub mod grants;
 pub mod manager;
 pub mod permission;
+pub mod preferences;
 pub mod rpc;
 pub mod storage;
 

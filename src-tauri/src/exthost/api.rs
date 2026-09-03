@@ -116,6 +116,16 @@ impl ApiLayer {
     /// behalf ask the same question the API layer does. They reach the same
     /// capabilities by another route, and for a while they did it without
     /// asking anybody.
+    /// Where `LocalStorage` lives.
+    ///
+    /// Exposed so removing an extension can empty it. This is the one store
+    /// the running application already has open, and a second connection
+    /// opened for the removal would be a second answer to what an extension's
+    /// storage is.
+    pub fn storage(&self) -> &Arc<Storage> {
+        &self.storage
+    }
+
     pub fn permits(&self) -> &Arc<dyn Permits> {
         &self.permits
     }
