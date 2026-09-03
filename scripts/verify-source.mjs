@@ -8,6 +8,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
 import { spawnSync } from "node:child_process";
 
+import { SOURCE, TAURI_POINTER, read, source, tauriVersion } from "./versions.mjs";
+
 const SKIP = new Set([
   "node_modules",
   "target",
@@ -1907,6 +1909,49 @@ if (tracked.status !== 0) {
   }
 }
 
+
+/*
+ * Six files holding one version number.
+ *
+ * `tauri.conf.json` reads `package.json`, so that one is a pointer rather
+ * than a copy and the check is that it stayed a pointer. The other five
+ * cannot read anything: Cargo and npm both want the number written in the
+ * file, and their lock files want it again.
+ *
+ * Left alone they drift, and the drift is invisible until somebody reads a
+ * bug report. `CARGO_PKG_VERSION` is the log header, the MCP handshake and
+ * the store's User-Agent; Settings shows `package_info().version`, which
+ * comes from the Tauri config and therefore from `package.json`. A bump that
+ * missed `Cargo.toml` gives one build two version numbers and no error.
+ *
+ * `npm run version:set 0.2.0` sets all of them from one argument.
+ */
+{
+  const wanted = source();
+
+  if (tauriVersion() !== TAURI_POINTER) {
+    fail(
+      "src-tauri/tauri.conf.json",
+      null,
+      `version is ${JSON.stringify(tauriVersion())} rather than ` +
+        `${JSON.stringify(TAURI_POINTER)}. Tauri takes a path to a package.json ` +
+        `where a semver string would go, which is what makes ${SOURCE} the only ` +
+        "place the number is decided",
+    );
+  }
+
+  for (const copy of read()) {
+    if (copy.version === wanted) continue;
+
+    fail(
+      copy.file,
+      null,
+      `says ${copy.version === null ? "nothing readable" : copy.version} where ` +
+        `${SOURCE} says ${wanted}. This is ${copy.what}. ` +
+        `Run \`npm run version:set ${wanted}\``,
+    );
+  }
+}
 
 console.log(
   failures === 0 ? "source verification passed" : `\n${failures} problem(s) found`,

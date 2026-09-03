@@ -115,6 +115,45 @@ real Raycast extensions.
 `scripts/device-tests.ps1` measures what a build actually costs on a machine.
 The budgets it checks against are in [docs/budgets.md](docs/budgets.md).
 
+## Releasing
+
+A tag builds the installers. Pushing `v0.2.0` runs
+[`.github/workflows/release.yml`](.github/workflows/release.yml) on a Windows
+runner and attaches the NSIS setup and the MSI to a draft release.
+
+```bash
+npm run version:set 0.2.0     # every file that holds a version number
+npm run changelog -- research # the diff, to write the entry from
+# write the `## 0.2.0` section of CHANGELOG.md, then commit
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The version lives in `package.json` and nowhere else by hand.
+`src-tauri/tauri.conf.json` reads it, which is why its `version` is a path
+rather than a number; `Cargo.toml`, `host/package.json` and three lock files
+carry copies that `npm run verify:source` refuses to let drift.
+
+The changelog is written, not generated. `npm run changelog -- research`
+prints where the work went, what appeared and went away, the new IPC surface
+and every commit body, and the workflow refuses to build a tag whose section
+is missing.
+
+Run the workflow from the Actions tab with no tag for a rehearsal: it builds
+everything and creates no release.
+
+**Signing needs two repository secrets**, under Settings > Secrets and
+variables > Actions:
+
+| Secret | What it is |
+| --- | --- |
+| `WINDOWS_CERTIFICATE` | A code-signing `.pfx`, base64 encoded: `base64 -w0 certificate.pfx` |
+| `WINDOWS_CERTIFICATE_PASSWORD` | The password that `.pfx` was exported with |
+
+Until both exist the signing steps are skipped and the installers go out
+unsigned, which SmartScreen warns about on first run. The certificate
+thumbprint is derived on the runner from the certificate itself, so there is no
+third secret and nothing about a certificate is committed.
+
 ## Layout
 
 | Path | What is there |
