@@ -373,7 +373,7 @@
     stdout: string;
     stderr: string;
     code: number | null;
-    ended: "finished" | "timedOut" | "cancelled";
+    ended: "finished" | "timedOut" | "cancelled" | "started";
   } | null>(null);
 
   /**
@@ -4251,6 +4251,13 @@
           {output.title} was stopped.
         {:else if output.ended === "timedOut"}
           {output.title} ran too long and was stopped.
+        {:else if output.ended === "started"}
+          <!-- Before the exit code, because there is not one. Windows started
+               it as administrator and a process at that level hands nothing
+               back to one below it: no output, no code, and no way to stop
+               it. Saying "finished" here would be claiming to know it
+               worked. -->
+          {output.title} was started as administrator. Sill cannot see what it does.
         {:else if output.code !== 0}
           {output.title} failed with code {output.code}.
         {:else}
@@ -4269,7 +4276,9 @@
         <pre class="output-text output-wrong sill-scrolls">{output.stderr}</pre>
       {/if}
 
-      {#if !output.running && !output.stdout.trim() && !output.stderr.trim()}
+      <!-- Not for an elevated start, which printed nothing here because Sill
+           was never holding its output, rather than because it was quiet. -->
+      {#if !output.running && output.ended !== "started" && !output.stdout.trim() && !output.stderr.trim()}
         <p class="output-said">It printed nothing.</p>
       {/if}
     </div>

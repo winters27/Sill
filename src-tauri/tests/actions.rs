@@ -24,6 +24,11 @@ const INDEX_MODES: &[&str] = &[
     "snippet",
     "quicklink",
     "quicklink-arg",
+    // Both of them, because whether a script stops to ask for an argument is a
+    // fact about its header and not about what can be done to it. The one that
+    // asks was the one nothing but the window could run.
+    "script",
+    "script-arg",
     "answer",
 ];
 
@@ -42,6 +47,33 @@ fn everything_the_index_can_hold_still_has_something_bound_to_enter() {
             "{mode} maps to {kind:?}, and nothing is bound to Enter for it"
         );
     }
+}
+
+/// A script is reachable by name, which is what a key and the model need.
+///
+/// A binding names an action id and resolves the thing from the index; the
+/// model names an action id and a target. Neither has a window. So an action
+/// under a stable id that accepts the kind is the whole of what both of them
+/// require, and this is the half of that a test can hold: `ActionCtx` carries
+/// a concrete `AppHandle`, so no action body can be run from here.
+#[test]
+fn running_a_script_is_reachable_by_its_id() {
+    let registry = builtins();
+
+    let found = registry
+        .get("sill.script.run")
+        .expect("a key and the model both bind by this id");
+
+    assert!(found.accepts(ObjectKind::Script));
+    assert!(
+        found.is_primary(ObjectKind::Script),
+        "Enter does not run it"
+    );
+    assert_eq!(
+        found.capabilities(),
+        &[Capability::ShellExecution],
+        "the model's approval card is raised off this",
+    );
 }
 
 #[test]

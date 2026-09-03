@@ -84,6 +84,12 @@ pub const SETTINGS: &[Setting] = &[
         "Stop a script after",
         "script timeout stop long running seconds",
     ),
+    s(
+        "scripts",
+        "Scripts",
+        "Scripts allowed to run as administrator",
+        "script administrator admin elevated elevate uac privilege rights",
+    ),
     // ------------------------------------------------------------- general
     s(
         "general",

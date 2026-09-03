@@ -1541,6 +1541,21 @@
             <PathList bind:paths={p.scripts.folders} onchange={commit} />
           </Section>
 
+          <Section
+            label="Administrator rights"
+            description="A script can ask for administrator rights in its own header, and asking is all it can do. A script file arrives in a checkout, in a zip, in a folder somebody shares, and the prompt Windows shows names powershell.exe rather than the script, so there is nothing on that dialog to decide with. Naming one here is the deciding, made in advance, about one file. A script that asks and is not named does not run at all, rather than quietly running without the rights it said it needed."
+          >
+            <PathList
+              bind:paths={p.scripts.elevated}
+              onchange={commit}
+              files
+              headline="No script may run as administrator"
+              hint="A script asking for it in its header will say so and stop."
+              add="Allow a script…"
+              removes="Stop allowing"
+            />
+          </Section>
+
           {:else if active === "extensions"}
           <!-- The Store section stays here because it is a preference; what is
                installed, what it runs and what it may reach is a screen of its

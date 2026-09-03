@@ -30,6 +30,29 @@
 //! The extension has to name an interpreter too. `Shell::of` returns `None`
 //! for anything unknown rather than guessing, so a `.txt` in the same folder
 //! is never handed to PowerShell.
+//!
+//! ## The three things Raycast's format has no word for
+//!
+//! A folder to run in, environment variables, and administrator rights. They
+//! are written under Sill's own marker rather than borrowed onto Raycast's,
+//! so a header carrying them still parses everywhere else and nothing here
+//! has to guess which product a `@raycast.` line was meant for:
+//!
+//! ```text
+//! # @sill.workingDirectory ../repo
+//! # @sill.environment DEPLOY_ENV=staging
+//! # @sill.environment REGION=eu-west-1
+//! # @sill.needsAdministrator true
+//! ```
+//!
+//! **A header is a request, not a grant.** A script file is somebody else's
+//! writing: it arrives in a zip, in a checkout, in a folder that somebody
+//! shares. The folder and the variables it asks for only ever reach the one
+//! child process, so a script asking for them can do nothing it could not
+//! already do by writing the same two lines in its own body. Administrator
+//! rights are the opposite: they are a boundary rather than a convenience, so
+//! the header can only ask, and the answer lives in Sill's own preferences
+//! where no script can write it. See [`plan`].
 
 use std::path::{Path, PathBuf};
 
@@ -97,6 +120,24 @@ pub struct Script {
     pub arguments: Vec<Argument>,
     /// Whether it needs somebody to type something before it runs.
     pub needs_argument: bool,
+    /// The folder it asked to run in, exactly as its header wrote it.
+    ///
+    /// Kept unresolved so what the header said and what Sill decided stay two
+    /// separate facts. A relative path is relative to the script's own folder,
+    /// which [`plan`] is what settles; resolving it here would mean resolving
+    /// it against whatever directory the process happened to be sitting in.
+    pub directory: Option<PathBuf>,
+    /// What it asked to be run with, in the order it asked.
+    ///
+    /// A pair list rather than a map: the header has an order, a person
+    /// reading the header reads it in that order, and a map would sort it into
+    /// a different one for no reason anybody could see.
+    pub environment: Vec<(String, String)>,
+    /// Whether its header asked for administrator rights.
+    ///
+    /// Asked, not granted. Nothing runs elevated because a file said so; see
+    /// [`plan`].
+    pub wants_admin: bool,
 }
 
 /// Strips whatever closes a block comment off the end of a value.
@@ -116,22 +157,31 @@ fn tidy(value: &str) -> String {
     value.to_string()
 }
 
-/// Pulls the `@raycast.*` lines out of a header, whatever comments it uses.
+/// Raycast's own marker, read unchanged so a copied header works here.
+const THEIRS: &str = "@raycast.";
+
+/// Sill's own marker, for the things Raycast's format cannot say.
+///
+/// Separate rather than more `@raycast.` keys, because a header travels: a
+/// script carrying `@raycast.needsAdministrator` would be making a claim about
+/// a product that never defined it, and a reader would have no way to tell
+/// which of the two was meant to answer.
+const OURS: &str = "@sill.";
+
+/// Pulls the marked lines out of a header, whatever comments it uses.
 ///
 /// Every shell marks a comment differently, `#` in sh and PowerShell, `REM` or
 /// `::` in batch, `//` in JavaScript. Rather than a table of those, this looks
 /// for the marker itself and takes what follows, which works for all of them
 /// and for the one somebody uses next.
-fn fields(header: &str) -> Vec<(String, String)> {
-    const MARKER: &str = "@raycast.";
-
+fn fields(header: &str, marker: &str) -> Vec<(String, String)> {
     let mut found = Vec::new();
 
     for line in header.lines() {
-        let Some(at) = line.find(MARKER) else {
+        let Some(at) = line.find(marker) else {
             continue;
         };
-        let rest = &line[at + MARKER.len()..];
+        let rest = &line[at + marker.len()..];
 
         let mut parts = rest.splitn(2, char::is_whitespace);
         let Some(key) = parts.next().filter(|key| !key.is_empty()) else {
@@ -144,14 +194,78 @@ fn fields(header: &str) -> Vec<(String, String)> {
     found
 }
 
+/// Whether a string can be the name of an environment variable.
+///
+/// Windows will take very nearly anything, which is the problem: a name with a
+/// space in it can be set and can never be read back by the ordinary `%NAME%`,
+/// so a header line that looked like it worked silently did nothing. An empty
+/// name is not a name at all, and a NUL ends the environment block early,
+/// taking every variable after it with it.
+///
+/// `=` cannot appear, because the split is on the first one and that is what
+/// makes the name the part in front of it.
+fn a_name(said: &str) -> bool {
+    !said.is_empty() && !said.contains(|c: char| c.is_whitespace() || c == '\0')
+}
+
+/// The variables a header declared, in the order it declared them.
+///
+/// **The first line for a name wins.** A header is read top to bottom by the
+/// person deciding whether to keep the file, and a second line quietly
+/// overriding the first is how a header stops meaning what it appears to say:
+/// appending one line to the bottom of a reviewed script would be enough.
+///
+/// Everything after the first `=` is the value, untouched. A value is never a
+/// path, a number, or anything else Sill has an opinion about, and trimming or
+/// unquoting it would be Sill editing somebody's data on the way past.
+fn environment(found: &[(String, String)]) -> Vec<(String, String)> {
+    let mut declared: Vec<(String, String)> = Vec::new();
+
+    for (key, said) in found {
+        if key != "environment" {
+            continue;
+        }
+
+        let Some((name, value)) = said.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+
+        if !a_name(name) || value.contains('\0') {
+            continue;
+        }
+
+        // Windows matches an environment name without regard to case, so
+        // `Path` and `PATH` are one variable and the second is the duplicate.
+        if declared
+            .iter()
+            .any(|(had, _)| had.eq_ignore_ascii_case(name))
+        {
+            continue;
+        }
+
+        declared.push((name.to_string(), value.to_string()));
+    }
+
+    declared
+}
+
 /// Reads a script's header, or decides it is not a command.
 pub fn describe(path: &Path, header: &str) -> Option<Script> {
     let shell = Shell::of(path)?;
-    let found = fields(header);
+    let found = fields(header, THEIRS);
+    let ours = fields(header, OURS);
 
     let value = |name: &str| {
         found
             .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+            .filter(|value| !value.is_empty())
+    };
+
+    let mine = |name: &str| {
+        ours.iter()
             .find(|(key, _)| key == name)
             .map(|(_, value)| value.clone())
             .filter(|value| !value.is_empty())
@@ -190,6 +304,143 @@ pub fn describe(path: &Path, header: &str) -> Option<Script> {
         author: value("author"),
         arguments,
         needs_argument,
+        directory: mine("workingDirectory").map(PathBuf::from),
+        environment: environment(&ours),
+        // Exactly `true`, and nothing else counts. `yes`, `1` and `on` are all
+        // reasonable guesses at what somebody meant, and guessing at the one
+        // field that ends in a UAC prompt is the wrong place to be generous.
+        wants_admin: mine("needsAdministrator").as_deref() == Some("true"),
+    })
+}
+
+/// Where a script runs, what it runs with, and whether it runs elevated.
+///
+/// Decided once, here, so the launcher and the action registry cannot answer
+/// the question differently. Everything in it is settled: the folder exists
+/// and is a folder, and `elevated` is what Sill is going to do rather than
+/// what the file asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Plan {
+    pub directory: PathBuf,
+    pub environment: Vec<(String, String)>,
+    pub elevated: bool,
+}
+
+/// A path in the one spelling that two spellings of it agree on.
+///
+/// Canonicalised, so a path through `..`, a short 8.3 name and a junction all
+/// settle to one string, and lowercased because Windows matches paths without
+/// regard to case. A path that no longer exists cannot be canonicalised and
+/// falls back to what it says, which is right: an allowance for a file that is
+/// gone should match nothing but itself.
+fn settled(path: &Path) -> String {
+    std::fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_lowercase()
+}
+
+/// Whether this exact script is one the person has allowed to elevate.
+fn allowed(path: &Path, may_elevate: &[String]) -> bool {
+    let want = settled(path);
+    may_elevate
+        .iter()
+        .any(|one| settled(Path::new(one.trim())) == want)
+}
+
+/**
+Settles everything about one run before anything is started.
+
+## Why administrator rights are not something a file may ask for
+
+A script header is somebody else's writing. It arrives in a checkout, in a
+zip, in a folder two people share. If `@sill.needsAdministrator true` were
+enough on its own then adding one comment line to any file in a scanned folder
+would be enough to put a UAC prompt in front of somebody, and **the prompt
+Windows shows names `powershell.exe`, not the script**. There is nothing on
+that dialog to tell one of fifty files apart, and the person is being asked to
+decide in the half second after pressing a key they meant for the launcher.
+
+So the header only asks. The answer is a list of script paths in Sill's own
+preferences, written by the settings window and by nothing else: not by a
+script, not by an extension, and not by the model, which has no tool that
+writes a preference at all. A script that asks and has not been allowed does
+not run.
+
+**It does not quietly run unelevated instead.** A script that says it needs
+administrator rights and is given none does half of what it was written to do,
+and finding out which half is somebody's afternoon.
+
+## Why an elevated script may not also set variables
+
+Windows does not carry them. An elevated process is started by the AppInfo
+service, which builds a fresh environment out of the profile, so the directory
+survives the trip and the variables do not. A script that read one and found
+it empty would take the branch nobody tested, with administrator rights, which
+is the worst place for that to happen. Refused rather than silently dropped.
+*/
+pub fn plan(script: &Script, may_elevate: &[String]) -> Result<Plan, String> {
+    let title = &script.title;
+
+    let beside = script
+        .path
+        .parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+        .ok_or_else(|| format!("Sill cannot tell which folder {title} is in"))?;
+
+    // An absolute declared path replaces the script's folder and a relative
+    // one is read from it, which `join` gives for free. Reading a relative
+    // path any other way means reading it against whatever directory this
+    // process happens to be sitting in, which is not a place anybody chose.
+    let directory = match &script.directory {
+        Some(said) => beside.join(said),
+        None => beside.to_path_buf(),
+    };
+
+    if !directory.is_dir() {
+        let shown = directory.display();
+
+        // Said rather than handed on. Windows answers a bad working directory
+        // with "The directory name is invalid. (os error 267)", which names
+        // neither the directory nor the script.
+        return Err(match (&script.directory, directory.exists()) {
+            (Some(_), true) => {
+                format!("{title} asks to run in {shown}, which is a file rather than a folder")
+            }
+            (Some(_), false) => {
+                format!("{title} asks to run in {shown}, and there is no such folder")
+            }
+            (None, _) => format!("{title} is in {shown}, and that folder has gone"),
+        });
+    }
+
+    let environment = script.environment.clone();
+
+    if script.wants_admin {
+        if !allowed(&script.path, may_elevate) {
+            // The path, not only the title. Allowing one means finding it in a
+            // file picker, and a person who has just been told "Deploy" still
+            // has to work out which of three files that is.
+            return Err(format!(
+                "{title} asks to run as administrator. Sill will not do that until {} is \
+                 allowed in Settings, under Scripts.",
+                script.path.display(),
+            ));
+        }
+
+        if !environment.is_empty() {
+            return Err(format!(
+                "{title} asks to run as administrator and to set environment variables. \
+                 Windows builds a fresh environment for an elevated process, so those values \
+                 would not arrive; take one or the other out of its header.",
+            ));
+        }
+    }
+
+    Ok(Plan {
+        directory,
+        environment,
+        elevated: script.wants_admin,
     })
 }
 
@@ -422,6 +673,329 @@ echo "hello $1"
         let script = describe(Path::new("go.sh"), header).expect("a command");
         assert_eq!(script.arguments.len(), 1);
         assert!(!script.needs_argument);
+    }
+
+    /// The three things Raycast's format has no word for.
+    mod what_sill_adds {
+        use super::*;
+
+        fn with(lines: &str) -> Script {
+            let header = format!("# @raycast.title A\n# @raycast.mode silent\n{lines}");
+            describe(Path::new("go.ps1"), &header).expect("a command")
+        }
+
+        #[test]
+        fn a_header_can_name_all_three() {
+            let script = with(concat!(
+                "# @sill.workingDirectory C:\\Work\\repo\n",
+                "# @sill.environment DEPLOY_ENV=staging\n",
+                "# @sill.environment REGION=eu-west-1\n",
+                "# @sill.needsAdministrator true\n",
+            ));
+
+            assert_eq!(
+                script.directory.as_deref(),
+                Some(Path::new(r"C:\Work\repo"))
+            );
+            assert_eq!(
+                script.environment,
+                vec![
+                    ("DEPLOY_ENV".to_string(), "staging".to_string()),
+                    ("REGION".to_string(), "eu-west-1".to_string()),
+                ],
+            );
+            assert!(script.wants_admin);
+        }
+
+        /// A Raycast header on its own declares none of them.
+        ///
+        /// The default has to be the quiet one: the script's own folder, no
+        /// variables, and no UAC prompt. Every script anybody already wrote is
+        /// one of these.
+        #[test]
+        fn a_header_that_names_none_of_them_asks_for_nothing() {
+            let script = describe(Path::new("hello.sh"), HELLO).expect("a command");
+
+            assert_eq!(script.directory, None);
+            assert!(script.environment.is_empty());
+            assert!(!script.wants_admin);
+        }
+
+        /// Sill's marker is read on its own, so `@raycast.needsAdministrator`
+        /// is a line about a product that never defined it and means nothing.
+        #[test]
+        fn the_other_marker_does_not_grant_it() {
+            assert!(!with("# @raycast.needsAdministrator true\n").wants_admin);
+        }
+
+        /// Exactly `true`. Guessing at the one field that ends in a UAC prompt
+        /// is the wrong place to be generous about what somebody meant.
+        #[test]
+        fn only_the_word_true_asks_for_administrator_rights() {
+            for said in ["yes", "1", "on", "True", "TRUE", "false", ""] {
+                assert!(
+                    !with(&format!("# @sill.needsAdministrator {said}\n")).wants_admin,
+                    "{said:?} was read as asking",
+                );
+            }
+
+            assert!(with("# @sill.needsAdministrator true\n").wants_admin);
+        }
+
+        mod the_variables {
+            use super::*;
+
+            fn env(lines: &str) -> Vec<(String, String)> {
+                with(lines).environment
+            }
+
+            /// Everything after the first `=` is the value, untouched.
+            #[test]
+            fn a_value_is_whatever_follows_the_first_equals() {
+                assert_eq!(
+                    env("# @sill.environment ODD=a&b \"q\" %PATH% x=y\n"),
+                    vec![("ODD".to_string(), "a&b \"q\" %PATH% x=y".to_string())],
+                );
+            }
+
+            /// A line with nothing to split on is not a variable.
+            #[test]
+            fn a_line_with_no_equals_sets_nothing() {
+                assert!(env("# @sill.environment JUST_A_NAME\n").is_empty());
+            }
+
+            /// Windows will happily set a name with a space in it, and nothing
+            /// can ever read it back with the ordinary `%NAME%`. A line that
+            /// looked like it worked and did nothing is worse than a refusal.
+            #[test]
+            fn a_name_nothing_could_read_back_is_refused() {
+                assert!(env("# @sill.environment TWO WORDS=x\n").is_empty());
+                assert!(env("# @sill.environment =x\n").is_empty());
+            }
+
+            /// The first line for a name wins.
+            ///
+            /// Appending one line to the bottom of a reviewed script would
+            /// otherwise be enough to change what a line at the top means.
+            #[test]
+            fn the_first_line_for_a_name_wins() {
+                assert_eq!(
+                    env(concat!(
+                        "# @sill.environment TOKEN=first\n",
+                        "# @sill.environment token=second\n",
+                    )),
+                    vec![("TOKEN".to_string(), "first".to_string())],
+                    "the second line overrode the first, or was kept beside it",
+                );
+            }
+        }
+    }
+
+    /// What is settled before anything runs.
+    mod planning_a_run {
+        use super::*;
+
+        /// A real script on disk, because `plan` asks the filesystem.
+        fn script(dir: &Path, name: &str, lines: &str) -> Script {
+            let path = dir.join(name);
+            std::fs::write(
+                &path,
+                format!("# @raycast.title Deploy\n# @raycast.mode silent\n{lines}"),
+            )
+            .expect("wrote the script");
+
+            read(&path).expect("a command")
+        }
+
+        fn temp() -> tempfile::TempDir {
+            tempfile::tempdir().expect("a temp dir")
+        }
+
+        #[test]
+        fn a_script_runs_beside_itself_by_default() {
+            let dir = temp();
+            let plan = plan(&script(dir.path(), "go.ps1", ""), &[]).expect("a plan");
+
+            assert_eq!(plan.directory, dir.path());
+            assert!(plan.environment.is_empty());
+            assert!(!plan.elevated);
+        }
+
+        /// A relative folder is read from the script's own folder, not from
+        /// whatever directory this process happens to be sitting in.
+        #[test]
+        fn a_relative_folder_is_read_from_the_script() {
+            let dir = temp();
+            let inner = dir.path().join("a folder");
+            std::fs::create_dir(&inner).expect("made it");
+
+            let script = script(dir.path(), "go.ps1", "# @sill.workingDirectory a folder\n");
+            let plan = plan(&script, &[]).expect("a plan");
+
+            assert_eq!(plan.directory, inner);
+        }
+
+        /// The two spellings that break a command line, and neither is on one.
+        #[test]
+        fn a_folder_with_a_space_and_a_trailing_backslash_is_taken_as_written() {
+            let dir = temp();
+            let inner = dir.path().join("a folder");
+            std::fs::create_dir(&inner).expect("made it");
+
+            let said = format!("{}\\", inner.display());
+            let script = script(
+                dir.path(),
+                "go.ps1",
+                &format!("# @sill.workingDirectory {said}\n"),
+            );
+
+            let plan = plan(&script, &[]).expect("a plan");
+
+            assert_eq!(plan.directory, PathBuf::from(said));
+            assert!(plan.directory.is_dir(), "the trailing backslash broke it");
+        }
+
+        /// The message a person can act on.
+        ///
+        /// Windows answers a bad working directory with "The directory name is
+        /// invalid. (os error 267)", which names neither the folder nor the
+        /// script and reads as a fault in the script's own code.
+        #[test]
+        fn a_folder_that_is_not_there_names_itself_and_the_script() {
+            let dir = temp();
+            let script = script(dir.path(), "go.ps1", "# @sill.workingDirectory nowhere\n");
+
+            let why = plan(&script, &[]).expect_err("refused");
+
+            assert!(why.contains("Deploy"), "it did not name the script: {why}");
+            assert!(why.contains("nowhere"), "it did not name the folder: {why}");
+            assert!(why.contains("no such folder"), "it said {why}");
+            assert!(!why.contains("os error"), "it handed on the number: {why}");
+        }
+
+        #[test]
+        fn a_file_where_a_folder_should_be_says_which_it_is() {
+            let dir = temp();
+            std::fs::write(dir.path().join("notes.txt"), b"x").expect("wrote");
+            let script = script(dir.path(), "go.ps1", "# @sill.workingDirectory notes.txt\n");
+
+            let why = plan(&script, &[]).expect_err("refused");
+
+            assert!(why.contains("file rather than a folder"), "it said {why}");
+        }
+
+        mod administrator_rights {
+            use super::*;
+
+            const ASKS: &str = "# @sill.needsAdministrator true\n";
+
+            /// The header asks; it does not grant.
+            ///
+            /// A script file arrives in a checkout, in a zip, in a shared
+            /// folder. If one comment line were enough, adding one comment
+            /// line to any file in a scanned folder would put a UAC prompt in
+            /// front of somebody, and the prompt names `powershell.exe`.
+            #[test]
+            fn a_header_alone_is_refused() {
+                let dir = temp();
+                let script = script(dir.path(), "go.ps1", ASKS);
+
+                let why = plan(&script, &[]).expect_err("refused");
+
+                assert!(why.contains("Deploy"), "it did not name the script: {why}");
+                assert!(
+                    why.contains(&script.path.display().to_string()),
+                    "it did not say which file to allow: {why}",
+                );
+                assert!(why.contains("Settings"), "it did not say where: {why}");
+            }
+
+            /// Allowing a different script is not allowing this one.
+            #[test]
+            fn allowing_another_script_allows_nothing_here() {
+                let dir = temp();
+                let script = script(dir.path(), "go.ps1", ASKS);
+                let other = dir.path().join("other.ps1").display().to_string();
+
+                assert!(plan(&script, &[other]).is_err());
+            }
+
+            /// Allowing the folder is not allowing what is in it.
+            ///
+            /// It would be allowing every file dropped into it afterwards,
+            /// which is the standing grant this list exists to avoid.
+            #[test]
+            fn allowing_the_folder_allows_nothing_in_it() {
+                let dir = temp();
+                let script = script(dir.path(), "go.ps1", ASKS);
+                let folder = dir.path().display().to_string();
+
+                assert!(plan(&script, &[folder]).is_err());
+            }
+
+            #[test]
+            fn a_script_named_in_the_list_runs_elevated() {
+                let dir = temp();
+                let script = script(dir.path(), "go.ps1", ASKS);
+                let named = script.path.display().to_string();
+
+                let plan = plan(&script, &[named]).expect("a plan");
+
+                assert!(plan.elevated);
+            }
+
+            /// Windows matches a path without regard to case, and a path
+            /// written through `..` is the same file. An allowance that only
+            /// matched one spelling would look like it had been ignored.
+            #[test]
+            fn a_different_spelling_of_the_same_file_still_counts() {
+                let dir = temp();
+                let inner = dir.path().join("scripts");
+                std::fs::create_dir(&inner).expect("made it");
+                let script = script(&inner, "go.ps1", ASKS);
+
+                let roundabout = dir
+                    .path()
+                    .join("scripts")
+                    .join("..")
+                    .join("scripts")
+                    .join("GO.PS1")
+                    .display()
+                    .to_string();
+
+                assert!(plan(&script, &[roundabout]).expect("a plan").elevated);
+            }
+
+            /// A script that is not asking does not become elevated because
+            /// its path is on the list. The list is permission, not intent.
+            #[test]
+            fn being_on_the_list_is_not_a_reason_to_elevate() {
+                let dir = temp();
+                let script = script(dir.path(), "go.ps1", "");
+                let named = script.path.display().to_string();
+
+                assert!(!plan(&script, &[named]).expect("a plan").elevated);
+            }
+
+            /// Windows builds a fresh environment for an elevated process, so
+            /// a declared variable would silently not arrive. Refused rather
+            /// than dropped: a script reading one and finding it empty takes
+            /// the branch nobody tested, with administrator rights.
+            #[test]
+            fn asking_for_both_is_refused_rather_than_half_done() {
+                let dir = temp();
+                let script = script(
+                    dir.path(),
+                    "go.ps1",
+                    "# @sill.needsAdministrator true\n# @sill.environment TOKEN=x\n",
+                );
+                let named = script.path.display().to_string();
+
+                let why = plan(&script, &[named]).expect_err("refused");
+
+                assert!(why.contains("fresh environment"), "it said {why}");
+            }
+        }
     }
 
     #[test]

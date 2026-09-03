@@ -178,9 +178,11 @@ pub const CATALOGUE: &[Tool] = &[
                     },
                     "kind": {
                         "type": "string",
-                        "description": "Only when the target is not a path on disk. One \
-                                        of: text, systemControl, window, url.",
-                        "enum": ["text", "systemControl", "window", "url", "file", "folder"]
+                        "description": "Only when the target is not a path on disk, or \
+                                        when it is a script command: a script is a path \
+                                        and Run is not something a plain file accepts. \
+                                        One of: text, systemControl, window, url, script.",
+                        "enum": ["text", "systemControl", "window", "url", "file", "folder", "script"]
                     }
                 },
                 "required": ["target"]
@@ -208,8 +210,10 @@ pub const CATALOGUE: &[Tool] = &[
                     },
                     "kind": {
                         "type": "string",
-                        "description": "Only when the target is not a path on disk.",
-                        "enum": ["text", "systemControl", "window", "url", "file", "folder"]
+                        "description": "Only when the target is not a path on disk, or \
+                                        when it is a script command, which has to say \
+                                        script to be run rather than opened.",
+                        "enum": ["text", "systemControl", "window", "url", "file", "folder", "script"]
                     },
                     "argument": {
                         "type": "string",
