@@ -26,6 +26,7 @@
   import ActivityPanel from "$lib/components/settings/ActivityPanel.svelte";
   import ClipboardPanel from "$lib/components/settings/ClipboardPanel.svelte";
   import SnippetsPanel from "$lib/components/settings/SnippetsPanel.svelte";
+  import AutomationsPanel from "$lib/components/settings/AutomationsPanel.svelte";
   import QuicklinksPanel from "$lib/components/settings/QuicklinksPanel.svelte";
   import ShortcutsPanel from "$lib/components/settings/ShortcutsPanel.svelte";
   import ThemeCards from "$lib/components/settings/ThemeCards.svelte";
@@ -107,6 +108,11 @@
       id: "quicklinks",
       name: "Quicklinks",
       blurb: "Saved addresses that take what you type and go straight there",
+    },
+    {
+      id: "automations",
+      name: "Automations",
+      blurb: "Triggers Windows runs on a schedule, so Sill runs nothing while it waits",
     },
     {
       id: "clipboard",
@@ -1252,6 +1258,8 @@
             <ShortcutsPanel prefs={p} commit={commitWith} {conflicts} />
           {:else if active === "quicklinks"}
             <QuicklinksPanel />
+          {:else if active === "automations"}
+            <AutomationsPanel />
           {:else if active === "emoji"}
             <EmojiPanel prefs={p} {commit} />
           {:else if active === "clipboard"}

@@ -1819,6 +1819,122 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * The automation module runs nothing at rest, and gates what it writes down.
+ *
+ * `P8-02`'s whole claim is that Sill contributes no scheduler: a trigger is a
+ * scheduled task, Windows holds the loop, and the only Sill code involved runs
+ * when somebody opens the settings panel. That claim is one thread away from
+ * being false, and nothing about adding a thread would fail a test, because a
+ * background loop that works is a background loop that passes.
+ *
+ * The gate is the other half. `may_schedule` is what stops a trigger naming an
+ * action that would stop and ask, which matters precisely because nobody is at
+ * the machine when one fires. Consulted after the task is written it is not a
+ * gate, and a task written without it never asks anybody anything.
+ *
+ * The commands are held to being called. A registered command is not evidence
+ * that anything invokes it: a dead one found on this project held the only
+ * extension timing there was, and read exactly like a working feature from the
+ * Rust side. Scoped to the file this item added, which is the only part it can
+ * honestly claim; ten other commands in the handler are named nowhere in the
+ * frontend and are somebody else's item.
+ */
+{
+  const CORE = "src-tauri/src/automation.rs";
+  const DOOR = "src-tauri/src/commands/automation.rs";
+  const FRONT = "src/lib/automations.ts";
+
+  const core = readFileSync(CORE, "utf8");
+  const door = readFileSync(DOOR, "utf8");
+  const front = readFileSync(FRONT, "utf8");
+
+  /*
+   * Nothing periodic, and nothing resident.
+   *
+   * A generous list on purpose. The point is not to catch a clever evasion,
+   * it is to make somebody reaching for one of these stop and reread the
+   * paragraph at the top of that file about why there is no loop.
+   */
+  for (const wakes of [
+    "thread::spawn",
+    "spawn_blocking",
+    "tokio::time",
+    "interval(",
+    "Instant::now",
+  ]) {
+    if (!core.includes(wakes)) continue;
+
+    fail(
+      CORE,
+      lineOf(core, core.indexOf(wakes)),
+      "`" +
+        wakes +
+        "` here, and the point of this module is that Windows owns the " +
+        "schedule and Sill owns no loop. Anything periodic belongs in the " +
+        "task, not in the process",
+    );
+  }
+
+  // A second way to run an action, which is the one thing an automation must
+  // never be. It reaches the registry through the command line `outside.rs`
+  // already reads, or it does not reach it.
+  for (const m of core.matchAll(/\.perform\(/g)) {
+    fail(
+      CORE,
+      lineOf(core, m.index),
+      "this runs an action, and an automation must reach the registry the way " +
+        "everything else does: as a command line through `outside.rs`",
+    );
+  }
+
+  const writes = [...door.matchAll(/automation::register\(/g)];
+
+  /*
+   * The gate has to be in the SAME command, not merely earlier in the file.
+   *
+   * Written as a file-wide `indexOf` first, and sabotage caught it: deleting
+   * the check from the command that writes a task passed, because the command
+   * that lists them consults `may_schedule` too and sits above it. So the
+   * search starts at the enclosing `#[tauri::command]` rather than at the top.
+   */
+  for (const found of writes) {
+    const boundary = door.lastIndexOf("#[tauri::command]", found.index);
+    const inside = door.slice(boundary === -1 ? 0 : boundary, found.index);
+
+    if (inside.includes("may_schedule(")) continue;
+
+    fail(
+      DOOR,
+      lineOf(door, found.index),
+      "this writes a scheduled task with no `may_schedule` in the same " +
+        "command, so a trigger can name an action that stops to ask at a " +
+        "moment nobody is there to answer",
+    );
+  }
+
+  if (!writes.length) {
+    fail(DOOR, null, "nothing here writes a scheduled task, so this rule is asleep");
+  }
+
+  const declared = /#\[tauri::command\]\s*\n\s*pub\(crate\)\s+(?:async\s+)?fn\s+(\w+)/g;
+
+  for (const m of door.matchAll(declared)) {
+    if (front.includes('"' + m[1] + '"')) continue;
+
+    fail(
+      DOOR,
+      lineOf(door, m.index),
+      "`" +
+        m[1] +
+        "` is registered and " +
+        FRONT +
+        " never invokes it, so nothing proves it is reachable and nothing " +
+        "would fail if it stopped working",
+    );
+  }
+}
+
+/*
  * The high contrast fallback, still in place.
  *
  * Windows high contrast replaces every colour the page chose and DELETES

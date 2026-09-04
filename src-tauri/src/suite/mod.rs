@@ -67,6 +67,7 @@ mod real_hello;
 mod real_operators;
 mod real_previews;
 mod real_tabs;
+mod real_tasks;
 mod real_terminals;
 mod registry;
 mod settings_apply_live;

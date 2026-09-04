@@ -42,6 +42,7 @@ pub const PANELS: &[&str] = &[
     "emoji",
     "shortcuts",
     "quicklinks",
+    "automations",
     "clipboard",
     "sources",
     "files",
@@ -489,6 +490,13 @@ pub const SETTINGS: &[Setting] = &[
         "Shortcuts",
         "Shortcuts",
         "hotkey key global selection transform text case",
+    ),
+    // --------------------------------------------------------- automations
+    s(
+        "automations",
+        "Automations",
+        "Triggers in Task Scheduler",
+        "automation trigger schedule scheduled task daily logon unlock cron timer",
     ),
     // ---------------------------------------------------------- quicklinks
     s(

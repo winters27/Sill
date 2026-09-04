@@ -7,6 +7,7 @@ pub mod app_volume;
 pub mod apps;
 pub mod apps_watch;
 pub mod audio;
+pub mod automation;
 pub mod bindings;
 pub mod bounded;
 pub mod browsers;
@@ -1995,6 +1996,10 @@ pub fn run() {
             commands::settings::resettable_panels,
             commands::settings::open_settings,
             commands::system::quit_app,
+            commands::automation::automations,
+            commands::automation::schedulable,
+            commands::automation::schedule,
+            commands::automation::unschedule,
             commands::search::search_commands,
             commands::search::search_elsewhere,
             commands::search::complete_path,

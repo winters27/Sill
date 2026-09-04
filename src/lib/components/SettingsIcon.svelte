@@ -10,6 +10,7 @@
     | "emoji"
     | "shortcuts"
     | "quicklinks"
+    | "automations"
     | "clipboard"
     | "history"
     | "sources"
@@ -53,9 +54,9 @@
   /**
    * Panels with drawn art. The rest use the line glyphs below.
    *
-   * Every panel but `history` now has a plaque, so the fallback is reached
-   * only by that one. It stays because a panel added before its art is drawn
-   * must show something rather than a broken image.
+   * `history` and `automations` reach the fallback. The second is the case
+   * this was kept for: a panel that shipped before its art was drawn shows a
+   * line glyph rather than a broken image.
    */
   const ART = new Set<IconName>([
     "general",
