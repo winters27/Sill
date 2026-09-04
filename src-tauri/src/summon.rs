@@ -560,6 +560,30 @@ pub fn went_away(window: &WebviewWindow) {
         asked.forget();
     }
 
+    /*
+     * The documents read out of every jump list on the machine.
+     *
+     * Up to three hundred paths, held so that the words typed after "recent"
+     * narrow the list without reading two hundred files per letter. That
+     * reason ends when the window does, and a launcher sitting hidden with a
+     * list of what somebody has been working on is holding it for nobody:
+     * about forty kilobytes, and the more interesting half of the objection is
+     * that it is forty kilobytes of their documents.
+     *
+     * Dropped rather than left to expire, because `Fresh` keeps its last
+     * reading past its window and only replaces it when something asks again.
+     *
+     * The terminal profiles beside it are deliberately left: eight short
+     * strings, against a settings file that has to be read and parsed to get
+     * them back.
+     */
+    if let Some(held) = window
+        .app_handle()
+        .try_state::<crate::state::Fresh<Vec<crate::jumplists::Recent>>>()
+    {
+        held.forget();
+    }
+
     // Arms a timer rather than suspending now: coming straight back is the
     // ordinary way this is used, and that path must stay free.
     crate::sleep::sleep_soon(window);
