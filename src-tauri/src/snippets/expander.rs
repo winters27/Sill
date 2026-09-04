@@ -253,7 +253,7 @@ impl Expander {
 }
 
 #[cfg(windows)]
-pub use windows_impl::{arm, armed, facts, move_caret_back, replace, stop, watch};
+pub use windows_impl::{arm, armed, facts, move_caret_back, rearm, replace, settled, stop, watch};
 
 #[cfg(windows)]
 mod windows_impl {
@@ -403,6 +403,74 @@ mod windows_impl {
                 crate::say!("the snippet hook did not stop");
             }
         }
+    }
+
+    /// How long a re-install waits for the old hook's thread to let go.
+    ///
+    /// It is blocked in `GetMessageW` with a `WM_QUIT` already on its queue, so
+    /// this is a scheduling delay rather than any real work. The bound exists
+    /// because giving up and leaving the hook off is better than a thread that
+    /// waits forever on the one path whose whole job is recovery.
+    const LETS_GO_WITHIN: std::time::Duration = std::time::Duration::from_millis(500);
+
+    /// Takes the hook out and puts it straight back, and says whether it
+    /// worked.
+    ///
+    /// The only way to recover a hook Windows removed for being slow. It does
+    /// that silently: the thread stays parked in `GetMessageW`, the handle
+    /// stays valid and `armed` keeps answering true, so `arm` on its own sees a
+    /// hook that is already running and returns without doing anything. The
+    /// teardown is the part that matters.
+    ///
+    /// Safe to call repeatedly. `stop` on a hook that is not running returns at
+    /// once, `arm` refuses a second install while one is starting, and the wait
+    /// below is what stops the two from crossing: `arm` reads the same `running`
+    /// flag the old thread clears on its way out, so re-installing before it has
+    /// gone would look like an install that was already under way and quietly do
+    /// nothing.
+    ///
+    /// **Never on a thread anybody is waiting for.** It sleeps.
+    pub fn rearm(expander: &Expander) -> bool {
+        stop(expander);
+
+        let deadline = std::time::Instant::now() + LETS_GO_WITHIN;
+        while expander.inner.running.load(Ordering::SeqCst) {
+            if std::time::Instant::now() >= deadline {
+                crate::say!("the old snippet hook thread would not let go");
+                return false;
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        arm(expander);
+        settled(expander)
+    }
+
+    /// Whether the hook is there, waiting briefly for an answer.
+    ///
+    /// `arm` returns before the hook exists. It spawns the thread that installs
+    /// it, and the thread id is published from inside that thread once
+    /// `SetWindowsHookExW` has really returned a handle, so `armed` immediately
+    /// after `arm` says no about a hook that is about to be fine.
+    ///
+    /// This is the difference between reporting that Sill cannot watch the
+    /// keyboard and reporting that it could not do so within a few milliseconds
+    /// of being asked. Only the first is worth saying.
+    ///
+    /// **Never on a thread anybody is waiting for.** It sleeps.
+    pub fn settled(expander: &Expander) -> bool {
+        let deadline = std::time::Instant::now() + LETS_GO_WITHIN;
+
+        while !armed(expander) {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        true
     }
 
     unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {

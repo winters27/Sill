@@ -511,7 +511,23 @@ mod windows_hook {
                     let mut message = MSG::default();
                     while GetMessageW(&mut message, None, 0, 0).as_bool() {}
 
-                    HOOK_INSTALLED.store(false, Ordering::SeqCst);
+                    /*
+                     * Only the current install owns the flag, for the reason
+                     * `Drop` gives about the sender next to it.
+                     *
+                     * Teardown is asynchronous: the action thread notices its
+                     * channel has closed and only then drops the listener that
+                     * posts the quit, so a superseded thread can reach this
+                     * line well after its replacement has installed and set the
+                     * flag. Clearing it unconditionally would leave Sill
+                     * believing the live hook is not there, which is a lie the
+                     * settings panel prints and the liveness check acts on by
+                     * re-installing a hook that was already fine.
+                     */
+                    if GENERATION.load(Ordering::SeqCst) == generation {
+                        HOOK_INSTALLED.store(false, Ordering::SeqCst);
+                    }
+
                     let _ = UnhookWindowsHookEx(hook);
                 })
                 .map_err(|e| {

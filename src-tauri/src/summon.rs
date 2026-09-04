@@ -219,8 +219,13 @@ pub fn restore_foreground() {
 /// current foreground window. Attaching to that window's input queue for the
 /// duration of the call makes Windows treat the change as user-driven, which
 /// is the standard approach and what every launcher on this platform does.
+///
+/// Says whether the window really ended up in front. It used to throw that
+/// answer away, and a launcher that is up but has not got the keyboard looks
+/// exactly like a launcher that is broken: the user types and the characters go
+/// to whatever they were doing before.
 #[cfg(windows)]
-pub(crate) fn force_foreground(hwnd: HWND) {
+pub(crate) fn force_foreground(hwnd: HWND) -> bool {
     // SAFETY: all handles and thread ids come from Win32 itself, and the
     // attach is unwound before returning in every path.
     unsafe {
@@ -228,14 +233,165 @@ pub(crate) fn force_foreground(hwnd: HWND) {
         let foreground_thread = GetWindowThreadProcessId(foreground, None);
         let this_thread = GetCurrentThreadId();
 
-        if foreground_thread != 0 && foreground_thread != this_thread {
+        let taken = if foreground_thread != 0 && foreground_thread != this_thread {
             let _ = AttachThreadInput(foreground_thread, this_thread, true);
-            let _ = SetForegroundWindow(hwnd);
+            let taken = SetForegroundWindow(hwnd).as_bool();
             let _ = AttachThreadInput(foreground_thread, this_thread, false);
+            taken
         } else {
-            let _ = SetForegroundWindow(hwnd);
+            SetForegroundWindow(hwnd).as_bool()
+        };
+
+        // Asked again rather than trusted, because the call returns false in
+        // cases where the change went through anyway. Reporting a problem the
+        // user does not have is worse than reporting nothing.
+        taken || GetForegroundWindow() == hwnd
+    }
+}
+
+/// Why the launcher is on screen without the keyboard.
+///
+/// Only reasons Sill can name. There is no `Unknown`, deliberately: a trouble
+/// the reader cannot act on teaches them the surface is noise, and a failed
+/// `SetForegroundWindow` on its own is not evidence of anything they could do
+/// something about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Blocked {
+    /// The window in front belongs to a program running with more privilege
+    /// than Sill, and Windows will not let a lower one take the keyboard from
+    /// it. This is also why the summon key itself does nothing while such a
+    /// window has focus.
+    Elevated,
+    /// Something is running full screen or presenting, so it owns the display
+    /// and the launcher is behind it.
+    FullScreen,
+}
+
+/// What to tell the user about a summon that did not get the keyboard.
+///
+/// Its own function so the rule can be read and tested without a screen, a
+/// keyboard or an administrator. The order matters: an elevated window in front
+/// is the case the user can do something about, and a full-screen game running
+/// as administrator is both.
+///
+/// **The two readings are asked for rather than handed over.** Each is a call
+/// into Windows, and this runs between a key being pressed and the launcher
+/// being on screen, which is the one path in this application that may not
+/// spend anything it does not have to. On the summon that worked, which is
+/// every summon, neither is asked.
+pub fn blocked_by(
+    took_focus: bool,
+    elevated: impl FnOnce() -> bool,
+    full_screen: impl FnOnce() -> bool,
+) -> Option<Blocked> {
+    if took_focus {
+        return None;
+    }
+
+    if elevated() {
+        return Some(Blocked::Elevated);
+    }
+
+    if full_screen() {
+        return Some(Blocked::FullScreen);
+    }
+
+    None
+}
+
+/// The one focus trouble, named once so the report and the withdrawal cannot
+/// disagree about which failure they mean.
+const FOREGROUND_TROUBLE: &str = "summon-foreground";
+
+/// Says out loud that the launcher is up but has not got the keyboard.
+#[cfg(windows)]
+fn report_focus(window: &WebviewWindow, took_focus: bool) {
+    let app = window.app_handle();
+
+    // Cheap, and it is the whole happy path: nothing was wrong, so nothing is
+    // said, and anything said last time stops being said.
+    let Some(blocked) = blocked_by(took_focus, foreground_is_elevated, presenting) else {
+        // A refusal with no cause to name still belongs in the log, which is
+        // the only place with a timestamp and an ordering and is what a bug
+        // report needs. It does not belong on the surface, which is for things
+        // the reader can act on.
+        if !took_focus {
+            crate::say!("the launcher did not get the foreground, and nothing says why");
+        }
+
+        crate::status::resolved(app, FOREGROUND_TROUBLE);
+        return;
+    };
+
+    let message = match blocked {
+        Blocked::Elevated => {
+            "The window in front is running as administrator, so Windows will not let Sill \
+             take the keyboard from it. Sill has to be started as administrator too to work \
+             over that program."
+        }
+        Blocked::FullScreen => {
+            "A program is running full screen, so the launcher opened behind it and did not \
+             get the keyboard."
+        }
+    };
+
+    crate::status::report(app, FOREGROUND_TROUBLE, message, None);
+}
+
+/// Whether the window in front belongs to a process this one may not touch.
+///
+/// Asked by trying to open it for the least a process can be opened for. A
+/// refusal is what a higher integrity level looks like from below, and it is
+/// the same refusal that stops the summon key reaching Sill at all while such a
+/// window has focus.
+#[cfg(windows)]
+fn foreground_is_elevated() -> bool {
+    use windows::Win32::Foundation::{CloseHandle, E_ACCESSDENIED};
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+
+    // SAFETY: the window handle comes from Windows and the process id is a
+    // local the call only writes into.
+    unsafe {
+        let foreground = GetForegroundWindow();
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(foreground, Some(&mut pid));
+
+        if pid == 0 || pid == GetCurrentProcessId() {
+            return false;
+        }
+
+        match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            Ok(handle) => {
+                let _ = CloseHandle(handle);
+                false
+            }
+            // Only a refusal. A process that has since exited fails differently
+            // and is not something to tell anybody about.
+            Err(err) => err.code() == E_ACCESSDENIED,
         }
     }
+}
+
+/// Whether something owns the display.
+///
+/// The shell's own answer, which is what decides whether Windows itself will
+/// show a notification, so it already covers exclusive full-screen Direct3D,
+/// a full-screen store app and presentation mode.
+#[cfg(windows)]
+fn presenting() -> bool {
+    use windows::Win32::UI::Shell::{
+        SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE,
+        QUNS_RUNNING_D3D_FULL_SCREEN,
+    };
+
+    // SAFETY: takes nothing and returns a value.
+    let state = unsafe { SHQueryUserNotificationState() };
+
+    let Ok(state) = state else {
+        return false;
+    };
+
+    state == QUNS_BUSY || state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE
 }
 
 /// Shows the launcher and takes the keyboard.
@@ -274,7 +430,11 @@ pub fn show(window: &WebviewWindow) {
     // pointer is the common ground.
     #[cfg(windows)]
     if let Ok(handle) = window.hwnd() {
-        force_foreground(HWND(handle.0 as *mut core::ffi::c_void));
+        let took_focus = force_foreground(HWND(handle.0 as *mut core::ffi::c_void));
+
+        // A launcher that is on screen without the keyboard is the failure this
+        // whole file exists to prevent, and until now it happened in silence.
+        report_focus(window, took_focus);
     }
 
     /*
@@ -424,5 +584,87 @@ mod tests {
     #[test]
     fn a_window_with_no_process_is_not() {
         assert!(!worth_returning_to(0, 4321));
+    }
+
+    use super::{blocked_by, Blocked};
+    use std::cell::Cell;
+
+    /// A summon that got the keyboard says nothing, whatever else is true.
+    ///
+    /// A full-screen video plays while somebody uses the launcher over it every
+    /// day of the week. Reporting that as a problem, on the summon that plainly
+    /// worked, is how a status surface becomes something people stop reading.
+    #[test]
+    fn a_summon_that_worked_is_never_reported() {
+        assert_eq!(blocked_by(true, || true, || true), None);
+    }
+
+    /// The summon that worked asks Windows nothing.
+    ///
+    /// Both readings are calls into the operating system, and this runs between
+    /// a key being pressed and the launcher being on screen, which is the path
+    /// this whole application is judged on. Every summon takes it, and the one
+    /// that has something to report is the rare one.
+    #[test]
+    fn a_summon_that_worked_costs_no_calls_into_windows() {
+        let asked = Cell::new(0);
+        let count = || {
+            asked.set(asked.get() + 1);
+            true
+        };
+
+        blocked_by(true, count, count);
+
+        assert_eq!(asked.get(), 0, "the summon path asked Windows something");
+    }
+
+    /// The reason the user can act on is the one they are told.
+    ///
+    /// A game running as administrator is both, and "start Sill as
+    /// administrator" is a thing somebody can go and do. "Something is full
+    /// screen" is not. Nothing is asked about the display once the answer is
+    /// settled, which is the same rule as above rather than a second one.
+    #[test]
+    fn an_elevated_window_is_named_ahead_of_a_full_screen_one() {
+        let looked_at_the_display = Cell::new(false);
+
+        let blocked = blocked_by(
+            false,
+            || true,
+            || {
+                looked_at_the_display.set(true);
+                true
+            },
+        );
+
+        assert_eq!(blocked, Some(Blocked::Elevated));
+        assert!(
+            !looked_at_the_display.get(),
+            "the display was asked about after the answer was already known"
+        );
+
+        assert_eq!(
+            blocked_by(false, || true, || false),
+            Some(Blocked::Elevated)
+        );
+    }
+
+    #[test]
+    fn a_full_screen_program_is_named_when_nothing_is_elevated() {
+        assert_eq!(
+            blocked_by(false, || false, || true),
+            Some(Blocked::FullScreen)
+        );
+    }
+
+    /// A failure with no cause Sill can name is not reported at all.
+    ///
+    /// `SetForegroundWindow` is refused for reasons that are none of the
+    /// user's business and several that are transient. A trouble saying only
+    /// that something went wrong is one nobody can act on, and the surface is
+    /// worth having exactly because it is empty almost always.
+    #[test]
+    fn a_failure_with_no_nameable_cause_stays_out_of_the_surface() {
+        assert_eq!(blocked_by(false, || false, || false), None);
     }
 }

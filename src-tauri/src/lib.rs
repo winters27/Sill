@@ -24,6 +24,7 @@ pub mod extension_install;
 pub mod exthost;
 pub mod files;
 pub mod files_ops;
+pub mod hooks;
 pub mod host;
 pub mod host_bridge;
 pub mod hyper;
@@ -54,6 +55,7 @@ pub mod registry;
 pub mod scripts;
 pub mod secrets;
 pub mod selection;
+pub mod session;
 pub mod settings_catalog;
 pub mod settings_index;
 pub mod shell;
@@ -1037,6 +1039,18 @@ fn register_summon_shortcut(app: &AppHandle, accelerator: &str) {
             // and leave the window exactly as it was.
             if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
                 summon::toggle_main(&handle);
+
+                /*
+                 * After the window, never before it.
+                 *
+                 * This is the one keystroke Sill can be certain somebody made,
+                 * which makes it the only moment a keyboard hook that has
+                 * counted nothing is provably not being called. It is two
+                 * atomic loads and a comparison, and it still goes after the
+                 * summon, because nothing belongs between a key being pressed
+                 * and the launcher being on screen.
+                 */
+                hooks::check(&handle, hooks::Cause::Typed);
             }
         });
 
@@ -1476,6 +1490,22 @@ pub fn run() {
                 snippets::expander::watch(&handle, &expander);
             }
             app.manage(expander);
+
+            /*
+             * What each keyboard hook looked like the last time anybody asked,
+             * and the window that says when to ask again.
+             *
+             * Managed before the listener is installed, because the first thing
+             * a resume does is read it. Nothing here runs while the machine is
+             * idle: the window procedure is only entered when a message arrives
+             * and Windows only sends these when the user goes away and comes
+             * back.
+             */
+            app.manage(hooks::Watch::default());
+
+            if let Some(window) = app.get_webview_window("main") {
+                session::watch(&window);
+            }
 
             // Acted on in Rust rather than the frontend: a keyword is typed
             // into another application entirely, and the launcher's webview
