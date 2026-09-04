@@ -274,6 +274,8 @@ fn reduce(raw: Raw) -> Option<Listing> {
         downloads: raw.download_count.unwrap_or(0),
         icon,
         commands,
+        // Everything here came out of the index, which is what this means.
+        native: false,
     })
 }
 

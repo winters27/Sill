@@ -292,6 +292,39 @@ impl Action for RunExtensionCommand {
         }
 
         let hosts = ctx.app.state::<crate::state::HostState>();
+
+        /*
+         * Which kind of open this is, asked before it is made true.
+         *
+         * `host_of` starts the extension runtime when nothing is running, so
+         * asking after it would answer "warm" every time and the cold figure
+         * would never be recorded at all. A cold open pays for a Node process,
+         * a worker thread and a module evaluation; a warm one pays for the
+         * last of those. Reporting either as the other is the lie this split
+         * exists to avoid.
+         */
+        let start = if crate::host::running_host(&hosts).await.is_some() {
+            crate::timing::Start::Warm
+        } else {
+            crate::timing::Start::Cold
+        };
+
+        /*
+         * The clock starts here rather than at the load.
+         *
+         * Everything above this line is part of the wait: the index lookup,
+         * the manifest, the saved preferences, the required-preference check.
+         * It is small, and it is still time somebody spends looking at a
+         * launcher that has not moved.
+         *
+         * It is stopped by the extension's first render, over in the API
+         * layer, because that is the first moment there is anything to look
+         * at. This call returns long before then.
+         */
+        if let Some(timings) = ctx.app.try_state::<crate::timing::Timings>() {
+            timings.opening_began(&record.extension, start);
+        }
+
         let host = crate::host::host_of(&ctx.app, &hosts).await?;
 
         let mut opts = crate::exthost::LoadOptions::with_preferences(

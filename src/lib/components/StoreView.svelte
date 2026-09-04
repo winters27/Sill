@@ -299,6 +299,24 @@
       await accept();
       return;
     }
+
+    /*
+     * There is nothing to fetch for a row the store does not carry.
+     *
+     * These rows are here because they are installed, not because the index
+     * lists them, so `storePrepare` would go looking for a catalogue entry
+     * that does not exist and come back with "the store has no extension
+     * called my-notes" about something the person is looking at. Said as what
+     * to do instead, because removing it is the one thing this screen can do
+     * for it.
+     */
+    if (current?.native) {
+      onstatus(
+        `${current.title} was built here rather than installed from the store, so there is nothing to fetch. Ctrl Shift X removes it.`,
+      );
+      return;
+    }
+
     if (current) await decide(current);
   }
 
@@ -531,9 +549,11 @@
 
       <p class="warning">{deciding.notEnforced}</p>
 
-      <p class="quiet">
-        Source: <code>{deciding.sourceUrl}</code>
-      </p>
+      {#if deciding.sourceUrl}
+        <p class="quiet">
+          Source: <code>{deciding.sourceUrl}</code>
+        </p>
+      {/if}
 
       <div class="decide-actions">
         <button class="primary" onclick={() => accept()} disabled={working !== null}>
@@ -651,7 +671,12 @@
                        already is, not only in the status bar. -->
                   <span class="busy">{detail || `${working}…`}</span>
                 {:else}
-                  <span>{installs(row.downloads)} installs</span>
+                  <!--
+                    A row the store does not carry has no download count, and
+                    "0 installs" about an extension somebody built themselves
+                    reads as a store listing nobody wanted.
+                  -->
+                  <span>{row.native ? "Built here" : `${installs(row.downloads)} installs`}</span>
                   {#if row.installed?.outdated}
                     <span class="update">Update</span>
                   {:else if row.installed}
@@ -695,17 +720,27 @@
             <p class="quiet">{current.categories.join(", ")}</p>
           {/if}
 
-          <h3>Version</h3>
-          <p class="quiet">
-            <code>{shortRevision(current.revision)}</code>
-            {#if current.installed}
-              {current.installed.outdated
-                ? ` published, you have ${shortRevision(current.installed.revision) || "an unrecorded version"}`
-                : " published, which is what you have"}
-            {/if}
-          </p>
+          <!-- A folder install has no published revision to be behind. -->
+          {#if current.revision}
+            <h3>Version</h3>
+            <p class="quiet">
+              <code>{shortRevision(current.revision)}</code>
+              {#if current.installed}
+                {current.installed.outdated
+                  ? ` published, you have ${shortRevision(current.installed.revision) || "an unrecorded version"}`
+                  : " published, which is what you have"}
+              {/if}
+            </p>
+          {/if}
 
-          <p class="cta">{verb(current)} with Enter</p>
+          {#if current.native}
+            <p class="cta">
+              Built here rather than installed from the store, so there is nothing to fetch. Ctrl
+              Shift X removes it.
+            </p>
+          {:else}
+            <p class="cta">{verb(current)} with Enter</p>
+          {/if}
         {/if}
       </div>
     </div>
@@ -724,7 +759,9 @@
         {#if working}
           <span class="busy">{detail || `${working} ${current?.title ?? ""}…`}</span>
         {:else}
-          <span><b>Enter</b> {current ? verb(current) : "install"}</span>
+          {#if !current?.native}
+            <span><b>Enter</b> {current ? verb(current) : "install"}</span>
+          {/if}
           {#if current?.installed}
             <span><b>Ctrl Shift X</b> remove</span>
           {/if}

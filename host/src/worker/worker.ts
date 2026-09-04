@@ -8,6 +8,7 @@
  */
 
 import { parentPort } from "node:worker_threads";
+import { getHeapStatistics } from "node:v8";
 import { createElement, type ReactElement } from "react";
 import { RpcPeer, type RpcParams } from "../proto/rpc";
 import { createRenderer } from "../render/renderer";
@@ -237,6 +238,37 @@ export function workerMain(): void {
     const args = Array.isArray(params.args) ? (params.args as unknown[]) : [];
     if (!renderer) throw new Error("sill: handler activated before the view existed");
     return renderer.callbacks.invoke(id, args) ?? null;
+  });
+
+  /**
+   * How much memory this command is using, asked rather than watched.
+   *
+   * There is no way to read one worker's heap from the thread that created it,
+   * so the only honest answer comes from inside. It arrives on the control
+   * channel, which is the manager talking to the worker about itself, and
+   * **not on a stream**. A worker's stdout and stderr are already diverted to
+   * be drained by hand, and giving this its own thing to write into them would
+   * put back the unbounded buffer that cost this project a release.
+   *
+   * `getHeapStatistics` rather than `process.memoryUsage()`, because a worker
+   * is a thread and `rss` there is the whole Node process, every other
+   * extension included. These three numbers belong to this isolate alone,
+   * which is what "what does this extension cost" means.
+   *
+   * `heap_size_limit` is deliberately not sent. It is not the number that
+   * stops a worker: V8 reports it as the old generation plus the semi spaces,
+   * so a cap of 512 MB reads back as 704, and a panel saying "11 MB of 704"
+   * beside a message saying it will be stopped at 512 would be two answers to
+   * one question. The manager knows what it asked for and says that instead.
+   *
+   * Registered before the launch, so a command whose module body is still
+   * evaluating is a worker that has not answered yet rather than one that
+   * cannot. It still will not answer while that body runs, because evaluating
+   * it holds the event loop, and that is the truth worth reporting.
+   */
+  control.handle("Lifecycle/heap", () => {
+    const heap = getHeapStatistics();
+    return { used: heap.used_heap_size, total: heap.total_heap_size };
   });
 
   control.handle("Lifecycle/shutdown", () => {

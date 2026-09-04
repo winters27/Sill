@@ -31,15 +31,19 @@
   import Select from "./Select.svelte";
   import TextField from "./TextField.svelte";
   import Instead from "../Instead.svelte";
+  import ExtensionCosts from "./ExtensionCosts.svelte";
   import { standing } from "$lib/instead";
+  import type { CostRow } from "$lib/costs";
   import {
     extensionPreferences,
+    extensionResources,
     grantPermission,
     installedExtensions,
     revokePermission,
     setExtensionPreference,
     shortRevision,
     storeUninstall,
+    type ExtensionCost,
     type ExtensionPreference,
     type InstalledExtension,
   } from "$lib/store";
@@ -64,10 +68,34 @@
    */
   let settings = $state<Record<string, ExtensionPreference[]>>({});
 
+  /**
+   * What each extension has cost this run, dearest first.
+   *
+   * Read alongside the list rather than on a timer. Nothing here changes
+   * unless somebody opens an extension, and a panel that re-asked every few
+   * seconds would be waking a Node process to be told the same thing, on a
+   * screen that is open for a minute at a time.
+   */
+  let costs = $state<ExtensionCost[]>([]);
+
+  /** The same, with the names people call the extensions by. */
+  const rows = $derived<CostRow[]>(
+    costs.map((cost) => ({
+      extension: cost.extension,
+      title:
+        installed.find((one) => one.extension === cost.extension)?.title ?? cost.extension,
+      cost,
+    })),
+  );
+
   async function refresh() {
     loading = true;
     try {
       installed = await installedExtensions();
+      // After the list, because a row is named from it. A failure here is not
+      // worth losing the panel over: the readings are the one part of this
+      // screen nothing depends on.
+      costs = await extensionResources().catch(() => []);
       settings = Object.fromEntries(
         await Promise.all(
           installed.map(
@@ -174,6 +202,15 @@
       : "Not found, so no extension can start. Get it from nodejs.org, or run: winget install OpenJS.NodeJS.LTS"}
   />
 </Section>
+
+<!--
+  What they cost, which is the one thing nothing here could answer before.
+
+  Nothing is measured on a schedule. Openings are timed as they happen, on a
+  path a person triggers, and the memory is asked of the extension runtime when
+  this screen is drawn. With the window shut, none of it costs anything.
+-->
+<ExtensionCosts {rows} />
 
 {#if status}
   <p class="said">{status}</p>

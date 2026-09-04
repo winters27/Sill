@@ -110,6 +110,20 @@ pub struct ApiLayer {
     /// gets done rather than whether it may be: one of them would otherwise
     /// have to refuse in the middle of doing.
     permits: Arc<dyn Permits>,
+    /**
+    Where "this extension took nine hundred milliseconds to open" is written
+    down.
+
+    Here rather than at the call that launched it, because this layer is the
+    first thing in Rust that hears from the extension itself. The launch
+    returns as soon as the worker has been told to start; everything a person
+    is actually waiting for happens afterwards, inside the worker, and lands
+    here as the first thing it asks Sill to draw.
+
+    Handed in rather than reached for, so the layer's dependencies stay
+    visible and a test can drive it with timings of its own.
+    */
+    timings: crate::timing::Timings,
 }
 
 impl ApiLayer {
@@ -118,12 +132,14 @@ impl ApiLayer {
         bridge: Arc<dyn Bridge>,
         storage: Arc<Storage>,
         permits: Arc<dyn Permits>,
+        timings: crate::timing::Timings,
     ) -> Self {
         Self {
             events,
             bridge,
             storage,
             permits,
+            timings,
         }
     }
 
@@ -145,6 +161,15 @@ impl ApiLayer {
 
     pub fn permits(&self) -> &Arc<dyn Permits> {
         &self.permits
+    }
+
+    /// Where what an extension costs is written down.
+    ///
+    /// Exposed so the host can record the memory a command was holding when it
+    /// was closed. That is the last moment the number exists, and it is read
+    /// from the unload's own reply rather than from anything this layer hears.
+    pub fn timings(&self) -> &crate::timing::Timings {
+        &self.timings
     }
 
     /// Handles one API call from a session. `extension` scopes storage.
@@ -177,6 +202,23 @@ impl ApiLayer {
 
         if let Err(why) = self.permits.allow(extension, needs).await {
             return Err(RpcError::internal(why));
+        }
+
+        /*
+         * The moment the waiting ends, for whoever is timing it.
+         *
+         * The first thing the person can see, and nothing before it. A command
+         * that reads its saved settings before drawing has not appeared yet,
+         * and counting that as arrival would report the slow extensions as
+         * fast. These three are the only ways an extension puts something in
+         * front of somebody: a view draws, and the commands that draw nothing
+         * report with a toast or with a message across the screen.
+         *
+         * `opening_showed` takes the entry, so the renders after the first one
+         * cost a lookup that misses and nothing else.
+         */
+        if matches!(method, "UI/render" | "UI/showHud" | "UI/showToast") {
+            self.timings.opening_showed(extension);
         }
 
         let string = |key: &str| -> String {

@@ -75,6 +75,10 @@ outside the code.
 | File index, whole C: drive | 157,772 entries, 6.2 s to walk, 16.2 MB on disk |
 | File search, one query | 3 to 10 ms |
 | Extension host, resident with nothing loaded | 0, it is not started until an extension is |
+| Opening an extension, cold, five real ones | 516 to 534 ms, of which most is Node starting |
+| Opening an extension, warm, five real ones | 36 to 114 ms |
+| Memory one command holds, five real ones | 11.3 to 62.5 MB |
+| Memory an empty worker holds | about 11 MB, which is the floor the rest sit on |
 | Rust core while a home folder is being written to | 3.4 s of processor per 30 s, about a tenth of one core |
 | Browser tabs, resident with the feature on | 0, nothing exists between two searches |
 | Browser tabs, one query against a browser that is not running | 1.5 ms, the window list, then nothing |
@@ -150,6 +154,39 @@ ROOT="C:/Users/you" cargo test --release --manifest-path src-tauri/Cargo.toml --
 ```bash
 INDEX="$APPDATA/app.winters.sill/index-cache.json" cargo test --release --manifest-path src-tauri/Cargo.toml --test compare_ranking -- --ignored --nocapture
 ```
+
+What one extension costs, against a real host and the real protocol. Build the
+bundles first with `npm run gate:views`, which is what puts them in
+`extensions/build`.
+
+```bash
+node scripts/run-extension.mjs extensions/build/emoji/emoji.js emoji --measure \
+  --grant fileRead,fileWrite,network,processLaunch \
+  --assets extensions/raycast-src/extensions/emoji/assets
+```
+
+Cold is this process starting Node, the host bundle evaluating, a worker thread
+being created and the extension's modules loading. Warm opens the same command
+again in the host that is now up, against the worker that was spun up when the
+first was claimed. They are far enough apart that reporting one as the other
+would be a lie, which is why the Extensions panel shows both.
+
+The five the view gate draws, on the machine this was written on:
+
+| Extension | Cold | Warm | Memory once settled |
+| --- | --- | --- | --- |
+| `uuid-generator` `viewHistory` | 526 ms | 36 ms | 11.3 MB |
+| `password-generator` `generate-random-password` | 527 ms | 39 ms | 11.4 MB |
+| `kill-process` `index` | 531 ms | 50 ms | 12 to 37 MB |
+| `hacker-news` `frontpage` | 525 ms | 114 ms | 15.4 MB |
+| `emoji` `emoji` | 516 ms | 74 ms | 62.5 MB |
+
+Two of those are worth reading twice. **Cold is the same for all five**,
+because almost all of it is Node starting rather than anything the extension
+does; the number that separates them is warm. And `kill-process` is a range
+rather than a figure, because it reads the whole process table: caught mid-scan
+it is 37 MB and 85% of a core, and settled it is 12 MB and idle. A reading is a
+moment, which is why the panel says "now" and not "always".
 
 ## The one that is over
 

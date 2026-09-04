@@ -268,6 +268,7 @@ fn layer(tx: mpsc::UnboundedSender<UiEvent>) -> (Arc<ApiLayer>, Arc<StubBridge>)
             bridge.clone(),
             storage,
             Arc::new(AllowAll),
+            sill_lib::timing::Timings::new(),
         )),
         bridge,
     )
@@ -659,6 +660,7 @@ async fn nothing_selected_reads_as_empty_rather_than_as_a_failure() {
         bridge.clone(),
         storage,
         Arc::new(AllowAll),
+        sill_lib::timing::Timings::new(),
     ));
 
     let answered = layer
@@ -762,7 +764,13 @@ fn refusing(
     let storage = Arc::new(Storage::memory().expect("in-memory store"));
 
     (
-        Arc::new(ApiLayer::new(tx, bridge.clone(), storage, permits.clone())),
+        Arc::new(ApiLayer::new(
+            tx,
+            bridge.clone(),
+            storage,
+            permits.clone(),
+            sill_lib::timing::Timings::new(),
+        )),
         bridge,
         permits,
     )

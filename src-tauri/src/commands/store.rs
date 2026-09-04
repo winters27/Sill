@@ -118,14 +118,74 @@ pub(crate) async fn store_browse(
 
     // Read once per browse rather than once per row. Three thousand directory
     // probes on a keystroke is not a keystroke budget.
-    let pins = store::pins(&store::extensions_home(&crate::state::data_dir(&app)));
+    let home = store::extensions_home(&crate::state::data_dir(&app));
+    let pins = store::pins(&home);
 
     Ok(store::browse(
         &catalog.listings,
+        &installed_but_unlisted(&home, &catalog.listings, &pins),
         |name: &str| pins.get(name).cloned(),
         &query,
         catalog.fetched_at,
     ))
+}
+
+/// Listings for what is installed here that Raycast's index does not carry.
+///
+/// An extension built from a folder is not in the catalogue and never will be,
+/// and one installed from the store can be withdrawn from it afterwards.
+/// Browsing ran over the catalogue alone, so both were **absent from the
+/// Installed tab of the screen whose job is managing installed extensions**
+/// while running perfectly well in the launcher.
+///
+/// Built from the index Sill wrote at install time rather than from a manifest
+/// on disk, because the index is what the launcher itself runs from: a row
+/// here and a row in the launcher describe the same thing by construction.
+fn installed_but_unlisted(
+    home: &std::path::Path,
+    listings: &[store::Listing],
+    pins: &std::collections::HashMap<String, store::Origin>,
+) -> Vec<store::Listing> {
+    use std::collections::HashMap;
+
+    let known: std::collections::HashSet<&str> =
+        listings.iter().map(|it| it.name.as_str()).collect();
+
+    let mut commands: HashMap<String, Vec<store::ListedCommand>> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+
+    for record in crate::registry::load_index(&store::index_file(home)) {
+        if known.contains(record.extension.as_str()) {
+            continue;
+        }
+
+        if !commands.contains_key(&record.extension) {
+            order.push(record.extension.clone());
+        }
+
+        commands
+            .entry(record.extension.clone())
+            .or_default()
+            .push(store::ListedCommand {
+                name: record.command,
+                title: record.title,
+                description: record.subtitle,
+                mode: record.mode,
+            });
+    }
+
+    order
+        .into_iter()
+        .map(|extension| {
+            let origin = pins.get(&extension);
+            store::Listing::of_installed(
+                &extension,
+                &extension,
+                origin.map(|it| it.revision.as_str()).unwrap_or_default(),
+                commands.remove(&extension).unwrap_or_default(),
+            )
+        })
+        .collect()
 }
 
 /// Says the store has been left.

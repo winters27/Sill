@@ -187,6 +187,40 @@ reads an extension's source to say what it appears to use, and it cannot see a
 module name assembled at runtime. An extension that assembles one is refused at
 runtime and says which permission it wanted.
 
+## What your extension costs, and where somebody sees it
+
+Settings, under Extensions, says how long each extension took to open and how
+much memory it was holding. It is the screen somebody goes to when their
+launcher got slower after they installed four things, and the line at the top
+of it names one extension.
+
+Two numbers for opening, because they are two different things. **Cold** is
+with the Node process that runs extensions having to start first, which is
+about half a second and is almost entirely Node rather than anything you
+wrote. **Warm** is with it already up, which is what somebody gets for every
+open after the first, and it is the one your code decides. Across the five
+real extensions Sill tests against, warm openings run from 36 ms to 114 ms.
+
+Memory is read from inside your worker, live while a command is loaded and
+once more as it closes. The same five run from 11 MB to 63 MB, and about
+11 MB of that is what an empty worker costs before your bundle is loaded at
+all.
+
+Two limits sit behind that, and neither is a number to design against.
+
+- **512 MB of heap.** A command that goes past it is stopped where it stands
+  and whatever the person was doing in it is lost. Nothing warns first, so if
+  you are keeping every row you have ever built, the panel is where that shows
+  up long before this does.
+- **A whole processor core for thirty seconds** without ever yielding. That is
+  a loop rather than work, and the command is stopped with a message saying so.
+
+You can see all of it for one command without building Sill:
+
+```bash
+node scripts/run-extension.mjs extensions/build/<name>/<command>.js <name> --measure
+```
+
 ## What happens when Sill does not cover something
 
 The module an extension receives for `@raycast/api` and `@raycast/utils` is a
