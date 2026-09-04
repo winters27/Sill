@@ -66,10 +66,15 @@ param(
     [string]$Exe = 'src-tauri/target/release/sill.exe',
     [int]$Minutes = 25,
     [int]$EverySeconds = 5,
-    [int]$SettleSeconds = 45
+    [int]$SettleSeconds = 45,
+    # Writes the count into docs/measurements/, which is where the published
+    # cost page gets it.
+    [switch]$Record
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Record) { . (Join-Path $PSScriptRoot 'record-measurement.ps1') }
 
 $exe = (Resolve-Path $Exe).Path
 
@@ -202,6 +207,18 @@ Write-Host '--- network at rest ---'
 foreach ($where in $new.Keys) { "    $where" }
 
 Write-Host ''
+
+# How long the watch ran belongs in the reading. Zero connections in two
+# minutes and zero in twenty-five are not the same claim, and the widget this
+# check exists for asked once every ten.
+if ($Record) {
+    Write-Measurement -Id network-at-rest -Build (Get-MeasurementBuild $exe) `
+        -Within ($new.Count -eq 0) -By 'scripts/measure-network.ps1' -Reading (
+            '{0} connection(s) in {1} minutes, over {2} samples' -f
+                $new.Count, $Minutes, $samples)
+
+    Write-Host ''
+}
 
 if ($new.Count -gt 0) {
     Write-Host ("OVER BUDGET  $($new.Count) connection(s) to somewhere off this machine while nobody was using the launcher, allowed 0") -ForegroundColor Red

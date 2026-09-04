@@ -48,10 +48,15 @@ param(
     [string]$Label = 'run',
     [int]$SettleSeconds = 35,
     [int]$SteadySeconds = 180,
-    [int]$SampleSeconds = 20
+    [int]$SampleSeconds = 20,
+    # Writes the four steady-state readings into docs/measurements/, which is
+    # where the published cost page gets them.
+    [switch]$Record
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Record) { . (Join-Path $PSScriptRoot 'record-measurement.ps1') }
 
 if (-not $Exe) {
     $Exe = Join-Path $PSScriptRoot '..\src-tauri\target\release\sill.exe'
@@ -203,6 +208,19 @@ function Write-Settings {
     }
 }
 
+# The two figures a snapshot prints, without printing them.
+#
+# `Write-Snapshot` writes to the output stream, so it cannot also hand a caller
+# a total: the total would arrive in the middle of the report. These are needed
+# twice over, once for what the launcher costs at rest and once for how far it
+# falls when its renderers suspend, so they are computed here and printed there.
+function Get-Totals($Tree) {
+    return [pscustomobject]@{
+        Private = ($Tree | Measure-Object -Property PrivatePageCount -Sum).Sum / 1MB
+        Working = ($Tree | Measure-Object -Property WorkingSetSize -Sum).Sum / 1MB
+    }
+}
+
 function Write-Snapshot($Tree, [string]$When) {
     $private = ($Tree | Measure-Object -Property PrivatePageCount -Sum).Sum / 1MB
     $working = ($Tree | Measure-Object -Property WorkingSetSize -Sum).Sum / 1MB
@@ -233,6 +251,7 @@ Write-Output "started as PID $root"
 
 Start-Sleep -Seconds $SettleSeconds
 $tree = Get-SillTree $root
+$started = Get-Totals $tree
 Write-Snapshot $tree 'after startup'
 $cpu = Measure-Cpu $tree $SampleSeconds
 foreach ($row in $cpu.Rows) { '  {0,-16} {1,7:N1} ms' -f $row.Role, $row.Ms }
@@ -240,6 +259,7 @@ foreach ($row in $cpu.Rows) { '  {0,-16} {1,7:N1} ms' -f $row.Role, $row.Ms }
 
 Start-Sleep -Seconds $SteadySeconds
 $tree = Get-SillTree $root
+$settled = Get-Totals $tree
 Write-Snapshot $tree "steady state (+$([int](($SettleSeconds + $SteadySeconds) / 60)) min)"
 $cpu = Measure-Cpu $tree $SampleSeconds
 foreach ($row in $cpu.Rows) { '  {0,-16} {1,7:N1} ms' -f $row.Role, $row.Ms }
@@ -247,6 +267,29 @@ foreach ($row in $cpu.Rows) { '  {0,-16} {1,7:N1} ms' -f $row.Role, $row.Ms }
 
 $woke = Measure-Wakeups $tree $SampleSeconds
 'wakeups {0:N0} a minute across {1} threads, busiest {2:N0}' -f $woke.PerMinute, $woke.Threads, $woke.Busiest
+
+# None of these has a budget. They are reported so a change is visible, and
+# what they cost depends on which widgets are pinned and what is indexed, which
+# are settings rather than regressions. `-Within $null` is what says so.
+if ($Record) {
+    Write-Output ''
+
+    Write-Measurement -Id idle-cpu -Build (Get-MeasurementBuild $Exe) -Within $null `
+        -By 'scripts/measure-idle.ps1' -Reading ('{0:N2}% of one core' -f $cpu.Percent)
+
+    Write-Measurement -Id idle-memory -Build (Get-MeasurementBuild $Exe) -Within $null `
+        -By 'scripts/measure-idle.ps1' -Reading (
+            '{0:N1} MB private across {1} processes' -f $settled.Private, $tree.Count)
+
+    Write-Measurement -Id working-set-suspended -Build (Get-MeasurementBuild $Exe) -Within $null `
+        -By 'scripts/measure-idle.ps1' -Reading (
+            '{0:N1} MB at startup, {1:N1} MB once settled' -f $started.Working, $settled.Working)
+
+    Write-Measurement -Id wakeups -Build (Get-MeasurementBuild $Exe) -Within $null `
+        -By 'scripts/measure-idle.ps1' -Reading (
+            '{0:N0} a minute across {1} threads, busiest {2:N0}' -f
+                $woke.PerMinute, $woke.Threads, $woke.Busiest)
+}
 
 Write-Output ''
 Write-Output "Leaving PID $root running. Stop it with: Stop-Process -Id $root"

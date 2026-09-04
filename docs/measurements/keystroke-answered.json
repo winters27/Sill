@@ -1,0 +1,10 @@
+{
+  "id": "keystroke-answered",
+  "reading": "215.3 ms median, 298.0 ms worst, over 9 keystrokes from 5 visits",
+  "within": null,
+  "build": "debug",
+  "machine": "Windows 11 Pro, 16 cores, 32 GB",
+  "version": "0.1.0",
+  "on": "2026-09-03",
+  "by": "scripts/measure-keystroke.ps1"
+}

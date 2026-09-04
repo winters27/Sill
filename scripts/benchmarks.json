@@ -1,0 +1,205 @@
+{
+  "$comment": [
+    "Every cost Sill publishes, and where each one can honestly be taken.",
+    "",
+    "This file holds decisions, never measurements. `what` and `budget` are",
+    "copied from a row of docs/budgets.md and verify:source refuses them if",
+    "that row stops saying both, so the public page and the internal contract",
+    "cannot drift. The readings come from docs/measurements/, which nothing",
+    "here and nobody by hand ever writes: they are what a measuring script",
+    "concluded, with the build and the machine it concluded it on.",
+    "",
+    "`runs` is where a row can honestly be taken, and it is why the page",
+    "has two tables. `anywhere` is counts, ratios, sizes and structural",
+    "facts, which mean the same on a borrowed virtual machine as on a desk.",
+    "`dedicated` is milliseconds and megabytes of a running launcher, which",
+    "need a display, a graphics driver and a machine nobody is using. Showing",
+    "the two kinds in one table would say they were the same kind of claim."
+  ],
+  "buildDoesNotChange": {
+    "$comment": [
+      "Costs whose reading means the same in a development build as in a",
+      "release one, so a reading taken on either is a reading.",
+      "",
+      "Everything else is marked provisional on the page until it comes from a",
+      "release build, because that is the build the budgets are about and the",
+      "two are two orders of magnitude apart in the part of Sill that draws",
+      "pixels. These are the exceptions rather than the rule, and they are a",
+      "list rather than a default: a new cost is provisional until somebody",
+      "argues here that the build cannot change it."
+    ],
+    "ids": [
+      "ranking-growth",
+      "summon-leaves-nothing",
+      "no-unaccounted-timer",
+      "clipboard-log",
+      "network-at-rest"
+    ]
+  },
+  "rows": [
+    {
+      "id": "ranking-one-keystroke",
+      "means": "Working out what to show for one letter typed, against an index of 1,500 things",
+      "what": "Ranking one keystroke, 1,500 entries",
+      "budget": "20 ms release, 60 ms debug",
+      "runs": "anywhere",
+      "how": "cargo test --release --manifest-path src-tauri/Cargo.toml --test budgets measured -- --ignored --nocapture",
+      "recordedBy": "scripts/measure-checks.mjs"
+    },
+    {
+      "id": "ranking-growth",
+      "means": "Whether that cost grows in step with the index rather than faster than it",
+      "what": "Ranking cost as the corpus grows",
+      "budget": "at most 40x for 8x the entries",
+      "runs": "anywhere",
+      "how": "cargo test --manifest-path src-tauri/Cargo.toml --test budgets",
+      "recordedBy": "scripts/measure-checks.mjs"
+    },
+    {
+      "id": "summon-leaves-nothing",
+      "means": "Whether opening and closing the launcher five hundred times leaves anything behind",
+      "what": "What a summon leaves behind, over 500 of them",
+      "budget": "no growth",
+      "runs": "anywhere",
+      "how": "cargo test --manifest-path src-tauri/Cargo.toml --lib five_hundred_summons_leave_nothing_behind",
+      "recordedBy": "scripts/measure-checks.mjs"
+    },
+    {
+      "id": "no-unaccounted-timer",
+      "means": "Repeating timers in the window with nothing saying why being put away stops them",
+      "what": "A repeating timer in the window that calls into Rust",
+      "budget": "0 unaccounted",
+      "runs": "anywhere",
+      "how": "node scripts/verify-source.mjs",
+      "recordedBy": "scripts/measure-checks.mjs"
+    },
+    {
+      "id": "clipboard-log",
+      "means": "How large the clipboard's write-ahead file is allowed to get",
+      "what": "Clipboard write-ahead log",
+      "budget": "at most 2 MB",
+      "runs": "anywhere",
+      "how": null,
+      "recordedBy": null,
+      "noReading": "the test named as holding this budget is not in the tree any more"
+    },
+    {
+      "id": "keystroke-answered",
+      "means": "From a letter reaching the search field to the rows for it being in the document",
+      "what": "Keystroke to the frame that draws the answer",
+      "budget": "16 ms",
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/measure-keystroke.ps1",
+      "recordedBy": "scripts/measure-keystroke.ps1"
+    },
+    {
+      "id": "keystroke-presented",
+      "means": "The same letter, to the first moment its pixels are certainly on the screen",
+      "what": "Keystroke to the frame after that, when the pixels are certainly out",
+      "budget": "one refresh more",
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/measure-keystroke.ps1",
+      "recordedBy": "scripts/measure-keystroke.ps1"
+    },
+    {
+      "id": "extension-activation",
+      "means": "From pressing Enter on an extension to its first view being on the screen",
+      "what": "Extension activation, Enter to its first view",
+      "budget": "300 ms warm, 1,200 ms cold",
+      "runs": "dedicated",
+      "how": null,
+      "recordedBy": null,
+      "noReading": "the app times this and its readings come back under a tenth of a millisecond, which cannot be Enter to something on a screen, so nothing is published from it"
+    },
+    {
+      "id": "summon",
+      "means": "From pressing the summon key to being able to type",
+      "what": "Summon, hotkey to being able to type",
+      "budget": "250 ms",
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/measure-summon.ps1",
+      "recordedBy": "scripts/measure-summon.ps1"
+    },
+    {
+      "id": "cold-start",
+      "means": "From starting the program to the summon key answering",
+      "what": "Cold start to the hotkey answering",
+      "budget": "4,000 ms",
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/measure-summon.ps1",
+      "recordedBy": "scripts/measure-summon.ps1"
+    },
+    {
+      "id": "network-at-rest",
+      "means": "How many times Sill reaches off the machine while nobody is using it",
+      "what": "Network calls at rest, widgets pinned, 25 min",
+      "budget": "0",
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/measure-network.ps1",
+      "recordedBy": "scripts/measure-network.ps1"
+    },
+    {
+      "id": "rust-core-idle-memory",
+      "means": "What the Rust core holds while idle, with a home folder indexed",
+      "what": "Rust core, idle, home folder indexed",
+      "budget": "40 MB",
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/device-tests.ps1 -Only idle",
+      "recordedBy": "scripts/device-tests.ps1"
+    },
+    {
+      "id": "rust-core-at-rest",
+      "means": "Processor time the Rust core spends while nothing is changing",
+      "what": "Rust core, at rest, nothing changing",
+      "budget": "500 ms per 30 s",
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/device-tests.ps1 -Only idle",
+      "recordedBy": "scripts/device-tests.ps1"
+    },
+    {
+      "id": "index-read-back",
+      "means": "Reading last run's file index at startup, so searching works before the walk finishes",
+      "what": "Reading last run's file index",
+      "budget": "under 500 ms",
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/device-tests.ps1 -Only cache",
+      "recordedBy": "scripts/device-tests.ps1"
+    },
+    {
+      "id": "idle-cpu",
+      "means": "Processor the whole application uses while it sits there with nobody touching it",
+      "what": "Idle CPU at steady state, whole tree",
+      "budget": null,
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/measure-idle.ps1",
+      "recordedBy": "scripts/measure-idle.ps1"
+    },
+    {
+      "id": "idle-memory",
+      "means": "What the whole application holds while idle, the window and Rust together",
+      "what": "Whole application, idle, all processes",
+      "budget": null,
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/measure-idle.ps1",
+      "recordedBy": "scripts/measure-idle.ps1"
+    },
+    {
+      "id": "working-set-suspended",
+      "means": "How far memory falls once the window is put away and its renderers suspend",
+      "what": "Working set, before and after the renderers suspend",
+      "budget": null,
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/measure-idle.ps1",
+      "recordedBy": "scripts/measure-idle.ps1"
+    },
+    {
+      "id": "wakeups",
+      "means": "How often it wakes up at rest, which processor time does not show",
+      "what": "Wakeups at rest, whole tree",
+      "budget": null,
+      "runs": "dedicated",
+      "how": "pwsh -File scripts/measure-idle.ps1",
+      "recordedBy": "scripts/measure-idle.ps1"
+    }
+  ]
+}

@@ -856,6 +856,80 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Every cost the public page names is still a row of the budget table.
+ *
+ * `docs/benchmark.md` is the most public thing in this repository and the
+ * efficiency claim is the pitch, so it has to be checkable. Its readings come
+ * from `docs/measurements/`, which only a measuring script ever writes, and its
+ * budgets come from `scripts/benchmarks.json`, which is where the decisions
+ * are. That second half is the pair with nothing making it agree: a budget
+ * loosened in `docs/budgets.md` and not in the catalogue leaves the public page
+ * holding Sill to a figure nothing enforces, and the version where the page is
+ * the loose one is worse.
+ *
+ * Matched on one line, for the reason the check above it gives: the budget
+ * document lists two dozen numbers and finding one anywhere in the file is not
+ * a check. The row naming this cost has to carry this budget.
+ */
+{
+  const CATALOGUE = "scripts/benchmarks.json";
+  const BUDGETS = "docs/budgets.md";
+
+  const rows = JSON.parse(readFileSync(CATALOGUE, "utf8")).rows;
+  const table = readFileSync(BUDGETS, "utf8").split("\n");
+
+  if (rows.length === 0) {
+    fail(CATALOGUE, null, "no cost is published, so the page checks nothing");
+  }
+
+  for (const row of rows) {
+    const said = table.some(
+      (line) => line.includes(row.what) && (!row.budget || line.includes(row.budget)),
+    );
+
+    if (!said) {
+      fail(
+        CATALOGUE,
+        null,
+        `"${row.what}"${row.budget ? ` at "${row.budget}"` : ""} is published ` +
+          `and no row of ${BUDGETS} says that, so the public page and the ` +
+          "budget it is held to have stopped being the same claim",
+      );
+    }
+
+    /*
+     * A row either names what measures it or says why nothing does.
+     *
+     * Both are real states and the page prints both. The clipboard's
+     * write-ahead budget is held by a test file that is not in the tree any
+     * more, and extension activation has an instrument whose readings are too
+     * small to be what the budget is about. What is refused is a row that says
+     * neither, because the page would then have a cost on it that nobody can
+     * chase, and a row naming a measurer that is not there, because the page
+     * would tell a reader to run something that cannot be run.
+     */
+    if (!row.recordedBy && !row.noReading) {
+      fail(
+        CATALOGUE,
+        null,
+        `"${row.what}" names neither what measures it nor why nothing does, ` +
+          "so the published page carries a cost with no way to chase it",
+      );
+    }
+
+    if (row.recordedBy && !existsSync(row.recordedBy)) {
+      fail(
+        CATALOGUE,
+        null,
+        `"${row.what}" names ${row.recordedBy} as what would measure it and ` +
+          "that file does not exist, so the page sends a reader to a script " +
+          "nobody has",
+      );
+    }
+  }
+}
+
+/*
  * The Raycast API level, in the two files that both claim it.
  *
  * The worker tells every extension `environment.raycastVersion`, and the
@@ -3249,6 +3323,23 @@ if (tracked.status !== 0) {
 
   let checked = 0;
 
+  /*
+   * Counted as well as judged, because this row is on the published cost page
+   * and the page never writes a number down itself.
+   *
+   * `scripts/measure-checks.mjs` reads the line printed below and records it,
+   * so the count a reader sees is the one this rule arrived at rather than a
+   * second count taken by something that reimplemented the rule.
+   *
+   * What gets published is the count this rule can stand behind: how many
+   * repeating timers are in the window, and how many of those are unaccounted
+   * for. Not how many reach Rust. This finds a call to Rust by the word
+   * `invoke` in the same file, and the two timers that do reach it go through
+   * a wrapper a module away, so a published figure for that would be a figure
+   * this cannot see.
+   */
+  let unaccounted = 0;
+
   for (const file of sources("src")) {
     const at = file.split(/[\\/]/).join("/").replace(/^\.\//, "");
     if (at === OWNS_THE_RULE || at.endsWith(".test.ts")) continue;
@@ -3276,6 +3367,8 @@ if (tracked.status !== 0) {
     if (!/\binvoke[(<]/.test(text)) continue;
 
     if (ALLOWED[at]) continue;
+
+    unaccounted += 1;
 
     fail(
       at,
@@ -3305,6 +3398,15 @@ if (tracked.status !== 0) {
       );
     }
   }
+
+  // For the published page. Said on every run rather than only when it breaks,
+  // the same way the ranking budget prints what it measured, because a count
+  // that speaks only on failure cannot show which way it is moving.
+  console.log(
+    `measurement no-unaccounted-timer :: ${unaccounted} unaccounted for, of ` +
+      `${checked} repeating ${checked === 1 ? "timer" : "timers"} in the ` +
+      `window :: ${unaccounted === 0}`,
+  );
 }
 
 /*

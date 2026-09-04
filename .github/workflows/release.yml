@@ -86,6 +86,18 @@ jobs:
       - name: Every version in the tree agrees
         run: node scripts/verify-source.mjs
 
+      # What Sill costs is the pitch, so a release goes out with a page saying
+      # so and that page has to be current. This regenerates it from the
+      # measurements in the repository and fails if the result differs from
+      # what is committed, which is what stops a number being edited in.
+      #
+      # It takes no readings. The ones that need a display and a machine
+      # nobody is using cannot be taken here at all, and the page says which
+      # rows those are and which machine they came from. What a release checks
+      # is that the published page is the one the recorded measurements make.
+      - name: The published cost page matches the measurements
+        run: node scripts/benchmark-page.mjs --check
+
       # The release body, written by a person, extracted rather than generated.
       # A generated list of commit subjects is not release notes: half of them
       # are merges and most name the mechanism rather than what changed for

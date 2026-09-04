@@ -67,12 +67,21 @@
 .PARAMETER BudgetMs
   What the median answered reading is allowed to be.
 
+.PARAMETER Record
+  Writes the readings into `docs/measurements/`, which is where the published
+  cost page gets them. Requires -Build, because this script reads the
+  launcher's own log and has no way to tell which build wrote it, and a
+  keystroke figure that does not say is not comparable to anything.
+
 .EXAMPLE
   pwsh -File scripts/measure-keystroke.ps1
   pwsh -File scripts/measure-keystroke.ps1 -Since 5 -BudgetMs 0
+  pwsh -File scripts/measure-keystroke.ps1 -Record -Build release
 #>
 param(
     [int]$Since = 60,
+    [switch]$Record,
+    [ValidateSet('release', 'debug')][string]$Build = '',
     # One frame at sixty hertz. Not a number picked to sit above what was
     # measured: it is the deadline the work has, because a keystroke whose
     # answer misses the frame it was typed in is a keystroke somebody sees the
@@ -86,6 +95,17 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Asked for rather than guessed. Every other measuring script starts a binary
+# and can read the build off its path; this one reads a log that says only what
+# was measured, not what measured it. Recording a keystroke figure without
+# saying which build produced it is the one mistake this whole page exists to
+# make impossible.
+if ($Record -and -not $Build) {
+    throw 'Recording needs -Build release or -Build debug: the log does not say which build wrote it.'
+}
+
+if ($Record) { . (Join-Path $PSScriptRoot 'record-measurement.ps1') }
 
 $log = Join-Path $env:APPDATA 'app.winters.sill\sill.log'
 if (-not (Test-Path $log)) { throw "no log at $log, so nothing has been measured" }
@@ -155,7 +175,48 @@ if ($presented) {
 '{0,-38} {1,8}' -f 'keystrokes measured', $answered.Typed
 '{0,-38} {1,8}' -f 'visits they came from', $answered.Batches
 
+$activation = Readings 'extensionFirstRender'
+if ($activation) {
+    '{0,-38} {1,8:N1} ms' -f 'extension to its first view, median', ($activation.Median / 1000)
+} else {
+    Write-Host 'no extension was opened in that window, so activation has no reading'
+}
+
 Write-Host ''
+
+if ($Record) {
+    # A budget switched off is a reading with no verdict, not a passing one.
+    $verdict = if ($BudgetMs -le 0) { $null } else { ($answered.Median / 1000) -le $BudgetMs }
+
+    Write-Measurement -Id keystroke-answered -Build $Build -Within $verdict `
+        -By 'scripts/measure-keystroke.ps1' -Reading (
+            '{0:N1} ms median, {1:N1} ms worst, over {2} keystrokes from {3} visits' -f
+                ($answered.Median / 1000), ($answered.Worst / 1000), $answered.Typed, $answered.Batches)
+
+    if ($presented) {
+        # No verdict: "one refresh more" is not a number this can compare
+        # against without knowing the display's refresh rate.
+        Write-Measurement -Id keystroke-presented -Build $Build -Within $null `
+            -By 'scripts/measure-keystroke.ps1' -Reading (
+                '{0:N1} ms median, {1:N1} ms worst' -f
+                    ($presented.Median / 1000), ($presented.Worst / 1000))
+    }
+
+    # Printed above and deliberately not recorded.
+    #
+    # The budget is 300 ms warm and 1,200 ms cold, and this instrument is
+    # reporting readings of around forty microseconds, which is less than one
+    # frame and cannot be Enter to something on a screen. Published, it would
+    # round to "0.0 ms" beside a 300 ms budget, which is the most flattering
+    # number on the page and the least earned. Whatever it is timing is worth
+    # finding out before anything is claimed from it.
+    #
+    # `scripts/benchmarks.json` says the same thing on the row, so the page
+    # prints the cost with the reason there is no reading rather than leaving
+    # the cost out.
+
+    Write-Host ''
+}
 
 if ($BudgetMs -le 0) {
     Write-Host "no budget applied: these figures are a report, not a budget" -ForegroundColor Yellow

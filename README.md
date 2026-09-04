@@ -159,6 +159,17 @@ host still renders real extensions cannot answer that from a frozen copy.
 `scripts/device-tests.ps1` measures what a build actually costs on a machine.
 The budgets it checks against are in [docs/budgets.md](docs/budgets.md).
 
+What Sill costs is the pitch, so it is written down where anybody can check
+it: [docs/benchmark.md](docs/benchmark.md) carries every reading with the
+machine, the build and the day it came from, and the command that takes the
+same reading on your own machine. Nothing on that page is typed. It is
+generated from what the measuring scripts wrote down, and `npm run verify`
+fails if the committed copy is not what they say.
+
+```bash
+npm run benchmark
+```
+
 ## Releasing
 
 A tag builds the installers. Pushing `v0.2.0` runs
