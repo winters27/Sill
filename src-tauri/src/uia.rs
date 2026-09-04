@@ -897,6 +897,8 @@ mod tests {
             maximized: false,
             rect: crate::windowing::Rect::new(0, 0, 100, 100),
             monitor: 0,
+            elsewhere: false,
+            desktop: None,
         }
     }
 

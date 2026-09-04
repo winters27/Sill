@@ -99,12 +99,19 @@ pub struct Profile {
 /// Minimised windows are left out. Where a minimised window would be if it
 /// were restored is not something anybody arranged, and saving it means that
 /// restoring later drags a window out of the taskbar that nobody asked for.
+///
+/// **Windows on another virtual desktop are left out for the same reason.**
+/// They became visible to the window list once `desktops` could tell them
+/// apart from suspended ones, and they carry a rectangle, but a rectangle
+/// measured on a desktop nobody is looking at is not part of the arrangement
+/// on the desktop somebody just tidied. Capturing one means every later
+/// restore drags a window here off a desktop it was deliberately put on.
 pub fn capture(name: &str, open: &[Window], works: &[Rect]) -> Profile {
     Profile {
         name: name.trim().to_string(),
         windows: open
             .iter()
-            .filter(|window| !window.minimized)
+            .filter(|window| !window.minimized && !window.elsewhere)
             .map(|window| Placed {
                 app: window.app.clone(),
                 title: window.title.clone(),
@@ -337,6 +344,8 @@ mod tests {
                 height: 600,
             },
             monitor: 0,
+            elsewhere: false,
+            desktop: None,
         }
     }
 
@@ -364,6 +373,22 @@ mod tests {
         down.minimized = true;
 
         let profile = capture("Morning", &[down, window(2, "Code", "sill")], &[work()]);
+
+        assert_eq!(profile.windows.len(), 1);
+        assert_eq!(profile.windows[0].app, "Code");
+    }
+
+    #[test]
+    fn a_window_on_another_desktop_is_not_part_of_this_desktop_arrangement() {
+        // These only started reaching `capture` at all once `desktops` could
+        // tell them apart from suspended windows. They carry a rectangle, so
+        // nothing about the type stops one going in, and an arrangement that
+        // captured one would drag it here on every later restore.
+        let mut away = window(1, "Firefox", "News");
+        away.elsewhere = true;
+        away.desktop = Some(2);
+
+        let profile = capture("Morning", &[away, window(2, "Code", "sill")], &[work()]);
 
         assert_eq!(profile.windows.len(), 1);
         assert_eq!(profile.windows[0].app, "Code");
@@ -679,6 +704,8 @@ mod tests {
             maximized: false,
             rect: laptop,
             monitor: 0,
+            elsewhere: false,
+            desktop: None,
         }];
 
         let planned = plan(&portable, &open, &[laptop]);
@@ -735,6 +762,8 @@ mod tests {
             maximized: false,
             rect: attached,
             monitor: 0,
+            elsewhere: false,
+            desktop: None,
         }];
 
         let planned = plan(&profile, &open, &[attached]);

@@ -2785,6 +2785,7 @@ fn window_actions() -> Vec<Box<dyn Action>> {
     );
 
     actions.push(Box::new(NextDisplay));
+
     // Last on purpose. Closing is the one thing here that cannot be undone,
     // and it should not sit next to the arrow keys.
     actions.push(Box::new(CloseWindow));
