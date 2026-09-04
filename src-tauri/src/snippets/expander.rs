@@ -73,12 +73,204 @@ impl Typed {
         self.buffer.clear();
     }
 
+    /// Records every character one key event produced.
+    ///
+    /// More than one is ordinary rather than exotic. A key on a layout with a
+    /// ligature produces two characters, a dead key followed by its base
+    /// produces the accented form, and anything outside the basic plane, which
+    /// is most emoji, is two UTF-16 units that are one character. This used to
+    /// take the first unit and only when there was exactly one of them, so all
+    /// three arrived as nothing or as half a character.
+    pub fn push_all(&mut self, chars: &[char]) {
+        for c in chars {
+            self.push(*c);
+        }
+    }
+
     /// Drops the last `count` characters, after they have been replaced.
     pub fn consume(&mut self, count: usize) {
         for _ in 0..count {
             self.buffer.pop();
         }
     }
+}
+
+/// Backspace's virtual key.
+const BACKSPACE: u32 = 0x08;
+
+/// `VK_PROCESSKEY`.
+///
+/// Windows substitutes this for the real key when an input method editor has
+/// taken it for a composition, which is every key typed into a Japanese,
+/// Chinese or Korean IME while a word is being built. It is not a key and it
+/// types nothing.
+const PROCESS_KEY: u32 = 0xE5;
+
+/// The most characters one key event can produce.
+///
+/// The size of the buffer handed to `ToUnicode`, so the two cannot disagree.
+pub const PRODUCED_MAX: usize = 8;
+
+/// Which modifiers were down when a key arrived.
+///
+/// Left and right Alt are separate because that is the only thing that tells
+/// AltGr from a Ctrl+Alt shortcut. See [`Held::alt_gr`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Held {
+    pub ctrl: bool,
+    pub left_alt: bool,
+    pub right_alt: bool,
+}
+
+impl Held {
+    /// Whether this is AltGr rather than two modifiers.
+    ///
+    /// **On a layout that has an AltGr key, right Alt is that key**, and the
+    /// keyboard driver sends a synthetic left Ctrl press immediately before the
+    /// right Alt press. So AltGr reaches a low-level hook as Ctrl down together
+    /// with right Alt down, and there is no flag anywhere saying which of those
+    /// two the user actually pressed.
+    ///
+    /// A genuine Ctrl+Alt chord is Ctrl with the **left** Alt, because that is
+    /// the Alt a person reaches for when they mean Alt. That is the whole
+    /// distinction, and it is the reason left and right Alt are held apart
+    /// here rather than collapsed into `VK_MENU` the way the rest of Windows
+    /// collapses them.
+    ///
+    /// It is not quite enough on its own. On a US layout right Alt is only Alt,
+    /// so Ctrl plus right Alt is a real shortcut that happens to look exactly
+    /// like AltGr. [`judge_key`] settles that case by asking Windows what the
+    /// key types and treating "nothing" as the shortcut it was.
+    pub fn alt_gr(self) -> bool {
+        self.ctrl && self.right_alt && !self.left_alt
+    }
+
+    /// Whether a modifier is held that makes this a shortcut rather than
+    /// typing.
+    ///
+    /// AltGr is deliberately not one, which is the fix: a German keyword
+    /// containing `@` could never be typed while it was.
+    pub fn chord(self) -> bool {
+        (self.ctrl || self.left_alt || self.right_alt) && !self.alt_gr()
+    }
+}
+
+/// What one key event does to the rolling buffer.
+///
+/// Borrowed rather than owned, so the typing path allocates nothing. This runs
+/// for every keystroke on the machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Effect<'a> {
+    /// The buffer is untouched.
+    Nothing,
+    /// Drop the last character.
+    Backspace,
+    /// Forget everything, because what is in the buffer is no longer the text
+    /// immediately behind the caret.
+    Clear,
+    /// Append these.
+    Type(&'a [char]),
+}
+
+/// Whether the key went to an input method editor instead of to the field.
+///
+/// The buffer has to be forgotten when it did, and that is the answer to the
+/// second half of this item rather than merely refusing to invent a character
+/// for a key that has none. **While an IME is composing, characters are landing
+/// in the field that Sill cannot see.** The buffer would still hold whatever
+/// was typed before the composition started, no longer immediately behind the
+/// caret, and the next keyword to match would delete that many characters from
+/// the middle of the user's Japanese. Deleting somebody's text is worse than
+/// failing to expand.
+fn ime_took_it(vk: u32) -> bool {
+    vk == PROCESS_KEY
+}
+
+/// Whether this key could type anything at all, before Windows is asked.
+///
+/// Purely about cost. `MapVirtualKeyW` followed by `ToUnicode` is the most
+/// expensive thing on this path by a wide margin and it would otherwise run for
+/// every keystroke on the machine including every arrow key and every shortcut.
+/// Everything this refuses is a case [`judge_key`] answers without looking at a
+/// character, and a test holds those two to that.
+pub fn could_type(vk: u32, held: Held) -> bool {
+    !ime_took_it(vk) && !resets_context(vk) && !held.chord() && vk != BACKSPACE
+}
+
+/// What one key does to the buffer.
+///
+/// Pure, and that is the point. The three failures this settles are a German
+/// layout, a Japanese IME and a character outside the basic plane, none of
+/// which can be installed on the machine Sill is developed on. Separating the
+/// decision from everything that needs Windows makes each of them a fixture
+/// instead of something nobody can run.
+///
+/// `produced` is what Windows said the key types, which is only consulted when
+/// [`could_type`] said it was worth asking.
+pub fn judge_key<'a>(vk: u32, held: Held, produced: &'a [char]) -> Effect<'a> {
+    // An IME composition first, because Windows has replaced the real key with
+    // `VK_PROCESSKEY` and every question below would be asked about the wrong
+    // key.
+    if ime_took_it(vk) || resets_context(vk) {
+        return Effect::Clear;
+    }
+
+    // Before backspace, deliberately. Ctrl+Backspace deletes a whole word, so
+    // dropping one character from the buffer would leave it holding text the
+    // field no longer has.
+    if held.chord() {
+        return Effect::Clear;
+    }
+
+    if vk == BACKSPACE {
+        return Effect::Backspace;
+    }
+
+    // A control character is not typing. Reachable only under AltGr and from
+    // keys with no printable form, because everything that types a control
+    // character on its own resets the context above.
+    if produced.is_empty() || produced.iter().any(|c| c.is_control()) {
+        /*
+         * Ctrl and right Alt were down and the layout made nothing of them.
+         *
+         * So this was a Ctrl+Alt shortcut on a layout with no AltGr, which is
+         * every US keyboard, and it has to reset the buffer like any other
+         * shortcut. Windows is the only thing that knows which of the two it
+         * was, and this is where its answer is read.
+         */
+        return if held.alt_gr() {
+            Effect::Clear
+        } else {
+            Effect::Nothing
+        };
+    }
+
+    Effect::Type(produced)
+}
+
+/// The characters in the UTF-16 units `ToUnicode` wrote.
+///
+/// Returns how many were decoded into `out`. A lone surrogate decodes to
+/// nothing at all rather than to a replacement character: half of a character
+/// is not a character, and putting one in the buffer would make every later
+/// comparison against a keyword wrong.
+pub fn produced(units: &[u16], out: &mut [char]) -> usize {
+    let mut count = 0;
+
+    for decoded in char::decode_utf16(units.iter().copied()) {
+        if count == out.len() {
+            break;
+        }
+
+        let Ok(c) = decoded else {
+            return 0;
+        };
+
+        out[count] = c;
+        count += 1;
+    }
+
+    count
 }
 
 /// Whether a virtual-key means the caret has gone somewhere else.
@@ -264,8 +456,8 @@ mod windows_impl {
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetKeyState, MapVirtualKeyW, ToUnicode, MAPVK_VK_TO_VSC, VIRTUAL_KEY, VK_BACK, VK_CAPITAL,
-        VK_CONTROL, VK_MENU, VK_SHIFT,
+        GetAsyncKeyState, GetKeyState, MapVirtualKeyW, ToUnicode, MAPVK_VK_TO_VSC, VIRTUAL_KEY,
+        VK_BACK, VK_CAPITAL, VK_CONTROL, VK_MENU, VK_SHIFT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, GetMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
@@ -616,38 +808,49 @@ mod windows_impl {
     }
 
     fn handle_key(expander: &Expander, vk: u32) {
-        if vk == VK_BACK.0 as u32 {
-            if let Ok(mut typed) = expander.inner.typed.lock() {
-                typed.backspace();
-            }
-            return;
-        }
+        let held = held_now();
 
-        if resets_context(vk) {
-            expander.reset();
-            return;
-        }
-
-        // A modifier held with a letter is a shortcut, not typing.
-        // SAFETY: GetKeyState takes a virtual key and returns a plain value.
-        let modified = unsafe {
-            (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0
-                || (GetKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0
+        /*
+         * Windows is asked what the key types, and the answer is part of the
+         * decision rather than something read afterwards.
+         *
+         * On a layout with AltGr there is no other way. AltGr arrives as Ctrl
+         * plus right Alt, which is indistinguishable from a Ctrl+Alt shortcut
+         * until the layout has been consulted: on a German keyboard AltGr+Q is
+         * the character `@` and on a US keyboard the identical key state is a
+         * shortcut that types nothing.
+         *
+         * On the stack, and only when the cheap questions have not already
+         * settled it, because `ToUnicode` runs for every keystroke on the
+         * machine.
+         */
+        let mut chars = ['\0'; PRODUCED_MAX];
+        let count = if could_type(vk, held) {
+            character_for(vk, held, &mut chars)
+        } else {
+            0
         };
-        if modified {
-            expander.reset();
-            return;
-        }
 
-        let Some(c) = character_for(vk) else {
-            return;
+        let typed_now = match judge_key(vk, held, &chars[..count]) {
+            Effect::Nothing => return,
+            Effect::Clear => {
+                expander.reset();
+                return;
+            }
+            Effect::Backspace => {
+                if let Ok(mut typed) = expander.inner.typed.lock() {
+                    typed.backspace();
+                }
+                return;
+            }
+            Effect::Type(chars) => chars,
         };
 
         let matched = {
             let Ok(mut typed) = expander.inner.typed.lock() else {
                 return;
             };
-            typed.push(c);
+            typed.push_all(typed_now);
 
             crate::snippets::store::match_keyword(
                 &expander.snippets(),
@@ -688,31 +891,75 @@ mod windows_impl {
         }
     }
 
-    /// The character a key would type, given the modifiers held right now.
+    /// Which modifiers are down at this instant.
+    ///
+    /// `GetAsyncKeyState`, like the dictation hook, and not `GetKeyState` as
+    /// this used to. `GetKeyState` answers for the calling thread's input
+    /// queue, and the hook thread has one only to park in: it installs the
+    /// hook and blocks in `GetMessageW` without ever being sent a keyboard
+    /// message, so what it believes about the modifiers is whatever it
+    /// believed at the start. `GetAsyncKeyState` asks the system.
+    ///
+    /// The synthetic left Ctrl that AltGr sends is a key event of its own and
+    /// goes through this same hook before the character does, so by the time a
+    /// character key arrives both halves of AltGr are already down as far as
+    /// the system is concerned.
+    fn held_now() -> Held {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LMENU, VK_RMENU};
+
+        // SAFETY: takes a virtual key and returns a plain value.
+        let down =
+            |vk: VIRTUAL_KEY| unsafe { (GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000) != 0 };
+
+        Held {
+            ctrl: down(VK_CONTROL),
+            left_alt: down(VK_LMENU),
+            right_alt: down(VK_RMENU),
+        }
+    }
+
+    /// What a key types, given the modifiers held, written into `out`.
     ///
     /// `ToUnicode` rather than a table, so a non-US layout types what its
     /// user expects: on a German keyboard the key marked Z produces `z`, and
     /// a hand-written map would say `y`.
-    fn character_for(vk: u32) -> Option<char> {
+    ///
+    /// Ctrl and Alt are put into the state when they are AltGr, because that
+    /// pair is exactly how `ToUnicode` is told to translate a third level: with
+    /// them absent it answers for the unshifted key and `@` on a German layout
+    /// would come back as `q`.
+    fn character_for(vk: u32, held: Held, out: &mut [char; PRODUCED_MAX]) -> usize {
         let mut state = [0u8; 256];
 
         // SAFETY: every call takes an owned buffer of the documented size.
         unsafe {
-            if (GetKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0 {
+            if (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0 {
                 state[VK_SHIFT.0 as usize] = 0x80;
             }
+            // The toggle rather than whether it is held down, and
+            // `GetAsyncKeyState` has no answer for that, so this one stays.
             if (GetKeyState(VK_CAPITAL.0 as i32) as u16 & 0x0001) != 0 {
                 state[VK_CAPITAL.0 as usize] = 0x01;
             }
+            if held.alt_gr() {
+                state[VK_CONTROL.0 as usize] = 0x80;
+                state[VK_MENU.0 as usize] = 0x80;
+            }
 
             let scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-            let mut buffer = [0u16; 8];
+            let mut buffer = [0u16; PRODUCED_MAX];
             // Flag 4 asks not to disturb the keyboard state, which matters
             // for dead keys: without it, typing an accent would consume it
             // here and the user's next character would come out wrong.
             let written = ToUnicode(vk, scan, Some(&state), &mut buffer, 4);
 
-            (written == 1).then(|| char::from_u32(buffer[0] as u32))?
+            // Zero is no translation and a negative one is a dead key, which
+            // has put nothing in the field yet.
+            if written <= 0 {
+                return 0;
+            }
+
+            produced(&buffer[..(written as usize).min(PRODUCED_MAX)], out)
         }
     }
 
@@ -977,6 +1224,224 @@ mod tests {
         expander.set_enabled(false);
         assert_eq!(expander.inner.typed.lock().unwrap().as_str(), "");
         assert!(!expander.is_enabled());
+    }
+
+    /* ---------------------------------------------------------------------
+     * The three layouts nobody here has.
+     *
+     * A German keyboard, a Japanese IME and a character outside the basic
+     * plane cannot be installed on the machine this is written on, so the
+     * decision was made pure and these are the fixtures. What a person with
+     * those layouts still has to confirm is written at the end of the item.
+     * -------------------------------------------------------------------- */
+
+    /// The key marked Q, which on a German layout is `@` under AltGr.
+    const Q: u32 = 0x51;
+    /// The key marked A.
+    const A: u32 = 0x41;
+
+    /// AltGr, exactly as a keyboard driver delivers it.
+    fn alt_gr() -> Held {
+        Held {
+            ctrl: true,
+            right_alt: true,
+            left_alt: false,
+        }
+    }
+
+    /// A genuine Ctrl+Alt chord, which is Ctrl with the Alt beside the space
+    /// bar.
+    fn ctrl_alt() -> Held {
+        Held {
+            ctrl: true,
+            left_alt: true,
+            right_alt: false,
+        }
+    }
+
+    fn nothing_held() -> Held {
+        Held::default()
+    }
+
+    /// A German layout types `@` with AltGr+Q, and it has to reach the buffer.
+    ///
+    /// This is the first half of the item. `@` is in more keywords than any
+    /// other punctuation, and on every layout with an AltGr key it could not be
+    /// typed at all, because Ctrl was down and Ctrl down meant shortcut.
+    #[test]
+    fn an_altgr_character_is_typing() {
+        assert_eq!(judge_key(Q, alt_gr(), &['@']), Effect::Type(&['@']));
+    }
+
+    /// And a real Ctrl+Alt chord still throws the buffer away.
+    ///
+    /// The trap in the whole fix. AltGr is Ctrl plus **right** Alt and a real
+    /// chord is Ctrl plus **left** Alt, and letting go of the difference in
+    /// either direction is a bug: keep resetting on right Alt and German
+    /// keywords stay impossible, stop resetting on left Alt and every Ctrl+Alt
+    /// shortcut in every application leaks a character into the snippet buffer.
+    #[test]
+    fn a_real_ctrl_alt_chord_still_forgets_everything() {
+        assert!(ctrl_alt().chord(), "Ctrl with the left Alt is a shortcut");
+        assert!(!ctrl_alt().alt_gr(), "the left Alt is not AltGr");
+
+        assert_eq!(judge_key(A, ctrl_alt(), &['a']), Effect::Clear);
+    }
+
+    /// Ctrl and right Alt on a layout with no AltGr is a shortcut too.
+    ///
+    /// A US keyboard has no third level, so Ctrl plus right Alt is a plain
+    /// Ctrl+Alt shortcut that happens to arrive in exactly the shape AltGr
+    /// arrives in. Nothing in the key state separates them. Windows does: the
+    /// layout translates it to nothing, and nothing is the answer that says it
+    /// was a shortcut after all.
+    #[test]
+    fn ctrl_and_right_alt_that_type_nothing_are_a_shortcut() {
+        assert_eq!(judge_key(A, alt_gr(), &[]), Effect::Clear);
+    }
+
+    /// Right Alt on its own is Alt, not AltGr.
+    ///
+    /// AltGr always brings the synthetic Ctrl with it, so right Alt without
+    /// Ctrl is somebody holding the Alt on the right of their space bar.
+    #[test]
+    fn right_alt_without_ctrl_is_an_alt_shortcut() {
+        let right_alt_only = Held {
+            ctrl: false,
+            left_alt: false,
+            right_alt: true,
+        };
+
+        assert!(right_alt_only.chord());
+        assert_eq!(judge_key(A, right_alt_only, &['a']), Effect::Clear);
+    }
+
+    /// A key an IME took changes the buffer to nothing at all.
+    ///
+    /// Both halves matter. No character is invented for `VK_PROCESSKEY`, which
+    /// types nothing, and **what was in the buffer is dropped**, because a
+    /// composition is text landing in the field that Sill cannot see. Keeping
+    /// it would leave the buffer holding characters that are no longer
+    /// immediately behind the caret, and the next keyword to match would delete
+    /// its own length out of the middle of somebody's Japanese.
+    #[test]
+    fn a_key_an_ime_took_leaves_nothing_behind() {
+        assert_eq!(judge_key(PROCESS_KEY, nothing_held(), &[]), Effect::Clear);
+
+        let mut typed = Typed::new();
+        typed.push_all(&['s', 'i', 'g']);
+
+        if let Effect::Clear = judge_key(PROCESS_KEY, nothing_held(), &[]) {
+            typed.clear();
+        }
+
+        assert_eq!(
+            typed.as_str(),
+            "",
+            "a composition left earlier typing in the buffer, so it no longer sits behind \
+             the caret and a match would delete the wrong characters"
+        );
+    }
+
+    /// A committed composition arrives as characters and lands whole.
+    ///
+    /// One key event producing several characters is the same defect as the
+    /// surrogate pair below: the old code took the first UTF-16 unit and only
+    /// when there was exactly one, so anything longer became nothing.
+    #[test]
+    fn committed_characters_all_reach_the_buffer() {
+        let commit = ['に', 'ほ', 'ん'];
+        assert_eq!(judge_key(A, nothing_held(), &commit), Effect::Type(&commit));
+
+        let mut typed = Typed::new();
+        typed.push_all(&commit);
+        assert_eq!(typed.as_str(), "にほん");
+    }
+
+    /// A character outside the basic plane survives whole.
+    ///
+    /// Two UTF-16 units are one character. Accepting a single unit meant every
+    /// emoji and a good deal of CJK either vanished or, worse, arrived as half
+    /// of itself.
+    #[test]
+    fn a_surrogate_pair_is_one_character() {
+        let mut out = ['\0'; PRODUCED_MAX];
+
+        // U+1F600, as `ToUnicode` writes it.
+        let count = produced(&[0xD83D, 0xDE00], &mut out);
+        assert_eq!(count, 1, "a surrogate pair decoded to {count} characters");
+        assert_eq!(out[0], '😀');
+
+        assert_eq!(
+            judge_key(A, nothing_held(), &out[..count]),
+            Effect::Type(&['😀'])
+        );
+    }
+
+    /// Half a character is not a character.
+    ///
+    /// A lone surrogate decodes to nothing rather than to a replacement
+    /// character, because a `U+FFFD` in the buffer is a character the user
+    /// never typed and every keyword comparison after it would be against text
+    /// that is not in the field.
+    #[test]
+    fn a_lone_surrogate_reaches_nothing() {
+        let mut out = ['\0'; PRODUCED_MAX];
+        assert_eq!(produced(&[0xD83D], &mut out), 0);
+    }
+
+    /// Ctrl+Backspace deleted a word, so one character is the wrong answer.
+    #[test]
+    fn ctrl_backspace_forgets_everything_rather_than_one_character() {
+        let ctrl = Held {
+            ctrl: true,
+            left_alt: false,
+            right_alt: false,
+        };
+
+        assert_eq!(judge_key(BACKSPACE, ctrl, &[]), Effect::Clear);
+        assert_eq!(
+            judge_key(BACKSPACE, nothing_held(), &[]),
+            Effect::Backspace,
+            "a plain backspace still removes exactly one character"
+        );
+    }
+
+    /// The cost gate and the decision cannot drift apart.
+    ///
+    /// `could_type` exists only to keep `MapVirtualKeyW` and `ToUnicode` off
+    /// the path for keys that cannot type anything, which is most keystrokes on
+    /// the machine. That is safe exactly while every case it refuses is one
+    /// `judge_key` answers without reading a character, and nothing but this
+    /// holds the two lists together.
+    #[test]
+    fn the_cost_gate_only_skips_keys_whose_answer_ignores_the_character() {
+        let states = [nothing_held(), ctrl_alt(), alt_gr()];
+        let keys = [A, Q, BACKSPACE, PROCESS_KEY, 0x0D, 0x1B, 0x25];
+
+        for vk in keys {
+            for held in states {
+                if could_type(vk, held) {
+                    continue;
+                }
+
+                assert_eq!(
+                    judge_key(vk, held, &['x']),
+                    judge_key(vk, held, &[]),
+                    "key {vk:#x} with {held:?} is refused a translation but its answer \
+                     depends on one"
+                );
+            }
+        }
+    }
+
+    /// Every character of a multi-character key event is remembered.
+    #[test]
+    fn pushing_several_characters_keeps_all_of_them() {
+        let mut typed = Typed::new();
+        typed.push_all(&['a', 'b']);
+        typed.push_all(&['😀']);
+        assert_eq!(typed.as_str(), "ab😀");
     }
 
     #[cfg(windows)]
