@@ -4040,6 +4040,22 @@
        * than it will ever tell anybody.
        */
       hidden = whenHidden(() => {
+        /*
+         * The keystroke clock stops when the window goes away.
+         *
+         * Without this a keystroke typed just before the launcher was put
+         * away keeps its start time, and the first paint after the **next**
+         * summon is charged the whole gap in between. It read 51 seconds for
+         * one keystroke in this log, beside a median of 74 ms, which is not a
+         * slow keystroke: it is a keystroke, a dismissal, and a summon a
+         * minute later, added together.
+         *
+         * That number is published. `P8-06` puts the worst reading on a page
+         * whose whole argument is that a reader can check it, so a figure
+         * that is really three things is worse there than anywhere else.
+         */
+        typedAt = null;
+
         for (const { what, tookUs } of drawn.flush()) {
           void reportPainted(what, tookUs).catch(() => {});
         }
