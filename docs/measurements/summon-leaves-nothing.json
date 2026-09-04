@@ -1,0 +1,10 @@
+{
+  "id": "summon-leaves-nothing",
+  "reading": "the check holds",
+  "within": true,
+  "build": "debug",
+  "machine": "Windows 11 Pro, 16 cores, 32 GB",
+  "version": "0.1.0",
+  "on": "2026-09-03",
+  "by": "scripts/measure-checks.mjs"
+}

@@ -8,6 +8,13 @@ Every number was taken on one machine (Windows 11, 16 cores, 32 GB) against a
 release build. They are a baseline to notice changes from, not a specification
 anybody else's machine has to meet.
 
+This document is the contract and it is written by hand. The readings a
+release publishes are not: [benchmark.md](benchmark.md) is generated from what
+the measuring scripts wrote down, carries the machine and the build behind
+every row, and says which rows have no reading at all. The budgets on it are
+read from the tables below, so loosening one here loosens it there and
+nowhere else.
+
 ## Where each of these runs
 
 A budget nobody enforces is a number that was true once. A gate that measures

@@ -1,0 +1,10 @@
+{
+  "id": "ranking-one-keystroke",
+  "reading": "27.1 ms for the worst of four queries over 1,500 entries",
+  "within": true,
+  "build": "debug",
+  "machine": "Windows 11 Pro, 16 cores, 32 GB",
+  "version": "0.1.0",
+  "on": "2026-09-03",
+  "by": "scripts/measure-checks.mjs"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "no-unaccounted-timer",
+  "reading": "0 unaccounted for, of 4 repeating timers in the window",
+  "within": true,
+  "build": "debug",
+  "machine": "Windows 11 Pro, 16 cores, 32 GB",
+  "version": "0.1.0",
+  "on": "2026-09-03",
+  "by": "scripts/measure-checks.mjs"
+}

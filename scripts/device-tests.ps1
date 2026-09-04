@@ -19,7 +19,12 @@
 
 param(
     [string]$Only = "",
-    [switch]$KeepRunning
+    [switch]$KeepRunning,
+    # Writes the three numbers this suite produces into docs/measurements/,
+    # which is where the published cost page gets them. Named for what it
+    # writes, because `Record` below is this file's own pass/fail reporter and
+    # two things called the same thing would be read as one.
+    [switch]$RecordCosts
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,6 +53,8 @@ public class Sill {
   }
 }
 '@
+
+if ($RecordCosts) { . (Join-Path $PSScriptRoot "record-measurement.ps1") }
 
 $script:Exe = Join-Path $PSScriptRoot "..\src-tauri\target\release\sill.exe" | Resolve-Path -ErrorAction SilentlyContinue
 $script:Data = Join-Path $env:APPDATA "app.winters.sill"
@@ -247,6 +254,12 @@ function Test-IndexCache {
         # A walk is over a second. Anything near that means it did not load.
         $ok = ($entries -gt 0) -and ($ms -lt 500)
         $detail = "$entries entries in $ms ms"
+
+        if ($RecordCosts) {
+            Write-Measurement -Id index-read-back -Build (Get-MeasurementBuild $script:Exe) `
+                -Within $ok -By "scripts/device-tests.ps1" `
+                -Reading "$ms ms for $entries entries"
+        }
     }
 
     Record "the file index is read back rather than re-walked" $ok $detail
@@ -277,6 +290,12 @@ function Test-Idle {
         Record "the Rust core idles inside its memory budget" ($mb -le 40) `
             "$mb MB private, budget 40 MB"
 
+        if ($RecordCosts) {
+            Write-Measurement -Id rust-core-idle-memory -Build (Get-MeasurementBuild $script:Exe) `
+                -Within ($mb -le 40) -By "scripts/device-tests.ps1" `
+                -Reading "$mb MB private"
+        }
+
         $before = $p.TotalProcessorTime
         Start-Sleep -Seconds 30
         $p.Refresh()
@@ -285,6 +304,12 @@ function Test-Idle {
         # A tenth of one core sustained would be 3,000 ms over thirty seconds.
         Record "the Rust core does almost nothing at rest" ($ms -le 500) `
             "$ms ms of processor over 30 s, budget 500 ms"
+
+        if ($RecordCosts) {
+            Write-Measurement -Id rust-core-at-rest -Build (Get-MeasurementBuild $script:Exe) `
+                -Within ($ms -le 500) -By "scripts/device-tests.ps1" `
+                -Reading "$ms ms of processor over 30 s"
+        }
     }
 }
 

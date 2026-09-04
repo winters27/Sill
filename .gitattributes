@@ -3,3 +3,13 @@
 # arrives as a stray carriage return at the end of every command, which fails in
 # a way that names nothing useful.
 *.sh text eol=lf
+
+# The published cost page and the readings it is built from.
+#
+# `npm run verify` regenerates the page and fails if it differs from the
+# committed copy, which is what stops a number being edited into it. The
+# generator writes LF, and this machine checks out CRLF by default, so without
+# these two lines that check would go red on a fresh Windows clone for a reason
+# nobody could act on.
+docs/benchmark.md text eol=lf
+docs/measurements/*.json text eol=lf

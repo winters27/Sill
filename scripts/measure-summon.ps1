@@ -42,10 +42,15 @@ param(
     # somebody switches off, and a switched-off budget catches nothing. This
     # is here to catch a change in kind, not a change of five milliseconds.
     [int]$BudgetMs = 250,
-    [int]$ColdBudgetMs = 4000
+    [int]$ColdBudgetMs = 4000,
+    # Writes both readings into docs/measurements/, which is where the
+    # published cost page gets them.
+    [switch]$Record
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Record) { . (Join-Path $PSScriptRoot 'record-measurement.ps1') }
 
 Add-Type @"
 using System; using System.Text; using System.Runtime.InteropServices;
@@ -189,18 +194,33 @@ $median = $sorted[[int][math]::Floor($sorted.Count / 2)]
 Get-Process sill -ErrorAction SilentlyContinue | Stop-Process -Force
 
 Write-Host ''
-$failed = $false
+$summonOk = $median -le $BudgetMs
+$coldOk = $coldMs -le $ColdBudgetMs
 
-if ($median -gt $BudgetMs) {
+if (-not $summonOk) {
     Write-Host ("OVER BUDGET  median summon {0} ms, allowed {1}" -f $median, $BudgetMs) -ForegroundColor Red
-    $failed = $true
 }
-if ($coldMs -gt $ColdBudgetMs) {
+if (-not $coldOk) {
     Write-Host ("OVER BUDGET  cold start {0} ms, allowed {1}" -f $coldMs, $ColdBudgetMs) -ForegroundColor Red
-    $failed = $true
 }
 
-if ($failed) { exit 1 }
+# Recorded whether or not it was within budget. A page that only wrote down
+# the runs it liked would be the failure this whole readout exists against.
+if ($Record) {
+    $build = Get-MeasurementBuild $exe
+
+    Write-Measurement -Id summon -Build $build -Within $summonOk `
+        -By 'scripts/measure-summon.ps1' -Reading (
+            '{0} ms median, {1} best, {2} worst, over {3} summons' -f
+                $median, $sorted[0], $sorted[-1], $summons.Count)
+
+    Write-Measurement -Id cold-start -Build $build -Within $coldOk `
+        -By 'scripts/measure-summon.ps1' -Reading ('{0} ms' -f $coldMs)
+
+    Write-Host ''
+}
+
+if (-not ($summonOk -and $coldOk)) { exit 1 }
 
 Write-Host ("within budget: summon {0} ms of {1}, cold start {2} ms of {3}" -f
     $median, $BudgetMs, $coldMs, $ColdBudgetMs) -ForegroundColor Green

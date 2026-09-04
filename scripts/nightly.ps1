@@ -95,11 +95,14 @@ $parts = @()
 # is why it comes last, after the device suite, because the device suite is the
 # part of this run that actually types into the launcher.
 $plan = @(
-    @{ Name = 'idle';      Script = 'measure-idle.ps1';      Binary = $true;  Args = @('-Label', 'nightly') },
-    @{ Name = 'summon';    Script = 'measure-summon.ps1';    Binary = $true;  Args = @() },
-    @{ Name = 'network';   Script = 'measure-network.ps1';   Binary = $true;  Args = @() },
-    @{ Name = 'device';    Script = 'device-tests.ps1';      Binary = $false; Args = @() },
-    @{ Name = 'keystroke'; Script = 'measure-keystroke.ps1'; Binary = $false; Args = @('-Since', '30') }
+    @{ Name = 'idle';      Script = 'measure-idle.ps1';      Binary = $true;  Args = @('-Label', 'nightly'); Record = @('-Record') },
+    @{ Name = 'summon';    Script = 'measure-summon.ps1';    Binary = $true;  Args = @();                    Record = @('-Record') },
+    @{ Name = 'network';   Script = 'measure-network.ps1';   Binary = $true;  Args = @();                    Record = @('-Record') },
+    @{ Name = 'device';    Script = 'device-tests.ps1';      Binary = $false; Args = @();                    Record = @('-RecordCosts') },
+    # `-Build release` is not an assumption here. This run refused a debug
+    # binary two screens up, so the log these readings come from was written by
+    # the release build it just measured everything else against.
+    @{ Name = 'keystroke'; Script = 'measure-keystroke.ps1'; Binary = $false; Args = @('-Since', '30'); Record = @('-Record', '-Build', 'release') }
 )
 
 if ($Quick) {
@@ -129,6 +132,11 @@ foreach ($part in $plan) {
     $args = @($part.Args)
     if ($part.Binary) { $args = @('-Exe', $exe) + $args }
 
+    # A quick run records nothing, deliberately. Its waits are shortened, so
+    # its figures are not readings, and writing one into the published page
+    # would put a number there that nothing stands behind.
+    if (-not $Quick) { $args += $part.Record }
+
     $said = & powershell -NoProfile -ExecutionPolicy Bypass -File $script @args 2>&1
     $code = $LASTEXITCODE
 
@@ -147,6 +155,15 @@ $left = @(Get-Process sill -ErrorAction SilentlyContinue).Count
 if ($left -gt 0) { Write-Host "$left launcher(s) still running after the run" -ForegroundColor Red }
 
 $report | Set-Content $Out -Encoding UTF8
+
+# The published page, rebuilt from what this run just wrote down. Nothing is
+# sent anywhere: it writes docs/benchmark.md into the checkout, and whoever
+# reads the report above decides whether to commit it.
+if (-not $Quick) {
+    Write-Host ''
+    Write-Host '--- the published page ---' -ForegroundColor Cyan
+    & node (Join-Path $PSScriptRoot 'benchmark-page.mjs')
+}
 
 Write-Host ''
 Write-Host '--- nightly ---' -ForegroundColor Cyan
