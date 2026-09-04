@@ -1651,6 +1651,109 @@ pub fn terminal_record(profile: &crate::terminals::Profile) -> RankedCommand {
     }
 }
 
+/// One note, as a row the search can splice in.
+///
+/// A `RankedCommand` for the reason a terminal profile is one: it was not found
+/// by matching a corpus, it is there because the query's first word asked for
+/// notes, so there is no class for the matcher to have worked out.
+pub fn note_record(note: &crate::notes::Note) -> RankedCommand {
+    RankedCommand {
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            // Prefixed so it cannot collide with anything scanned, which is
+            // the same shape `conversation_record` uses. The bare id is what
+            // the action acts on.
+            id: format!("note:{}", note.id),
+            extension: "notes".to_string(),
+            extension_title: "Notes".to_string(),
+            command: note.id.clone(),
+            title: note.title(),
+            subtitle: note.glance(),
+            description: String::new(),
+            mode: "note".to_string(),
+            entrypoint: note.id.clone(),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
+/// The row that starts a new note.
+///
+/// An empty entrypoint, which is what `sill.note.open` reads as "there is no
+/// note yet, make one". A sentinel rather than a second action because opening
+/// a note and opening a note that does not exist yet are one act from where
+/// somebody is standing: the window comes up with a cursor in it either way.
+pub fn new_note_record() -> RankedCommand {
+    RankedCommand {
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            id: "note:new".to_string(),
+            extension: "notes".to_string(),
+            extension_title: "Notes".to_string(),
+            command: "new".to_string(),
+            title: "New Note".to_string(),
+            subtitle: "Open an empty one".to_string(),
+            description: String::new(),
+            mode: "note".to_string(),
+            entrypoint: String::new(),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
+/**
+The row offering to set a timer.
+
+`entrypoint` is **the whole query, exactly as it was typed**, and that is the
+design rather than an economy. The row has to show what it will do and the
+action has to do it, which is two readings of one sentence, and the way those
+two readings stop agreeing is for one of them to happen in the window. So the
+window carries the words back unread and `timers::matched` is the only thing
+that ever interprets them.
+*/
+pub fn reminder_record(
+    query: &str,
+    timer: &crate::timers::Timer,
+    at: crate::timers::Local,
+) -> RankedCommand {
+    RankedCommand {
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            id: "sill:reminder".to_string(),
+            extension: "timers".to_string(),
+            extension_title: "Reminder".to_string(),
+            command: "set".to_string(),
+            title: timer.message.clone(),
+            subtitle: format!("In {}, at {}", crate::timers::said(timer.after), at.clock()),
+            description: String::new(),
+            mode: "reminder".to_string(),
+            entrypoint: query.trim().to_string(),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
 pub fn answer_record(text: &str, input: &str) -> RankedCommand {
     RankedCommand {
         // An answer is only ever produced because the query was a sum, so it

@@ -24,6 +24,14 @@ export interface General {
    * the other direction.
    */
   detailedLog: boolean;
+  /**
+   * Whether notes exist at all.
+   *
+   * A prototype: one note at a time, in one window, with no folders, tags or
+   * formatting. Off by default, and off means Sill never opens the notes file
+   * on any keystroke rather than opening it and finding nothing.
+   */
+  notes: boolean;
 }
 
 /** Skin tone and what Enter does, for the emoji picker. */

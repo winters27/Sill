@@ -1011,6 +1011,24 @@
             </Row>
           </Section>
 
+          <Section label="Unfinished">
+            <!--
+              A prototype, and the row says so rather than the release notes
+              doing it. Somebody who reads "Notes" in a launcher expects
+              folders, tags and formatting; what is behind this is one note at
+              a time in one window, and the honest place to say that is the
+              line under the switch they are about to press.
+            -->
+            <Row
+              title="Notes"
+              description="A prototype. One note at a time, in its own window. Type note in the launcher to find one. Off means Sill never opens the file at all."
+            >
+              {#snippet control()}
+                <Toggle bind:checked={p.general.notes} onchange={commit} label="Notes" />
+              {/snippet}
+            </Row>
+          </Section>
+
           <Section label="Opening and closing">
             <Row
               title="Hide when it loses focus"

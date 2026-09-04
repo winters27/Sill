@@ -46,6 +46,27 @@ function glance(text: string): string {
 }
 
 /**
+ * What each mode's rows are headed, and what a mode nobody named gets.
+ *
+ * A table rather than the chain of ternaries this was. The chain answered
+ * "File" for everything it did not name, so a reminder arriving from a fired
+ * timer would have been headed "File" with no file anywhere near it and
+ * nothing would have said so. Naming the fallback once, here, is what makes a
+ * mode added later obviously unnamed rather than quietly wrong.
+ */
+const HEADED: Record<string, string> = {
+  folder: "Folder",
+  file: "File",
+  text: "Selection",
+  // A reminder Windows started, which is text with a reason for being here.
+  // It is `text` to Rust and to the action panel; only the heading differs.
+  "reminder-shown": "Reminder",
+};
+
+/** The modes whose target is words rather than a path. */
+const WORDS = new Set(["text", "reminder-shown"]);
+
+/**
  * The rows for a resolved selection.
  *
  * A file keeps its path as the subtitle and as the icon, exactly as a file
@@ -56,21 +77,21 @@ function glance(text: string): string {
  */
 export function selectionRows(objects: SelectedObject[]): RankedCommand[] {
   return objects.map((object) => {
-    const isText = object.mode === "text";
+    const words = WORDS.has(object.mode);
 
     return {
       id: object.id,
       extension: "selection",
       // The heading a lone row never shows and a mixed selection does. Rust
       // decides which of the two a thing is; this only names it.
-      extensionTitle: object.mode === "folder" ? "Folder" : isText ? "Selection" : "File",
+      extensionTitle: HEADED[object.mode] ?? "File",
       title: object.title,
-      subtitle: isText ? glance(object.target) : object.target,
+      subtitle: words ? glance(object.target) : object.target,
       mode: object.mode as RankedCommand["mode"],
       entrypoint: object.target,
-      // A path is its own icon. Text has no file to take one from, and an
-      // icon guessed for it would be an icon for the wrong thing.
-      icon: isText ? null : object.target,
+      // A path is its own icon. Words have no file to take one from, and an
+      // icon guessed for them would be an icon for the wrong thing.
+      icon: words ? null : object.target,
       matched: [],
     };
   });

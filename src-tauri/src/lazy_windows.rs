@@ -86,6 +86,32 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
             .minimizable(false)
             .build(),
 
+        /*
+         * The notes window, which is one note at a time and nothing else.
+         *
+         * Deferred like the other three, and with a stronger reason: notes are
+         * a prototype behind a switch that is off, so on most machines this
+         * window is never built at all and costs exactly nothing. Decorated
+         * and resizable, unlike everything above it, because it is the one
+         * window somebody sits in and types into rather than one that appears
+         * over what they were doing.
+         *
+         * Closable, likewise. A capture overlay is hidden so its renderer can
+         * be put to sleep and reused a moment later; a note is finished with,
+         * and the honest thing when somebody presses the close button is to
+         * give the memory back.
+         */
+        "note" => builder("note")
+            .title("Sill notes")
+            .inner_size(560.0, 460.0)
+            .min_inner_size(360.0, 240.0)
+            .resizable(true)
+            .decorations(true)
+            .closable(true)
+            .transparent(false)
+            .shadow(true)
+            .build(),
+
         other => return Err(format!("{other} is not a window Sill builds on demand")),
     };
 
@@ -100,7 +126,7 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
 /// Public so a test can assert that every one of them is buildable and that
 /// none of them is still declared in the configuration, which is the mistake
 /// that would give a window a renderer again without anybody noticing.
-pub const DEFERRED: &[&str] = &["markup", "capture", "dictation"];
+pub const DEFERRED: &[&str] = &["markup", "capture", "dictation", "note"];
 
 /**
 Puts one of these away, and lets its renderer go to sleep.

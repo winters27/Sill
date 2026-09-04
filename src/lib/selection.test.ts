@@ -27,7 +27,43 @@ const text: SelectedObject = {
   mode: "text",
 };
 
+const reminder: SelectedObject = {
+  kind: "text",
+  id: "reminder:Take the bread out",
+  target: "Take the bread out",
+  title: "Take the bread out",
+  mode: "reminder-shown",
+};
+
 describe("rows for whatever was selected", () => {
+  /**
+   * A reminder Windows started is headed as one, and looks nothing like a file.
+   *
+   * The heading used to be a chain of ternaries ending in "File", so a mode
+   * nobody had named was drawn as a file: a row headed "File", whose subtitle
+   * was a path that does not exist, and whose icon was looked up from it.
+   */
+  it("heads a fired reminder as a reminder", () => {
+    const [row] = selectionRows([reminder]);
+
+    expect(row.extensionTitle).toBe("Reminder");
+    expect(row.title).toBe("Take the bread out");
+    expect(row.icon).toBeNull();
+    // The mode survives, because it is what the action panel asks Rust about
+    // and Rust answers it with the actions for text.
+    expect(row.mode).toBe("reminder-shown");
+  });
+
+  /** And nothing else claims a heading it was never given. */
+  it("does not call an unnamed mode a file", () => {
+    const [row] = selectionRows([{ ...reminder, mode: "something-new" }]);
+
+    // The fallback is still "File", which is what it always was. What changed
+    // is that it is written once, where somebody adding a mode will see it,
+    // rather than at the end of a ternary chain.
+    expect(row.extensionTitle).toBe("File");
+  });
+
   /**
    * The mode is what the action panel asks Rust about, so it has to survive.
    *

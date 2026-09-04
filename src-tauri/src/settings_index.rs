@@ -107,6 +107,12 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "general",
         "General",
+        "Notes",
+        "note scratchpad scratch write prototype",
+    ),
+    s(
+        "general",
+        "General",
         "Hide when it loses focus",
         "blur dismiss escape close",
     ),

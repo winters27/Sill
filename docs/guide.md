@@ -97,6 +97,38 @@ is deliberately hard to trigger: a version number is not a sum, and something
 that looks like arithmetic but is not gets left alone rather than replacing
 your search with a number.
 
+## Reminders and timers
+
+Type `remind me in 20 minutes to call Sam`, or `timer 5m tea`, and a row says
+what will happen and at what time. Pressing Enter hands it to Windows: it
+becomes a one-off task in the Task Scheduler folder called `Sill`, and Windows
+does the waiting. So the reminder survives Sill being restarted, and while it
+is pending Sill is doing nothing at all about it. When it fires, Sill opens
+with the reminder on screen and the action panel on it, so it can be copied or
+read aloud like any other piece of text. The task removes itself afterwards.
+
+A length of time can be written `20`, `20m`, `20 minutes` or `1h30m`. A bare
+number is minutes. Anything shorter than ten seconds or longer than thirty days
+is refused rather than rounded, and a reminder with no time in it is not
+offered at all, because a reminder at a moment nobody chose is worse than none.
+
+## Notes
+
+Off to begin with. Settings, General, Notes turns it on, and the row says what
+it is: a prototype, one note at a time, in its own window. There are no
+folders, no tags and no formatting.
+
+With it on, typing `note` lists what you have written, newest first, and
+anything after the word narrows it by looking inside the notes themselves. The
+last row makes a new one. A note is saved while you type and again when the
+window closes, and it is called whatever its first line says.
+
+Only the word `note` (or `notes`, `scratch`, `scratchpad`) reaches them.
+Nothing you write is searched by an ordinary query, so a launcher opened in
+front of somebody else does not put a paragraph of yours under an application.
+
+Switched off, Sill does not open the notes file at all.
+
 ## Windows
 
 The switcher key opens Sill straight into a list of open windows with a
