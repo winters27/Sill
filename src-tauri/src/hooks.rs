@@ -266,6 +266,9 @@ mod windows_impl {
         };
 
         let settings = service.settings();
+        // What private mode is already set to. This is a health check on a
+        // hook, not a place that decides whether Sill is recording.
+        let paused = service.paused();
         let facts = HotkeyListener::state();
         let last = Watch::turn(&watch.dictation, facts.keys_seen);
 
@@ -297,7 +300,7 @@ mod windows_impl {
              * here would be a second thing to keep in step with the chord, the
              * finish key and the cancel key.
              */
-            crate::apply_dictation(&app, &settings);
+            crate::apply_dictation(&app, &settings, paused);
 
             if HotkeyListener::state().installed {
                 crate::status::resolved(&app, DICTATION_HOOK_TROUBLE);

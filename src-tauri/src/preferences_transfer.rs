@@ -79,7 +79,12 @@ pub struct Panel {
 pub const PANELS: &[Panel] = &[
     Panel {
         id: "general",
-        sections: &["general"],
+        // Private mode is here because it is a fact about the machine rather
+        // than about any one feature: it overrides the clipboard, dictation
+        // and capture settings at once, and filing it under any of those three
+        // would mean resetting that panel decided whether Sill was recording
+        // the other two.
+        sections: &["general", "privacy"],
     },
     Panel {
         id: "appearance",
@@ -1043,6 +1048,7 @@ mod tests {
         prefs.dictation.provider.enabled = true;
         prefs.tts.voice = "echo".into();
         prefs.widgets.fahrenheit = !prefs.widgets.fahrenheit;
+        prefs.privacy.paused = !prefs.privacy.paused;
 
         prefs
     }

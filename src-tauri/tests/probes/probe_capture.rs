@@ -12,7 +12,14 @@ fn takes_a_picture_of_the_screen() {
     assert!(width > 0 && height > 0, "no screen area was reported");
 
     let started = std::time::Instant::now();
-    let shot = capture::region(left, top, width, height).expect("captures");
+    let shot = capture::region(
+        &sill_lib::privacy::allowed_regardless(),
+        left,
+        top,
+        width,
+        height,
+    )
+    .expect("captures");
     let took = started.elapsed();
 
     println!(
@@ -43,7 +50,14 @@ fn takes_a_picture_of_the_screen() {
 #[ignore = "reads this machine's screens"]
 fn the_words_on_the_screen_can_be_read_back() {
     let (left, top, width, height) = capture::virtual_screen();
-    let shot = capture::region(left, top, width, height).expect("captures");
+    let shot = capture::region(
+        &sill_lib::privacy::allowed_regardless(),
+        left,
+        top,
+        width,
+        height,
+    )
+    .expect("captures");
 
     let started = std::time::Instant::now();
     let text = sill_lib::ocr::read_bgra(&shot.pixels, shot.width, shot.height).expect("reads");

@@ -654,7 +654,16 @@ async fn read_screen(app: &AppHandle) -> Value {
         return json!({ "error": "No screens were found." });
     }
 
-    let shot = match crate::capture::region(left, top, width, height) {
+    // The model reads the screen through the same permission a screenshot
+    // does, which is the point of there being one: private mode did not have
+    // to be taught about this tool, and a tool added tomorrow cannot forget
+    // it either.
+    let allowed = match crate::privacy::allow(&app.state::<crate::privacy::Privacy>()) {
+        Ok(allowed) => allowed,
+        Err(why) => return json!({ "error": why }),
+    };
+
+    let shot = match crate::capture::region(&allowed, left, top, width, height) {
         Ok(shot) => shot,
         Err(why) => return json!({ "error": format!("Could not look at the screen: {why}") }),
     };

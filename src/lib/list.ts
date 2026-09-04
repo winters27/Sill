@@ -57,6 +57,15 @@ const HEADINGS: Record<string, string> = {
    */
   "store-listing": "Extension Store",
   "sill-setting": "Sill Settings",
+  /*
+   * Terminal profiles and WSL distributions, under one heading.
+   *
+   * Not "Windows Terminal": on a machine without it, the rows are the WSL
+   * distributions the registry knows about and Terminal has nothing to do
+   * with them. What the two have in common is that pressing one opens a
+   * terminal.
+   */
+  "terminal-profile": "Terminals",
   view: "Commands",
   "no-view": "Commands",
   builtin: "Sill",

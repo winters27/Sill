@@ -38,6 +38,7 @@ pub mod icons;
 pub mod input;
 pub mod job;
 pub mod json_store;
+pub mod jumplists;
 pub mod keysheet;
 pub mod lazy_windows;
 pub mod leavings;
@@ -54,6 +55,7 @@ pub mod placement;
 pub mod preferences;
 pub mod preferences_transfer;
 pub mod previews;
+pub mod privacy;
 pub mod processes;
 pub mod profiles;
 pub mod profiles_store;
@@ -642,9 +644,22 @@ pub(crate) fn same_dictation(
 ///
 /// The hook fires on a thread with no route back to the frontend, so the
 /// service has to hold its own copy of everything the trigger needs.
-pub(crate) fn apply_dictation(app: &AppHandle, settings: &dictation::models::DictationSettings) {
+///
+/// `paused` is private mode, and it is a parameter rather than something read
+/// here so that every caller has to answer it. The two that apply preferences
+/// pass what the preferences say; the hook's own health check passes what the
+/// service already holds, because re-arming a hook is not the moment to change
+/// what private mode is set to.
+pub(crate) fn apply_dictation(
+    app: &AppHandle,
+    settings: &dictation::models::DictationSettings,
+    paused: bool,
+) {
     let service = app.state::<dictation::service::DictationService>();
     service.set_settings(settings.clone());
+    // Before the arming below, so there is no instant in which the hook is
+    // armed and the refusal is not in place.
+    service.set_paused(paused);
 
     if !settings.enabled {
         service.disable_hotkey();
@@ -1457,6 +1472,19 @@ fn manage_before_windows(app: &tauri::App) {
     // opened.
     log::set_level(log_level(prefs.general.detailed_log));
 
+    /*
+     * Private mode, before any window exists and therefore before any capture
+     * command can be reached.
+     *
+     * Windows are created before the setup hook runs, so a mirror pointed at
+     * the preferences later would leave a window in which Sill was in private
+     * mode and photographing the screen anyway. The same reasoning as the
+     * emoji corpus below.
+     */
+    let privacy = privacy::Privacy::default();
+    privacy.set(prefs.privacy.paused);
+    app.manage(privacy);
+
     app.manage(PrefsState {
         inner: Arc::new(tokio::sync::Mutex::new(prefs)),
         path: Arc::new(prefs_path),
@@ -1525,6 +1553,28 @@ fn manage_before_windows(app: &tauri::App) {
      */
     app.manage(state::Fresh::<Arc<Vec<files::Trace>>>::new(
         files::RECENT_FRESH_FOR,
+    ));
+    /*
+     * What every application remembers having opened, for the same reason.
+     *
+     * A different list from the one above: that is the Recent folder, which is
+     * the shell's own shortcuts, and this is the two hundred jump lists behind
+     * the taskbar's right-click menus. Read only when a query's first word
+     * asks for it, held for a few seconds because the words after it narrow
+     * the list, and bounded to three hundred documents.
+     */
+    app.manage(state::Fresh::<Vec<jumplists::Recent>>::new(
+        jumplists::FRESH_FOR,
+    ));
+    /*
+     * The terminals and shells this machine has, for the same reason again.
+     *
+     * Terminal's settings file and the WSL keys in the registry, read when a
+     * query's first word asks for a terminal and held for a minute: it changes
+     * when somebody edits their settings, which is not while they are typing.
+     */
+    app.manage(state::Fresh::<Vec<terminals::Profile>>::new(
+        terminals::FRESH_FOR,
     ));
 
     /*
@@ -1879,15 +1929,12 @@ pub fn run() {
                         Err(err) => crate::say!("could not prune the clipboard: {err}"),
                     }
                 }
-                history.set_rules(clipboard::monitor::Rules {
-                    enabled: prefs.clipboard.enabled,
-                    keep_images: prefs.clipboard.keep_images,
-                    ignored_apps: prefs.clipboard.ignored_apps.clone(),
-                    secrets: prefs.clipboard.secrets,
-                    retain_days: prefs.clipboard.retain_days,
-                    max_entries: prefs.clipboard.max_entries,
-                    encrypt_images: prefs.clipboard.encrypt_images,
-                });
+                // Derived rather than filled in, and by the same function the
+                // settings apply uses, so private mode cannot be honoured on
+                // a settings save and forgotten at startup. That difference
+                // would be invisible: a launcher started in private mode
+                // would record everything until somebody opened settings.
+                history.set_rules(crate::privacy::clipboard_rules(&prefs));
 
                 // The count cap, once, beside the retention prune above. Both
                 // run again from the recording path; this is for the history
@@ -1897,7 +1944,7 @@ pub fn run() {
                     Ok(gone) => crate::say!("trimmed {gone} clipboard entries past the limit"),
                     Err(err) => crate::say!("could not trim the clipboard: {err}"),
                 }
-                if prefs.clipboard.enabled {
+                if crate::privacy::clipboard_rules(&prefs).enabled {
                     clipboard::monitor::watch(&handle, &history);
                 }
                 app.manage(history);
@@ -1905,7 +1952,17 @@ pub fn run() {
 
             // After the manage calls above: this resolves the service out of
             // managed state, which panics if it is not there yet.
-            apply_dictation(&handle, &prefs.dictation);
+            apply_dictation(
+                &handle,
+                &crate::privacy::dictation_settings(&prefs),
+                prefs.privacy.paused,
+            );
+
+            // The standing sign that private mode is on, put up at startup as
+            // well as when it is switched on. It persists across restarts on
+            // purpose, and a mode that survived silently would be the failure
+            // it exists to prevent.
+            crate::privacy::report(&handle, prefs.privacy.paused);
 
             // Started here rather than waited for. The walk is over a second
             // of work, and nothing needs it until somebody types: file search

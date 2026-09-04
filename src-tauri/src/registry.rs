@@ -694,6 +694,36 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "manager",
             ],
         ),
+        // Wearing the shell's padlock rather than a settings gear, for the
+        // reason the switches do: what it changes is whether the machine is
+        // being recorded, not a preference about how Sill looks.
+        //
+        // `imageres.dll,54` is the same padlock Lock Screen uses, and it is
+        // deliberately the same one: both rows are "stop, somebody might be
+        // watching".
+        builtin_wearing(
+            PRIVATE_MODE,
+            &padlock_icon(),
+            "Private Mode",
+            "Pause the clipboard history, dictation and screen capture",
+            &[
+                "private",
+                "privacy",
+                "pause",
+                "incognito",
+                "record",
+                "recording",
+                "clipboard",
+                "dictation",
+                "screenshot",
+                "capture",
+                "secret",
+                "password",
+                "share",
+                "screen share",
+                "meeting",
+            ],
+        ),
         builtin(
             "emoji",
             "snippets",
@@ -775,7 +805,7 @@ fn system_commands() -> Vec<CommandRecord> {
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
     let audio = mixer_icon();
     let theme = format!(r"{root}\System32\themecpl.dll");
-    let padlock = format!(r"{root}\System32\imageres.dll,54");
+    let padlock = padlock_icon();
     let network = format!(r"{root}\System32\ncpa.cpl");
     /*
      * Index 2, and the index is the whole point.
@@ -1121,6 +1151,21 @@ fn recycle_bin_icon() -> String {
 fn task_manager_icon() -> String {
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
     format!(r"{root}\System32\Taskmgr.exe")
+}
+
+/// The one builtin whose row shows which way it is set.
+///
+/// Named once, because three places need the same string and they are in three
+/// files: the row is built here, the search fills its state in, and the action
+/// that flips it dispatches on it. Spelled out in any of them separately and
+/// the row would silently stop showing its state, or stop working, with
+/// nothing failing to compile.
+pub const PRIVATE_MODE: &str = "private-mode";
+
+/// The shell's padlock, which two rows wear.
+fn padlock_icon() -> String {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    format!(r"{root}\System32\imageres.dll,54")
 }
 
 /// Where the volume mixer keeps its icon.
@@ -1494,6 +1539,106 @@ pub fn now_playing_record(now: &crate::media::NowPlaying) -> RankedCommand {
             // whatever the current session is rather than on this, so it is
             // carried to say what was on screen rather than to find anything.
             entrypoint: now.source.clone(),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
+/// One document out of a jump list, shaped as a row.
+///
+/// **Deliberately an ordinary file row.** The mode is `file` or `folder`, the
+/// id is the same `file:` id a result from search or from Explorer carries,
+/// and the icon comes from the path the way every other file row's does. So it
+/// arrives with Open, Reveal in Folder, Copy Path, Rename, Compress and the
+/// rest already attached, ranking sees the same identity whichever way the
+/// document was found, and nothing new has to be taught to draw it.
+///
+/// A row kind of its own would have been a second vocabulary for a thing the
+/// launcher already has a word for, and every action would have had to be
+/// told about it.
+pub fn jumplist_record(one: &crate::jumplists::Recent) -> RankedCommand {
+    RankedCommand {
+        // Not found by matching: the query was the word that asks for this
+        // list, and the words after it were a filter rather than a match. The
+        // same reasoning `now_playing_record` uses.
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            id: format!("file:{}", one.path),
+            extension: "files".to_string(),
+            // What the right of the row says. Not the application that opened
+            // it: Windows names the jump list after a hash of the program's
+            // identity and keeps no table mapping that back to a name, so the
+            // honest label is where the row came from.
+            extension_title: "Recent".to_string(),
+            command: crate::jumplists::title_for(one),
+            title: crate::jumplists::title_for(one),
+            subtitle: crate::jumplists::subtitle_for(one),
+            description: String::new(),
+            // `file` for a folder as well, which is what the file search
+            // already does and what `list.ts` says about it: a folder found by
+            // searching is one answer among many, and the window opens a
+            // `file` row with the shell, which opens a folder in Explorer.
+            // There is no `folder` branch in the root list's Enter, so a row
+            // claiming that mode would fail to open at all.
+            mode: "file".to_string(),
+            entrypoint: one.path.clone(),
+            keywords: Vec::new(),
+            // The file's own icon. A record's icon is dropped when it is the
+            // same string as its entrypoint, so `None` is how a row says "ask
+            // the shell about my own path", which is what a file row wants.
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
+/// One way of opening a terminal, shaped as a row.
+///
+/// The title is the profile's own name, which is the string `wt -p` takes and
+/// the one somebody recognises. The target says which program opens it, and
+/// `terminals::target_of` is the only thing that writes it: the action reads
+/// it back through `terminals::profile_from`, and the pair is round-tripped by
+/// a test so a row cannot be built one way and read another.
+///
+/// No icon, and it was looked for. What is on `%PATH%` as `wt.exe` is a
+/// **zero-byte execution alias** with nothing in it to draw, and the program it
+/// stands for lives under `WindowsApps`, which Windows does not let a program
+/// read. So these rows wear the lettered tile every row without an icon wears,
+/// rather than something borrowed from a different program.
+pub fn terminal_record(profile: &crate::terminals::Profile) -> RankedCommand {
+    RankedCommand {
+        // Not found by matching: the query was one of the words that ask for
+        // this list, and what followed narrowed it. The same reasoning
+        // `now_playing_record` uses.
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            id: format!("terminal:{}", profile.name),
+            extension: "terminals".to_string(),
+            extension_title: "Terminal".to_string(),
+            command: profile.name.clone(),
+            title: profile.name.clone(),
+            subtitle: if profile.default {
+                "The default profile".to_string()
+            } else if profile.distribution {
+                "WSL distribution".to_string()
+            } else {
+                "Windows Terminal profile".to_string()
+            },
+            description: String::new(),
+            mode: "terminal-profile".to_string(),
+            entrypoint: crate::terminals::target_of(profile).to_string(),
             keywords: Vec::new(),
             icon: None,
             toggle: None,

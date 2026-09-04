@@ -359,6 +359,18 @@ export interface HyperKey {
   key: number | null;
 }
 
+/**
+ * Private mode: whether Sill is recording anything at all.
+ *
+ * One switch over three subsystems, which is why it is its own section rather
+ * than a field on `general`: it overrides the clipboard, dictation and capture
+ * settings, and a switch that overrides other settings filed among them reads
+ * as one of them. Rust owns what it actually stops; see `privacy.rs`.
+ */
+export interface PrivacySettings {
+  paused: boolean;
+}
+
 export interface Preferences {
   general: General;
   snippets: SnippetSettings;
@@ -383,6 +395,7 @@ export interface Preferences {
   navigation: NavigationSettings;
   actionKeys: ActionKeySettings;
   emoji: EmojiSettings;
+  privacy: PrivacySettings;
 }
 
 /**

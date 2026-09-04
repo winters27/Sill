@@ -144,7 +144,18 @@ export interface RankedCommand {
      * while the store's rows were the one shape nothing outside that view
      * could name.
      */
-    | "store-listing";
+    | "store-listing"
+    /**
+     * A way of opening a terminal: a Windows Terminal profile, or a WSL
+     * distribution that has no profile of its own.
+     *
+     * Never from the index. It is read out of Terminal's settings file and the
+     * WSL keys in the registry when somebody types one of the words that asks,
+     * so like a window it is opened through the action registry rather than
+     * launched by id. Its entrypoint says which of the two it is, because the
+     * two start different programs.
+     */
+    | "terminal-profile";
   entrypoint: string;
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;

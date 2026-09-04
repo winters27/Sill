@@ -130,6 +130,30 @@ pub(crate) async fn search_commands(
     }
 
     /*
+     * The one row of Sill's own that says which way it is set.
+     *
+     * A switch's state is a fact about the moment somebody looks at it, the
+     * same as the Windows switches above, so it is filled in here rather than
+     * carried by the index. It costs an atomic load and only when the row
+     * actually matched, which is why it is behind the same `any` the switches
+     * are: a search that finds no private mode row asks nothing.
+     *
+     * The id is `registry::PRIVATE_MODE` rather than the string, because the
+     * row is built in one file and named in two others and a row that quietly
+     * stopped showing its state is exactly what a fourth spelling would buy.
+     */
+    let private_row = registry::builtin_id(registry::PRIVATE_MODE);
+    if results.iter().any(|hit| hit.command.id == private_row) {
+        let paused = app.state::<crate::privacy::Privacy>().paused();
+
+        for hit in results.iter_mut() {
+            if hit.command.id == private_row {
+                hit.command.toggle = Some(paused);
+            }
+        }
+    }
+
+    /*
      * Emoji, ranked here rather than fetched by a second round trip.
      *
      * They stay a separate corpus on purpose: two thousand of them beside
@@ -181,6 +205,73 @@ pub(crate) async fn search_commands(
     );
 
     /*
+     * The terminals this machine has, and the profiles inside them.
+     *
+     * Behind the same shape of gate: the first word of the query, exactly, and
+     * `matched` is handed the reading rather than taking it, so a keystroke
+     * that is not one of six words never opens Terminal's settings file or
+     * touches the registry.
+     *
+     * A minute of cache, because what it answers changes when somebody edits
+     * Terminal's settings or installs a distribution and neither happens while
+     * they are typing.
+     *
+     * These are spliced rather than put on top for the reason the media row
+     * is: "terminal" is a word somebody types on the way to a program called
+     * Terminal, and a row that stole Enter from it would be the launcher
+     * arguing with them.
+     */
+    let profiles = crate::terminals::matched(&query, || {
+        crate::terminals::now(&app.state::<crate::state::Fresh<Vec<crate::terminals::Profile>>>())
+    });
+
+    splice_suggestions(
+        &mut results,
+        profiles
+            .iter()
+            .map(registry::terminal_record)
+            .collect::<Vec<_>>(),
+    );
+
+    /*
+     * What has been opened recently, out of every application's jump list.
+     *
+     * The same gate the media row has and for the same reason: `matched` holds
+     * it and is handed both readings rather than taking them, so a keystroke
+     * whose first word is not one of three never opens a file. Two hundred and
+     * seven jump lists on this machine, six megabytes, and a query that is not
+     * asking pays a `split_whitespace` and three string comparisons.
+     *
+     * Behind five seconds of cache because the words after "recent" narrow the
+     * list, so typing "recent tax" would otherwise re-read the folder per
+     * letter. Bounded to three hundred documents, which is what stops the
+     * cache being a leak with a good reason.
+     *
+     * The existence check is the second closure and is deliberately separate:
+     * a path out of a jump list is often gone, and asking the filesystem about
+     * three hundred of them per keystroke would cost more than reading them
+     * did. Only the handful that survived the filter are asked about, and the
+     * same call says whether it is a folder, which decides the row's mode.
+     */
+    let opened = crate::jumplists::matched(
+        &query,
+        || {
+            crate::jumplists::now(
+                &app.state::<crate::state::Fresh<Vec<crate::jumplists::Recent>>>(),
+            )
+        },
+        |path| std::fs::metadata(path).ok().map(|found| found.is_dir()),
+    );
+
+    splice_suggestions(
+        &mut results,
+        opened
+            .iter()
+            .map(registry::jumplist_record)
+            .collect::<Vec<_>>(),
+    );
+
+    /*
      * Above everything, because when a query IS a sum, or a request for a
      * UUID, the answer is the only thing wanted.
      *
@@ -227,6 +318,7 @@ pub(crate) async fn search_commands(
 /// everywhere else: this is not a thing that is on or off.
 #[tauri::command]
 pub(crate) async fn system_states(
+    app: AppHandle,
     state: State<'_, RegistryState>,
     switches: State<'_, crate::state::Fresh<crate::system::Live>>,
     ids: Vec<String>,
@@ -234,14 +326,32 @@ pub(crate) async fn system_states(
     let index = state.index();
     let live = crate::system::live(&switches);
 
-    Ok(crate::system::states_for(
+    let states = crate::system::states_for(
         index
             .commands
             .iter()
             .map(|row| (row.id.as_str(), row.entrypoint.as_str())),
         &ids,
         &live,
-    ))
+    );
+
+    /*
+     * Private mode answers here too, because this is the one question the
+     * window asks after pressing a row that has a state.
+     *
+     * It is not a Windows switch and is not in `system::states_for`, so
+     * without this it answered `null` and the window left the row showing what
+     * it said before it was pressed. A switch that reads the same after being
+     * pressed is a switch that looks broken.
+     */
+    let private = registry::builtin_id(registry::PRIVATE_MODE);
+    let paused = app.state::<crate::privacy::Privacy>().paused();
+
+    Ok(states
+        .into_iter()
+        .zip(ids.iter())
+        .map(|(state, id)| if *id == private { Some(paused) } else { state })
+        .collect())
 }
 
 /// A picture of one open window, for the switcher.
@@ -265,9 +375,24 @@ pub(crate) async fn window_preview(app: AppHandle, id: String) -> Result<Option<
      * parameter, because a borrow cannot cross onto another thread and a
      * handle can.
      */
-    tokio::task::spawn_blocking(move || app.state::<crate::previews::Previews>().of(handle))
-        .await
-        .map_err(|err| format!("could not photograph that window: {err}"))
+    /*
+     * Private mode means no picture rather than an error.
+     *
+     * A switcher with no preview is a switcher, which is what the comment
+     * above says about a window that refuses to be photographed, and the row
+     * that switched private mode on is what explains why. An error here would
+     * put a message about Sill on screen once per arrow key.
+     */
+    let Ok(allowed) = crate::privacy::allow(&app.state::<crate::privacy::Privacy>()) else {
+        return Ok(None);
+    };
+
+    tokio::task::spawn_blocking(move || {
+        app.state::<crate::previews::Previews>()
+            .of(&allowed, handle)
+    })
+    .await
+    .map_err(|err| format!("could not photograph that window: {err}"))
 }
 
 /// Drops every window picture.

@@ -126,16 +126,21 @@ pub(crate) async fn set_preferences(
         }
     }
 
+    /*
+     * Private mode, before anything that depends on it.
+     *
+     * The mirror the capture chokepoint reads, then the standing report that
+     * says the mode is on, then the two subsystems whose settings it
+     * overrides. Both of those are derived by `privacy`, which is the only
+     * place either struct is built from preferences, so this apply and the one
+     * at startup cannot honour it differently.
+     */
+    app.state::<crate::privacy::Privacy>()
+        .set(prefs.privacy.paused);
+    crate::privacy::report(&app, prefs.privacy.paused);
+
     if let Some(history) = app.try_state::<clipboard::monitor::Clipboard>() {
-        history.set_rules(clipboard::monitor::Rules {
-            enabled: prefs.clipboard.enabled,
-            keep_images: prefs.clipboard.keep_images,
-            ignored_apps: prefs.clipboard.ignored_apps.clone(),
-            secrets: prefs.clipboard.secrets,
-            retain_days: prefs.clipboard.retain_days,
-            max_entries: prefs.clipboard.max_entries,
-            encrypt_images: prefs.clipboard.encrypt_images,
-        });
+        history.set_rules(crate::privacy::clipboard_rules(&prefs));
 
         // Turning the lock on covers what is already stored, and turning it
         // off leaves nothing behind that only one Windows account can open.
@@ -151,16 +156,28 @@ pub(crate) async fn set_preferences(
 
         // Switched off means stopped. The watcher owns a thread and a hidden
         // window and is woken by every copy on the machine, whether or not it
-        // does anything with what it sees.
-        if prefs.clipboard.enabled {
+        // does anything with what it sees. Private mode arrives through the
+        // same derivation rather than as a second condition here, so there is
+        // one answer to "is the clipboard recording" rather than two.
+        if crate::privacy::clipboard_rules(&prefs).enabled {
             clipboard::monitor::watch(&app, &history);
         } else {
             clipboard::monitor::stop(&history);
         }
     }
 
-    if !same_dictation(&previous.dictation, &prefs.dictation) {
-        apply_dictation(&app, &prefs.dictation);
+    // Private mode is part of what dictation's settings are, so a change to it
+    // is a change to them: without the second half, switching private mode on
+    // would leave the low-level keyboard hook armed until something else
+    // happened to touch a dictation setting.
+    if !same_dictation(&previous.dictation, &prefs.dictation)
+        || previous.privacy.paused != prefs.privacy.paused
+    {
+        apply_dictation(
+            &app,
+            &crate::privacy::dictation_settings(&prefs),
+            prefs.privacy.paused,
+        );
     }
 
     if previous.aliases != prefs.aliases {

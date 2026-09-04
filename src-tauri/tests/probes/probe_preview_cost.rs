@@ -32,6 +32,7 @@ fn a_preview_is_cheap_enough_to_take_while_arrowing() {
     for window in &visible {
         let start = std::time::Instant::now();
         let Ok(shot) = sill_lib::capture::window(
+            &sill_lib::privacy::allowed_regardless(),
             window.id,
             (
                 window.rect.x,

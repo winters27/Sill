@@ -122,6 +122,13 @@ pub const SETTINGS: &[Setting] = &[
         "Return to the root list",
         "reset summon root back",
     ),
+    s(
+        "general",
+        "General",
+        "Private mode",
+        "privacy pause recording clipboard dictation screenshot capture 
+         incognito secret password screen share meeting",
+    ),
     // ---------------------------------------------------------- appearance
     s(
         "appearance",

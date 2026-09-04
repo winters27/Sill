@@ -126,6 +126,16 @@ pub enum ObjectKind {
     /// installed and can be run. A listing has no entrypoint and may have no
     /// files on this machine at all.
     StoreListing,
+    /// One way of opening a terminal: a Windows Terminal profile, or a WSL
+    /// distribution that has no profile of its own.
+    ///
+    /// Not an [`ObjectKind::Application`]. `wt.exe` is the application and a
+    /// profile is an argument to it, so launching one is not launching a
+    /// program at a path; and the two kinds of row here start two different
+    /// programs, which is a fact about the row rather than about the file
+    /// system. Not in the index either: the list is Terminal's settings file
+    /// and the registry's WSL keys, read when somebody asks for it.
+    TerminalProfile,
 }
 
 impl ObjectKind {
@@ -166,6 +176,7 @@ impl ObjectKind {
         Self::Script,
         Self::Conversation,
         Self::StoreListing,
+        Self::TerminalProfile,
     ];
 
     /**
@@ -210,6 +221,7 @@ impl ObjectKind {
             Self::Workspace => "saved arrangement",
             Self::Conversation => "conversation",
             Self::StoreListing => "extension in the store",
+            Self::TerminalProfile => "terminal profile",
         }
     }
 
@@ -248,6 +260,7 @@ impl ObjectKind {
             Self::SystemControl => "systemControl",
             Self::Snippet => "snippet",
             Self::Quicklink => "quicklink",
+            Self::TerminalProfile => "terminalProfile",
             Self::Script => "script",
             Self::Answer => "answer",
             Self::ClipboardEntry => "clipboardEntry",
@@ -323,6 +336,10 @@ impl ObjectKind {
             // folding three thousand listings into what a keystroke weighs
             // would be paying for the store on every search.
             "store-listing" => Self::StoreListing,
+            // A terminal profile, which is not in the index either: it is
+            // read out of Terminal's settings and the WSL registry keys when
+            // a query asks for one.
+            "terminal-profile" => Self::TerminalProfile,
             _ => return None,
         })
     }
@@ -354,6 +371,9 @@ impl ObjectKind {
                 | Self::Window
                 // And switching to a tab is switching to the window it is in.
                 | Self::BrowserTab
+                // Opening a terminal puts a terminal in front, which is the
+                // entire reason for pressing it.
+                | Self::TerminalProfile
         )
     }
 }
@@ -631,12 +651,13 @@ mod tests {
                 ObjectKind::Script => 22,
                 ObjectKind::Conversation => 23,
                 ObjectKind::StoreListing => 24,
+                ObjectKind::TerminalProfile => 25,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            25,
+            26,
             "a kind was added or removed without `ALL` being told",
         );
 
