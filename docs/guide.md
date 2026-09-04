@@ -169,6 +169,19 @@ Be clear-eyed about what that is: it is a permission boundary, not a cage. An
 extension that sets out to get around it can. What you are protected from is
 an ordinary extension quietly doing something you did not agree to.
 
+## MCP servers
+
+An MCP server you already have can put its tools in Sill's action panel, so a
+file found by search offers something the server does rather than only what
+Sill does. [mcp.md](mcp.md) is the whole of how, including what one costs and
+the four things one cannot do.
+
+Two things worth knowing before you set one up. **Nothing is started until you
+run one of its actions**, so a server listed in Settings and never used has
+never been started. And **an action from a server counts as running a program**,
+because that is what it is, so a scheduled trigger cannot use one and Sill's
+own AI has to prove somebody is at the machine first.
+
 ## The keys
 
 **Press `?` with an empty search field.** That opens the keyboard reference,

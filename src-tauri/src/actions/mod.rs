@@ -16,6 +16,7 @@ use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 pub mod extension;
+pub mod mcp;
 
 use crate::action::{Action, ActionCtx, ActionRegistry, Capability, Outcome, Undo};
 use crate::object::{Object, ObjectKind};

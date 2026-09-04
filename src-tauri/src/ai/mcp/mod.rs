@@ -49,6 +49,14 @@
 //! config file. It defends against everything that cannot, which on a machine
 //! with more than one account is most things.
 //!
+//! ## The other direction
+//!
+//! Everything above is Sill answering. [`client`] is Sill asking: a server the
+//! person configured, started down a pipe, asked one thing and ended. The two
+//! halves share [`protocol::REVISIONS`] so there is one answer to what
+//! revision of MCP Sill speaks, and share nothing else, because serving and
+//! calling have almost no code in common.
+//!
 //! ## The approval card is not optional here
 //!
 //! Nothing in this module runs an action. `tools::run` does, through the same
@@ -57,6 +65,7 @@
 //! a program stops exactly where the chat window stops, and gets the same
 //! refusal when nobody says yes.
 
+pub mod client;
 pub mod link;
 pub mod protocol;
 

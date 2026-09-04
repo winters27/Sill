@@ -1044,6 +1044,83 @@ pub struct Preferences {
     /// Whether Sill is recording anything at all.
     #[serde(default)]
     pub privacy: Privacy,
+    /// MCP servers, and which of their tools appear in the action panel.
+    ///
+    /// Declarations only. Nothing here is a connection, a handle or a running
+    /// process: see `crate::actions::mcp`.
+    #[serde(default)]
+    pub mcp: Mcp,
+}
+
+/**
+The MCP servers this person has set up.
+
+**Everything here is a declaration and none of it is a connection.** A server
+in this list costs a few strings in a file until somebody runs one of its
+actions or presses Check in Settings, which is what lets `crate::actions::mcp`
+build the action panel without asking anybody anything.
+
+`json_store::entries_that_can_be_read` for the same reason `bindings` and
+`aliases` use it: one server written by a newer Sill, or hand-edited into a
+shape serde cannot read, must not take the rest of the list with it.
+*/
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Mcp {
+    #[serde(deserialize_with = "crate::json_store::entries_that_can_be_read")]
+    pub servers: Vec<McpServer>,
+}
+
+/**
+One MCP server, as the person described it.
+
+## Why the kinds are declared here rather than asked for
+
+A server's tools carry a name, a description and a JSON schema, and none of
+those say "this applies to a file in Sill". Working it out by asking would put
+somebody else's process on the path of a keystroke; guessing it from a property
+called `path` would be a rule that is wrong on the first server that calls it
+`file`. So the person who set the server up says which of Sill's kinds each
+tool applies to, in the same vocabulary an extension's `actionOn` uses.
+
+## Why there is no environment
+
+An MCP server often wants a key, and the obvious field for one would put it in
+this file in the clear, where every backup and every sync takes a copy. Sill has
+`secrets.rs` for exactly that and it is not wired to this yet, so rather than
+ship the unsafe half, the field is absent: a server needing a secret is started
+through a wrapper that holds it, the same way the person already runs it
+outside Sill. `providers` above is the shape this would have to grow into.
+*/
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct McpServer {
+    /// What the person called it, and the middle of every id it contributes.
+    pub name: String,
+    /// The program to start.
+    pub command: String,
+    pub args: Vec<String>,
+    /// Which of its tools appear in the action panel, and on what.
+    pub actions: Vec<McpAction>,
+}
+
+/// One of a server's tools, as an action in the panel.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct McpAction {
+    /// The tool's own name, as the server lists it.
+    pub tool: String,
+    /// What the panel shows. The tool's name when this is blank.
+    pub title: String,
+    /// Sill's kinds, spelled the way `ObjectKind::named` reads them.
+    pub acts_on: Vec<String>,
+    /// The tool argument the thing being acted on is passed as.
+    ///
+    /// One property rather than a map, for the reason `ActionCtx::argument`
+    /// gives: every tool worth a row in an action panel takes one thing, and a
+    /// bag of named parameters would be a shape invented for a case that does
+    /// not exist yet. Blank for a tool that takes nothing.
+    pub argument: String,
 }
 
 /// Private mode.

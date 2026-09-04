@@ -3519,7 +3519,7 @@ if (tracked.status !== 0) {
   const LIB = "src-tauri/src/lib.rs";
   const text = readFileSync(LIB, "utf8");
 
-  const funnel = text.match(/pub\(crate\) fn adopt_commands\([\s\S]*?\n\}/)?.[0];
+  const funnel = text.match(/pub\(crate\) async fn adopt_commands\([\s\S]*?\n\}/)?.[0];
 
   if (funnel === undefined) {
     fail(LIB, null, "`adopt_commands` is gone, so nothing is keeping the two lists in step");
@@ -3545,6 +3545,162 @@ if (tracked.status !== 0) {
       lineOf(text, found.index),
       "the index's commands are replaced outside `adopt_commands`, so what " +
         "extensions contribute to the action panel is not rebuilt with them",
+    );
+  }
+}
+
+/*
+ * An MCP server is started by somebody pressing something, and by nothing else.
+ *
+ * **This is the rule the whole of `P8-05` rests on.** An extension is code Sill
+ * installed; an MCP server is somebody else's program on the far end of a pipe,
+ * which may be slow, may hang, and may have been uninstalled since the day it
+ * was configured. The action panel is drawn on a keystroke. If drawing it asked
+ * a server anything, one dead server would be a launcher that stops responding,
+ * and the fix after the fact is a cache, and then the cache needs invalidating.
+ *
+ * So `actions::mcp::contributed` is a pure function over the declarations in
+ * the preferences, and the client that starts a process is reachable from
+ * exactly two places: running one of the actions, and the Check button in
+ * Settings. Both are somebody pressing something.
+ *
+ * A rule rather than a test because the two call sites take Tauri state: one is
+ * a `#[tauri::command]` and the other is an `Action::run` holding an
+ * `AppHandle`, and neither can be constructed without a running application.
+ * `tests/actions.rs::drawing_the_panel_never_waits_for_a_server` holds the
+ * timing half; this holds the half a clock cannot see.
+ */
+{
+  const CORE = "src-tauri/src/actions/mcp.rs";
+  const DOOR = "src-tauri/src/commands/mcp.rs";
+  const CLIENT = "src-tauri/src/ai/mcp/client.rs";
+
+  const core = readFileSync(CORE, "utf8");
+
+  /*
+   * The builder names nothing that could start a process.
+   *
+   * Read out of the function rather than out of the file, because `run` in the
+   * same file is *supposed* to call the client and a file-wide search would
+   * either pass always or fail always. That is the mistake `P8-02` made first
+   * and had to rewrite.
+   */
+  const builder = core.match(/pub fn contributed\([\s\S]*?\n\}/)?.[0];
+
+  if (builder === undefined) {
+    fail(CORE, null, "`contributed` is gone, so nothing builds the MCP half of the action panel");
+  } else if (/client::|Command::new|spawn\(/.test(builder)) {
+    fail(
+      CORE,
+      lineOf(core, core.indexOf(builder)),
+      "`actions::mcp::contributed` reaches for the MCP client, so drawing the " +
+        "action panel would start somebody else's program on a keystroke and " +
+        "a dead server would hang the launcher",
+    );
+  }
+
+  /*
+   * And running one goes through the client rather than opening its own pipe.
+   *
+   * The seam a unit test cannot reach: `Contributed::run` takes an `ActionCtx`
+   * holding a concrete `AppHandle`. What it must do is look the server up
+   * live, because somebody can remove it between the panel being drawn and the
+   * row being pressed, and then call the one client that carries the deadline.
+   */
+  for (const [expected, said] of [
+    [
+      /let server = configured\(ctx, &self\.server\)\.await\?;/,
+      "`Contributed::run` no longer looks the server up at the moment it runs, " +
+        "so a server somebody has removed is still started",
+    ],
+    [
+      /crate::ai::mcp::client::call\(/,
+      "`Contributed::run` does not go through the MCP client, so whatever it " +
+        "does instead has no deadline and a hung server hangs the action",
+    ],
+  ]) {
+    if (expected.test(core)) continue;
+    fail(CORE, null, said);
+  }
+
+  /*
+   * Nothing else in Sill may start one.
+   *
+   * Two files, and the reason each is allowed is different: one is an action
+   * somebody ran, the other is a button somebody pressed. A third caller would
+   * be a server started for a reason nobody chose, which is the whole of what
+   * "nothing at rest" means here.
+   */
+  for (const found of sources("src-tauri/src")) {
+    const file = found.replace(/\\/g, "/");
+    if (file === CORE || file === DOOR || file === CLIENT) continue;
+    if (!file.endsWith(".rs")) continue;
+
+    const text = readFileSync(found, "utf8");
+
+    for (const at of text.matchAll(/mcp::client::(call|tools)\b/g)) {
+      fail(
+        file,
+        lineOf(text, at.index),
+        "this starts an MCP server, and the only two things that may are " +
+          "running one of its actions and the Check button in Settings",
+      );
+    }
+  }
+
+  /*
+   * Both halves of what is contributed are built in the one funnel.
+   *
+   * `ActionRegistry::contribute` replaces the whole list, so a second place
+   * that built only the MCP half would take every extension's action out of
+   * the panel, and one that built only the extension half would do the
+   * reverse. Neither failure says anything at the time. The rule above already
+   * holds `.contribute(` to `adopt_commands`; this holds the MCP builder to it
+   * too, so the funnel cannot be left half filled.
+   */
+  const lib = readFileSync("src-tauri/src/lib.rs", "utf8");
+  const funnel = lib.match(/pub\(crate\) async fn adopt_commands\([\s\S]*?\n\}/)?.[0];
+
+  for (const found of lib.matchAll(/actions::mcp::contributed\(/g)) {
+    const inside =
+      funnel !== undefined &&
+      found.index >= lib.indexOf(funnel) &&
+      found.index < lib.indexOf(funnel) + funnel.length;
+
+    if (inside) continue;
+
+    fail(
+      "src-tauri/src/lib.rs",
+      lineOf(lib, found.index),
+      "what MCP servers contribute is built outside `adopt_commands`, so it " +
+        "is not rebuilt together with what extensions contribute",
+    );
+  }
+
+  if (funnel !== undefined && !/actions::mcp::contributed\(/.test(funnel)) {
+    fail(
+      "src-tauri/src/lib.rs",
+      null,
+      "`adopt_commands` no longer builds what MCP servers contribute, so a " +
+        "rescan silently takes every MCP action out of the action panel",
+    );
+  }
+
+  /*
+   * And a settings save that changed them asks the funnel to run again.
+   *
+   * Without this the panel would go on offering the servers that were
+   * configured when Sill started until something else happened to trigger a
+   * rescan, which for most people is never.
+   */
+  const settings = readFileSync("src-tauri/src/commands/settings.rs", "utf8");
+
+  if (!/previous\.mcp != prefs\.mcp[\s\S]{0,200}readopt_commands\(&app\)/.test(settings)) {
+    fail(
+      "src-tauri/src/commands/settings.rs",
+      null,
+      "saving a changed set of MCP servers does not rebuild the action panel, " +
+        "so a server somebody just added contributes nothing until a restart",
     );
   }
 }

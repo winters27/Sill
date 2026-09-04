@@ -12,6 +12,8 @@ by its author on Windows 11 and nowhere else. Build it from source.
 [Using Sill](docs/guide.md) is the guide for somebody with it open.
 [Writing an extension](docs/extensions.md) is the one for somebody adding to
 it, and carries the coverage table saying which parts of the Raycast API work.
+[MCP servers](docs/mcp.md) covers putting a server you already have into the
+action panel, and what one costs.
 The keyboard reference is not written down anywhere: press `?` in the launcher
 with an empty field and Sill builds it from the keys that are actually
 registered.
