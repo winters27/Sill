@@ -92,6 +92,26 @@ jobs:
         env:
           SILL_BUILT_INDEX: required
 
+      # Which performance budgets live here, and which deliberately do not.
+      #
+      # This agent is a borrowed virtual machine with no display, no graphics
+      # hardware and neighbours competing for its cores. It cannot honestly say
+      # what a frame costs, so nothing in milliseconds of a running launcher is
+      # gated here and nothing should be added. Those live in
+      # `scripts/nightly.ps1`, on a machine set aside for it, and are not
+      # required checks on purpose: a merge gate that depends on what else the
+      # machine was doing is a gate everybody learns to ignore.
+      #
+      # What an agent holds as well as any machine is a count, a ratio or a
+      # structural fact, and three of those already ran in the step above:
+      # the ranking budgets in `tests/budgets.rs`, and the rule in
+      # `verify:source` that a repeating timer in the window must go through
+      # `pollWhileVisible` or say why being hidden stops it. That last one is
+      # the network-at-rest budget, in the only shape a build agent can check
+      # it: the count has to be zero, and the widget that made it six an hour
+      # was a bare `setInterval` in a component that hiding a window does not
+      # destroy. See `docs/budgets.md` for where each row runs.
+
       # The ranking cost, in the log of every run rather than only the runs
       # that break. The budget on an agent is loose on purpose, so the number
       # underneath it is the thing worth watching: a build that starts

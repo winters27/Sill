@@ -7,6 +7,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { orElse, silently } from "$lib/status";
+import type { Painted } from "$lib/latency";
 // The one shape a chord is written in, shared with the matcher that reads it.
 import type { Shortcut } from "./actions";
 
@@ -678,6 +679,18 @@ export function aiClear(): Promise<void> {
 
 export function summonPainted(): Promise<void> {
   return invoke<void>("summon_painted");
+}
+
+/**
+ * Hands Rust what the window timed, once, on the way out.
+ *
+ * Keystroke-to-paint and an extension's first render: the two numbers only the
+ * page can see. Sent when the launcher is put away rather than as they happen,
+ * because a keystroke is allowed one search and one delayed page and a third
+ * call would be the measuring making the thing worse.
+ */
+export function reportPainted(what: Painted, tookUs: number[]): Promise<void> {
+  return invoke<void>("painted", { what, tookUs });
 }
 
 export function systemStates(ids: string[]): Promise<(boolean | null)[]> {

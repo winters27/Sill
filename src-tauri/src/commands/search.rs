@@ -329,6 +329,40 @@ pub(crate) fn summon_painted(timings: State<'_, crate::timing::Timings>) {
     timings.summon_painted();
 }
 
+/// One batch of readings the page took, handed over when it was put away.
+///
+/// The other measurements the window owns: how long a keystroke took to reach
+/// a screen, and how long an extension took to draw its first view. Rust knows
+/// when it answered and not when the answer was drawn, and the drawing is the
+/// half somebody waited for.
+///
+/// **A batch rather than a call per keystroke, deliberately.** The budget
+/// table allows one keystroke one search and one delayed page, so reporting on
+/// those two with a third call would be the instrumentation breaking a budget
+/// in order to measure one.
+///
+/// An unrecognised name is refused rather than filed somewhere. A page and a
+/// binary that disagree about what they are measuring should say so, and the
+/// alternative is a keystroke's time appearing in an extension's row.
+#[tauri::command]
+pub(crate) fn painted(
+    timings: State<'_, crate::timing::Timings>,
+    what: String,
+    took_us: Vec<u64>,
+) -> Result<(), String> {
+    let Some(what) = crate::timing::Painted::parse(&what) else {
+        return Err(format!("nothing called {what:?} is measured here"));
+    };
+
+    let took: Vec<std::time::Duration> = took_us
+        .into_iter()
+        .map(std::time::Duration::from_micros)
+        .collect();
+
+    timings.painted_all(what, &took);
+    Ok(())
+}
+
 /// What reaching the launcher has cost lately.
 ///
 /// Read by the settings window and by the probe that holds the budget. The

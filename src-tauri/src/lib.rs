@@ -1225,7 +1225,23 @@ fn register_summon_shortcut(app: &AppHandle, accelerator: &str) {
             // tray would keep saying Sill cannot be summoned by the key that
             // had just summoned it.
             status::resolved(app, "summon-hotkey");
-            println!("[sill] summon key registered: {accelerator}");
+            /*
+             * In the log rather than only on a console, unlike the failure
+             * below, which was already there.
+             *
+             * The asymmetry was the problem: the log said when the key could
+             * not be taken and never said which key was taken, so the one
+             * fact that decides whether the launcher can be reached at all
+             * was the one fact nothing recorded. It matters because the key
+             * is a setting and because registration can be refused by
+             * whatever else on the machine already owns the chord, so what
+             * the preferences ask for and what actually answers are two
+             * different things. `measure-keystroke.ps1` presses what this
+             * line names; assuming Alt+Space, which is what
+             * `measure-summon.ps1` does, presses nothing on a machine where
+             * somebody changed it.
+             */
+            crate::say!("summon key registered: {accelerator}");
         }
         Err(err) => crate::say!("could not register {accelerator}: {err}"),
     }
@@ -2001,6 +2017,7 @@ pub fn run() {
             commands::search::search_windows,
             commands::search::system_states,
             commands::search::summon_painted,
+            commands::search::painted,
             commands::ai::ai_ready,
             commands::ai::ai_hello,
             commands::ai::ai_ask,

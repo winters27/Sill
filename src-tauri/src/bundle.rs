@@ -127,6 +127,34 @@ pub fn budgets(private_bytes: Option<u64>, timings: &Report) -> Vec<Budget> {
             allowed: None,
             measured: timings.median_ms.map(|ms| format!("{ms} ms median")),
         },
+        /*
+         * What a keystroke cost this person, on their machine.
+         *
+         * The one number in this list that nobody else can take for them.
+         * Ranking is measured in a test and idle memory in a script, but how
+         * long a letter took to reach a screen depends on the display, the
+         * graphics driver and what else is drawing, and a bundle is the only
+         * place any of that is ever visible.
+         *
+         * The answered figure rather than the presented one, because the
+         * budget is about the part Sill does. See `timing::Painted`.
+         */
+        Budget {
+            what: "Keystroke to the frame that draws the answer",
+            allowed: Some("16 ms"),
+            measured: timings
+                .paints
+                .iter()
+                .find(|cost| cost.name == crate::timing::Painted::KeystrokeAnswered.as_str())
+                .map(|cost| {
+                    format!(
+                        "{:.1} ms mean, {:.1} ms worst, over {}",
+                        cost.average_us() as f64 / 1000.0,
+                        cost.slowest_us as f64 / 1000.0,
+                        cost.count,
+                    )
+                }),
+        },
     ]
 }
 
@@ -294,6 +322,7 @@ pub fn assemble(parts: &Parts) -> String {
 
     costs(&mut out, "Search sources", &parts.timings.sources);
     openings(&mut out, &parts.timings.extensions);
+    costs(&mut out, "Drawn by the window", &parts.timings.paints);
 
     section(&mut out, "Not working");
     if parts.troubles.is_empty() {
@@ -856,6 +885,7 @@ mod tests {
             median_ms: None,
             sources: Vec::new(),
             extensions: Vec::new(),
+            paints: Vec::new(),
         };
 
         let scrub = Scrub::new(Some(std::path::Path::new("C:\\Users\\brandon")));
@@ -909,6 +939,7 @@ mod tests {
             median_ms: None,
             sources: Vec::new(),
             extensions: Vec::new(),
+            paints: Vec::new(),
         };
 
         let scrub = Scrub::new(None);

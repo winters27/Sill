@@ -60,6 +60,16 @@
     /** The set of rows the command is showing, when it offers a choice. */
     dropdown: ReturnType<typeof dropdownOf> | undefined;
     onpick: (value: string) => void;
+    /**
+     * A person changed what is in the field.
+     *
+     * Not the same event as the query changing, which is why it is reported
+     * separately. The launcher sets the query itself in a dozen places, an
+     * extension can set it, and history walks it; none of those is somebody
+     * waiting for an answer, and counting them as keystrokes would put a
+     * programmatic clear into a measurement of how fast typing feels.
+     */
+    ontyped?: () => void;
   }
 
   let {
@@ -79,6 +89,7 @@
     commandPlaceholder,
     dropdown,
     onpick,
+    ontyped,
   }: Props = $props();
 
   /**
@@ -181,6 +192,7 @@
     aria-label="Search"
     bind:this={field}
     bind:value={query}
+    oninput={ontyped}
     placeholder={mode === "argument"
       ? "Type what to search for, then Enter…"
       : mode === "emoji"
