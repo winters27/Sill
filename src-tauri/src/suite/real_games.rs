@@ -59,6 +59,29 @@ fn the_steam_library_on_this_machine_reads() {
         assert_eq!(args.len(), 2, "{} took the wrong argument list", game.name);
     }
 
+    /*
+     * Artwork, which is what a person actually notices.
+     *
+     * Four of the seven games here keep their logo one level down under a
+     * content hash, and three keep it beside the folder. Looking only beside
+     * the folder found nothing for the four, so the launcher drew a lettered
+     * tile for Apex Legends, Enshrouded, Split Fiction and Battlefield while
+     * the others had a picture. Brandon reported it by looking at the list.
+     *
+     * Not an assertion that every game has one: a game Steam has never drawn
+     * a shelf for genuinely has no logo, and a lettered tile is the right
+     * answer then. This says how many, so a drop is visible in the output
+     * rather than silent.
+     */
+    let with_art = found.iter().filter(|one| one.icon_source.is_some()).count();
+    println!("{with_art} of {} games have artwork", found.len());
+
+    assert!(
+        with_art * 2 > found.len(),
+        "only {with_art} of {} games found a logo, which is what looking in          one of the two places Steam uses looks like",
+        found.len()
+    );
+
     // The one entry every Steam install has and nobody launches.
     assert!(
         !found

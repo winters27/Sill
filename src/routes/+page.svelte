@@ -2825,8 +2825,6 @@
    * arrowed between a file and a command would move the row they were reading;
    * this way the layout is fixed for as long as one query's results are.
    */
-  let showsFilePreview = $derived(commands.some((row) => row.mode === "file"));
-
   /**
    * The file the strip is looking inside, when the selected row is one.
    *
@@ -2836,6 +2834,26 @@
   let fileUnderCursor = $derived(
     commands[selected]?.mode === "file" ? commands[selected].entrypoint : undefined,
   );
+
+  /**
+   * Whether the strip beside the list is drawn at all.
+   *
+   * When there is something to put in it, and not merely when the list holds
+   * a file somewhere.
+   *
+   * It used to be `commands.some(...)`, to stop the strip appearing and
+   * disappearing as somebody arrowed between a file and a command. That is a
+   * real thing worth avoiding, because the row being read moves under the
+   * cursor. But the price was paid on every query returning **one** file, and
+   * the price is a third of the window held open and empty beside the rows
+   * somebody is actually reading. Searching "game" reserved it while showing
+   * seven games and nothing in the strip.
+   *
+   * An empty third of the window is worse to look at than a list that shifts
+   * when you reach a file, so the shift is what is paid now.
+   */
+  let showsFilePreview = $derived(fileUnderCursor !== undefined);
+
 
   /**
    * The conversation on screen.

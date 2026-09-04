@@ -420,22 +420,48 @@ fn epic_manifests() -> Option<PathBuf> {
 fn steam_logo(root: &Path, id: &str) -> Option<String> {
     let cache = root.join("appcache").join("librarycache").join(id);
 
-    // `logo.png` is the transparent wordmark and the only one shaped like an
-    // icon. The others in that folder are the shelf artwork, which is a
-    // portrait poster and reads as a smear at the size of a row.
-    let logo = cache.join("logo.png");
-    logo.is_file()
-        .then(|| logo.to_string_lossy().to_string())
-        .or_else(|| {
-            // Steam wrote a flat `<appid>_logo.png` before it moved to a
-            // folder per game, and an install that has not refreshed its cache
-            // since still has the old shape.
-            let old = root
-                .join("appcache")
-                .join("librarycache")
-                .join(format!("{id}_logo.png"));
-            old.is_file().then(|| old.to_string_lossy().to_string())
-        })
+    /*
+     * Three shapes, because Steam has changed this twice and a machine can
+     * hold all three at once.
+     *
+     * `logo.png` is the transparent wordmark and the only artwork shaped like
+     * an icon; the rest of that folder is shelf art, which is a portrait
+     * poster and reads as a smear at the size of a row.
+     *
+     * **Newer entries put it one level down, under a content hash.** Four of
+     * the seven games on the machine this was written on are stored that way,
+     * and looking only for `logo.png` beside the folder found nothing for any
+     * of them: the launcher drew a lettered tile for Apex Legends,
+     * Enshrouded, Split Fiction and Battlefield while three older games kept
+     * their picture. That is what this reads as a bug.
+     *
+     * The hash is not something to look up. `assetcache.vdf` maps it, but the
+     * directory is right here and holds exactly one thing, so reading the
+     * folder answers the same question without parsing another file that
+     * Steam is free to change again.
+     */
+    let named = cache.join("logo.png");
+    if named.is_file() {
+        return Some(named.to_string_lossy().to_string());
+    }
+
+    if let Ok(entries) = std::fs::read_dir(&cache) {
+        for entry in entries.flatten() {
+            let inside = entry.path().join("logo.png");
+            if inside.is_file() {
+                return Some(inside.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // Steam wrote a flat `<appid>_logo.png` before either of those, and an
+    // install that has not refreshed its cache since still has that shape.
+    let old = root
+        .join("appcache")
+        .join("librarycache")
+        .join(format!("{id}_logo.png"));
+
+    old.is_file().then(|| old.to_string_lossy().to_string())
 }
 
 /// Every installed game, as rows the index can hold.
