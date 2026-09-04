@@ -10,6 +10,7 @@ pub mod audio;
 pub mod bindings;
 pub mod bounded;
 pub mod browsers;
+pub mod bundle;
 pub mod calculator;
 pub mod capture;
 pub mod catalog;
@@ -87,6 +88,18 @@ use registry::{CommandRecord, Frecency};
 
 use host::{forward_events, host_js, index_paths};
 use state::{now_seconds, HostState, PrefsState, RegistryState};
+
+/// What the setting means, in one place both callers use.
+///
+/// A switch rather than a list of levels, because there are two and one of
+/// them is the floor. `log.rs` explains why there is nothing below it.
+pub(crate) fn log_level(detailed: bool) -> log::Level {
+    if detailed {
+        log::Level::Detailed
+    } else {
+        log::Level::Normal
+    }
+}
 
 /// Reads the installed command index and the saved ranking history.
 ///
@@ -1189,10 +1202,15 @@ fn manage_before_windows(app: &tauri::App) {
     // reading them later would mean applying a default and then immediately
     // replacing it.
     let prefs_path = preferences::path(&data_dir);
+    let prefs = preferences::Preferences::load(&prefs_path);
+
+    // Straight away, so a session started to reproduce a fault is detailed
+    // from its first line rather than from whenever settings happened to be
+    // opened.
+    log::set_level(log_level(prefs.general.detailed_log));
+
     app.manage(PrefsState {
-        inner: Arc::new(tokio::sync::Mutex::new(preferences::Preferences::load(
-            &prefs_path,
-        ))),
+        inner: Arc::new(tokio::sync::Mutex::new(prefs)),
         path: Arc::new(prefs_path),
     });
 
@@ -1753,6 +1771,7 @@ pub fn run() {
             commands::system::undo_activity,
             commands::system::clear_activity,
             commands::diagnostics::diagnostics,
+            commands::diagnostics::export_diagnostics,
             commands::system::rebuild_index,
             commands::system::summon_with,
             commands::system::open_data_folder,

@@ -16,6 +16,14 @@ export type InterfaceFont = "satoshi" | "inter" | "system";
 export interface General {
   openAtLogin: boolean;
   showInTray: boolean;
+  /**
+   * Write the per-keystroke and per-summon lines to the log as well.
+   *
+   * For somebody chasing a fault. It only ever adds: nothing here can stop a
+   * failure or a crash reaching the log, which is why there is no setting in
+   * the other direction.
+   */
+  detailedLog: boolean;
 }
 
 /** Skin tone and what Enter does, for the emoji picker. */
@@ -412,6 +420,20 @@ export interface Timings {
    * one of those drags an average somewhere no summon ever was.
    */
   medianMs?: number | null;
+  /** What each search source has cost this session, slowest per call first. */
+  sources: Cost[];
+  /** What each extension opened this session has cost, slowest first. */
+  extensions: Cost[];
+}
+
+/** What one search source or one extension has cost this session. */
+export interface Cost {
+  /** The source, or the extension's id. */
+  name: string;
+  count: number;
+  /** Microseconds: a search source answers in a couple of milliseconds. */
+  totalUs: number;
+  slowestUs: number;
 }
 
 export function getTimings(): Promise<Timings> {
@@ -477,6 +499,20 @@ export function listOwnSettings(): Promise<SettingEntry[]> {
 
 export function openLog(): Promise<void> {
   return invoke("open_log");
+}
+
+/**
+ * Writes everything Sill knows about itself into one file, and opens it.
+ *
+ * Answers with where it was written, so the row can say so rather than leaving
+ * somebody to guess which of the files in the data folder it was.
+ *
+ * Deliberately not caught into a default. The whole point of the button is to
+ * produce a file to send, and quietly answering with nothing would leave the
+ * row saying it worked.
+ */
+export function exportDiagnostics(): Promise<string> {
+  return invoke<string>("export_diagnostics");
 }
 
 export function openDataFolder(): Promise<void> {

@@ -800,6 +800,62 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Every allowance the diagnostic bundle quotes is still in the budget table.
+ *
+ * `docs/budgets.md` is the contract: it says what Sill is allowed to cost and
+ * which test holds it. The export bundle prints a couple of those figures
+ * beside what this run measured, so somebody reading a bundle can see at a
+ * glance whether the machine that produced it is inside them.
+ *
+ * That is one number written in two places with nothing making them agree,
+ * which is the shape this file exists for. A budget loosened in the document
+ * and not in `bundle.rs` means every bundle quotes a figure that stopped being
+ * true, and it is exactly the kind of drift nobody notices, because both
+ * halves keep working.
+ */
+{
+  const BUNDLE = "src-tauri/src/bundle.rs";
+  const BUDGETS = "docs/budgets.md";
+
+  const table = readFileSync(BUDGETS, "utf8");
+  const source = readFileSync(BUNDLE, "utf8");
+
+  /*
+   * Matched against the row rather than against the whole document.
+   *
+   * Looking the figure up anywhere in the file is not a check: the document
+   * lists two dozen numbers, and "41 MB" is in it as what the Rust core costs
+   * with a whole drive indexed. Quoting that as the idle allowance would have
+   * passed. What has to hold is that the row naming this budget carries this
+   * figure, so both halves of the pair are matched on one line.
+   */
+  const quoted = [
+    ...source.matchAll(/what:\s*"([^"]+)",\s*allowed:\s*Some\("([^"]+)"\)/g),
+  ];
+
+  if (quoted.length === 0) {
+    fail(BUNDLE, null, "no budget is quoted, so this check verifies nothing");
+  }
+
+  const rows = table.split("\n");
+
+  for (const [, what, allowed] of quoted) {
+    const said = rows.some((row) => row.includes(what) && row.includes(allowed));
+
+    if (!said) {
+      const at = source.indexOf(`what: "${what}"`);
+      fail(
+        BUNDLE,
+        lineOf(source, at),
+        `the bundle quotes "${allowed}" for "${what}" and no row of ${BUDGETS} ` +
+          "says both, so every exported bundle reports a figure that is not " +
+          "the one anything is held to",
+      );
+    }
+  }
+}
+
+/*
  * The Raycast API level, in the two files that both claim it.
  *
  * The worker tells every extension `environment.raycastVersion`, and the
@@ -885,7 +941,11 @@ else if (Number(css[1]) !== Number(rust[1])) {
     // The `say!` macro is called from everywhere, including code that has no
     // handle to anything and no business acquiring one. A logger threaded
     // through every call site would be a worse design than this.
-    "log.rs": ["FILE", "PATH", "WRITTEN"],
+    // `LEVEL` is here for the same reason as the other three: `say!` and
+    // `detail!` expand at call sites that have no handle to anything, and
+    // `detail!` reads it before formatting, which is what keeps it free on a
+    // path that runs per keystroke.
+    "log.rs": ["FILE", "LEVEL", "PATH", "WRITTEN"],
 
     /*
      * A `WH_KEYBOARD_LL` callback is a bare `extern "system" fn`. Windows

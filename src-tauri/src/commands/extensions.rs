@@ -11,14 +11,31 @@ use crate::state::HostState;
 pub(crate) async fn load_extension(
     app: tauri::AppHandle,
     state: State<'_, HostState>,
+    timings: State<'_, crate::timing::Timings>,
     entrypoint: String,
     extension: String,
     command: String,
 ) -> Result<String, String> {
+    /*
+     * Timed from here, which includes starting Node when it is not running.
+     *
+     * That is deliberate and it is the number this project has spent the most
+     * effort on. Somebody waiting for an extension is waiting for whichever
+     * parts happen to be needed, and a measurement that excluded the host
+     * start would report a fast load on exactly the occasions that felt slow.
+     */
+    let began = std::time::Instant::now();
+
     let host = host_of(&app, &state).await?;
     let mut opts = LoadOptions::view(entrypoint, &extension, &command);
     opts.capabilities = crate::exthost::grants::for_extension(&app, &extension);
-    host.load(&opts).await.map_err(|e| e.to_string())
+    let loaded = host.load(&opts).await.map_err(|e| e.to_string());
+
+    // Recorded whether it worked or not. An extension that fails after eight
+    // seconds is the one worth seeing.
+    timings.extension_took(&extension, began.elapsed());
+
+    loaded
 }
 
 /// Fires a callback in a running command.

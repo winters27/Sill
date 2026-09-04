@@ -102,6 +102,10 @@ pub(crate) async fn set_preferences(
         apply_tray(&app, prefs.general.show_in_tray);
     }
 
+    // Unconditionally, unlike its neighbours. It is one relaxed store, and a
+    // comparison to save it would be the more expensive of the two.
+    crate::log::set_level(crate::log_level(prefs.general.detailed_log));
+
     if let Some(expander) = app.try_state::<snippets::expander::Expander>() {
         expander.set_enabled(prefs.snippets.expand_keywords);
         expander.set_tap_binding(crate::tap_binding(&prefs.taps));

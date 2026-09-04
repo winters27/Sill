@@ -17,13 +17,33 @@
 //! thing this could ever record and dropping it would hide exactly the
 //! failure worth knowing about.
 //!
+//! ## What a source and an extension cost
+//!
+//! A summon says the launcher opened quickly. It says nothing about which part
+//! of a search was slow, and "Sill feels slow when I type" has never had an
+//! answer beyond a guess. So each search source and each extension load adds
+//! its own time up here: how many times, how long in total, and the worst one.
+//!
+//! Three numbers rather than a list of every call. A list of ten thousand
+//! keystrokes is a memory leak with a nice name, and the question anybody
+//! actually asks is "which source is the slow one" and "was it always slow or
+//! was it once".
+//!
 //! ## Why this costs nothing
 //!
 //! Two instants and a push onto a bounded queue, on a path a person triggers.
 //! Nothing runs on a timer and nothing is measured while the launcher is
 //! closed, which is the state it is in nearly all the time.
+//!
+//! The per-source part runs on a path that does run per keystroke, so it is
+//! held to the same standard: one `Instant`, one uncontended lock, and a
+//! lookup in a map of at most a dozen `&'static str` keys. **Nothing is
+//! allocated**, because the source names are constants and an extension's name
+//! is copied once, the first time that extension is opened. Against a search
+//! that costs milliseconds this is not measurable, and while nobody is typing
+//! it is not running.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -35,6 +55,67 @@ use serde::Serialize;
 /// whole thing is a few hundred bytes. The one before last is what somebody
 /// means by "it felt slow just then".
 const KEPT: usize = 20;
+
+/// How many extensions may have their own line.
+///
+/// A bound rather than a limit anybody reaches: the store's largest users have
+/// a couple of dozen installed, and this only counts the ones actually opened
+/// this session. It exists because the key is a name that arrives from a
+/// manifest, and nothing that grows from a name may grow without end.
+const MOST_EXTENSIONS: usize = 64;
+
+/// What one source or one extension has cost this session.
+///
+/// The three numbers that answer the question. An average alone hides the one
+/// slow call; a worst alone hides that it is slow every time.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Cost {
+    /// The source, or the extension's id.
+    pub name: String,
+    pub count: u64,
+    /// Microseconds, because a search source answers in a couple of
+    /// milliseconds and milliseconds would round most of them to zero.
+    pub total_us: u64,
+    pub slowest_us: u64,
+}
+
+impl Cost {
+    /// The mean, which is what to read first.
+    pub fn average_us(&self) -> u64 {
+        self.total_us.checked_div(self.count).unwrap_or(0)
+    }
+}
+
+/// The running total behind one [`Cost`], without its name.
+#[derive(Debug, Clone, Copy, Default)]
+struct Adding {
+    count: u64,
+    total_us: u64,
+    slowest_us: u64,
+}
+
+impl Adding {
+    fn add(&mut self, took: Duration) {
+        // Saturating rather than wrapping: a machine that slept mid-search
+        // reports an absurd duration, and an absurd number in a diagnostic is
+        // better than a small one that used to be absurd.
+        let us = u64::try_from(took.as_micros()).unwrap_or(u64::MAX);
+
+        self.count = self.count.saturating_add(1);
+        self.total_us = self.total_us.saturating_add(us);
+        self.slowest_us = self.slowest_us.max(us);
+    }
+
+    fn named(&self, name: &str) -> Cost {
+        Cost {
+            name: name.to_string(),
+            count: self.count,
+            total_us: self.total_us,
+            slowest_us: self.slowest_us,
+        }
+    }
+}
 
 /// One summon, from the hotkey to being able to type.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -71,6 +152,10 @@ pub struct Report {
     /// display coming out of sleep) and one of those drags an average
     /// somewhere no summon ever was.
     pub median_ms: Option<u128>,
+    /// What each search source has cost, slowest first.
+    pub sources: Vec<Cost>,
+    /// What each extension opened this session has cost, slowest first.
+    pub extensions: Vec<Cost>,
 }
 
 #[derive(Default)]
@@ -81,6 +166,10 @@ struct Inner {
     awaiting_paint: bool,
     kept: VecDeque<Summon>,
     cold_start: Option<Duration>,
+    /// Keyed by a constant, so recording one allocates nothing.
+    sources: BTreeMap<&'static str, Adding>,
+    /// Keyed by an extension id, copied once the first time it is opened.
+    extensions: BTreeMap<String, Adding>,
 }
 
 /// The timings, held as managed state rather than in a static.
@@ -185,12 +274,66 @@ impl Timings {
         crate::say!("ready in {} ms", since_start.as_millis());
     }
 
+    /// Times a source for as long as the returned value is alive.
+    ///
+    /// A guard rather than a call at the end, because every one of these
+    /// commands has several ways out: an empty query returns early, a lock
+    /// gives up, a `?` propagates. A stopwatch stopped on the last line only
+    /// measures the path that reaches the last line, which is the one that was
+    /// never in doubt.
+    pub fn timing(&self, source: &'static str) -> Timed<'_> {
+        Timed {
+            timings: self,
+            source,
+            began: Instant::now(),
+        }
+    }
+
+    /// One search source answered, and this is what it took.
+    ///
+    /// A constant for the name rather than a `String`, deliberately: this runs
+    /// on a keystroke and the sources are a fixed list, so nothing here
+    /// allocates. See the module note on what that buys.
+    pub fn source_took(&self, source: &'static str, took: Duration) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.sources.entry(source).or_default().add(took);
+        }
+
+        crate::detail!("{source} answered in {} us", took.as_micros());
+    }
+
+    /// One extension was opened, and this is what it took.
+    ///
+    /// The 300 ms extension load is the number this project has spent the most
+    /// effort on, and until now the only way to see it was a stopwatch. Which
+    /// extension is slow is the useful half: "extensions are slow" is not
+    /// actionable and "this one takes 800 ms" is.
+    pub fn extension_took(&self, extension: &str, took: Duration) {
+        if let Ok(mut inner) = self.inner.lock() {
+            // Looked up before inserting, so a full map still counts the
+            // extensions already in it rather than going silent.
+            if let Some(adding) = inner.extensions.get_mut(extension) {
+                adding.add(took);
+            } else if inner.extensions.len() < MOST_EXTENSIONS {
+                inner
+                    .extensions
+                    .entry(extension.to_string())
+                    .or_default()
+                    .add(took);
+            }
+        }
+
+        crate::detail!("{extension} loaded in {} ms", took.as_millis());
+    }
+
     pub fn report(&self) -> Report {
         let Ok(inner) = self.inner.lock() else {
             return Report {
                 cold_start_ms: None,
                 summons: Vec::new(),
                 median_ms: None,
+                sources: Vec::new(),
+                extensions: Vec::new(),
             };
         };
 
@@ -200,8 +343,41 @@ impl Timings {
             cold_start_ms: inner.cold_start.map(|d| d.as_millis()),
             median_ms: median(&summons),
             summons,
+            sources: worst_first(inner.sources.iter().map(|(name, add)| add.named(name))),
+            extensions: worst_first(inner.extensions.iter().map(|(name, add)| add.named(name))),
         }
     }
+}
+
+/// One source being timed, until it goes out of scope.
+///
+/// See [`Timings::timing`] on why this is a guard.
+pub struct Timed<'a> {
+    timings: &'a Timings,
+    source: &'static str,
+    began: Instant,
+}
+
+impl Drop for Timed<'_> {
+    fn drop(&mut self) {
+        self.timings.source_took(self.source, self.began.elapsed());
+    }
+}
+
+/// Slowest on average first, which is the order somebody reads them in.
+///
+/// By the average rather than by the total, because the total is mostly a
+/// count: the root list is searched on every keystroke and an extension is
+/// opened once, so ordering by total would always put the same thing on top
+/// whatever it cost.
+fn worst_first(costs: impl Iterator<Item = Cost>) -> Vec<Cost> {
+    let mut costs: Vec<Cost> = costs.collect();
+    costs.sort_by(|a, b| {
+        b.average_us()
+            .cmp(&a.average_us())
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    costs
 }
 
 fn push(kept: &mut VecDeque<Summon>, one: Summon) {
@@ -384,5 +560,109 @@ mod tests {
         assert_eq!(report.summons.len(), 2);
         assert!(report.summons[0].painted_ms.is_none());
         assert!(report.summons[1].painted_ms.is_some());
+    }
+
+    /// A source is added up rather than listed, and the worst one is kept.
+    ///
+    /// The worst matters on its own. An average of 3 ms over a thousand
+    /// keystrokes hides the one that took 400, and the one that took 400 is
+    /// what somebody felt and is asking about.
+    #[test]
+    fn a_source_is_added_up_and_its_worst_call_is_kept() {
+        let timings = Timings::new();
+
+        // The worst one in the middle, deliberately. Recorded last it would
+        // also be the most recent, and a test where those coincide passes for
+        // an implementation that only ever keeps the latest.
+        timings.source_took("commands", Duration::from_micros(2_000));
+        timings.source_took("commands", Duration::from_micros(400_000));
+        timings.source_took("commands", Duration::from_micros(4_000));
+
+        let report = timings.report();
+        let commands = &report.sources[0];
+
+        assert_eq!(commands.name, "commands");
+        assert_eq!(commands.count, 3);
+        assert_eq!(commands.total_us, 406_000);
+        assert_eq!(
+            commands.slowest_us, 400_000,
+            "the worst call is gone, which is the one somebody noticed"
+        );
+        assert_eq!(commands.average_us(), 135_333);
+    }
+
+    /// The slow one is first, and it is the slow one *per call*.
+    ///
+    /// Ordering by the total would always put the root list on top: it is
+    /// searched on every keystroke and an extension is opened once, so the
+    /// total is mostly a count of how often something ran.
+    #[test]
+    fn the_slowest_per_call_is_named_first_not_the_busiest() {
+        let timings = Timings::new();
+
+        for _ in 0..500 {
+            timings.source_took("commands", Duration::from_micros(3_000));
+        }
+        timings.source_took("files", Duration::from_micros(90_000));
+
+        let report = timings.report();
+        let named: Vec<&str> = report
+            .sources
+            .iter()
+            .map(|cost| cost.name.as_str())
+            .collect();
+
+        assert_eq!(named, ["files", "commands"]);
+    }
+
+    /// An extension's name arrives from a manifest, so the list is bounded.
+    #[test]
+    fn extensions_cannot_grow_the_list_without_end() {
+        let timings = Timings::new();
+
+        for at in 0..(MOST_EXTENSIONS + 20) {
+            timings.extension_took(&format!("extension-{at}"), Duration::from_millis(1));
+        }
+
+        assert_eq!(timings.report().extensions.len(), MOST_EXTENSIONS);
+    }
+
+    /// A full list still counts the extensions already in it.
+    ///
+    /// The bound is there to stop the map growing, not to stop measuring. An
+    /// early return once it is full would freeze every extension's numbers at
+    /// whatever they were when the sixty-fourth appeared.
+    #[test]
+    fn a_full_list_keeps_counting_what_is_already_in_it() {
+        let timings = Timings::new();
+
+        for at in 0..MOST_EXTENSIONS {
+            timings.extension_took(&format!("extension-{at}"), Duration::from_millis(1));
+        }
+
+        // The one that does not fit.
+        timings.extension_took("one-too-many", Duration::from_millis(1));
+        // And then one that is already in.
+        timings.extension_took("extension-0", Duration::from_millis(9));
+
+        let report = timings.report();
+        let first = report
+            .extensions
+            .iter()
+            .find(|cost| cost.name == "extension-0")
+            .expect("extension-0 was recorded before the list filled");
+
+        assert_eq!(first.count, 2);
+        assert_eq!(first.slowest_us, 9_000);
+        assert!(report.extensions.iter().all(|c| c.name != "one-too-many"));
+    }
+
+    /// Nothing measured says nothing, rather than a zero somebody would quote.
+    #[test]
+    fn a_session_that_searched_nothing_reports_no_sources() {
+        let report = Timings::new().report();
+
+        assert!(report.sources.is_empty());
+        assert!(report.extensions.is_empty());
     }
 }
