@@ -80,6 +80,31 @@ machine stops at an approval card and waits for a yes. The same tools are
 exposed over MCP, so an editor or another agent reaches them through the same
 gate.
 
+## Links and the command line
+
+Something outside Sill can ask it to run an action, and both ways land in the
+same action registry as a keypress:
+
+```text
+sill://run/sill.launch?target=C:\Users\me\Notes
+sill run sill.file.recycle C:\Users\me\old.txt
+```
+
+The two are not trusted equally, because they are not the same thing. Anything
+that can put a link on a page can write the first one, so an address may name
+only the actions on a short list, may reach only the capabilities on a second
+list, and **always** stops at a card naming the action and the whole target
+before anything happens. `sill run` had to be typed by somebody who could have
+run the program themselves, so it reaches every action and asks on the same
+terms the model does: reads run, anything that changes something stops at the
+card.
+
+The command sends its request to the running Sill and exits, so what happened
+appears on screen and in the activity log rather than at the prompt.
+
+Registering `sill://` with Windows is the installer's job, and a build run from
+source has not had it done.
+
 ## Building
 
 Needs the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/)

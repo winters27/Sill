@@ -473,6 +473,19 @@ export function aiRefusePending(): Promise<void> {
   return invoke<void>("ai_refuse_pending");
 }
 
+/**
+ * The card that is up and unanswered, for a window that has just opened.
+ *
+ * A card is raised by an event, and a window opened to hold one did not exist
+ * when that event went out: the emit happened, the webview did not, and the
+ * question that caused the window to open is the one question it never hears.
+ * Asking on mount is how it hears it. At most one, because whatever raised it
+ * is paused until it is answered.
+ */
+export function aiOutstanding(): Promise<AiAsking | null> {
+  return invoke<AiAsking | null>("ai_outstanding");
+}
+
 /** One tool the model reached for, as the window draws it. */
 export interface AiStep {
   tool: string;

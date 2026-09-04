@@ -1640,6 +1640,54 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * Nothing a stranger asked for reaches an action without going past the gate.
+ *
+ * `outside.rs` is the one door a `sill://` address and a `sill run` command
+ * come through, and `reach::may_run` is what decides which of the two is
+ * asking and what that one is allowed to name. A page on the internet can
+ * write an address; the registry behind that door moves files to the recycle
+ * bin, runs scripts, quits processes and shuts the machine down.
+ *
+ * Two things are checked and neither is about how the gate is written. There
+ * must be exactly ONE `perform` in the file, because a second is a second path
+ * and the whole design is that there is not one, and `reach::may_run` must
+ * appear before it, because a gate consulted afterwards is a gate.
+ *
+ * Written as a rule rather than left to the tests because the tests cannot see
+ * it: an `ActionCtx` holds a concrete `AppHandle`, so nothing in a test can run
+ * an action body, and the sequence of calls in this function is therefore
+ * checkable only by reading it. This reads it.
+ */
+{
+  const DOOR = "src-tauri/src/outside.rs";
+  const text = readFileSync(DOOR, "utf8");
+
+  const performs = [...text.matchAll(/\.perform\(/g)];
+  const gate = text.indexOf("reach::may_run(");
+
+  if (performs.length !== 1) {
+    fail(
+      DOOR,
+      performs[1] ? lineOf(text, performs[1].index) : null,
+      `this file runs an action in ${performs.length} places and must run it in ` +
+        "one. A second route from a command line to the registry is a second " +
+        "place to remember the gate",
+    );
+  }
+
+  for (const found of performs) {
+    if (gate !== -1 && gate < found.index) continue;
+
+    fail(
+      DOOR,
+      lineOf(text, found.index),
+      "this runs an action with no `reach::may_run` above it, so a `sill://` " +
+        "address off a web page reaches whatever it named",
+    );
+  }
+}
+
+/*
  * The high contrast fallback, still in place.
  *
  * Windows high contrast replaces every colour the page chose and DELETES
