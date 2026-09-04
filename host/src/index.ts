@@ -648,6 +648,10 @@ class ExtensionHost {
       capabilities: Array.isArray(opts.capabilities)
         ? (opts.capabilities as string[])
         : [],
+      // The thing this command was run on, when it was run as an action. Rust
+      // leaves the field out entirely for an ordinary launch, and absent is
+      // what `@sill/api`'s `actionTarget` answers with.
+      sillObject: (opts.on ?? undefined) as LaunchData["sillObject"],
     };
 
     // Before the launch, which is the first moment the extension can print

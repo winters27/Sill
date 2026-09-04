@@ -12,7 +12,7 @@ import { getHeapStatistics } from "node:v8";
 import { createElement, type ReactElement } from "react";
 import { RpcPeer, type RpcParams } from "../proto/rpc";
 import { createRenderer } from "../render/renderer";
-import { getBridge, setBridge, type Environment } from "../api/bridge";
+import { getBridge, setBridge, type Environment, type SillObject } from "../api/bridge";
 import { gateGlobals, Held, patchRequire } from "./patch-require";
 
 export interface LaunchData {
@@ -36,6 +36,13 @@ export interface LaunchData {
    * disk, rather than one that can.
    */
   capabilities?: string[];
+  /**
+   * The thing this command was run on, when it was run as an action.
+   *
+   * Absent for an ordinary launch, and absent is what `@sill/api` reports:
+   * a command picked off the root list was run on nothing.
+   */
+  sillObject?: SillObject;
 }
 
 export function workerMain(): void {
@@ -178,6 +185,17 @@ export function workerMain(): void {
       environment,
       preferences: data.preferences,
       launchArguments: data.launchArguments,
+      // The thing this command was run on, when it was reached through an
+      // action panel rather than off the root list.
+      on: data.sillObject,
+      // A getter rather than a value, because `held` is replaced while the
+      // command is on screen: somebody revoking a permission in Settings
+      // reaches a running worker, and an extension asking what it holds has to
+      // get the answer the module gate would give rather than the one that was
+      // true at launch.
+      get capabilities(): readonly string[] {
+        return held.all();
+      },
     });
 
     /*

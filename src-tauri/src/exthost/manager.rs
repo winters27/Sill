@@ -78,6 +78,20 @@ pub struct LoadOptions {
     /// Empty is the safe default and stays the default: a caller that forgets
     /// to fill it in gets an extension that can draw and nothing else.
     pub capabilities: Vec<Capability>,
+    /// The thing this command was run on, when it was run as an action.
+    ///
+    /// Absent for every ordinary launch, which is what somebody picking the
+    /// command out of the root list is: there is nothing it was run on. Present
+    /// only when the command was reached through the action panel of a file, a
+    /// folder or whatever else it declared it acts on, and the worker hands it
+    /// back through `@sill/api`.
+    ///
+    /// The domain object itself rather than a shape invented for the wire. It
+    /// is four small strings and a kind, every one of which the extension needs
+    /// to do anything useful, and a second type here would be a second answer
+    /// to "what is a thing in Sill".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<crate::object::Object>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
 }
@@ -136,6 +150,7 @@ impl LoadOptions {
             arguments: json!({}),
             launch_type: LaunchType::User,
             capabilities: Vec::new(),
+            on: None,
             cwd: None,
         }
     }

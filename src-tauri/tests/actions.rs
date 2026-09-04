@@ -78,7 +78,7 @@ fn neither_sentinel_is_the_id_of_a_real_action() {
 
     for sentinel in [sill_lib::bindings::PANEL, sill_lib::bindings::PRIMARY] {
         assert!(
-            !ids.contains(&sentinel),
+            !ids.iter().any(|id| id == sentinel),
             "{sentinel} is a registered action, so no key can ever run it",
         );
     }
@@ -117,7 +117,7 @@ fn no_kind_has_two_actions_claiming_enter() {
             .for_kind(*kind)
             .into_iter()
             .filter(|a| a.is_primary(*kind))
-            .map(|a| a.id())
+            .map(|a| a.id().to_string())
             .collect();
 
         assert!(
@@ -191,7 +191,7 @@ fn a_result_that_only_exists_on_screen_offers_nothing_that_outlives_it() {
     let offered: Vec<_> = registry
         .for_kind(ObjectKind::Answer)
         .into_iter()
-        .map(|a| a.id())
+        .map(|a| a.id().to_string())
         .collect();
 
     assert_eq!(offered, vec!["sill.copyAnswer"]);
@@ -211,15 +211,15 @@ fn things_on_disk_can_have_their_path_copied_and_folder_opened() {
         let offered: Vec<_> = registry
             .for_kind(kind)
             .into_iter()
-            .map(|a| a.id())
+            .map(|a| a.id().to_string())
             .collect();
 
         assert!(
-            offered.contains(&"sill.copyPath"),
+            offered.iter().any(|found| found == "sill.copyPath"),
             "{kind:?} lost Copy Path"
         );
         assert!(
-            offered.contains(&"sill.revealInFolder"),
+            offered.iter().any(|found| found == "sill.revealInFolder"),
             "{kind:?} lost Show in Folder"
         );
     }
@@ -241,7 +241,11 @@ fn the_action_panel_has_something_to_show_for_every_result() {
             "{mode} draws an empty action panel, which reads as the key being dead"
         );
 
-        let primary: Vec<_> = drawn.iter().filter(|a| a.primary).map(|a| a.id).collect();
+        let primary: Vec<_> = drawn
+            .iter()
+            .filter(|a| a.primary)
+            .map(|a| a.id.clone())
+            .collect();
         assert_eq!(
             primary.len(),
             1,
@@ -279,7 +283,7 @@ fn text_and_clipboard_rows_are_the_same_thing_to_a_transform() {
         let offered: Vec<_> = registry
             .for_kind(*kind)
             .into_iter()
-            .map(|a| a.id())
+            .map(|a| a.id().to_string())
             .collect();
 
         for wanted in [
@@ -289,7 +293,7 @@ fn text_and_clipboard_rows_are_the_same_thing_to_a_transform() {
             "sill.text.jsonPretty",
         ] {
             assert!(
-                offered.contains(&wanted),
+                offered.iter().any(|found| found == wanted),
                 "{mode} is missing {wanted}: {offered:?}"
             );
         }
@@ -307,7 +311,7 @@ fn loose_text_has_exactly_one_action_on_enter() {
             .for_kind(*kind)
             .into_iter()
             .filter(|a| a.is_primary(*kind))
-            .map(|a| a.id())
+            .map(|a| a.id().to_string())
             .collect();
 
         assert_eq!(
@@ -337,7 +341,7 @@ fn a_transform_is_never_offered_on_something_that_is_not_text() {
         let offered: Vec<_> = registry
             .for_kind(kind)
             .into_iter()
-            .map(|a| a.id())
+            .map(|a| a.id().to_string())
             .collect();
         assert!(
             !offered.iter().any(|id| id.starts_with("sill.text.")),
@@ -355,11 +359,15 @@ fn a_file_can_be_acted_on_and_not_only_opened() {
     let registry = sill_lib::actions::builtins();
 
     for kind in [ObjectKind::File, ObjectKind::Folder] {
-        let offered: Vec<&str> = registry.for_kind(kind).iter().map(|a| a.id()).collect();
+        let offered: Vec<String> = registry
+            .for_kind(kind)
+            .iter()
+            .map(|a| a.id().to_string())
+            .collect();
 
         for wanted in ["sill.copyPath", "sill.file.terminal", "sill.file.recycle"] {
             assert!(
-                offered.contains(&wanted),
+                offered.iter().any(|found| found == wanted),
                 "{kind:?} cannot {wanted}: {offered:?}"
             );
         }
@@ -407,7 +415,7 @@ fn renaming_and_moving_are_reachable_by_name_and_not_only_by_the_page() {
 
     // And both are drawn, so the panel offers what the ids promise.
     for kind in [ObjectKind::File, ObjectKind::Folder] {
-        let drawn: Vec<&str> = registry
+        let drawn: Vec<String> = registry
             .describe(kind, &Default::default())
             .into_iter()
             .map(|a| a.id)
@@ -415,7 +423,7 @@ fn renaming_and_moving_are_reachable_by_name_and_not_only_by_the_page() {
 
         for id in ["sill.file.rename", "sill.file.move"] {
             assert!(
-                drawn.contains(&id),
+                drawn.iter().any(|drawn| drawn == id),
                 "{kind:?} is not offered {id}: {drawn:?}"
             );
         }
@@ -466,14 +474,18 @@ fn nothing_that_is_not_a_file_is_offered_a_file_action() {
         ObjectKind::Quicklink,
         ObjectKind::SystemSetting,
     ] {
-        let offered: Vec<&str> = registry.for_kind(kind).iter().map(|a| a.id()).collect();
+        let offered: Vec<String> = registry
+            .for_kind(kind)
+            .iter()
+            .map(|a| a.id().to_string())
+            .collect();
 
         assert!(
-            !offered.contains(&"sill.file.recycle"),
+            !offered.iter().any(|found| found == "sill.file.recycle"),
             "{kind:?} was offered recycling: {offered:?}"
         );
         assert!(
-            !offered.contains(&"sill.file.terminal"),
+            !offered.iter().any(|found| found == "sill.file.terminal"),
             "{kind:?} was offered a terminal: {offered:?}"
         );
     }
@@ -631,15 +643,18 @@ fn a_system_switch_is_not_run_by_the_action_that_runs_sill_itself() {
     // be able to tell somebody which they are agreeing to.
     let registry = builtins();
 
-    let offered: Vec<&str> = registry
+    let offered: Vec<String> = registry
         .for_kind(ObjectKind::SystemControl)
         .iter()
-        .map(|a| a.id())
+        .map(|a| a.id().to_string())
         .collect();
 
-    assert!(offered.contains(&"sill.system.run"), "{offered:?}");
     assert!(
-        !offered.contains(&"sill.runBuiltin"),
+        offered.iter().any(|found| found == "sill.system.run"),
+        "{offered:?}"
+    );
+    assert!(
+        !offered.iter().any(|found| found == "sill.runBuiltin"),
         "Sill's own runner accepts a Windows switch: {offered:?}"
     );
 }
@@ -669,10 +684,14 @@ fn nothing_else_is_offered_a_system_switch_action() {
         ObjectKind::File,
         ObjectKind::Answer,
     ] {
-        let offered: Vec<&str> = registry.for_kind(kind).iter().map(|a| a.id()).collect();
+        let offered: Vec<String> = registry
+            .for_kind(kind)
+            .iter()
+            .map(|a| a.id().to_string())
+            .collect();
 
         assert!(
-            !offered.contains(&"sill.system.run"),
+            !offered.iter().any(|found| found == "sill.system.run"),
             "{kind:?} was offered it: {offered:?}"
         );
     }
@@ -765,10 +784,10 @@ mod a_program_has_more_than_one_volume_action {
     #[test]
     fn the_panel_offers_a_way_to_move_the_slider() {
         let registry = builtins();
-        let offered: Vec<&str> = registry
+        let offered: Vec<String> = registry
             .for_kind(ObjectKind::AudioSession)
             .into_iter()
-            .map(|action| action.id())
+            .map(|action| action.id().to_string())
             .collect();
 
         for wanted in [
@@ -778,7 +797,7 @@ mod a_program_has_more_than_one_volume_action {
             "sill.audio.session.full",
         ] {
             assert!(
-                offered.contains(&wanted),
+                offered.iter().any(|found| found == wanted),
                 "{wanted} is not offered: {offered:?}"
             );
         }
@@ -853,18 +872,18 @@ fn reading_aloud_reaches_both_places_that_ask_for_text_actions() {
         let kind = sill_lib::object::ObjectKind::from_mode(mode)
             .unwrap_or_else(|| panic!("{mode} is a mode the window sends"));
 
-        let offered: Vec<&str> = registry
+        let offered: Vec<String> = registry
             .describe(kind, &Default::default())
             .into_iter()
             .map(|a| a.id)
             .collect();
 
         assert!(
-            offered.contains(&"sill.text.readAloud"),
+            offered.iter().any(|id| id == "sill.text.readAloud"),
             "nothing offers Read Aloud for {mode}, so no key can be bound to it: {offered:?}"
         );
         assert!(
-            offered.contains(&"sill.text.stopReading"),
+            offered.iter().any(|id| id == "sill.text.stopReading"),
             "Stop Reading is unreachable for {mode}, which leaves no way to stop it: {offered:?}"
         );
     }
@@ -881,7 +900,7 @@ fn reading_aloud_reaches_both_places_that_ask_for_text_actions() {
 /// convention nothing was enforcing, which is exactly how long that lasts.
 #[test]
 fn every_action_id_is_namespaced() {
-    let stray: Vec<&str> = sill_lib::actions::builtins()
+    let stray: Vec<String> = sill_lib::actions::builtins()
         .ids()
         .into_iter()
         .filter(|id| !id.starts_with("sill."))
@@ -1026,7 +1045,7 @@ fn enter_on_what_is_playing_pauses_it_and_never_skips_it() {
 
     let drawn = registry.describe(ObjectKind::NowPlaying, &Default::default());
 
-    let offered: Vec<&str> = drawn.iter().map(|action| action.id).collect();
+    let offered: Vec<String> = drawn.iter().map(|action| action.id.clone()).collect();
 
     let play = offered
         .iter()
@@ -1097,7 +1116,7 @@ fn nothing_but_a_running_process_can_be_ended() {
         let offered: Vec<_> = registry
             .for_kind(*kind)
             .into_iter()
-            .map(|action| action.id())
+            .map(|action| action.id().to_string())
             .filter(|id| id.starts_with("sill.process."))
             .collect();
 
@@ -1192,10 +1211,10 @@ fn every_declared_shortcut_is_the_chord_it_names() {
 
     // And nothing else has one. A default key is a decision, so an action
     // acquiring one has to arrive here rather than only in a diff.
-    let carrying: Vec<&str> = all
+    let carrying: Vec<String> = all
         .iter()
         .filter(|(_, _, shortcut)| shortcut.is_some())
-        .map(|(id, _, _)| *id)
+        .map(|(id, _, _)| id.clone())
         .collect();
 
     assert_eq!(carrying.len(), DECLARED.len(), "{carrying:?}");
@@ -1409,11 +1428,11 @@ fn a_store_listing_has_a_panel_and_nothing_in_it_installs() {
          confirmation being skipped: {drawn:?}"
     );
 
-    let ids: Vec<&str> = drawn.iter().map(|action| action.id).collect();
+    let ids: Vec<String> = drawn.iter().map(|action| action.id.clone()).collect();
 
     for wanted in ["sill.store.copySource", "sill.store.remove"] {
         assert!(
-            ids.contains(&wanted),
+            ids.iter().any(|id| id == wanted),
             "a listing is not offered {wanted}: {ids:?}"
         );
     }
@@ -1423,7 +1442,7 @@ fn a_store_listing_has_a_panel_and_nothing_in_it_installs() {
     // primary is lifted, and the entry that removes something should not be
     // the one under the cursor when the panel opens.
     assert_eq!(
-        ids.last().copied(),
+        ids.last().map(String::as_str),
         Some("sill.store.remove"),
         "the entry that removes an extension is not the last one offered: {ids:?}"
     );
@@ -1443,10 +1462,10 @@ fn nothing_but_a_store_listing_can_be_removed_from_the_store() {
             continue;
         }
 
-        let offered: Vec<&str> = registry
+        let offered: Vec<String> = registry
             .for_kind(*kind)
             .into_iter()
-            .map(|action| action.id())
+            .map(|action| action.id().to_string())
             .filter(|id| id.starts_with("sill.store."))
             .collect();
 
@@ -1468,15 +1487,15 @@ fn nothing_but_a_store_listing_can_be_removed_from_the_store() {
 fn a_store_listing_is_never_offered_a_way_to_run_itself() {
     let registry = builtins();
 
-    let offered: Vec<&str> = registry
+    let offered: Vec<String> = registry
         .for_kind(ObjectKind::StoreListing)
         .into_iter()
-        .map(|action| action.id())
+        .map(|action| action.id().to_string())
         .collect();
 
     for wanted in ["sill.runExtensionCommand", "sill.launch"] {
         assert!(
-            !offered.contains(&wanted),
+            !offered.iter().any(|found| found == wanted),
             "a listing is offered {wanted}, which needs an entrypoint it does not have"
         );
     }
@@ -1545,14 +1564,14 @@ mod what_a_link_may_reach {
         let registry = builtins();
 
         for id in registry.ids() {
-            if LINKABLE.contains(&id) {
+            if LINKABLE.contains(&id.as_str()) {
                 continue;
             }
 
-            let action = registry.get(id).expect("it came out of the registry");
+            let action = registry.get(&id).expect("it came out of the registry");
 
             assert!(
-                reach::may_run(Trust::Link, id, action.capabilities()).is_err(),
+                reach::may_run(Trust::Link, &id, action.capabilities()).is_err(),
                 "{id} can be run by anything able to put a link in front of somebody",
             );
         }
@@ -1564,8 +1583,372 @@ mod what_a_link_may_reach {
         let registry = builtins();
 
         for id in registry.ids() {
-            let action = registry.get(id).expect("it came out of the registry");
-            assert!(reach::may_run(Trust::Shell, id, action.capabilities()).is_ok());
+            let action = registry.get(&id).expect("it came out of the registry");
+            assert!(reach::may_run(Trust::Shell, &id, action.capabilities()).is_ok());
         }
     }
+}
+
+// ------------------------------------------ what an extension contributes
+
+/// Actions an installed extension declares in its manifest.
+///
+/// Here rather than beside the code for the reason at the top of this file, and
+/// it was reproduced: with these in `src/actions/extension.rs` the library's
+/// test binary exits `STATUS_ENTRYPOINT_NOT_FOUND` before running anything,
+/// because building a `dyn Action` mints a vtable holding a `run` that reaches
+/// the extension host's `confirmAlert`.
+mod contributed {
+    use sill_lib::actions::extension::contributed;
+    use sill_lib::object::ObjectKind;
+    use sill_lib::registry::{CommandRecord, Declared};
+
+    /// A record shaped the way an installed extension's is.
+    fn command(extension: &str, name: &str, acts_on: &[&str]) -> CommandRecord {
+        CommandRecord {
+            id: format!("{extension}:{name}"),
+            extension: extension.to_string(),
+            extension_title: extension.to_string(),
+            command: name.to_string(),
+            title: format!("{name} it"),
+            subtitle: String::new(),
+            description: String::new(),
+            mode: "no-view".to_string(),
+            entrypoint: format!("C:/ext/{extension}/{name}.js"),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: Some(Box::new(Declared {
+                acts_on: acts_on.iter().map(|k| k.to_string()).collect(),
+                ..Default::default()
+            })),
+        }
+    }
+
+    #[test]
+    fn a_command_that_declares_nothing_contributes_nothing() {
+        let mut plain = command("demo", "run", &[]);
+        plain.manifest = None;
+
+        assert!(contributed(&[plain, command("demo", "other", &[])]).is_empty());
+    }
+
+    #[test]
+    fn a_declared_command_becomes_an_action_on_every_kind_it_named() {
+        let built = contributed(&[command("hashes", "blake3", &["file", "folder"])]);
+
+        assert_eq!(built.len(), 1);
+        let action = &built[0];
+
+        assert_eq!(action.id(), "extension.hashes.blake3");
+        assert_eq!(action.title(), "blake3 it");
+        assert!(action.accepts(ObjectKind::File));
+        assert!(action.accepts(ObjectKind::Folder));
+        assert!(!action.accepts(ObjectKind::Window));
+    }
+
+    /// An id an author cannot choose and cannot collide on.
+    ///
+    /// Two extensions naming a command the same thing is ordinary, and one of
+    /// them shadowing the other in `get` would run whichever happened to be
+    /// installed first.
+    #[test]
+    fn two_extensions_with_the_same_command_name_get_different_ids() {
+        let built = contributed(&[
+            command("hashes", "run", &["file"]),
+            command("tools", "run", &["file"]),
+        ]);
+
+        let ids: Vec<&str> = built.iter().map(|a| a.id()).collect();
+        assert_eq!(ids, ["extension.hashes.run", "extension.tools.run"]);
+    }
+
+    /// Enter belongs to Sill, whatever an extension declares.
+    #[test]
+    fn nothing_contributed_claims_enter() {
+        let built = contributed(&[command("hashes", "blake3", &["file"])]);
+
+        for kind in ObjectKind::ALL {
+            assert!(
+                !built[0].is_primary(*kind),
+                "a contributed action claims Enter on {}",
+                kind.name()
+            );
+        }
+    }
+
+    /// A kind from a newer Sill is skipped and the rest of the row survives.
+    #[test]
+    fn an_unknown_kind_is_dropped_rather_than_taking_the_action_with_it() {
+        let built = contributed(&[command("hashes", "blake3", &["file", "hologram"])]);
+
+        assert_eq!(built.len(), 1);
+        assert!(built[0].accepts(ObjectKind::File));
+    }
+
+    /// And a declaration of nothing known contributes no action at all, rather
+    /// than one that accepts nothing and sits in the settings list with no way
+    /// to reach it.
+    #[test]
+    fn a_declaration_of_nothing_known_contributes_no_action() {
+        assert!(contributed(&[command("hashes", "blake3", &["hologram"])]).is_empty());
+    }
+}
+
+/// One record, shaped the way an installed extension's is.
+fn declaring(
+    extension: &str,
+    command: &str,
+    title: &str,
+    on: &[&str],
+) -> sill_lib::registry::CommandRecord {
+    sill_lib::registry::CommandRecord {
+        id: format!("{extension}:{command}"),
+        extension: extension.to_string(),
+        extension_title: extension.to_string(),
+        command: command.to_string(),
+        title: title.to_string(),
+        subtitle: String::new(),
+        description: String::new(),
+        mode: "no-view".to_string(),
+        entrypoint: format!("C:/ext/{extension}/{command}.js"),
+        keywords: Vec::new(),
+        icon: None,
+        toggle: None,
+        panel: None,
+        preferences: serde_json::Value::Null,
+        manifest: Some(Box::new(sill_lib::registry::Declared {
+            acts_on: on.iter().map(|kind| kind.to_string()).collect(),
+            ..Default::default()
+        })),
+    }
+}
+
+/// The registry answers about both lists, and only about Sill's for Enter.
+///
+/// The one behaviour that makes a contributed action an action rather than a
+/// second kind of thing: `for_kind` finds it, `get` finds it by id, `describe`
+/// draws it, and `primary` never returns one.
+#[test]
+fn a_contributed_action_joins_the_registry_without_taking_it_over() {
+    use sill_lib::actions::extension;
+
+    let registry = builtins();
+
+    let before = registry.describe(ObjectKind::File, &Default::default());
+    assert!(
+        registry.get("extension.hashes.blake3").is_none(),
+        "an extension nobody installed already has an action"
+    );
+
+    registry.contribute(extension::contributed(&[declaring(
+        "hashes",
+        "blake3",
+        "Hash with BLAKE3",
+        &["file"],
+    )]));
+
+    let after = registry.describe(ObjectKind::File, &Default::default());
+
+    assert_eq!(
+        after.len(),
+        before.len() + 1,
+        "the panel for a file did not gain exactly the contributed action"
+    );
+
+    let row = after
+        .iter()
+        .find(|a| a.id == "extension.hashes.blake3")
+        .expect("the contributed action is drawn for a file");
+    assert_eq!(row.title, "Hash with BLAKE3");
+    assert!(!row.primary, "a contributed action is drawn as the primary");
+
+    assert!(
+        registry.get("extension.hashes.blake3").is_some(),
+        "the contributed action cannot be looked up by the id the panel sends back"
+    );
+
+    // Last, because the whole point of shipped-first ordering is that
+    // installing something cannot take the top of somebody's panel.
+    assert_eq!(
+        after.last().map(|a| a.id.as_str()),
+        Some("extension.hashes.blake3"),
+        "a contributed action is not below everything Sill ships"
+    );
+
+    let enter = registry
+        .primary(ObjectKind::File)
+        .expect("Enter still does something to a file");
+    assert_eq!(
+        enter.id(),
+        "sill.launch",
+        "an extension took Enter on a file"
+    );
+}
+
+/// Contributing again replaces rather than adds.
+///
+/// An extension being uninstalled is a shorter list, and a merge could only
+/// ever grow: the panel would keep offering a command whose bundle is gone.
+#[test]
+fn contributing_a_second_time_replaces_what_was_there() {
+    use sill_lib::actions::extension;
+
+    let registry = builtins();
+
+    registry.contribute(extension::contributed(&[
+        declaring("hashes", "run", "Run It", &["file"]),
+        declaring("tools", "run", "Run It", &["file"]),
+    ]));
+    assert!(registry.get("extension.tools.run").is_some());
+
+    // "tools" has been uninstalled, so the next scan finds one of them.
+    registry.contribute(extension::contributed(&[declaring(
+        "hashes",
+        "run",
+        "Run It",
+        &["file"],
+    )]));
+
+    assert!(
+        registry.get("extension.tools.run").is_none(),
+        "an uninstalled extension still offers its action"
+    );
+    assert!(
+        registry.get("extension.hashes.run").is_some(),
+        "the extension still installed lost its action"
+    );
+}
+
+/// Every id says whose it is, in both directions.
+///
+/// `every_action_id_is_namespaced` says nothing shipped is missing `sill.`.
+/// This is the half that starts mattering once an extension can add one:
+/// nothing contributed may wear Sill's namespace, or an author could claim
+/// `sill.launch` and `get` would hand back whichever came first.
+#[test]
+fn nothing_an_extension_contributes_wears_sills_namespace() {
+    use sill_lib::actions::extension;
+
+    // The most hostile thing an author can write: an extension directory and a
+    // command name that spell out an id Sill already ships.
+    let built = extension::contributed(&[declaring("sill", "launch", "Open", &["file"])]);
+
+    for action in &built {
+        assert!(
+            action.id().starts_with(extension::PREFIX),
+            "{} is not in the extension namespace",
+            action.id()
+        );
+        assert!(
+            !action.id().starts_with("sill."),
+            "{} is in Sill's own namespace",
+            action.id()
+        );
+    }
+
+    let registry = builtins();
+    registry.contribute(built);
+
+    assert_eq!(
+        registry
+            .get("sill.launch")
+            .expect("Sill's own Open is still there")
+            .title(),
+        "Open",
+    );
+}
+
+/// A trigger cannot start an extension while nobody is there.
+///
+/// `may_schedule` refuses everything `needs_asking` would stop for, and running
+/// somebody else's code is squarely that. Held here because a contributed
+/// action is the one action an author writes, and a Task Scheduler entry that
+/// runs it is code executing unattended on a schedule the extension asked for.
+#[test]
+fn a_contributed_action_cannot_be_put_on_a_schedule() {
+    use sill_lib::actions::extension;
+
+    let built =
+        extension::contributed(&[declaring("hashes", "blake3", "Hash with BLAKE3", &["file"])]);
+    let action = &built[0];
+
+    assert!(
+        sill_lib::automation::may_schedule(action.id(), action.capabilities()).is_err(),
+        "an extension's action can be scheduled to run with nobody there"
+    );
+}
+
+/// Enter is Sill's even against an action that claims it.
+///
+/// The contributed actions a manifest can produce never claim to be primary,
+/// so nothing above this would notice if `primary` started searching them:
+/// that was checked by sabotage and the sabotage passed. This one contributes
+/// something that does claim Enter and watches it not get it.
+///
+/// Two guards stand behind it, and this fails only when **both** go: `primary`
+/// searches what Sill ships and nothing else, and `everything` puts what Sill
+/// ships first, so even a `primary` that searched the lot would find Open
+/// before this. Sabotaged one at a time and then together.
+///
+/// Worth holding rather than leaving to the type. An extension is somebody
+/// else's code, `contribute` takes any `Action`, and "the one key everybody
+/// presses without looking still opens the file" is not a promise to rest on a
+/// default method body.
+#[test]
+fn nothing_contributed_can_take_enter_even_if_it_claims_it() {
+    use sill_lib::action::{Action, ActionCtx, Outcome};
+    use sill_lib::object::Object;
+
+    struct Greedy;
+
+    #[async_trait::async_trait]
+    impl Action for Greedy {
+        fn id(&self) -> &str {
+            "extension.greedy.open"
+        }
+
+        fn title(&self) -> &str {
+            "Open With Greedy"
+        }
+
+        fn accepts(&self, kind: ObjectKind) -> bool {
+            kind == ObjectKind::File
+        }
+
+        fn capabilities(&self) -> &'static [Capability] {
+            &[Capability::ProcessLaunch]
+        }
+
+        fn is_primary(&self, kind: ObjectKind) -> bool {
+            self.accepts(kind)
+        }
+
+        async fn run(&self, _ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
+            unreachable!("this action exists to be refused Enter, never to run")
+        }
+    }
+
+    let registry = builtins();
+    registry.contribute(vec![std::sync::Arc::new(Greedy)]);
+
+    assert_eq!(
+        registry
+            .primary(ObjectKind::File)
+            .expect("Enter still does something to a file")
+            .id(),
+        "sill.launch",
+        "an action outside what Sill ships took Enter on a file"
+    );
+
+    // And it is still drawn, because refusing it Enter is not refusing it.
+    assert!(
+        registry
+            .describe(ObjectKind::File, &Default::default())
+            .iter()
+            .any(|a| a.id == "extension.greedy.open"),
+        "the action was dropped rather than merely denied Enter"
+    );
 }

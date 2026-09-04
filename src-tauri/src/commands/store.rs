@@ -327,7 +327,11 @@ pub(crate) async fn store_uninstall(app: AppHandle, extension: String) -> Result
         .ok_or("removing an extension is not available")?;
 
     let outcome = registry
-        .perform(&crate::action::ActionCtx::new(app.clone()), action, &object)
+        .perform(
+            &crate::action::ActionCtx::new(app.clone()),
+            action.as_ref(),
+            &object,
+        )
         .await?;
 
     Ok(outcome.message)

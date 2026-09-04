@@ -101,6 +101,23 @@ pub struct Declared {
     /// command as `props.arguments`. Recorded here because the manifest is
     /// read once, at install, and the launcher cannot go back for it.
     pub arguments: Vec<crate::extension_install::Argument>,
+    /// The kinds of thing this command declared it can be run on.
+    ///
+    /// Empty for every command that is only a command, which is nearly all of
+    /// them. A non-empty list makes this command a row in the action panel of
+    /// everything of those kinds, through
+    /// [`crate::actions::extension::contributed`].
+    ///
+    /// Names rather than `ObjectKind`s, and that is not laziness. This is
+    /// written into the extension index on disk and read back by whatever
+    /// build of Sill runs next; a strongly typed field that fails to parse
+    /// takes the whole record with it, and a command would stop existing
+    /// because of a word in an optional list. A name this build does not know
+    /// is dropped when the actions are built, which leaves the command
+    /// runnable with only its contribution missing. Nothing reaches here by
+    /// accident either: installing refuses a kind it has never heard of, by
+    /// name.
+    pub acts_on: Vec<String>,
 }
 
 /// A command plus why it placed where it did.

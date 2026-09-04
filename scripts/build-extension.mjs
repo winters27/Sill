@@ -9,15 +9,34 @@
  * Preview of M8. Kept deliberately small so the moving parts stay visible.
  *
  * Usage: node scripts/build-extension.mjs <extension-dir> [command-name]
+ *          [--watch [-- <run-extension.mjs flags>]]
  */
-import { build } from "../host/node_modules/esbuild/lib/main.js";
+import { context } from "../host/node_modules/esbuild/lib/main.js";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 
-const [, , extensionDir, requestedCommand] = process.argv;
+/*
+ * Everything after a bare `--` belongs to the run, not to the build.
+ *
+ * Split before anything is read, so a flag meant for `run-extension.mjs`
+ * cannot be mistaken for the command name. `--grant` and `--on` are the two
+ * that matter in practice: an extension being written usually needs a
+ * permission and, if it contributes an action, something to act on.
+ */
+const argv = process.argv.slice(2);
+const separator = argv.indexOf("--");
+const mine = separator === -1 ? argv : argv.slice(0, separator);
+const forTheRun = separator === -1 ? [] : argv.slice(separator + 1);
+
+const watching = mine.includes("--watch");
+const [extensionDir, requestedCommand] = mine.filter((one) => !one.startsWith("--"));
 
 if (!extensionDir) {
-  console.error("usage: node scripts/build-extension.mjs <extension-dir> [command-name]");
+  console.error(
+    "usage: node scripts/build-extension.mjs <extension-dir> [command-name] " +
+      "[--watch [-- <run-extension.mjs flags>]]",
+  );
   process.exit(1);
 }
 
@@ -102,7 +121,7 @@ writeFileSync(
   `${JSON.stringify({ type: "commonjs", private: true }, null, 2)}\n`,
 );
 
-await build({
+const options = {
   entryPoints: [entry],
   outfile,
   bundle: true,
@@ -113,12 +132,25 @@ await build({
   jsxImportSource: "react",
   // Supplied by the host. Bundling either would give the worker a second copy
   // of React, and hooks would fail in ways that look like extension bugs.
-  external: ["@raycast/api", "react", "react/jsx-runtime", "react/jsx-dev-runtime"],
+  external: ["@raycast/api", "@sill/api", "react", "react/jsx-runtime", "react/jsx-dev-runtime"],
   alias: aliasesFromTsconfig(),
   logLevel: "warning",
   sourcemap: false,
   minify: false,
-});
+};
+
+/**
+ * The build, once, or the loop.
+ *
+ * `context` either way rather than `build` for one and `context` for the
+ * other, so a single build and a watched one are the same esbuild
+ * configuration reaching the same disk. Two code paths through a bundler is
+ * how a watch loop ends up producing something the one-shot build does not.
+ */
+const ctx = await context(options);
+await ctx.rebuild();
+
+if (!watching) await ctx.dispose();
 
 /**
  * What `getPreferenceValues()` should return before anyone has changed
@@ -158,6 +190,15 @@ const record = {
   entrypoint: outfile.replace(/\\/g, "/"),
   keywords: command.keywords ?? [],
   preferences: defaultPreferences(manifest, command),
+  /*
+   * What the command contributes, carried into the index Sill reads.
+   *
+   * Without this an extension built here draws its action nowhere, and the
+   * only way to see one work would be to install the extension properly. That
+   * is exactly the loop this script exists to shorten: `Declared` takes
+   * defaults for every field it does not get, so one key is the whole of it.
+   */
+  manifest: { actsOn: command.sill?.actionOn ?? [] },
 };
 
 // The registry Rust reads at startup. Rewritten rather than appended so a
@@ -180,3 +221,72 @@ writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`);
 
 console.log(JSON.stringify(record, null, 2));
 console.log(`\nindex now lists ${index.length} command(s): ${indexPath}`);
+
+if (!watching) process.exit(0);
+
+/*
+ * The loop, which is the whole of what a watch mode is for.
+ *
+ * Rebuild, then run the result against the real host and print what it drew.
+ * Building without running would be the less useful half: esbuild reports a
+ * syntax error either way, and what somebody writing an extension actually
+ * wants to see is the list, the toast or the gap the change produced.
+ *
+ * One run at a time, and a change that lands while one is in flight kills it.
+ * A watch that queues runs turns a burst of saves into a queue of stale
+ * answers, each printed after the edit that made it wrong.
+ */
+const runner = resolve(import.meta.dirname, "run-extension.mjs");
+let running;
+
+function run() {
+  if (running) {
+    // Its own output is about to be replaced by a newer one, so nothing is
+    // lost by ending it here.
+    running.kill();
+    running = undefined;
+  }
+
+  console.log(`\n--- ${new Date().toLocaleTimeString()} ${manifest.name}/${command.name} ---`);
+
+  running = spawn(
+    process.execPath,
+    [runner, outfile, manifest.name, ...forTheRun],
+    { stdio: "inherit" },
+  );
+
+  running.on("exit", () => {
+    running = undefined;
+    console.log("\nwatching. Save the extension again, or press Ctrl+C.");
+  });
+}
+
+await ctx.watch();
+run();
+
+/*
+ * esbuild's watcher rebuilds on its own and says nothing this script can hook
+ * without a plugin, so the run is triggered by the same thing esbuild is
+ * watching: the entry point and whatever it pulled in. `fs.watch` on the
+ * output is the honest signal, because a rebuild that produced no change
+ * writes nothing and a run then would be a run for no reason.
+ */
+const { watch } = await import("node:fs");
+let settling;
+
+watch(dirname(outfile), (_event, name) => {
+  if (name !== `${command.name}.js`) return;
+
+  // Editors and bundlers both write in bursts, and a rebuilt bundle lands as
+  // several events. One run per burst.
+  clearTimeout(settling);
+  settling = setTimeout(run, 120);
+});
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    running?.kill();
+    void ctx.dispose();
+    process.exit(0);
+  });
+}

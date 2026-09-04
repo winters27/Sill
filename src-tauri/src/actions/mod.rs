@@ -15,6 +15,8 @@ use async_trait::async_trait;
 use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
+pub mod extension;
+
 use crate::action::{Action, ActionCtx, ActionRegistry, Capability, Outcome, Undo};
 use crate::object::{Object, ObjectKind};
 
@@ -153,11 +155,11 @@ struct Launch;
 
 #[async_trait]
 impl Action for Launch {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.launch"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Open"
     }
 
@@ -219,11 +221,11 @@ struct RunExtensionCommand;
 
 #[async_trait]
 impl Action for RunExtensionCommand {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.runExtensionCommand"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Run Command"
     }
 
@@ -244,129 +246,160 @@ impl Action for RunExtensionCommand {
         // because loading needs four fields the object has no reason to hold.
         // This is the one action whose target is not enough on its own, and
         // it is worth the lookup rather than widening the type for it.
-        let registry = ctx.app.state::<crate::state::RegistryState>();
-        let record = registry
-            .index()
-            .commands
-            .iter()
-            .find(|c| c.id == object.id)
-            .cloned()
-            .ok_or_else(|| format!("no such command: {}", object.id))?;
+        let record = extension::command_record(ctx, &object.id)?;
 
-        // The manifest decides, and a mode this cannot name is refused rather
-        // than loaded as a view. It used to fall through to `View`, so a
-        // `menu-bar` command left the window waiting for a tree that never
-        // arrives. Installing now refuses those, so reaching this is an index
-        // written by an older Sill, and saying so is better than hanging.
-        let mode = crate::exthost::CommandMode::from_manifest(&record.mode).ok_or_else(|| {
-            match crate::extension_install::why_not_runnable(&record.mode) {
-                Some(because) => format!("{} cannot run here: {because}.", object.title),
-                None => format!("{} cannot run here.", object.title),
-            }
-        })?;
+        // Nothing to hand it. Somebody picked this command off the root list,
+        // so there is no thing it was run on, and `@sill/api` says so.
+        open_extension_command(ctx, &record, &object.title, None).await
+    }
+}
 
-        let data_dir = crate::state::data_dir(&ctx.app);
-        let declared = record.manifest.clone().unwrap_or_default();
-
-        // What the manifest defaults to, under what somebody set in Settings.
-        let held = crate::exthost::preferences::load(&data_dir);
-        let preferences = crate::exthost::preferences::effective(
-            &record.preferences,
-            held.in_scope(&crate::exthost::preferences::extension_scope(
-                &record.extension,
-            )),
-            held.in_scope(&crate::exthost::preferences::command_scope(
-                &record.extension,
-                &record.command,
-            )),
-        );
-
-        // Raycast refuses to start a command whose required preference is
-        // unset and names it. Sill was starting it, and the extension threw on
-        // an undefined in its first line, which reads as the extension being
-        // broken rather than as a setting nobody has filled in.
-        let missing =
-            crate::exthost::preferences::missing_required(&declared.preferences, &preferences);
-        if !missing.is_empty() {
-            return Err(format!(
-                "{} needs {} before it can run. Set it in Settings, under Extensions.",
-                object.title,
-                missing.join(" and ")
-            ));
+/// One command in a worker, however it was reached.
+///
+/// Extracted from [`RunExtensionCommand`] rather than copied beside it, and
+/// the reason is the whole of rules 14 to 16: an extension command reached
+/// from the root list and the same command reached as an action on a file must
+/// be the same launch. Everything here is a step somebody would forget in a
+/// second copy, and the ones that fail quietly are the dangerous half: without
+/// the preferences an extension runs as though every setting were cleared,
+/// without the assets path it reads its own data files off an empty disk, and
+/// without the capability list it can draw and nothing else.
+///
+/// `called` is what to call it in a message, and `on` is the only real
+/// difference between the two callers.
+async fn open_extension_command(
+    ctx: &ActionCtx,
+    record: &crate::registry::CommandRecord,
+    called: &str,
+    on: Option<&Object>,
+) -> Result<Outcome, String> {
+    // The manifest decides, and a mode this cannot name is refused rather
+    // than loaded as a view. It used to fall through to `View`, so a
+    // `menu-bar` command left the window waiting for a tree that never
+    // arrives. Installing now refuses those, so reaching this is an index
+    // written by an older Sill, and saying so is better than hanging.
+    let mode = crate::exthost::CommandMode::from_manifest(&record.mode).ok_or_else(|| {
+        match crate::extension_install::why_not_runnable(&record.mode) {
+            Some(because) => format!("{called} cannot run here: {because}."),
+            None => format!("{called} cannot run here."),
         }
+    })?;
 
-        let hosts = ctx.app.state::<crate::state::HostState>();
+    let data_dir = crate::state::data_dir(&ctx.app);
+    let declared = record.manifest.clone().unwrap_or_default();
 
-        /*
-         * Which kind of open this is, asked before it is made true.
-         *
-         * `host_of` starts the extension runtime when nothing is running, so
-         * asking after it would answer "warm" every time and the cold figure
-         * would never be recorded at all. A cold open pays for a Node process,
-         * a worker thread and a module evaluation; a warm one pays for the
-         * last of those. Reporting either as the other is the lie this split
-         * exists to avoid.
-         */
-        let start = if crate::host::running_host(&hosts).await.is_some() {
-            crate::timing::Start::Warm
-        } else {
-            crate::timing::Start::Cold
-        };
-
-        /*
-         * The clock starts here rather than at the load.
-         *
-         * Everything above this line is part of the wait: the index lookup,
-         * the manifest, the saved preferences, the required-preference check.
-         * It is small, and it is still time somebody spends looking at a
-         * launcher that has not moved.
-         *
-         * It is stopped by the extension's first render, over in the API
-         * layer, because that is the first moment there is anything to look
-         * at. This call returns long before then.
-         */
-        if let Some(timings) = ctx.app.try_state::<crate::timing::Timings>() {
-            timings.opening_began(&record.extension, start);
-        }
-
-        let host = crate::host::host_of(&ctx.app, &hosts).await?;
-
-        let mut opts = crate::exthost::LoadOptions::with_preferences(
-            record.entrypoint.clone(),
+    // What the manifest defaults to, under what somebody set in Settings.
+    let held = crate::exthost::preferences::load(&data_dir);
+    let preferences = crate::exthost::preferences::effective(
+        &record.preferences,
+        held.in_scope(&crate::exthost::preferences::extension_scope(
+            &record.extension,
+        )),
+        held.in_scope(&crate::exthost::preferences::command_scope(
             &record.extension,
             &record.command,
-            mode,
-            preferences,
-        );
+        )),
+    );
 
-        // Both were the empty string, so `environment.assetsPath` pointed at
-        // nothing and an extension reading an icon out of its own assets found
-        // no such file. The support folder is made here rather than at install
-        // because an update clears the installed directory and this must
-        // survive one.
-        let home = crate::store::extensions_home(&data_dir);
-        let assets = home.join(&record.extension).join("assets");
-        if assets.is_dir() {
-            opts.assets_path = assets.to_string_lossy().replace('\\', "/");
-        }
-
-        let support = crate::exthost::preferences::support_path(&data_dir, &record.extension);
-        if std::fs::create_dir_all(&support).is_ok() {
-            opts.support_path = support.to_string_lossy().replace('\\', "/");
-        }
-
-        // What the command declared it wants typed. Nothing collects them yet,
-        // so every one is absent, and absent is `""` rather than missing: an
-        // extension destructuring `props.arguments` and passing the result to
-        // a search is the ordinary shape, and `undefined` there is a crash
-        // where an empty string is an empty search.
-        opts.arguments = crate::exthost::LoadOptions::blank_arguments(&declared.arguments);
-
-        opts.capabilities = crate::exthost::grants::for_extension(&ctx.app, &record.extension);
-
-        let session = host.load(&opts).await.map_err(|e| e.to_string())?;
-        Ok(Outcome::running(format!("Ran {}", object.title), session))
+    // Raycast refuses to start a command whose required preference is
+    // unset and names it. Sill was starting it, and the extension threw on
+    // an undefined in its first line, which reads as the extension being
+    // broken rather than as a setting nobody has filled in.
+    let missing =
+        crate::exthost::preferences::missing_required(&declared.preferences, &preferences);
+    if !missing.is_empty() {
+        return Err(format!(
+            "{called} needs {} before it can run. Set it in Settings, under Extensions.",
+            missing.join(" and ")
+        ));
     }
+
+    let hosts = ctx.app.state::<crate::state::HostState>();
+
+    /*
+     * Which kind of open this is, asked before it is made true.
+     *
+     * `host_of` starts the extension runtime when nothing is running, so
+     * asking after it would answer "warm" every time and the cold figure
+     * would never be recorded at all. A cold open pays for a Node process,
+     * a worker thread and a module evaluation; a warm one pays for the
+     * last of those. Reporting either as the other is the lie this split
+     * exists to avoid.
+     */
+    let start = if crate::host::running_host(&hosts).await.is_some() {
+        crate::timing::Start::Warm
+    } else {
+        crate::timing::Start::Cold
+    };
+
+    /*
+     * The clock starts here rather than at the load.
+     *
+     * Everything above this line is part of the wait: the index lookup,
+     * the manifest, the saved preferences, the required-preference check.
+     * It is small, and it is still time somebody spends looking at a
+     * launcher that has not moved.
+     *
+     * It is stopped by the extension's first render, over in the API
+     * layer, because that is the first moment there is anything to look
+     * at. This call returns long before then.
+     */
+    if let Some(timings) = ctx.app.try_state::<crate::timing::Timings>() {
+        timings.opening_began(&record.extension, start);
+    }
+
+    let host = crate::host::host_of(&ctx.app, &hosts).await?;
+
+    let mut opts = crate::exthost::LoadOptions::with_preferences(
+        record.entrypoint.clone(),
+        &record.extension,
+        &record.command,
+        mode,
+        preferences,
+    );
+
+    // Both were the empty string, so `environment.assetsPath` pointed at
+    // nothing and an extension reading an icon out of its own assets found
+    // no such file. The support folder is made here rather than at install
+    // because an update clears the installed directory and this must
+    // survive one.
+    let home = crate::store::extensions_home(&data_dir);
+    let assets = home.join(&record.extension).join("assets");
+    if assets.is_dir() {
+        opts.assets_path = assets.to_string_lossy().replace('\\', "/");
+    }
+
+    let support = crate::exthost::preferences::support_path(&data_dir, &record.extension);
+    if std::fs::create_dir_all(&support).is_ok() {
+        opts.support_path = support.to_string_lossy().replace('\\', "/");
+    }
+
+    // What the command declared it wants typed. Nothing collects them yet,
+    // so every one is absent, and absent is `""` rather than missing: an
+    // extension destructuring `props.arguments` and passing the result to
+    // a search is the ordinary shape, and `undefined` there is a crash
+    // where an empty string is an empty search.
+    opts.arguments = crate::exthost::LoadOptions::blank_arguments(&declared.arguments);
+
+    /*
+     * What this extension has been allowed to reach, read now.
+     *
+     * This one line is the whole of "an extension's action can do what the
+     * extension may do and no more". A contributed action declares which
+     * kinds it applies to and nothing else: it cannot ask for a permission,
+     * cannot inherit one from the object it was run on, and cannot arrive
+     * at a different answer from the same command started off the root
+     * list, because both callers are this line. What comes back is what
+     * somebody agreed to on the install card, minus anything they have
+     * taken back since, and the worker's own module gate refuses the rest.
+     */
+    opts.capabilities = crate::exthost::grants::for_extension(&ctx.app, &record.extension);
+
+    // The thing it was run on, when it was run on one.
+    opts.on = on.cloned();
+
+    let session = host.load(&opts).await.map_err(|e| e.to_string())?;
+    Ok(Outcome::running(format!("Ran {called}"), session))
 }
 
 // ---------------------------------------------------------------- settings
@@ -376,11 +409,11 @@ struct OpenSystemSetting;
 
 #[async_trait]
 impl Action for OpenSystemSetting {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.openSystemSetting"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Open Setting"
     }
 
@@ -407,11 +440,11 @@ struct OpenSillSetting;
 
 #[async_trait]
 impl Action for OpenSillSetting {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.openOwnSetting"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Open in Settings"
     }
 
@@ -440,11 +473,11 @@ struct RunBuiltin;
 
 #[async_trait]
 impl Action for RunBuiltin {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.runBuiltin"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Run"
     }
 
@@ -564,11 +597,11 @@ struct ToggleSystem;
 
 #[async_trait]
 impl Action for ToggleSystem {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.system.run"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Run"
     }
 
@@ -730,11 +763,11 @@ struct ToggleSessionMute;
 
 #[async_trait]
 impl Action for ToggleSessionMute {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.audio.session.mute"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Mute or Unmute"
     }
 
@@ -789,11 +822,11 @@ struct SessionLouder;
 
 #[async_trait]
 impl Action for SessionLouder {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.audio.session.louder"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Louder"
     }
 
@@ -814,11 +847,11 @@ struct SessionQuieter;
 
 #[async_trait]
 impl Action for SessionQuieter {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.audio.session.quieter"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Quieter"
     }
 
@@ -839,11 +872,11 @@ struct SessionHalf;
 
 #[async_trait]
 impl Action for SessionHalf {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.audio.session.half"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Half Volume"
     }
 
@@ -864,11 +897,11 @@ struct SessionFull;
 
 #[async_trait]
 impl Action for SessionFull {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.audio.session.full"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Full Volume"
     }
 
@@ -917,11 +950,11 @@ struct PlayPause;
 
 #[async_trait]
 impl Action for PlayPause {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.media.playPause"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Play or Pause"
     }
 
@@ -962,11 +995,11 @@ struct NextTrack;
 
 #[async_trait]
 impl Action for NextTrack {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.media.next"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Next Track"
     }
 
@@ -1036,11 +1069,11 @@ struct QuitProcess;
 
 #[async_trait]
 impl Action for QuitProcess {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.process.quit"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Quit"
     }
 
@@ -1090,11 +1123,11 @@ struct ForceQuitProcess;
 
 #[async_trait]
 impl Action for ForceQuitProcess {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.process.forceQuit"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Force Quit"
     }
 
@@ -1135,11 +1168,11 @@ struct UninstallApp;
 
 #[async_trait]
 impl Action for UninstallApp {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.app.uninstall"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Uninstall"
     }
 
@@ -1351,11 +1384,11 @@ struct PasteSnippet;
 
 #[async_trait]
 impl Action for PasteSnippet {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.pasteSnippet"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Paste Snippet"
     }
 
@@ -1405,11 +1438,11 @@ struct PasteEmoji;
 
 #[async_trait]
 impl Action for PasteEmoji {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.emoji.paste"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Paste"
     }
 
@@ -1444,11 +1477,11 @@ struct OpenQuicklink;
 
 #[async_trait]
 impl Action for OpenQuicklink {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.openQuicklink"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Open Link"
     }
 
@@ -1484,11 +1517,11 @@ struct CopyAnswer;
 
 #[async_trait]
 impl Action for CopyAnswer {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.copyAnswer"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Copy Answer"
     }
 
@@ -1521,11 +1554,11 @@ struct TerminalHere;
 
 #[async_trait]
 impl Action for TerminalHere {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.file.terminal"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Open Terminal Here"
     }
 
@@ -1676,11 +1709,11 @@ struct RecycleFile;
 
 #[async_trait]
 impl Action for RecycleFile {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.file.recycle"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Move to Recycle Bin"
     }
 
@@ -1791,11 +1824,11 @@ struct CopyPath;
 
 #[async_trait]
 impl Action for CopyPath {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.copyPath"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Copy Path"
     }
 
@@ -1831,11 +1864,11 @@ struct RevealInFolder;
 
 #[async_trait]
 impl Action for RevealInFolder {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.revealInFolder"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Show in Folder"
     }
 
@@ -1877,11 +1910,11 @@ struct CopyName;
 
 #[async_trait]
 impl Action for CopyName {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.copyName"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Copy Name"
     }
 
@@ -1921,11 +1954,11 @@ struct Transform {
 
 #[async_trait]
 impl Action for Transform {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         self.id
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         self.title
     }
 
@@ -1961,11 +1994,11 @@ struct RestoreWorkspace;
 
 #[async_trait]
 impl Action for RestoreWorkspace {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.workspace.restore"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Restore"
     }
 
@@ -1999,11 +2032,11 @@ struct MakeWorkspacePortable;
 
 #[async_trait]
 impl Action for MakeWorkspacePortable {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.workspace.portable"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Use Named Positions"
     }
 
@@ -2035,11 +2068,11 @@ struct ForgetWorkspace;
 
 #[async_trait]
 impl Action for ForgetWorkspace {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.workspace.forget"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Forget"
     }
 
@@ -2072,11 +2105,11 @@ struct ForgetConversation;
 
 #[async_trait]
 impl Action for ForgetConversation {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.conversation.forget"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Forget"
     }
 
@@ -2117,11 +2150,11 @@ struct CopyConversation;
 
 #[async_trait]
 impl Action for CopyConversation {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.conversation.copy"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Copy Transcript"
     }
 
@@ -2166,11 +2199,11 @@ struct CopyStoreSource;
 
 #[async_trait]
 impl Action for CopyStoreSource {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.store.copySource"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Copy Source Link"
     }
 
@@ -2227,11 +2260,11 @@ struct RemoveExtension;
 
 #[async_trait]
 impl Action for RemoveExtension {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.store.remove"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Remove"
     }
 
@@ -2314,11 +2347,11 @@ struct ReadAloud;
 
 #[async_trait]
 impl Action for ReadAloud {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.text.readAloud"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Read Aloud"
     }
 
@@ -2355,11 +2388,11 @@ struct StopReading;
 
 #[async_trait]
 impl Action for StopReading {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.text.stopReading"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Stop Reading"
     }
 
@@ -2440,11 +2473,11 @@ struct CopyClipboardEntry;
 
 #[async_trait]
 impl Action for CopyClipboardEntry {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.clipboard.copy"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Copy"
     }
 
@@ -2556,11 +2589,11 @@ struct FocusWindow;
 
 #[async_trait]
 impl Action for FocusWindow {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.window.focus"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Switch To"
     }
 
@@ -2587,11 +2620,11 @@ struct CloseWindow;
 
 #[async_trait]
 impl Action for CloseWindow {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.window.close"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Close Window"
     }
 
@@ -2625,11 +2658,11 @@ struct WindowState {
 
 #[async_trait]
 impl Action for WindowState {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         self.id
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         self.title
     }
 
@@ -2660,11 +2693,11 @@ struct KeepOnTop;
 
 #[async_trait]
 impl Action for KeepOnTop {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.window.keepOnTop"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Keep on Top"
     }
 
@@ -2701,11 +2734,11 @@ struct SnapWindow {
 
 #[async_trait]
 impl Action for SnapWindow {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         self.slot.action_id()
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         self.slot.title()
     }
 
@@ -2737,11 +2770,11 @@ struct NextDisplay;
 
 #[async_trait]
 impl Action for NextDisplay {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.window.nextDisplay"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Move to Next Display"
     }
 
@@ -2779,11 +2812,11 @@ struct SwitchToTab;
 
 #[async_trait]
 impl Action for SwitchToTab {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.browser.tab.focus"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Switch To Tab"
     }
 
@@ -2869,11 +2902,11 @@ struct MarkUp;
 
 #[async_trait]
 impl Action for MarkUp {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.markUp"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Mark Up"
     }
 
@@ -2913,11 +2946,11 @@ struct ExtractText;
 
 #[async_trait]
 impl Action for ExtractText {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.extractText"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Extract Text"
     }
 
@@ -2978,11 +3011,11 @@ struct SearchWeb;
 
 #[async_trait]
 impl Action for SearchWeb {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.searchWeb"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Search the Web"
     }
 
@@ -3028,11 +3061,11 @@ struct OpenUrl;
 
 #[async_trait]
 impl Action for OpenUrl {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.openUrl"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Open in Browser"
     }
 
@@ -3071,11 +3104,11 @@ struct CopyUrl;
 
 #[async_trait]
 impl Action for CopyUrl {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.copyUrl"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Copy Address"
     }
 
@@ -3113,11 +3146,11 @@ struct HashFile;
 
 #[async_trait]
 impl Action for HashFile {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.file.hash"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Copy SHA-256"
     }
 
@@ -3152,11 +3185,11 @@ struct CompressFile;
 
 #[async_trait]
 impl Action for CompressFile {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.file.compress"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Compress"
     }
 
@@ -3205,11 +3238,11 @@ struct RenameFile;
 
 #[async_trait]
 impl Action for RenameFile {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.file.rename"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Rename"
     }
 
@@ -3260,11 +3293,11 @@ struct MoveFile;
 
 #[async_trait]
 impl Action for MoveFile {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.file.move"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         // Not "Move To". The panel filters by substring, so that is a prefix
         // of "Move to Recycle Bin" and typing "move to" put the one that
         // removes the file above the one that moves it. The extra word is the
@@ -3337,11 +3370,11 @@ struct VerifyFile;
 
 #[async_trait]
 impl Action for VerifyFile {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.file.verify"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Check Against Copied Checksum"
     }
 
@@ -3401,11 +3434,11 @@ struct LookUpFile;
 
 #[async_trait]
 impl Action for LookUpFile {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.file.lookUp"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Look Up on VirusTotal"
     }
 
@@ -3455,11 +3488,11 @@ struct RunScript;
 
 #[async_trait]
 impl Action for RunScript {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "sill.script.run"
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         "Run"
     }
 

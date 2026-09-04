@@ -300,11 +300,18 @@ pub trait Action: Send + Sync {
     /// Stable across releases: it is what a shortcut, a workflow step or a
     /// stored preference refers to. Renaming one breaks those; changing the
     /// title does not.
-    fn id(&self) -> &'static str;
+    ///
+    /// Borrowed from the action rather than `&'static str`, which is what this
+    /// was. Every action Sill ships names itself with a literal and still
+    /// does. What `'static` also said, without meaning to, is that **no action
+    /// can be learned about while Sill is running**, and that is the whole of
+    /// why an extension could not contribute one: its id is read out of a
+    /// manifest at install time and is a `String` the action owns.
+    fn id(&self) -> &str;
 
     /// What the action panel shows. Imperative, because it is a thing you are
     /// about to do rather than a description of what it does.
-    fn title(&self) -> &'static str;
+    fn title(&self) -> &str;
 
     fn accepts(&self, kind: ObjectKind) -> bool;
 
@@ -340,8 +347,8 @@ pub trait Action: Send + Sync {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionInfo {
-    pub id: &'static str,
-    pub title: &'static str,
+    pub id: String,
+    pub title: String,
     pub primary: bool,
     /// The chord that runs it, after whatever the person has set.
     ///
@@ -357,8 +364,29 @@ pub struct ActionInfo {
 /// accept this kind" and "which is primary", and both are linear over a set
 /// small enough that anything cleverer would be slower to read and no faster
 /// to run.
+///
+/// ## Two lists, one vocabulary
+///
+/// [`Self::shipped`] is the vocabulary compiled into this build. It cannot
+/// change while Sill runs, because nothing can add a Rust type at run time.
+///
+/// [`Self::contributed`] is what installed extensions declare, which changes
+/// the moment somebody installs, updates or removes one. It is **the same
+/// trait, reached through the same `for_kind`, `get`, `primary` and
+/// `perform`**: the split is about when the list is known, not about what is
+/// in it, and every question anybody asks the registry sees both. A second
+/// lookup path for extension actions is the exact shape (two lists that must
+/// agree, with nothing making them agree) that has cost this project a search
+/// bug, a launch bug and an icon table.
+///
+/// `ArcSwap` for the same reason the index uses one: reads happen on every
+/// selection change and must not take a lock, and writes happen when an
+/// extension is installed, which is rare and human-paced.
 pub struct ActionRegistry {
-    actions: Vec<Box<dyn Action>>,
+    /// The actions this build was compiled with.
+    shipped: Vec<std::sync::Arc<dyn Action>>,
+    /// The actions installed extensions declare, replaced whole on a rescan.
+    contributed: arc_swap::ArcSwap<Vec<std::sync::Arc<dyn Action>>>,
 }
 
 impl ActionRegistry {
@@ -401,15 +429,44 @@ impl ActionRegistry {
     }
 
     pub fn new(actions: Vec<Box<dyn Action>>) -> Self {
-        Self { actions }
+        Self {
+            shipped: actions.into_iter().map(std::sync::Arc::from).collect(),
+            contributed: arc_swap::ArcSwap::from_pointee(Vec::new()),
+        }
+    }
+
+    /// Replaces what installed extensions contribute.
+    ///
+    /// Whole, never merged. An extension being removed is a shorter list, and
+    /// a merge could only ever add: an action whose extension was uninstalled
+    /// would keep its row in the panel and, pressed, would start a bundle that
+    /// is not on disk any more.
+    ///
+    /// Called from one place, [`crate::adopt_commands`], which is also the one
+    /// place the index's commands are replaced. Two rescans of the same thing
+    /// with nothing making them agree is how the panel ends up offering an
+    /// action for an extension the index has already forgotten.
+    pub fn contribute(&self, actions: Vec<std::sync::Arc<dyn Action>>) {
+        self.contributed.store(std::sync::Arc::new(actions));
+    }
+
+    /// Everything there is, shipped first.
+    ///
+    /// Shipped first is a design decision rather than bookkeeping: it is what
+    /// puts an extension's contributed action **below** every action Sill
+    /// itself offers on a file, so installing something cannot quietly take
+    /// the top of somebody's panel.
+    fn everything(&self) -> Vec<std::sync::Arc<dyn Action>> {
+        let mut out = self.shipped.clone();
+        out.extend(self.contributed.load().iter().cloned());
+        out
     }
 
     /// What can be done to this kind, primary first.
-    pub fn for_kind(&self, kind: ObjectKind) -> Vec<&dyn Action> {
-        let mut found: Vec<&dyn Action> = self
-            .actions
-            .iter()
-            .map(|a| a.as_ref())
+    pub fn for_kind(&self, kind: ObjectKind) -> Vec<std::sync::Arc<dyn Action>> {
+        let mut found: Vec<std::sync::Arc<dyn Action>> = self
+            .everything()
+            .into_iter()
             .filter(|a| a.accepts(kind))
             .collect();
 
@@ -421,18 +478,26 @@ impl ActionRegistry {
     }
 
     /// What Enter does for this kind.
-    pub fn primary(&self, kind: ObjectKind) -> Option<&dyn Action> {
-        self.actions
+    ///
+    /// Only ever something Sill ships, and that is two guards rather than one.
+    /// `contributed` is not searched at all here, and even if it were,
+    /// [`Self::everything`] puts what Sill ships first so `find` reaches it
+    /// first. Sabotaging either alone leaves the other holding, which is why
+    /// `tests/actions.rs::nothing_contributed_can_take_enter_even_if_it_claims_it`
+    /// only fails when both are broken together.
+    ///
+    /// Worth two, because Enter is the key somebody presses without looking
+    /// and this is the one thing installing a stranger's extension must never
+    /// be able to change.
+    pub fn primary(&self, kind: ObjectKind) -> Option<std::sync::Arc<dyn Action>> {
+        self.shipped
             .iter()
-            .map(|a| a.as_ref())
             .find(|a| a.accepts(kind) && a.is_primary(kind))
+            .cloned()
     }
 
-    pub fn get(&self, id: &str) -> Option<&dyn Action> {
-        self.actions
-            .iter()
-            .map(|a| a.as_ref())
-            .find(|a| a.id() == id)
+    pub fn get(&self, id: &str) -> Option<std::sync::Arc<dyn Action>> {
+        self.everything().into_iter().find(|a| a.id() == id)
     }
 
     /// What the window draws for this kind, with the chords it runs on.
@@ -447,8 +512,8 @@ impl ActionRegistry {
         self.for_kind(kind)
             .into_iter()
             .map(|a| ActionInfo {
-                id: a.id(),
-                title: a.title(),
+                id: a.id().to_string(),
+                title: a.title().to_string(),
                 primary: a.is_primary(kind),
                 shortcut: crate::action_keys::effective(keys, a.id(), a.shortcut()),
             })
@@ -461,22 +526,19 @@ impl ActionRegistry {
     /// action is a fact about the action rather than about the kind it was
     /// found under, and the same action reached from a file and from a folder
     /// is one row.
-    pub fn all(
-        &self,
-    ) -> Vec<(
-        &'static str,
-        &'static str,
-        Option<crate::action_keys::Shortcut>,
-    )> {
-        self.actions
-            .iter()
-            .map(|a| (a.id(), a.title(), a.shortcut()))
+    pub fn all(&self) -> Vec<(String, String, Option<crate::action_keys::Shortcut>)> {
+        self.everything()
+            .into_iter()
+            .map(|a| (a.id().to_string(), a.title().to_string(), a.shortcut()))
             .collect()
     }
 
     /// Every registered id, for the tests that check they are unique.
-    pub fn ids(&self) -> Vec<&'static str> {
-        self.actions.iter().map(|a| a.id()).collect()
+    pub fn ids(&self) -> Vec<String> {
+        self.everything()
+            .into_iter()
+            .map(|a| a.id().to_string())
+            .collect()
     }
 }
 

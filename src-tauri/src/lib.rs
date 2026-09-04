@@ -202,11 +202,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
         if !cached.is_empty() {
             println!("[sill] {} entries from cache", cached.len());
 
-            let aliases = aliases.clone();
-            state.update_index(move |index| {
-                index.commands = cached;
-                index.aliases = aliases;
-            });
+            adopt_commands(&handle, &state, cached, Some(aliases.clone()));
 
             let _ = handle.emit("sill://registry-updated", 0);
         }
@@ -229,10 +225,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
 
         // Only what the scan produced. Snippets, quicklinks and scripts are
         // somebody else's to maintain and are left exactly as they are.
-        state.update_index(move |index| {
-            index.commands = fresh;
-            index.aliases = aliases;
-        });
+        adopt_commands(&handle, &state, fresh, Some(aliases));
 
         if let Some(text) = text {
             tauri::async_runtime::spawn_blocking(move || {
@@ -934,6 +927,43 @@ pub(crate) fn reload_scripts(app: &AppHandle) {
     });
 }
 
+/**
+Puts a freshly scanned set of commands in the index, and rebuilds what the
+installed extensions contribute to the action panel.
+
+**The only place `index.commands` is replaced**, and `verify:source` holds that.
+The two things here are one fact read twice: the index says which extension
+commands exist, and the action registry says which of them can be run on a
+file. A second place that set one without the other is the shape this codebase
+already knows by heart, and here it would be an action panel offering to run a
+command out of an extension that has just been uninstalled.
+
+The contribution is built from the list about to land rather than read back
+afterwards, so there is no window in which the two disagree and no second
+lookup to get wrong.
+
+`aliases` only when the caller has some; the scan carries them and a reindex
+does not.
+*/
+pub(crate) fn adopt_commands(
+    app: &AppHandle,
+    state: &RegistryState,
+    commands: Vec<registry::CommandRecord>,
+    aliases: Option<registry::Aliases>,
+) {
+    let contributed = actions::extension::contributed(&commands);
+
+    state.update_index(move |index| {
+        index.commands = commands;
+        if let Some(aliases) = aliases {
+            index.aliases = aliases;
+        }
+    });
+
+    app.state::<action::ActionRegistry>()
+        .contribute(contributed);
+}
+
 /// Rebuilds the index in the background.
 pub(crate) fn reload_index(app: &AppHandle) {
     use std::sync::atomic::Ordering;
@@ -974,7 +1004,7 @@ pub(crate) fn reload_index(app: &AppHandle) {
 
             if !fresh.is_empty() {
                 let total = fresh.len();
-                state.update_index(move |index| index.commands = fresh);
+                adopt_commands(&handle, &state, fresh, None);
                 println!("[sill] reindexed {total} entries");
                 let _ = handle.emit("sill://registry-updated", total);
             }

@@ -99,7 +99,7 @@ pub(crate) async fn launch_command(
     }
 
     let outcome = actions
-        .perform(&ActionCtx::new(app.clone()), action, &object)
+        .perform(&ActionCtx::new(app.clone()), action.as_ref(), &object)
         .await?;
 
     /*
@@ -425,7 +425,7 @@ pub(crate) async fn extract_text_from_last_image(app: AppHandle) -> Result<Strin
         .ok_or_else(|| "text recognition is not available".to_string())?;
 
     let outcome = registry
-        .perform(&ActionCtx::new(app.clone()), action, &object)
+        .perform(&ActionCtx::new(app.clone()), action.as_ref(), &object)
         .await?;
     Ok(outcome.message)
 }
@@ -488,7 +488,7 @@ pub(crate) async fn run_action(
     let outcome = registry
         .perform(
             &ActionCtx::answering(app.clone(), argument),
-            chosen,
+            chosen.as_ref(),
             &object,
         )
         .await?;

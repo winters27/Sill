@@ -1067,21 +1067,21 @@ pub(crate) async fn action_shortcuts(
         .all()
         .into_iter()
         .map(|(id, title, default)| {
-            let shortcut = crate::action_keys::effective(&keys, id, default);
+            let shortcut = crate::action_keys::effective(&keys, &id, default);
 
             ActionShortcut {
+                overridden: keys.overrides.contains_key(&id),
+                contested: clashes.get(&id).map(|c| c.other.clone()),
+                chord: shortcut.map(|s| s.chord()).unwrap_or_default(),
                 id,
                 title,
-                chord: shortcut.map(|s| s.chord()).unwrap_or_default(),
-                overridden: keys.overrides.contains_key(id),
-                contested: clashes.get(id).map(|c| c.other.clone()),
             }
         })
         .collect();
 
     // Alphabetical, because registration order is an implementation detail and
     // this is a list somebody scans for a name.
-    rows.sort_by(|a, b| a.title.cmp(b.title));
+    rows.sort_by(|a, b| a.title.cmp(&b.title));
     Ok(rows)
 }
 
@@ -1089,8 +1089,8 @@ pub(crate) async fn action_shortcuts(
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ActionShortcut {
-    pub id: &'static str,
-    pub title: &'static str,
+    pub id: String,
+    pub title: String,
     /// The accelerator, or empty for an action with no key.
     pub chord: String,
     /// Whether this was set by hand rather than shipped.
