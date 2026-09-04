@@ -27,6 +27,7 @@
   import ClipboardPanel from "$lib/components/settings/ClipboardPanel.svelte";
   import SnippetsPanel from "$lib/components/settings/SnippetsPanel.svelte";
   import AutomationsPanel from "$lib/components/settings/AutomationsPanel.svelte";
+  import McpPanel from "$lib/components/settings/McpPanel.svelte";
   import QuicklinksPanel from "$lib/components/settings/QuicklinksPanel.svelte";
   import ShortcutsPanel from "$lib/components/settings/ShortcutsPanel.svelte";
   import ThemeCards from "$lib/components/settings/ThemeCards.svelte";
@@ -113,6 +114,11 @@
       id: "automations",
       name: "Automations",
       blurb: "Triggers Windows runs on a schedule, so Sill runs nothing while it waits",
+    },
+    {
+      id: "mcp",
+      name: "MCP Servers",
+      blurb: "Programs whose tools appear in the action panel, started only when you run one",
     },
     {
       id: "clipboard",
@@ -1284,6 +1290,8 @@
             <QuicklinksPanel />
           {:else if active === "automations"}
             <AutomationsPanel />
+          {:else if active === "mcp"}
+            <McpPanel prefs={p} {commit} />
           {:else if active === "emoji"}
             <EmojiPanel prefs={p} {commit} />
           {:else if active === "clipboard"}

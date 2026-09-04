@@ -150,6 +150,10 @@ pub const PANELS: &[Panel] = &[
         id: "widgets",
         sections: &["widgets"],
     },
+    Panel {
+        id: "mcp",
+        sections: &["mcp"],
+    },
 ];
 
 /// Marks a file as one of Sill's own exports.
@@ -1049,6 +1053,12 @@ mod tests {
         prefs.tts.voice = "echo".into();
         prefs.widgets.fahrenheit = !prefs.widgets.fahrenheit;
         prefs.privacy.paused = !prefs.privacy.paused;
+        prefs.mcp.servers = vec![crate::preferences::McpServer {
+            name: "notes".into(),
+            command: "node".into(),
+            args: vec!["server.js".into()],
+            actions: Vec::new(),
+        }];
 
         prefs
     }

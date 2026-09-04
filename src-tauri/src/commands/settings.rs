@@ -188,6 +188,23 @@ pub(crate) async fn set_preferences(
             .update_index(move |index| index.aliases = aliases);
     }
 
+    /*
+     * The action panel, when the MCP servers changed.
+     *
+     * Through the same funnel a rescan uses, because `contribute` replaces the
+     * whole contributed list: a second route that set only the MCP half would
+     * take every extension's action out of the panel until the next scan, and
+     * a route that set only the extension half would do the reverse. There is
+     * one place both are built, and this asks it to run again.
+     *
+     * Compared rather than run unconditionally. Every settings save reaches
+     * here, and rebuilding the panel for somebody dragging the glass slider is
+     * work bought for nothing.
+     */
+    if previous.mcp != prefs.mcp {
+        crate::readopt_commands(&app).await;
+    }
+
     if previous.bindings != prefs.bindings {
         crate::bindings::apply(&app, &previous.bindings, &prefs.bindings);
     }

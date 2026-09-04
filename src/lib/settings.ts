@@ -396,6 +396,7 @@ export interface Preferences {
   actionKeys: ActionKeySettings;
   emoji: EmojiSettings;
   privacy: PrivacySettings;
+  mcp: import("$lib/mcp").McpSettings;
 }
 
 /**

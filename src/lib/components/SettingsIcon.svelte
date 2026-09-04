@@ -11,6 +11,7 @@
     | "shortcuts"
     | "quicklinks"
     | "automations"
+    | "mcp"
     | "clipboard"
     | "history"
     | "sources"
@@ -54,9 +55,9 @@
   /**
    * Panels with drawn art. The rest use the line glyphs below.
    *
-   * `history` and `automations` reach the fallback. The second is the case
-   * this was kept for: a panel that shipped before its art was drawn shows a
-   * line glyph rather than a broken image.
+   * `history`, `automations` and `mcp` reach the fallback. The second is the
+   * case this was kept for: a panel that shipped before its art was drawn
+   * shows a line glyph rather than a broken image.
    */
   const ART = new Set<IconName>([
     "general",
@@ -218,6 +219,14 @@
     <path d="m6 8 4 4-4 4" />
     <path d="M13 16h5" />
     <rect x="2.5" y="4" width="19" height="16" rx="2.5" />
+  {:else if name === "mcp"}
+    <!-- A plug going into a socket: something of somebody else's, connected
+         to Sill on purpose. A robot or a brain would be saying "AI", and
+         these are ordinary programs on a pipe. -->
+    <path d="M9 3v4M15 3v4" />
+    <rect x="6.5" y="7" width="11" height="5.5" rx="1.5" />
+    <path d="M12 12.5V17" />
+    <path d="M8.5 17h7a1 1 0 0 1 1 1v3h-9v-3a1 1 0 0 1 1-1Z" />
   {:else}
     <circle cx="12" cy="12" r="9" />
     <path d="M12 11v5.5M12 7.8h.01" />

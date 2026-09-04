@@ -204,7 +204,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
         if !cached.is_empty() {
             println!("[sill] {} entries from cache", cached.len());
 
-            adopt_commands(&handle, &state, cached, Some(aliases.clone()));
+            adopt_commands(&handle, &state, cached, Some(aliases.clone())).await;
 
             let _ = handle.emit("sill://registry-updated", 0);
         }
@@ -227,7 +227,7 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
 
         // Only what the scan produced. Snippets, quicklinks and scripts are
         // somebody else's to maintain and are left exactly as they are.
-        adopt_commands(&handle, &state, fresh, Some(aliases));
+        adopt_commands(&handle, &state, fresh, Some(aliases)).await;
 
         if let Some(text) = text {
             tauri::async_runtime::spawn_blocking(move || {
@@ -959,14 +959,39 @@ lookup to get wrong.
 
 `aliases` only when the caller has some; the scan carries them and a reindex
 does not.
+
+**Both kinds of contributed action are built here**, and that is the same rule
+arriving a second time. An extension declares its actions in a manifest the
+index carries; a configured MCP server declares its own in the preferences.
+`ActionRegistry::contribute` replaces the whole list, so anything rebuilding one
+half without the other would silently drop the other half: installing an
+extension would take away every MCP action until the next settings save, and
+saving a setting would take away every extension action until the next scan.
+One funnel, both halves, every time. `verify:source` holds all of it.
+
+Reading the MCP declarations here rather than taking them as a parameter is
+what keeps the preferences the one source of truth for them. Nothing is started
+and nothing is asked of any server: see [`actions::mcp::contributed`].
 */
-pub(crate) fn adopt_commands(
+pub(crate) async fn adopt_commands(
     app: &AppHandle,
     state: &RegistryState,
     commands: Vec<registry::CommandRecord>,
     aliases: Option<registry::Aliases>,
 ) {
-    let contributed = actions::extension::contributed(&commands);
+    let mut contributed = actions::extension::contributed(&commands);
+
+    // Held for one clone and let go, before anything else here runs. The
+    // settings lock is taken by every save and by the AI gate, and this is on
+    // the path a rescan takes.
+    let servers = match app.try_state::<PrefsState>() {
+        Some(prefs) => prefs.inner.lock().await.mcp.servers.clone(),
+        // Only reachable before preferences are managed, which is before any
+        // scan has run. An empty list is the honest answer rather than a panic.
+        None => Vec::new(),
+    };
+
+    contributed.extend(actions::mcp::contributed(&servers));
 
     state.update_index(move |index| {
         index.commands = commands;
@@ -977,6 +1002,20 @@ pub(crate) fn adopt_commands(
 
     app.state::<action::ActionRegistry>()
         .contribute(contributed);
+}
+
+/// Rebuilds what is contributed, without rescanning anything.
+///
+/// For a settings save that changed the MCP servers. The index's commands have
+/// not moved, so they are read back out and handed straight to the funnel
+/// rather than a second route being opened to the action registry: the whole
+/// point of `adopt_commands` being the only caller of `contribute` is that
+/// there is nowhere else for the two halves to come apart.
+pub(crate) async fn readopt_commands(app: &AppHandle) {
+    let state = app.state::<RegistryState>().inner().clone();
+    let commands = state.index().commands.clone();
+
+    adopt_commands(app, &state, commands, None).await;
 }
 
 /// Rebuilds the index in the background.
@@ -1019,7 +1058,7 @@ pub(crate) fn reload_index(app: &AppHandle) {
 
             if !fresh.is_empty() {
                 let total = fresh.len();
-                adopt_commands(&handle, &state, fresh, None);
+                adopt_commands(&handle, &state, fresh, None).await;
                 println!("[sill] reindexed {total} entries");
                 let _ = handle.emit("sill://registry-updated", total);
             }
@@ -2091,6 +2130,7 @@ pub fn run() {
             commands::automation::schedulable,
             commands::automation::schedule,
             commands::automation::unschedule,
+            commands::mcp::mcp_tools,
             commands::search::search_commands,
             commands::search::search_elsewhere,
             commands::search::complete_path,

@@ -43,6 +43,7 @@ pub const PANELS: &[&str] = &[
     "shortcuts",
     "quicklinks",
     "automations",
+    "mcp",
     "clipboard",
     "sources",
     "files",
@@ -504,6 +505,25 @@ pub const SETTINGS: &[Setting] = &[
         "Automations",
         "Triggers in Task Scheduler",
         "automation trigger schedule scheduled task daily logon unlock cron timer",
+    ),
+    // ----------------------------------------------------------------- mcp
+    s(
+        "mcp",
+        "MCP Servers",
+        "MCP servers",
+        "mcp model context protocol server tool stdio agent",
+    ),
+    s(
+        "mcp",
+        "MCP Servers",
+        "Actions from a server",
+        "mcp tool action panel file folder contribute",
+    ),
+    s(
+        "mcp",
+        "MCP Servers",
+        "Starting one takes a moment",
+        "mcp slow start cost npx node process",
     ),
     // ---------------------------------------------------------- quicklinks
     s(

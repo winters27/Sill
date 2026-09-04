@@ -1952,3 +1952,392 @@ fn nothing_contributed_can_take_enter_even_if_it_claims_it() {
         "the action was dropped rather than merely denied Enter"
     );
 }
+
+// ------------------------------------ what an MCP server contributes
+
+/// One configured server, shaped the way the preferences hold it.
+fn serving(name: &str, tool: &str, title: &str, on: &[&str]) -> sill_lib::preferences::McpServer {
+    sill_lib::preferences::McpServer {
+        name: name.to_string(),
+        command: "node".to_string(),
+        args: vec!["server.mjs".to_string()],
+        actions: vec![sill_lib::preferences::McpAction {
+            tool: tool.to_string(),
+            title: title.to_string(),
+            acts_on: on.iter().map(|kind| kind.to_string()).collect(),
+            argument: "path".to_string(),
+        }],
+    }
+}
+
+/// Actions a configured MCP server declares.
+///
+/// Here rather than beside the code for the reason at the top of this file:
+/// building a `dyn Action` in the library's own test binary kills the whole
+/// `--lib` run at load. The same trap `actions::extension` names.
+mod from_a_server {
+    use sill_lib::actions::mcp::contributed;
+    use sill_lib::object::ObjectKind;
+    use sill_lib::preferences::{McpAction, McpServer};
+
+    use super::serving;
+
+    #[test]
+    fn a_declared_tool_becomes_an_action_on_every_kind_it_named() {
+        let built = contributed(&[serving(
+            "notes",
+            "summarise",
+            "Summarise",
+            &["file", "folder"],
+        )]);
+
+        assert_eq!(built.len(), 1);
+        let action = &built[0];
+
+        assert_eq!(action.id(), "mcp.notes.summarise");
+        assert_eq!(action.title(), "Summarise");
+        assert!(action.accepts(ObjectKind::File));
+        assert!(action.accepts(ObjectKind::Folder));
+        assert!(!action.accepts(ObjectKind::Window));
+    }
+
+    /// The id is Sill's, so two servers with a tool of the same name do not
+    /// shadow each other and nobody can claim `sill.launch`.
+    #[test]
+    fn two_servers_with_the_same_tool_name_get_different_ids() {
+        let built = contributed(&[
+            serving("notes", "run", "Run", &["file"]),
+            serving("tools", "run", "Run", &["file"]),
+        ]);
+
+        let ids: Vec<&str> = built.iter().map(|a| a.id()).collect();
+        assert_eq!(ids, ["mcp.notes.run", "mcp.tools.run"]);
+    }
+
+    /**
+    Two servers a person gave the same name to do not both get the id.
+
+    The one thing an MCP server can do that an installed extension cannot: an
+    extension's name is a directory on disk, so it is unique by construction,
+    while a server's name is typed into a settings field. `ActionRegistry::get`
+    returns the first match for ever, so a duplicate would put a row in the
+    panel that silently ran the other server's tool.
+    */
+    #[test]
+    fn two_servers_a_person_named_the_same_do_not_both_contribute() {
+        let built = contributed(&[
+            serving("notes", "run", "The one they set up first", &["file"]),
+            serving("notes", "run", "The one that came second", &["file"]),
+        ]);
+
+        assert_eq!(built.len(), 1, "an id was minted twice");
+        assert_eq!(built[0].title(), "The one they set up first");
+    }
+
+    /// Enter belongs to Sill, whatever is configured.
+    #[test]
+    fn nothing_from_a_server_claims_enter() {
+        let built = contributed(&[serving("notes", "summarise", "Summarise", &["file"])]);
+
+        for kind in ObjectKind::ALL {
+            assert!(
+                !built[0].is_primary(*kind),
+                "an MCP action claims Enter on {}",
+                kind.name()
+            );
+        }
+    }
+
+    /// A kind from a newer Sill is skipped and the rest of the row survives.
+    #[test]
+    fn an_unknown_kind_is_dropped_rather_than_taking_the_action_with_it() {
+        let built = contributed(&[serving(
+            "notes",
+            "summarise",
+            "Summarise",
+            &["file", "hologram"],
+        )]);
+
+        assert_eq!(built.len(), 1);
+        assert!(built[0].accepts(ObjectKind::File));
+    }
+
+    #[test]
+    fn a_declaration_of_nothing_known_contributes_no_action() {
+        assert!(contributed(&[serving("notes", "summarise", "S", &["hologram"])]).is_empty());
+        assert!(contributed(&[serving("notes", "summarise", "S", &[])]).is_empty());
+    }
+
+    /// A row somebody is still filling in contributes nothing rather than an
+    /// action that would try to start a program with no name.
+    #[test]
+    fn a_half_written_server_contributes_nothing() {
+        let mut blank = serving("", "summarise", "S", &["file"]);
+        assert!(contributed(&[blank.clone()]).is_empty(), "no name");
+
+        blank.name = "notes".to_string();
+        blank.command = "   ".to_string();
+        assert!(contributed(&[blank.clone()]).is_empty(), "no command");
+
+        blank.command = "node".to_string();
+        blank.actions = vec![McpAction {
+            tool: String::new(),
+            title: "S".to_string(),
+            acts_on: vec!["file".to_string()],
+            argument: String::new(),
+        }];
+        assert!(contributed(&[blank]).is_empty(), "no tool");
+    }
+
+    /// A tool with no title is drawn under its own name.
+    ///
+    /// A blank row in the action panel is one nobody can press on purpose, and
+    /// the title is a field somebody can leave empty.
+    #[test]
+    fn a_tool_with_no_title_is_drawn_under_its_own_name() {
+        let built = contributed(&[serving("notes", "summarise", "  ", &["file"])]);
+
+        assert_eq!(built[0].title(), "summarise");
+    }
+
+    #[test]
+    fn a_server_with_no_actions_contributes_nothing() {
+        let built = contributed(&[McpServer {
+            name: "notes".to_string(),
+            command: "node".to_string(),
+            args: Vec::new(),
+            actions: Vec::new(),
+        }]);
+
+        assert!(built.is_empty());
+    }
+}
+
+/**
+An MCP action declares that it runs an arbitrary program, and everything
+follows from that.
+
+**This is the whole of where an MCP-contributed action sits relative to the
+Windows Hello gate**, and it sits there without a fourth gate being written.
+`P8-03` put `ShellExecution` and `FileWrite` behind Hello for the AI and MCP
+callers; `P8-02` refused to move a gate when narrowing what could be named was
+the honest fix. Neither is touched here. What is declared is what invoking one
+amounts to: starting a program named by a command line and handing it a string,
+which is `Capability::ShellExecution`'s own definition.
+
+Three things fall out, and each is checked here or in the test after this one:
+the model reaches it through Hello, a scheduled trigger cannot reach it at all,
+and a `sill://` link stops at the approval card.
+
+`ProcessLaunch`, which is what an extension's contributed action declares, would
+be wrong here and quietly so: it is the capability for opening a named thing the
+way double-clicking it would, and it is light enough that the model would reach
+one of these behind a card rather than a fingerprint.
+*/
+#[test]
+fn an_mcp_action_says_it_runs_a_program_and_therefore_reaches_hello() {
+    use sill_lib::ai::acting::{self, Gate};
+    use sill_lib::hello::Availability;
+
+    let built = sill_lib::actions::mcp::contributed(&[serving(
+        "notes",
+        "summarise",
+        "Summarise",
+        &["file"],
+    )]);
+    let action = &built[0];
+
+    assert_eq!(
+        action.capabilities(),
+        &[Capability::ShellExecution],
+        "an MCP action starts a program the person named on a command line",
+    );
+
+    assert_eq!(
+        acting::gate(action.capabilities(), Some(Availability::Ready)),
+        Gate::Hello,
+        "the model reaches somebody else's MCP server with nobody proving they are there",
+    );
+
+    // And on a machine with no reader it is still the card plus the reason,
+    // never nothing. Failing open here is the one thing that would matter.
+    assert_eq!(
+        acting::gate(action.capabilities(), Some(Availability::NoDevice)),
+        Gate::CardInstead(Availability::NoDevice),
+    );
+
+    assert!(
+        acting::needs_asking(action.capabilities()),
+        "a sill:// link naming this would run it without a card",
+    );
+}
+
+/// A trigger cannot start somebody's MCP server while nobody is there.
+///
+/// It falls out of the capability rather than out of a rule about MCP:
+/// `may_schedule` refuses everything `needs_asking` would stop for, and running
+/// an arbitrary program is squarely that. A three in the morning trigger that
+/// started a stranger's process is the thing `P8-02` exists to make impossible.
+#[test]
+fn an_mcp_action_cannot_be_put_on_a_schedule() {
+    let built = sill_lib::actions::mcp::contributed(&[serving(
+        "notes",
+        "summarise",
+        "Summarise",
+        &["file"],
+    )]);
+    let action = &built[0];
+
+    assert!(
+        sill_lib::automation::may_schedule(action.id(), action.capabilities()).is_err(),
+        "an MCP server can be started on a schedule with nobody there"
+    );
+}
+
+/// The registry answers about a third list without any of them taking it over.
+///
+/// The same behaviour `a_contributed_action_joins_the_registry_without_taking_it_over`
+/// holds for an extension, and it has to hold again: `contribute` replaces the
+/// whole contributed list, so both halves are built together and both have to
+/// arrive.
+#[test]
+fn an_mcp_action_joins_the_registry_beside_an_extensions() {
+    use sill_lib::actions::{extension, mcp};
+
+    let registry = builtins();
+
+    let before = registry
+        .describe(ObjectKind::File, &Default::default())
+        .len();
+
+    let mut both = extension::contributed(&[declaring("hashes", "blake3", "Hash", &["file"])]);
+    both.extend(mcp::contributed(&[serving(
+        "notes",
+        "summarise",
+        "Summarise",
+        &["file"],
+    )]));
+    registry.contribute(both);
+
+    let after = registry.describe(ObjectKind::File, &Default::default());
+
+    assert_eq!(after.len(), before + 2, "both halves did not arrive");
+    assert!(after.iter().any(|a| a.id == "extension.hashes.blake3"));
+    assert!(after.iter().any(|a| a.id == "mcp.notes.summarise"));
+
+    assert!(
+        registry.get("mcp.notes.summarise").is_some(),
+        "an MCP action cannot be looked up by the id the panel sends back"
+    );
+
+    // Enter is still Sill's, with two strangers' lists in the registry.
+    assert_eq!(
+        registry
+            .primary(ObjectKind::File)
+            .expect("Enter still does something to a file")
+            .id(),
+        "sill.launch",
+    );
+}
+
+/// Three namespaces, and nothing may wear another's.
+///
+/// `get` returns the first match for ever, so an MCP action able to spell
+/// `sill.launch` or `extension.hashes.blake3` would be an action that shadows
+/// one somebody trusts. The most hostile thing a person can type is a server
+/// name that spells out somebody else's id.
+#[test]
+fn nothing_an_mcp_server_contributes_wears_another_namespace() {
+    use sill_lib::actions::{extension, mcp};
+
+    let built = mcp::contributed(&[
+        serving("sill", "launch", "Open", &["file"]),
+        serving("extension.hashes", "blake3", "Hash", &["file"]),
+    ]);
+
+    for action in &built {
+        assert!(
+            action.id().starts_with(mcp::PREFIX),
+            "{} is not in the MCP namespace",
+            action.id()
+        );
+        assert!(
+            !action.id().starts_with("sill."),
+            "{} is in Sill's own namespace",
+            action.id()
+        );
+        assert!(
+            !action.id().starts_with(extension::PREFIX),
+            "{} is in an extension's namespace",
+            action.id()
+        );
+    }
+
+    let registry = builtins();
+    registry.contribute(built);
+
+    assert_eq!(
+        registry
+            .get("sill.launch")
+            .expect("Sill's own Open is still there")
+            .title(),
+        "Open",
+    );
+}
+
+/**
+Building the panel starts nothing and waits for nobody.
+
+The claim the whole design rests on, and the one thing that separates this from
+an extension: an MCP server is somebody else's program, and the action panel is
+drawn on a keystroke. If drawing it asked a server anything, a server that is
+slow, hung or uninstalled would be a launcher that stops responding.
+
+So `contributed` is a pure function over the declarations, and this measures
+that it is: three servers whose command lines name programs that do not exist
+on this machine, turned into actions, drawn, looked up and listed, well inside
+the time a single process start would take. `verify:source` holds the other
+half by refusing to let the builder name the client at all.
+*/
+#[test]
+fn drawing_the_panel_never_waits_for_a_server() {
+    let registry = builtins();
+
+    let servers: Vec<sill_lib::preferences::McpServer> = (0..3)
+        .map(|n| {
+            let mut server = serving(
+                &format!("ghost-{n}"),
+                "summarise",
+                "Summarise",
+                &["file", "folder"],
+            );
+            server.command = "sill-no-such-program-exists".to_string();
+            server
+        })
+        .collect();
+
+    let started = std::time::Instant::now();
+
+    registry.contribute(sill_lib::actions::mcp::contributed(&servers));
+
+    let drawn = registry.describe(ObjectKind::File, &Default::default());
+    let _ = registry.get("mcp.ghost-0.summarise");
+    let _ = registry.all();
+
+    let took = started.elapsed();
+
+    assert_eq!(
+        drawn.iter().filter(|a| a.id.starts_with("mcp.")).count(),
+        3,
+        "the three servers did not all reach the panel"
+    );
+
+    // A process start on this platform is tens of milliseconds at the very
+    // best, and a Node server is hundreds. Anything under a tenth of a second
+    // for three of them is proof nothing was started.
+    assert!(
+        took < std::time::Duration::from_millis(100),
+        "drawing the panel for three servers took {took:?}, which is long \
+         enough that something was asked of one of them"
+    );
+}

@@ -33,6 +33,7 @@ mod probe_capture;
 mod probe_catalog;
 mod probe_drive;
 mod probe_icons;
+mod probe_mcp_server;
 mod probe_media;
 mod probe_move_across_drives;
 mod probe_ocr;
