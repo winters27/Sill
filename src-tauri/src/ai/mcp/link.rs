@@ -128,6 +128,31 @@ where
     }
 }
 
+/// Whether two secrets match, without saying how far it got.
+///
+/// `==` on a string compares the length and then stops at the first byte that
+/// differs, so how long it takes depends on how much of the secret a caller
+/// guessed. Against a 32 byte value out of the system's random generator that
+/// is not an attack anybody is going to finish, over a loopback socket with a
+/// scheduler in the way: this is not fixing a way in, it is refusing to have
+/// the argument.
+///
+/// Written out rather than taking a dependency for four lines. The length is
+/// compared first and openly, because the length of Sill's own secret is a
+/// constant anybody can read in this file.
+fn same_secret(said: &str, token: &str) -> bool {
+    if said.len() != token.len() {
+        return false;
+    }
+
+    // Every byte, every time. `fold` rather than `all`, which would stop early
+    // and be the thing this exists to avoid.
+    said.bytes()
+        .zip(token.bytes())
+        .fold(0u8, |differences, (a, b)| differences | (a ^ b))
+        == 0
+}
+
 /// One connection, from the secret to the last message.
 async fn talk<F, Fut>(socket: TcpStream, token: &str, run: F)
 where
@@ -145,7 +170,7 @@ where
     // The secret first, before a single message is read. Anything else on this
     // machine can reach a loopback port; this is the whole of what stops it.
     match lines.next_line().await {
-        Ok(Some(said)) if said.trim() == token => {}
+        Ok(Some(said)) if same_secret(said.trim(), token) => {}
         // Nothing is written back. A caller that does not know the secret
         // learns only that the connection closed, which is all it is owed.
         _ => return,
@@ -463,5 +488,37 @@ mod tests {
         assert_eq!(one.len(), 64, "{one}");
         assert_ne!(one, two, "the same secret came back twice");
         assert!(one.chars().any(|c| c != '0'), "the secret is all zeroes");
+    }
+
+    /// The comparison still answers the question it is for.
+    ///
+    /// Constant time is worth nothing if it is also constantly wrong, and a
+    /// hand written comparison is exactly the kind of thing that passes every
+    /// test somebody remembered to write and accepts an empty secret.
+    #[test]
+    fn only_the_right_secret_gets_in() {
+        let token = secret();
+
+        assert!(same_secret(&token, &token));
+
+        assert!(!same_secret("", &token), "an empty secret was accepted");
+        assert!(
+            !same_secret(&token[..token.len() - 1], &token),
+            "a prefix was accepted"
+        );
+        assert!(
+            !same_secret(&format!("{token}x"), &token),
+            "the secret with something appended was accepted"
+        );
+
+        // One byte different, in the last position, which is the one a
+        // comparison that stops early would take longest to reach.
+        let mut nearly = token.clone();
+        let last = nearly.pop().expect("a secret has bytes");
+        nearly.push(if last == 'a' { 'b' } else { 'a' });
+        assert!(
+            !same_secret(&nearly, &token),
+            "a secret differing in one byte was accepted"
+        );
     }
 }

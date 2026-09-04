@@ -2813,6 +2813,67 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * The MCP secret is compared without stopping early.
+ *
+ * `same_secret` exists so that how long the comparison takes does not depend
+ * on how much of the secret a caller guessed. **No test can hold that.**
+ * Replacing the fold with `.all()` is still perfectly correct, passes every
+ * assertion about which secrets are accepted, and quietly gives the property
+ * back. Measured: that sabotage passed the unit test.
+ *
+ * Timing it instead would be a flaky test measuring a debug build, which is
+ * worse than nothing. So the shape of the code is what is held, and this is
+ * the only place that can hold it.
+ */
+{
+  const LINK = "src-tauri/src/ai/mcp/link.rs";
+
+  if (existsSync(LINK)) {
+    const text = readFileSync(LINK, "utf8");
+    const at = text.indexOf("fn same_secret(");
+
+    if (at < 0) {
+      fail(LINK, null, "same_secret is gone, and with it the constant time comparison of the MCP secret");
+    } else {
+      const opened = text.indexOf("{", at);
+      let depth = 0;
+      let end = opened;
+      for (let i = opened; i < text.length; i++) {
+        if (text[i] === "{") depth++;
+        else if (text[i] === "}" && --depth === 0) {
+          end = i;
+          break;
+        }
+      }
+
+      const body = text.slice(opened, end);
+
+      if (!body.includes("fold(")) {
+        fail(
+          LINK,
+          lineOf(text, at),
+          "same_secret no longer folds over every byte, so the comparison " +
+            "can stop at the first one that differs and how long it takes " +
+            "says how much of the secret was right",
+        );
+      }
+
+      for (const early of [".all(", ".any(", ".position(", ".find("]) {
+        if (body.includes(early)) {
+          fail(
+            LINK,
+            lineOf(text, at),
+            `same_secret uses ${early}, which stops at the first byte that ` +
+              "differs. It is still correct, which is exactly why no test " +
+              "catches it",
+          );
+        }
+      }
+    }
+  }
+}
+
+/*
  * Every recorded copy is still followed by the housekeeping.
  *
  * The two bounds on the clipboard, retention and the row cap, run from the
