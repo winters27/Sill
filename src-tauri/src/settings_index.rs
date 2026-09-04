@@ -703,6 +703,18 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "sources",
         "Sources",
+        "Open browser tabs",
+        "browser tabs open switch to tab chrome edge firefox zen window",
+    ),
+    s(
+        "sources",
+        "Sources",
+        "Include Firefox and browsers built on it",
+        "firefox zen librewolf waterfox tabs accessibility cost",
+    ),
+    s(
+        "sources",
+        "Sources",
         "Maximum browser results",
         "browser limit count results pages",
     ),

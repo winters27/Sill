@@ -193,6 +193,25 @@ impl Default for Want {
     }
 }
 
+/// The browser a running program is, if Sill knows it as one.
+///
+/// Named from the same table the profile reader uses, rather than a second
+/// list of executables kept beside it. A browser added to `KNOWN` becomes
+/// readable and switchable in the same line, and there is no way to add one
+/// and get half of it.
+///
+/// The file name only, and case-insensitively, because this is compared
+/// against whatever path a running process reports and that is neither
+/// normalised nor consistently cased.
+pub fn known_by_exe(exe: &str) -> Option<(&'static str, Family)> {
+    let exe = exe.to_ascii_lowercase();
+
+    KNOWN
+        .iter()
+        .find(|known| known.exe.eq_ignore_ascii_case(&exe))
+        .map(|known| (known.name, known.family))
+}
+
 fn base_dir(base: Base) -> Option<PathBuf> {
     let var = match base {
         Base::Local => "LOCALAPPDATA",

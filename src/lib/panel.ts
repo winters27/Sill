@@ -208,6 +208,11 @@ export function clipboardPanel(from: ClipboardPanel): ActionEntry[] {
 const UNNAMABLE = new Set([
   "answer",
   "window",
+  // A tab, for the same reason a window is: its id holds a window handle and
+  // the browser's own identifier for the tab, and both stop meaning anything
+  // when the tab closes. A name given to today's tab would point at nothing
+  // tomorrow.
+  "browser-tab",
   "audio-session",
   "process",
   // One row for whatever is playing, built by the search and gone the moment

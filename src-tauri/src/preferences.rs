@@ -844,6 +844,29 @@ pub struct Browsers {
     pub bookmarks: bool,
     /// Results requested per query.
     pub max_results: u32,
+    /// Tabs that are open right now, read through UI Automation.
+    ///
+    /// Its own switch rather than a part of `enabled`, because it is a
+    /// different act: `enabled` copies and reads files a browser wrote about
+    /// where somebody has been, and this asks a running browser what is on its
+    /// screen. Somebody can reasonably want either one without the other.
+    pub tabs: bool,
+    /// Whether the tab list includes Firefox and the browsers built on it.
+    ///
+    /// **The only setting in Sill that exists because of a cost inside
+    /// somebody else's program.** Chromium exposes its own window to
+    /// accessibility whether or not anybody looks. Firefox does not: it keeps
+    /// its accessibility engine switched off until a client asks, the asking
+    /// is unavoidable, and it stays on until that browser is restarted.
+    /// Measured on this machine, reading Zen's tabs once cost that browser
+    /// about **10 MB in the window's process and 85 MB across its content
+    /// processes**, and the first read took 374 ms against 54 ms for every
+    /// read after it.
+    ///
+    /// On by default once tabs are on at all, because somebody who turned this
+    /// feature on wants their own browser in it, and off is here for somebody
+    /// who reads that paragraph and would rather not.
+    pub tabs_firefox: bool,
 }
 
 impl Default for Browsers {
@@ -853,6 +876,8 @@ impl Default for Browsers {
             history: true,
             bookmarks: true,
             max_results: 6,
+            tabs: false,
+            tabs_firefox: true,
         }
     }
 }

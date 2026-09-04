@@ -1139,15 +1139,41 @@ else if (Number(css[1]) !== Number(rust[1])) {
    */
   const byExtension = new Set(["snippet"]);
 
-  for (const file of sources("src-tauri/src")) {
-    const rust = readFileSync(file, "utf8");
+  /*
+   * The window builds rows too, and this check could not see them.
+   *
+   * It read Rust only, on the assumption that a row's mode is Rust's to
+   * decide. Six row builders in `commands.ts` and `results.ts` set one
+   * themselves, and every one of those modes happened also to appear in Rust,
+   * so the hole never showed. A row whose mode exists **only** in the window
+   * went straight past: browser tabs are read by Rust and shaped into a row
+   * here, and this file passed with the heading deleted.
+   *
+   * The preview gallery is not in the list. Its `mode` fields are extension
+   * manifest data on fake listings, not row kinds, and `menu-bar` is a real
+   * value there and not a heading anything is missing.
+   */
+  const BUILDERS = [
+    "src/lib/exthost/commands.ts",
+    "src/lib/results.ts",
+    "src/lib/conversations.ts",
+    "src/routes/+page.svelte",
+  ];
 
-    for (const found of rust.matchAll(/\bmode:\s*"([a-z][a-z-]*)"/g)) {
+  const looked = [
+    ...sources("src-tauri/src"),
+    ...BUILDERS.filter((one) => existsSync(one)),
+  ];
+
+  for (const file of looked) {
+    const text = readFileSync(file, "utf8");
+
+    for (const found of text.matchAll(/\bmode:\s*"([a-z][a-z-]*)"/g)) {
       if (named.has(found[1]) || byExtension.has(found[1])) continue;
 
       fail(
         file,
-        lineOf(rust, found.index),
+        lineOf(text, found.index),
         `mode "${found[1]}" has no heading in ${LIST}, so its rows are filed ` +
           "under whichever extension produced them rather than under a name",
       );
