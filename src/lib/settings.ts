@@ -279,6 +279,15 @@ export type BindingSource =
   | { from: "clipboard" }
   /** The window in front, which is what makes a window action bindable. */
   | { from: "foregroundWindow" }
+  /**
+   * Whatever is selected right now, files or text.
+   *
+   * Explorer is asked first and answers without anything being copied; only
+   * when it has nothing does this fall back to reading text the way
+   * `selection` does. One key for "act on what I am looking at", rather than
+   * one for each kind of thing that might be under the cursor.
+   */
+  | { from: "currentSelection" }
   | { from: "command"; id: string };
 
 /** A key that runs an action without the launcher appearing. */

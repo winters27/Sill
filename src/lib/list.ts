@@ -72,6 +72,16 @@ const HEADINGS: Record<string, string> = {
    */
   setting: "Windows Settings",
   file: "Files",
+  /*
+   * Folders, apart from files.
+   *
+   * Only a selection produces this today: a search returns a folder under
+   * `file`, because there it is one answer among many to "where is the thing
+   * called X" and splitting the list in two would put a heading over one row.
+   * A selection is a list somebody made by hand, and telling them apart there
+   * is the difference between "Open Terminal Here" being offered and not.
+   */
+  folder: "Folders",
   "file-setup": "Files",
   window: "Open Windows",
   /*

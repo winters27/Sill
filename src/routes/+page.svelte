@@ -28,6 +28,7 @@
   import { askedForTheKeys, deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import { asUrl, isPath, isUrl } from "$lib/typed";
   import { conversationRows as conversationsAsRows } from "$lib/conversations";
+  import { selectionRows, type SelectedObject } from "$lib/selection";
   import { fileSearchRow } from "$lib/results";
   import {
     afterLaunch,
@@ -1812,6 +1813,35 @@
       return;
     }
 
+    /*
+     * Enter on something that was already selected runs whatever Enter means
+     * for that kind, which is a question only the registry answers.
+     *
+     * Named here rather than left to fall through to the root branch because
+     * these rows are not in any index: `launch_command` would look the row's
+     * id up, find nothing, and answer "no such command", which is the same
+     * hole a calculator answer and a media row are intercepted for.
+     *
+     * Then it gets out of the way. The launcher was summoned by a key to do
+     * one thing to one thing, and staying up afterwards would leave a window
+     * over the document or the folder somebody is now looking at.
+     */
+    if (mode === "selection") {
+      const row = commands[selected];
+      const primary = rootActions.find((action) => action.primary);
+      if (!row || !primary) return;
+
+      try {
+        const outcome = await runObjectAction(primary.id, asTarget(row));
+        status = outcome.message;
+        lastUndo = outcome.undoneBy ?? null;
+        await dismiss();
+      } catch (err) {
+        status = `${err}`;
+      }
+      return;
+    }
+
     if (mode === "root") {
       const command = commands[selected];
       if (!command) return;
@@ -2895,6 +2925,33 @@
     status = "";
   }
 
+  /**
+   * Puts the launcher on what was selected, with the panel already open.
+   *
+   * The panel opens straight away on a single thing, because that is what the
+   * key meant: one file, or the paragraph that was highlighted, and a list of
+   * one with a closed panel is a screen that answers nothing. On several it
+   * stays closed, because there is a choice to make first about which of them
+   * the action is for, and a panel over a list of three files would look like
+   * it applied to all three when it applies to the one under the cursor.
+   */
+  function openSelection(objects: SelectedObject[]) {
+    const rows = selectionRows(objects);
+    // Rust does not send an empty list, and drawing one would replace whatever
+    // was on screen with nothing.
+    if (rows.length === 0) return;
+
+    switcherPreview?.drop();
+    moving = null;
+    awaiting = null;
+    mode = "selection";
+    commands = rows;
+    selected = 0;
+    query = "";
+    panelOpen = rows.length === 1;
+    panelSelected = 0;
+  }
+
   async function openSwitcher() {
     panelOpen = false;
     // Whatever was on screen was a picture of a moment that has passed.
@@ -3568,6 +3625,7 @@
     let unlisten: UnlistenFn | undefined;
     let shown: UnlistenFn | undefined;
     let switcher: UnlistenFn | undefined;
+    let selecting: UnlistenFn | undefined;
     let indexed: UnlistenFn | undefined;
     let welcomed: UnlistenFn | undefined;
     let changed: UnlistenFn | undefined;
@@ -3923,6 +3981,18 @@
         void openSwitcher();
       });
 
+      /*
+       * A universal key was pressed and Rust has read what was selected.
+       *
+       * Rust has already done the half that had to happen while something else
+       * was in front: asked Explorer what is highlighted, or pressed Ctrl+C in
+       * whatever had the keyboard. What arrives is a list of objects, and all
+       * that is left is to draw them and open the panel.
+       */
+      selecting = await listen<SelectedObject[]>("sill://act-on", ({ payload }) => {
+        openSelection(payload);
+      });
+
       // Something outside the launcher asked for a command, which today means
       // the notification-area menu. Rust has already put the window up; this
       // is only what to show now that it is there.
@@ -3985,6 +4055,7 @@
       hidden?.();
       finishedScript?.();
       switcher?.();
+      selecting?.();
       indexed?.();
       welcomed?.();
       changed?.();

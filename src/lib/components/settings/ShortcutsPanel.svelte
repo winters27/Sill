@@ -180,9 +180,37 @@
     ]);
   });
 
-  /** The actions a row may choose from, which follows what it runs on. */
+  /**
+   * Opening the action panel, offered as though it were an action.
+   *
+   * It is not one, and deliberately: `bindings::PANEL` is read before the
+   * registry is asked anything, because an action called "Show Actions" would
+   * appear in every action panel in the launcher including the one it opens.
+   * The settings row still has to offer it, so the one place it is spelled out
+   * is here, next to the id Rust reads.
+   *
+   * First in the list, so a key pointed at "whatever is selected" starts as
+   * the thing that item exists for rather than as an upper-case transform.
+   */
+  const PANEL: ActionInfo = {
+    id: "sill.actions",
+    title: "Open the Action Panel",
+    primary: false,
+  };
+
+  /**
+   * The actions a row may choose from, which follows what it runs on.
+   *
+   * The universal source gets the text list with the panel on top: what it
+   * resolves to is not known until the key is pressed, and offering only the
+   * actions that suit one of the two answers would be offering the wrong list
+   * half the time. The panel is the entry that works whichever it turns out to
+   * be, because it asks Rust once the answer is known.
+   */
   function choicesFor(source: BindingSource): ActionInfo[] {
-    return source.from === "foregroundWindow" ? windowActions : textActions;
+    if (source.from === "foregroundWindow") return windowActions;
+    if (source.from === "currentSelection") return [PANEL, ...textActions];
+    return textActions;
   }
 
   /**
@@ -355,6 +383,7 @@
     if (source.from === "selection") return "the selected text";
     if (source.from === "clipboard") return "the clipboard";
     if (source.from === "foregroundWindow") return "the window in front";
+    if (source.from === "currentSelection") return "whatever is selected";
     return commandNames[source.id] ?? source.id;
   }
 
@@ -370,9 +399,11 @@
     const source: BindingSource =
       from === "foregroundWindow"
         ? { from: "foregroundWindow" }
-        : from === "clipboard"
-          ? { from: "clipboard" }
-          : { from: "selection" };
+        : from === "currentSelection"
+          ? { from: "currentSelection" }
+          : from === "clipboard"
+            ? { from: "clipboard" }
+            : { from: "selection" };
 
     const current = bindings[at];
     const choices = choicesFor(source);
@@ -427,7 +458,8 @@
         <Select
           value={binding.source.from}
           options={[
-            { value: "selection", label: "Selection" },
+            { value: "currentSelection", label: "Whatever is selected" },
+            { value: "selection", label: "Selected text" },
             { value: "clipboard", label: "Clipboard" },
             { value: "foregroundWindow", label: "Window in front" },
           ]}

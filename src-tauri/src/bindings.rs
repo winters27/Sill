@@ -51,6 +51,23 @@ pub enum Source {
     /// `windowing::foreground` already handles. A key pressed while the
     /// launcher is open means the thing behind it, never the launcher.
     ForegroundWindow,
+    /**
+    Whatever is selected right now, whether that is files or text.
+
+    The one source that does not say in advance what kind of thing it will
+    produce, and the reason it exists: "act on what I am looking at" is one
+    thought, and having to know beforehand whether you are looking at a
+    paragraph or at three files makes it two keys instead of one.
+
+    Explorer is asked first, through [`crate::explorer`], because it can be
+    asked without touching anything: it already knows what is highlighted and
+    says so. Only when that comes back with nothing does this fall through to
+    [`Source::Selection`], which presses Ctrl+C. So the expensive, intrusive
+    half of reading a selection is skipped entirely whenever the cheap half
+    answered, and the clipboard is left alone with it. See
+    [`Source::touches_clipboard`].
+    */
+    CurrentSelection,
     /// One particular thing from the index, named once when the binding is
     /// made. This is how a key opens a specific application.
     Command { id: String },
@@ -70,12 +87,30 @@ impl Source {
     suspending the watcher for it means something copied in that moment is
     not recorded. Nobody would connect a missing history entry to having
     pressed the key that moved a window.
+
+    **The universal source is the one that cannot answer this from its own
+    name**, which is why the question takes an argument. Files highlighted in
+    Explorer are read out of Explorer and never go near the clipboard; the
+    same key pressed in a document has to press Ctrl+C. Asking Explorer
+    happens first, so by the time this is asked the answer is known, and a
+    key pressed over three selected files pauses nothing.
     */
-    fn touches_clipboard(&self) -> bool {
+    fn touches_clipboard(&self, files_are_selected: bool) -> bool {
         match self {
             Source::Selection | Source::Clipboard | Source::ClipboardImage => true,
+            Source::CurrentSelection => !files_are_selected,
             Source::ForegroundWindow | Source::Command { .. } => false,
         }
+    }
+
+    /// Whether this source asks Explorer what is highlighted before anything
+    /// else.
+    ///
+    /// Only the universal one. Reading Explorer costs a few cross-process COM
+    /// calls, which is nothing next to pressing Ctrl+C in somebody's document
+    /// but is not nothing on a key that was never going to act on a file.
+    fn reads_explorer(&self) -> bool {
+        matches!(self, Source::CurrentSelection)
     }
 }
 
@@ -119,6 +154,46 @@ fn yes() -> bool {
 /// silently the moment the index changes underneath. Resolved at fire time
 /// from the object instead, which is the only place the kind is a fact.
 pub const PRIMARY: &str = "sill.primary";
+
+/// "Do not run anything, show me what could be run."
+///
+/// The second sentinel, and the one that makes `P8-01` a feature rather than a
+/// list of new keys. A binding names one action, which is right for "upper-case
+/// this" and wrong for "I have three files selected and I will decide when I
+/// see the list". This puts the launcher's own action panel on whatever the
+/// source resolved to and stops there.
+///
+/// **It is not an action and must not become one.** Registering it would put
+/// "Show Actions" in every action panel in the launcher, including the one it
+/// opens. It is also not a hole in the rule that `ActionRegistry::perform` is
+/// the only way an action runs: nothing is performed here. Whatever is chosen
+/// from the panel goes through `run_action` and so through `perform`, exactly
+/// as it does when the panel was opened with Ctrl+K on a search result.
+pub const PANEL: &str = "sill.actions";
+
+/// What a binding's action id actually names.
+///
+/// Two of the three are ids no action has, so reading them as action ids finds
+/// nothing and the key reports that it is bound to something impossible. Pure
+/// and tested, because the failure is silent: a sentinel that stopped being
+/// recognised would leave a working key answering "cannot be done to File".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wanted<'a> {
+    /// Show the panel instead of running anything. See [`PANEL`].
+    Panel,
+    /// Whatever Enter does for the kind that was resolved. See [`PRIMARY`].
+    Primary,
+    /// One action, by its stable id.
+    Named(&'a str),
+}
+
+pub fn wanted(action: &str) -> Wanted<'_> {
+    match action {
+        PANEL => Wanted::Panel,
+        PRIMARY => Wanted::Primary,
+        other => Wanted::Named(other),
+    }
+}
 
 /// Registers every binding, releasing whatever was registered before.
 ///
@@ -202,6 +277,26 @@ pub fn apply(app: &AppHandle, previous: &[Binding], current: &[Binding]) {
 async fn fire(app: &AppHandle, binding: &Binding) {
     let registry = app.state::<ActionRegistry>();
 
+    /*
+     * Explorer is asked first, and without the clipboard.
+     *
+     * The order is the whole reason this is here rather than inside `resolve`.
+     * Taking the clipboard suspends history, and a key pressed over three
+     * highlighted files has no business doing that: those files are read out
+     * of Explorer and nothing is copied. So what is highlighted has to be
+     * known before the clipboard question is asked, and it is.
+     *
+     * Blocking, on a pool thread: the read crosses into another process and
+     * gives up on its own after `explorer::PATIENCE`.
+     */
+    let files: Vec<Object> = if binding.source.reads_explorer() {
+        tokio::task::spawn_blocking(|| crate::explorer::objects_from(&crate::explorer::selection()))
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
     // Taken before anything else runs, and given back at the end whatever
     // happens in between. One owner for the whole operation: the action itself
     // writes its result to the clipboard, so anything reading "the previous
@@ -209,9 +304,12 @@ async fn fire(app: &AppHandle, binding: &Binding) {
     //
     // Only for the sources that have anything to do with it. See
     // `Source::touches_clipboard`.
-    let held = binding.source.touches_clipboard().then(|| Held::take(app));
+    let held = binding
+        .source
+        .touches_clipboard(!files.is_empty())
+        .then(|| Held::take(app));
 
-    let (object, origin) = match resolve(app, binding, held.as_ref()).await {
+    let (objects, origin) = match resolve(app, binding, held.as_ref(), files).await {
         Ok(resolved) => resolved,
         Err(reason) => {
             crate::say!("{}: {reason}", binding.accelerator);
@@ -222,63 +320,75 @@ async fn fire(app: &AppHandle, binding: &Binding) {
         }
     };
 
-    // Resolved now rather than when the key was recorded: `PRIMARY` means
-    // "open this", and which action opens a thing is a fact about the thing.
-    let action = if binding.action == PRIMARY {
-        registry.primary(object.kind)
-    } else {
-        registry.get(&binding.action)
-    };
+    /*
+     * "Show me what could be done" runs nothing and stops here.
+     *
+     * Before the registry lookup, because `PANEL` is deliberately not an
+     * action id: looking it up would find nothing and the key would report
+     * itself as bound to something impossible. The launcher goes up with the
+     * selection on it, and whatever is chosen there runs through
+     * `ActionRegistry::perform` like every other panel entry.
+     */
+    if matches!(wanted(&binding.action), Wanted::Panel) {
+        crate::summon::show_actions(app, &objects);
 
-    let Some(action) = action else {
-        crate::say!(
-            "{} is bound to {}, which cannot be done to {:?}",
-            binding.accelerator,
-            binding.action,
-            object.kind
-        );
-        if let Some(held) = held {
-            held.give_back();
-        }
-        return;
-    };
-
-    if !action.accepts(object.kind) {
-        crate::say!(
-            "{} is bound to {}, which cannot be done to {:?}",
-            binding.accelerator,
-            binding.action,
-            object.kind
-        );
+        // Nothing was pasted and nothing was meant to be kept: reading a text
+        // selection left Sill's own copy on the clipboard, and the person's
+        // own contents go back.
         if let Some(held) = held {
             held.give_back();
         }
         return;
     }
 
-    let outcome = match registry
-        .perform(
-            // The answer a key was recorded with, when it was recorded with
-            // one. A key bound to "move this to the archive folder" is the
-            // whole reason `Binding` carries it.
-            &ActionCtx::answering(app.clone(), binding.argument.clone()),
-            action,
-            &object,
-        )
-        .await
-    {
-        Ok(outcome) => outcome,
-        Err(reason) => {
-            crate::say!("{} failed: {reason}", binding.accelerator);
-            if let Some(held) = held {
-                held.give_back();
-            }
-            return;
+    // One object for every source but the universal one, and however many are
+    // highlighted for that. Each goes through `perform` separately, because an
+    // action acts on a thing: "recycle these three" is three recycles, three
+    // entries in the activity log and three undos, which is what somebody who
+    // then presses Ctrl+Z expects to find.
+    let mut produced: Option<String> = None;
+
+    for object in &objects {
+        // Resolved now rather than when the key was recorded: `PRIMARY` means
+        // "open this", and which action opens a thing is a fact about the thing.
+        let action = match wanted(&binding.action) {
+            Wanted::Primary => registry.primary(object.kind),
+            Wanted::Named(id) => registry.get(id),
+            // Handled above, before anything was looked up.
+            Wanted::Panel => None,
+        };
+
+        let Some(action) = action.filter(|action| action.accepts(object.kind)) else {
+            crate::say!(
+                "{} is bound to {}, which cannot be done to {:?}",
+                binding.accelerator,
+                binding.action,
+                object.kind
+            );
+            continue;
+        };
+
+        match registry
+            .perform(
+                // The answer a key was recorded with, when it was recorded with
+                // one. A key bound to "move this to the archive folder" is the
+                // whole reason `Binding` carries it.
+                &ActionCtx::answering(app.clone(), binding.argument.clone()),
+                action,
+                object,
+            )
+            .await
+        {
+            Ok(outcome) => produced = outcome.text,
+            // One failure does not abandon the rest of a selection. A file
+            // that has been deleted since it was highlighted must not stop the
+            // other two being acted on.
+            Err(reason) => crate::say!("{} failed: {reason}", binding.accelerator),
         }
-    };
+    }
 
     if may_paste_back(binding, origin) {
-        if let Some(text) = outcome.text {
+        if let Some(text) = produced {
             // Blocking, like the capture: it waits on another application.
             let handle = app.clone();
             let result =
@@ -322,22 +432,46 @@ fn may_paste_back(binding: &Binding, captured: Option<Origin>) -> bool {
     binding.replace && captured == Some(Origin::Selection)
 }
 
-/// What the binding acts on, and where the text came from if it is text.
+/**
+What the binding acts on, and where the text came from if it is text.
+
+A list rather than one thing, because one source can resolve to several: three
+files highlighted in Explorer are three objects and the key means all of them.
+Every other source produces exactly one, and a text selection always produces
+exactly one, which is what keeps the paste-back below unambiguous.
+
+`files` is what Explorer already said was highlighted, read by `fire` before
+the clipboard was considered. Empty means either that this source does not ask
+Explorer or that Explorer had nothing to say, and both fall through to reading
+text.
+*/
 async fn resolve(
     app: &AppHandle,
     binding: &Binding,
     held: Option<&Held>,
-) -> Result<(Object, Option<Origin>), String> {
+    files: Vec<Object>,
+) -> Result<(Vec<Object>, Option<Origin>), String> {
     match &binding.source {
-        Source::Selection | Source::Clipboard => {
+        // Files, when Explorer had some. No origin: a file is not text and
+        // there is no selection behind it to paste anything into.
+        Source::CurrentSelection if !files.is_empty() => Ok((files, None)),
+
+        // Everything else the universal source can find is text, read the one
+        // way there is to read it.
+        Source::Selection | Source::Clipboard | Source::CurrentSelection => {
             // Unreachable rather than defensive: `touches_clipboard` says
-            // these two do, so `fire` took it. A test holds the two together
+            // these do, so `fire` took it. A test holds the two together
             // so this can never become a silent refusal.
             let held = held.ok_or_else(|| {
                 "the clipboard was not taken for a source that reads it".to_string()
             })?;
 
-            let captured = if matches!(binding.source, Source::Selection) {
+            // The universal source has already tried the cheap half and found
+            // nothing, so what is left of it is exactly `Source::Selection`.
+            let reads_a_selection =
+                matches!(binding.source, Source::Selection | Source::CurrentSelection);
+
+            let captured = if reads_a_selection {
                 // Blocking: reading a selection presses Ctrl+C and waits for
                 // the other application to answer, which is not something to
                 // do on a runtime worker. `block_in_place` rather than
@@ -356,25 +490,25 @@ async fn resolve(
             let origin = captured.from;
 
             Ok((
-                Object {
+                vec![Object {
                     kind: ObjectKind::Text,
                     id: "selection".to_string(),
                     title: preview(&captured.text),
                     target: captured.text,
                     mode: "text".to_string(),
-                },
+                }],
                 Some(origin),
             ))
         }
 
         // No origin: there was no selection behind a screenshot to put
         // anything back into.
-        Source::ClipboardImage => last_image(app).map(|object| (object, None)),
+        Source::ClipboardImage => last_image(app).map(|object| (vec![object], None)),
 
         // No origin either. Moving a window produces no text, and there is
         // nothing to paste back into.
         Source::ForegroundWindow => crate::windowing::foreground()
-            .map(|window| (Object::from_window(&window), None))
+            .map(|window| (vec![Object::from_window(&window)], None))
             .ok_or_else(|| "nothing is in front".to_string()),
 
         Source::Command { id } => {
@@ -390,7 +524,7 @@ async fn resolve(
             // No origin. Launching an application produces no text, and there
             // is no selection behind it to put anything back into.
             Object::from_record(&record)
-                .map(|object| (object, None))
+                .map(|object| (vec![object], None))
                 .ok_or_else(|| format!("{} is a kind of thing Sill cannot act on", record.title))
         }
     }
@@ -588,14 +722,94 @@ mod tests {
     /// the clipboard rather than in this pair. Held together here instead.
     #[test]
     fn every_source_that_reads_the_clipboard_is_one_that_takes_it() {
-        let reads = [Source::Selection, Source::Clipboard, Source::ClipboardImage];
+        let reads = [
+            Source::Selection,
+            Source::Clipboard,
+            Source::ClipboardImage,
+            // With nothing highlighted in Explorer, the universal source is
+            // `Source::Selection`, and `resolve` refuses it without the
+            // clipboard.
+            Source::CurrentSelection,
+        ];
 
         for source in reads {
             assert!(
-                source.touches_clipboard(),
+                source.touches_clipboard(false),
                 "{source:?} is resolved from the clipboard and would arrive without it"
             );
         }
+    }
+
+    /// Files highlighted in Explorer are read without pausing the history.
+    ///
+    /// The rule `P3-05` established, arriving at the one source that can go
+    /// either way. Taking the clipboard suspends the watcher for the length of
+    /// the operation, and a key pressed over three selected files never reads
+    /// or writes it: Explorer was asked and Explorer answered. Suspending it
+    /// anyway would drop whatever was copied in that moment, with nothing
+    /// connecting the missing entry to the key.
+    #[test]
+    fn a_file_selection_leaves_the_clipboard_alone() {
+        assert!(!Source::CurrentSelection.touches_clipboard(true));
+
+        // And the other three do not change their answer because Explorer
+        // happens to have something highlighted behind them.
+        for source in [Source::Selection, Source::Clipboard, Source::ClipboardImage] {
+            assert!(source.touches_clipboard(true), "{source:?}");
+        }
+    }
+
+    /// Only the universal source pays for asking Explorer.
+    #[test]
+    fn nothing_but_the_universal_source_asks_explorer() {
+        assert!(Source::CurrentSelection.reads_explorer());
+
+        for source in [
+            Source::Selection,
+            Source::Clipboard,
+            Source::ClipboardImage,
+            Source::ForegroundWindow,
+            Source::Command {
+                id: "app:code".into(),
+            },
+        ] {
+            assert!(!source.reads_explorer(), "{source:?}");
+        }
+    }
+
+    /// The two ids that are not actions are read as what they are.
+    ///
+    /// Silent when it breaks, which is why it is a test. A sentinel that
+    /// stopped being recognised would be looked up in the registry, found
+    /// missing, and reported as a key bound to something that cannot be done
+    /// to a file, which points at the action rather than at this.
+    #[test]
+    fn the_two_ids_that_are_not_actions_are_recognised() {
+        assert_eq!(wanted(PANEL), Wanted::Panel);
+        assert_eq!(wanted(PRIMARY), Wanted::Primary);
+        assert_eq!(wanted("sill.text.upper"), Wanted::Named("sill.text.upper"));
+    }
+
+    // The matching check that neither sentinel is a registered action id lives
+    // in `tests/actions.rs`, and has to. Calling `actions::builtins()` from the
+    // library's own test binary retains the dialog plugin, whose
+    // `TaskDialogIndirect` needs a manifest that binary does not get, and the
+    // whole run dies with `STATUS_ENTRYPOINT_NOT_FOUND` before a test executes.
+    // `suite/mod.rs` documents the rule; this is what it looks like when the
+    // rule is broken by one line in a test.
+
+    /// The universal source survives the preferences file.
+    ///
+    /// A variant that serialises to a name the reader does not know is a
+    /// shortcut that quietly disappears from somebody's settings on the next
+    /// start.
+    #[test]
+    fn the_universal_source_reads_back_as_itself() {
+        let written = serde_json::to_string(&Source::CurrentSelection).expect("serialisable");
+        assert_eq!(written, r#"{"from":"currentSelection"}"#);
+
+        let read: Source = serde_json::from_str(&written).expect("readable");
+        assert_eq!(read, Source::CurrentSelection);
     }
 
     /// A key that moves a window must not pause clipboard history.
@@ -607,11 +821,11 @@ mod tests {
     /// comment.
     #[test]
     fn a_window_or_a_launch_leaves_the_clipboard_alone() {
-        assert!(!Source::ForegroundWindow.touches_clipboard());
+        assert!(!Source::ForegroundWindow.touches_clipboard(false));
         assert!(!Source::Command {
             id: "app:chrome".into()
         }
-        .touches_clipboard());
+        .touches_clipboard(false));
     }
 
     /// The source survives a round trip through the preferences file.

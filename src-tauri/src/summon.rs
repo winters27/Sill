@@ -476,6 +476,29 @@ pub fn show_switcher(app: &tauri::AppHandle) {
     let _ = window.emit("sill://switcher", ());
 }
 
+/// Shows the launcher with the action panel open on what was selected.
+///
+/// The same shape as `show_switcher`: Rust decides what is there, the page
+/// decides what that looks like. Rust has already read Explorer or pressed
+/// Ctrl+C by the time this is called, which is the part that had to happen
+/// while something else was in front.
+///
+/// Nothing is shown for an empty list. A launcher that appears to say "there
+/// was nothing selected" has taken the screen away from whatever the person
+/// was doing to tell them their key did nothing, and the log already says so.
+pub fn show_actions(app: &tauri::AppHandle, objects: &[crate::object::Object]) {
+    if objects.is_empty() {
+        return;
+    }
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    show(&window);
+    let _ = window.emit("sill://act-on", objects);
+}
+
 /// Shows the launcher, optionally asking it to run something on arrival.
 ///
 /// The same shape as `show_switcher`: Rust puts the window up and says what
