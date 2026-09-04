@@ -1131,31 +1131,41 @@ else if (Number(css[1]) !== Number(rust[1])) {
  *
  * So every place the window turns a registry action into a panel row has to
  * pass the action's own shortcut along.
+ *
+ * Both places are in `$lib/panel` now rather than in the window's `$derived`.
+ * The files are listed rather than the one that happens to hold them today,
+ * because a check that names a single file goes quiet the moment the code
+ * moves, which is the failure mode this whole script exists to avoid.
  */
 {
-  const PAGE = "src/routes/+page.svelte";
-  const text = readFileSync(PAGE, "utf8");
+  const BUILDERS = ["src/lib/panel.ts", "src/routes/+page.svelte"];
+  let anywhere = 0;
 
-  // Each entry built from a registry action, found by the tag it is given.
-  const built = Array.from(text.matchAll(/tag: `Sill\.Action:\$\{action\.id\}`/g));
+  for (const file of BUILDERS) {
+    const text = readFileSync(file, "utf8");
 
-  if (built.length === 0) {
-    fail(PAGE, 1, "no registry action reaches the action panel at all");
+    // Each entry built from a registry action, found by the tag it is given.
+    const built = Array.from(text.matchAll(/tag: `Sill\.Action:\$\{action\.id\}`/g));
+    anywhere += built.length;
+
+    for (const at of built) {
+      // The entry is a short object literal. A whole file's worth of slack
+      // would let one entry borrow the shortcut another passed.
+      const nearby = text.slice(at.index, at.index + 900);
+
+      if (!nearby.includes("action.shortcut")) {
+        fail(
+          file,
+          lineOf(text, at.index),
+          "a registry action is drawn without the shortcut Rust resolved for it, " +
+            "so the key somebody set in Settings is neither drawn nor read",
+        );
+      }
+    }
   }
 
-  for (const at of built) {
-    // The entry is a short object literal. A whole file's worth of slack
-    // would let one entry borrow the shortcut another passed.
-    const nearby = text.slice(at.index, at.index + 900);
-
-    if (!nearby.includes("action.shortcut")) {
-      fail(
-        PAGE,
-        lineOf(text, at.index),
-        "a registry action is drawn without the shortcut Rust resolved for it, " +
-          "so the key somebody set in Settings is neither drawn nor read",
-      );
-    }
+  if (anywhere === 0) {
+    fail(BUILDERS[0], 1, "no registry action reaches the action panel at all");
   }
 }
 

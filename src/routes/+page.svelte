@@ -23,6 +23,8 @@
   import { isBrowsing, selectionAfter } from "$lib/results";
   import { askedForTheKeys, deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import { asUrl, isPath, isUrl } from "$lib/typed";
+  import { conversationRows as conversationsAsRows } from "$lib/conversations";
+  import { fileSearchRow } from "$lib/results";
   import {
     afterLaunch,
     behaviourOf,
@@ -39,7 +41,8 @@
   import { storeClose, type StoreRow } from "$lib/store";
   import WidgetBoard from "$lib/widgets/Board.svelte";
   import WidgetChin from "$lib/widgets/Chin.svelte";
-  import { actionFor, collectActions, isRunnable } from "$lib/exthost/actions";
+  import { actionFor, collectActions, isRunnable, type ActionEntry } from "$lib/exthost/actions";
+  import { clipboardPanel, rowPanel } from "$lib/panel";
   import { clipboardEntry, clipboardMerge } from "$lib/clipboard";
   import {
     chordFrom,
@@ -723,230 +726,27 @@
    * A list or grid takes them from the selected item; a form or detail has no
    * selected row, so its actions hang off the view itself.
    */
-  const actions = $derived.by(() => {
+  const actions = $derived.by((): ActionEntry[] => {
     version;
 
     // At the root the actions belong to the launcher, not to an extension.
     // Raycast's Cmd+K works here too, and a menu that silently does nothing
     // in half the app is worse than no menu.
+    //
+    // What each of these two offers is a function over what is picked and what
+    // the registry answered, so it lives in `$lib/panel` where a test can call
+    // it. Which of them applies is a question about the mode, so it is here.
     if (mode === "clipboard") {
-      // Merging is only offered once there is something to merge. An action
-      // that is always listed and almost never applicable teaches people to
-      // scroll past the whole panel.
-      const merging =
-        picked.length > 1
-          ? [
-              {
-                id: -30,
-                title: `Merge ${picked.length} Entries`,
-                tag: "Sill.ClipboardMerge",
-                props: {},
-                shortcut: { modifiers: ["ctrl"], key: "m" },
-              },
-              {
-                id: -31,
-                title: `Merge ${picked.length} on One Line`,
-                tag: "Sill.ClipboardMergeInline",
-                props: {},
-                shortcut: undefined,
-              },
-            ]
-          : [];
-
-      // Only for an entry that actually kept formatting. Offering it on a
-      // line of terminal output would be offering to do nothing.
-      const plain = richEntry
-        ? [
-            {
-              id: -32,
-              title: "Paste as Plain Text",
-              tag: "Sill.ClipboardPastePlain",
-              props: {},
-              shortcut: { modifiers: ["ctrl", "shift"], key: "enter" },
-            },
-          ]
-        : [];
-
-      const collecting = [
-        ...(picked.length
-          ? [
-              {
-                id: -33,
-                title: `Add ${picked.length} to a Collection`,
-                tag: "Sill.ClipboardCollect",
-                props: {},
-                shortcut: undefined,
-              },
-            ]
-          : []),
-        ...(openCollection
-          ? [
-              {
-                id: -34,
-                title: `Remove from ${openCollection.name}`,
-                tag: "Sill.ClipboardUncollect",
-                props: {},
-                shortcut: undefined,
-              },
-              {
-                id: -35,
-                title: `Delete the ${openCollection.name} Collection`,
-                tag: "Sill.ClipboardForgetCollection",
-                props: {},
-                shortcut: undefined,
-              },
-            ]
-          : []),
-      ];
-
-      return [
-        ...merging,
-        ...collecting,
-        {
-          id: -10,
-          title: "Paste",
-          tag: "Sill.ClipboardPaste",
-          props: {},
-          shortcut: { modifiers: [], key: "enter" },
-        },
-        ...plain,
-        {
-          id: -11,
-          title: "Copy",
-          tag: "Sill.ClipboardCopy",
-          props: {},
-          shortcut: { modifiers: ["ctrl"], key: "c" },
-        },
-        {
-          id: -12,
-          title: "Pin or Unpin",
-          tag: "Sill.ClipboardPin",
-          props: {},
-          shortcut: { modifiers: ["ctrl"], key: "p" },
-        },
-        {
-          id: -13,
-          title: "Next Type",
-          tag: "Sill.ClipboardFilter",
-          props: {},
-          shortcut: { modifiers: ["ctrl"], key: "t" },
-        },
-        {
-          id: -14,
-          title: "Delete",
-          tag: "Sill.ClipboardDelete",
-          props: {},
-          // Ctrl, because the search field has focus and a bare Delete while
-          // filtering used to destroy the row under the cursor instead of the
-          // character being typed. With nothing typed the bare key still
-          // works; the panel advertises the one that always does.
-          shortcut: { modifiers: ["ctrl"], key: "delete" },
-        },
-        // What can be done to the text itself, from the same registry the
-        // root list draws from. Paste, pin, filter and delete above act on
-        // the list; these act on the content.
-        //
-        // The registry's primary for a clipboard row is a plain Copy, which
-        // this view already offers above. Showing it twice under two
-        // shortcuts is worse than either.
-        ...clipboardActions
-          .filter((action) => !action.primary)
-          .map((action, index) => ({
-          id: -20 - index,
-          title: action.title,
-          tag: `Sill.Action:${action.id}`,
-          props: {},
-          // The action's own, from Rust. These used to arrive with none at
-          // all, so Read Aloud sat on the clipboard list advertising nothing
-          // while the four rows above it advertised chords written by hand.
-          shortcut: action.shortcut,
-        })),
-      ] as typeof extensionActions;
+      return clipboardPanel({
+        picked,
+        rich: richEntry,
+        openCollection,
+        registry: clipboardActions,
+      });
     }
 
-    // Whatever Rust says can be done to the selected result. This used to be
-    // two entries written here by hand, which meant the panel and the Enter
-    // key were two separate opinions about what a result supports.
-    if (hasRowActions(mode)) {
-      const chosen = rowForActions;
-
-      // Naming a result is offered on the result, not buried in settings.
-      // An alias nobody can reach is one nobody sets, and the launcher is
-      // where you are when you notice you want one.
-      /*
-       * Only where a name would still mean something tomorrow.
-       *
-       * An alias points at a command id, so it is only worth offering on a
-       * row whose id survives a restart. A calculator answer exists for as
-       * long as it is on screen, a window's id is a handle that stops being
-       * valid when it closes, and a program's audio session carries the
-       * process number in it, so naming one would be naming this morning's
-       * copy of that program. A running process is that last one exactly: its
-       * id **is** the process number.
-       */
-      const namable =
-        chosen &&
-        chosen.mode !== "answer" &&
-        chosen.mode !== "window" &&
-        chosen.mode !== "audio-session" &&
-        chosen.mode !== "process" &&
-        // An alias points at a command id and is matched against the index. A
-        // conversation is not in the index, so a name given to one would find
-        // nothing however carefully it was chosen.
-        chosen.mode !== "conversation" &&
-        chosen.mode !== "past-conversation" &&
-        // Nor is an extension in the store, for a stronger version of the same
-        // reason: it may not be installed at all, so there is nothing on this
-        // machine for a name to point at. Once it is installed its commands
-        // are in the index and each can be named there.
-        chosen.mode !== "store-listing";
-
-      const naming =
-        namable
-          ? [
-              {
-                id: -40,
-                title: chosen.alias ? `Rename "${chosen.alias}"` : "Give It a Name",
-                tag: "Sill.SetAlias",
-                props: {},
-                shortcut: undefined,
-              },
-              ...(chosen.alias
-                ? [
-                    {
-                      id: -41,
-                      title: `Forget the Name "${chosen.alias}"`,
-                      tag: "Sill.ClearAlias",
-                      props: {},
-                      shortcut: undefined,
-                    },
-                  ]
-                : []),
-            ]
-          : [];
-
-      return [
-        ...rootActions.map((action, index) => ({
-        id: -1 - index,
-        title: action.title,
-        tag: `Sill.Action:${action.id}`,
-        props: {},
-        /*
-         * Enter for the primary one, and otherwise whatever the action says.
-         *
-         * Enter stays written here rather than being declared in Rust,
-         * because for the primary action it is not a shortcut: it is the
-         * `open` movement, handled by the chord map with everything the
-         * launcher does on the way out. Declaring it as a shortcut as well
-         * would put two handlers on one key.
-         */
-        shortcut: action.primary
-          ? { modifiers: [], key: "enter" }
-          : action.shortcut,
-        })),
-        ...naming,
-      ] as typeof extensionActions;
-    }
+    // Whatever Rust says can be done to the selected result.
+    if (hasRowActions(mode)) return rowPanel(rootActions, rowForActions);
 
     const node = tree.top();
     if (!node) return [];
@@ -958,9 +758,6 @@
 
     return collectActions(tree, node);
   });
-
-  /** Only used to give the root list's synthetic actions the right type. */
-  const extensionActions: ReturnType<typeof collectActions> = [];
 
   /**
    * What the action registry says can be done to the selected result.
@@ -2285,36 +2082,6 @@
    * something to read and this is something to do. It sits with the files it
    * is standing in for, and Enter fixes the thing it names.
    */
-  function fileSearchRow(why: FileSearchMissing): RankedCommand {
-    const said = {
-      indexing: {
-        title: "Reading your files",
-        subtitle: "Sill is going through your folders for the first time. This takes a moment and happens once.",
-      },
-      absent: {
-        title: "Turn on file search",
-        subtitle: "Sill is not indexing any folders. Choose this to start, and it will read the ones you work in.",
-      },
-      asleep: {
-        title: "Start file search",
-        subtitle: "Everything is installed but not running, so there is nothing to search. Choose this to start it.",
-      },
-    }[why];
-
-    return {
-      id: "sill:file-search",
-      extension: "sill",
-      extensionTitle: "Files",
-      title: said.title,
-      subtitle: said.subtitle,
-      mode: "file-setup",
-      entrypoint: "",
-      matched: [],
-    };
-  }
-
-
-
   /**
    * Pastes or copies one emoji, and remembers what was typed to reach it.
    *
@@ -2707,49 +2474,9 @@
   /**
    * The list, as rows.
    *
-   * Built here rather than in Rust because these never go through search:
-   * the list is short, it is already ordered by when each was last spoken to,
-   * and filtering it is a substring test on the question.
+   * Shaped in `$lib/conversations`, where a test can read what a row says.
    */
-  const conversationRows: RankedCommand[] = $derived.by(() => {
-    const wanted = query.trim().toLowerCase();
-
-    return pastConversations
-      .filter((one) => !wanted || one.title.toLowerCase().includes(wanted))
-      .map((one) => ({
-        id: `chat-row:${one.id}`,
-        extension: "sill",
-        extensionTitle: "Conversations",
-        command: "conversation",
-        title: one.title,
-        subtitle: saidAbout(one),
-        mode: "past-conversation" as const,
-        // Not a switch, and the row shape wants to be told.
-        toggle: undefined,
-        entrypoint: one.id,
-        panel: "ai",
-        score: 0,
-        matched: [],
-      }));
-  });
-
-  /** What a conversation row says underneath the question. */
-  function saidAbout(one: AiConversation): string {
-    const when =
-      one.age < 60
-        ? "Just now"
-        : one.age < 3600
-          ? `${Math.floor(one.age / 60)} min ago`
-          : one.age < 86_400
-            ? `${Math.floor(one.age / 3600)} hr ago`
-            : `${Math.floor(one.age / 86_400)} d ago`;
-
-    const replies = `${one.replies} ${one.replies === 1 ? "reply" : "replies"}`;
-
-    // Saying which one is open stops the row offering to reopen something
-    // that is already open.
-    return one.open ? `${when} · ${replies} · open` : `${when} · ${replies}`;
-  }
+  const conversationRows = $derived(conversationsAsRows(pastConversations, query));
 
   async function openConversations() {
     panelOpen = false;
