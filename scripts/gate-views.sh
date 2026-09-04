@@ -201,7 +201,8 @@ echo
 echo "--- no-view with a toast: lorem-ipsum (real extension) ---"
 node scripts/build-extension.mjs extensions/raycast-src/extensions/lorem-ipsum words > /dev/null
 node scripts/run-extension.mjs extensions/build/lorem-ipsum/words.js lorem-ipsum --no-view \
-  --grant fileRead,fileWrite,network,processLaunch | tee /tmp/sill-lorem.log
+  --grant fileRead,fileWrite,network,processLaunch \
+  --expect-called Clipboard/copy=1 --expect-toast | tee /tmp/sill-lorem.log
 grep -q "Clipboard/copy x1" /tmp/sill-lorem.log && echo "ok   it put its words on the clipboard once" || { echo "FAIL nothing was copied"; exit 1; }
 grep -q "on screen: \"Copied" /tmp/sill-lorem.log && echo "ok   and said so with a toast" || { echo "FAIL no toast was shown"; exit 1; }
 drew lorem-ipsum

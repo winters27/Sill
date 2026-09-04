@@ -577,7 +577,20 @@ async function untilDrawn({
       return true;
     }
 
-    if (renders > before && Date.now() - lastRenderAt >= quiet) {
+    /*
+     * Quiet only counts when nothing specific was asked for.
+     *
+     * `visual-studio-code-recent-projects` draws an empty list, goes quiet for
+     * well past the quiet period while it reads the recent-projects file, then
+     * fills in the dropdown. Letting quiet end a wait that is looking for five
+     * dropdown options returned it after 1 ms with none of them, which is the
+     * same "read it too early" failure this function exists to prevent, coming
+     * back in through the fallback.
+     *
+     * When the caller named a condition, the condition or the deadline ends
+     * the wait. Nothing else.
+     */
+    if (!arrived && renders > before && Date.now() - lastRenderAt >= quiet) {
       waits.push(`${renders - before} render(s) in ${lastRenderAt - began}ms`);
       return true;
     }
@@ -740,14 +753,94 @@ const wantsRows = Math.max(
   Number(argAfter("--expect-rows") ?? 0),
 );
 
+/*
+ * Everything this run is about to claim about the first draw.
+ *
+ * Not a chosen subset: whatever is asserted has to be waited for, or the
+ * assertion is a race. Adding an `--expect-` flag without adding it here is
+ * how CI goes red on somebody else's machine and nowhere else.
+ */
+const wantsRoot = argAfter("--expect-root");
+const wantsItems = Number(argAfter("--expect-items") ?? 0);
+const wantsActions = Number(argAfter("--expect-actions") ?? 0);
+const wantsToastActions = Number(argAfter("--expect-toast-actions") ?? 0);
+
 const wanted = [
+  wantsRoot !== undefined && {
+    enough: () => tree.top()?.tag === wantsRoot,
+    said: `a <${wantsRoot}>`,
+  },
   wantsRows > 0 && {
     enough: () => rowsDrawnNow() >= wantsRows,
     said: `${wantsRows} row(s)`,
   },
+  wantsItems > 0 && {
+    enough: () => {
+      const top = tree.top();
+      if (!top) return false;
+      const tag = `${top.tag}.Item`;
+      return tree.elementChildren(top).filter((c) => c.tag === tag).length >= wantsItems;
+    },
+    said: `${wantsItems} item(s)`,
+  },
+  wantsActions > 0 && {
+    enough: () => {
+      const top = tree.top();
+      return top ? collectActions(tree, firstItemOf(top)).length >= wantsActions : false;
+    },
+    said: `${wantsActions} action(s) on the first row`,
+  },
   wantsDropdown > 0 && {
     enough: () => dropdownDrawnNow() >= wantsDropdown,
     said: `${wantsDropdown} dropdown option(s)`,
+  },
+  wantsToastActions > 0 && {
+    enough: () => (toast?.actions.length ?? 0) >= wantsToastActions,
+    said: `${wantsToastActions} toast button(s)`,
+  },
+  args.includes("--expect-detail") && {
+    enough: () => {
+      const top = tree.top();
+      return top
+        ? itemsOf(rowsOf(tree, top, "")).some((item) => detailOf(tree, item))
+        : false;
+    },
+    said: "a detail pane",
+  },
+  /*
+   * A no-view command draws nothing, so quiet is all it ever had, and the two
+   * things the gate then greps out of this log are a clipboard write and a
+   * toast that both arrive on their own schedule. Waiting for them is the same
+   * fix as everywhere else here.
+   */
+  argAfter("--expect-called") !== undefined && {
+    enough: () => {
+      const [method, n] = String(argAfter("--expect-called")).split("=");
+      return calls.filter((one) => one === method).length >= Number(n || 1);
+    },
+    said: `a call to ${argAfter("--expect-called")}`,
+  },
+  args.includes("--expect-toast") && {
+    enough: () => toast !== null,
+    said: "a toast",
+  },
+  argAfter("--expect-toast-title") !== undefined && {
+    // These two runs also assert a negative, that nothing reached the
+    // clipboard. A negative read before the command got going passes for the
+    // wrong reason, which is worse than a red gate.
+    enough: () => toast?.title === argAfter("--expect-toast-title"),
+    said: `a toast saying ${JSON.stringify(argAfter("--expect-toast-title"))}`,
+  },
+  argAfter("--expect-hud") !== undefined && {
+    enough: () => hud === argAfter("--expect-hud"),
+    said: "the HUD",
+  },
+  args.includes("--expect-empty-view") && {
+    enough: () => {
+      const top = tree.top();
+      return top ? emptyViewOf(tree, top) !== undefined : false;
+    },
+    said: "an EmptyView",
   },
 ].filter(Boolean);
 
@@ -850,15 +943,38 @@ if (journey.wanted) {
   journey.eager = lazyFor !== undefined && said.includes(lazyFor);
   journey.found = activate(action?.handler);
 
-  // A push draws the screen it went to, and a pop draws the one underneath,
-  // so both are waits for a render rather than for a length of time. Same
-  // reason as the first one: 1.5 s is a guess that holds on a fast machine.
-  await untilDrawn({ quiet: 400 });
+  // A push draws the screen it went to and a pop draws the one underneath, so
+  // wait for that screen by name when the run says which one it expects. The
+  // tag it is about to read is the whole assertion; quiet is only the fallback
+  // for a run that did not say.
+  const goingTo = argAfter("--expect-pushed");
+  const backTo = argAfter("--expect-popped");
+  const wasAt = navigation.depth;
+
+  await untilDrawn(
+    goingTo !== undefined
+      ? {
+          // Depth as well as tag. A screen pushed onto one of its own kind
+          // already has the expected tag before the push lands, and the wait
+          // would end on the screen it started from.
+          arrived: () => navigation.depth > wasAt && tree.top()?.tag === goingTo,
+          called: `a <${goingTo}>`,
+        }
+      : { quiet: 400 },
+  );
   journey.pushedTo = tree.top()?.tag;
   journey.depth = navigation.depth;
 
+  const wentTo = navigation.depth;
   activate(navigation.pop);
-  await untilDrawn({ quiet: 400 });
+  await untilDrawn(
+    backTo !== undefined
+      ? {
+          arrived: () => navigation.depth < wentTo && tree.top()?.tag === backTo,
+          called: `back to a <${backTo}>`,
+        }
+      : { quiet: 400 },
+  );
   journey.poppedTo = tree.top()?.tag;
 }
 
@@ -1269,6 +1385,15 @@ if (expectToastActions !== undefined) {
  * is the only way to assert one did the right thing rather than merely
  * something. Exact, because the words are the extension's own.
  */
+const expectCalled = flag("--expect-called");
+
+if (expectCalled !== undefined) {
+  const [method, n] = String(expectCalled).split("=");
+  const made = calls.filter((one) => one === method).length;
+  const times = Number(n || 1);
+  check(made === times, `${method} called ${times} time(s), got ${made}`);
+}
+
 const expectHud = flag("--expect-hud");
 
 if (expectHud !== undefined) {
