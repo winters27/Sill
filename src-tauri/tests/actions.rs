@@ -1403,3 +1403,68 @@ fn removing_an_extension_asks_only_to_write_files() {
 
     assert_eq!(copying.capabilities(), &[Capability::ClipboardWrite]);
 }
+
+/// What a `sill://` address may reach, checked against the real registry.
+///
+/// The two allow-lists in `reach` are text, and text goes stale: an id can be
+/// misspelled, or the action behind it can grow a capability nobody looked at
+/// again. Both failures are silent, and both end with a page on the internet
+/// naming something it should never have been able to name. This is the only
+/// place the lists and the actions they are about are in the same room.
+mod what_a_link_may_reach {
+    use super::*;
+    use sill_lib::reach::{self, Trust, LINKABLE};
+
+    /// Every name on the list is an action that exists, and every one of them
+    /// passes the capability gate as it is actually written today.
+    #[test]
+    fn every_name_on_the_list_is_a_real_action_the_gate_lets_through() {
+        let registry = builtins();
+
+        for id in LINKABLE {
+            let action = registry
+                .get(id)
+                .unwrap_or_else(|| panic!("{id} is on the link list and is not an action"));
+
+            reach::may_run(Trust::Link, id, action.capabilities()).unwrap_or_else(|why| {
+                panic!("{id} is on the link list and its own capabilities refuse it: {why}")
+            });
+        }
+    }
+
+    /// And nothing else in the registry gets through.
+    ///
+    /// Over every action rather than over a list of the frightening ones, so
+    /// the action added next year is refused by this test existing rather than
+    /// by somebody remembering to come back here. The registry moves files to
+    /// the recycle bin, runs scripts, quits processes and shuts the machine
+    /// down.
+    #[test]
+    fn nothing_else_in_the_registry_gets_through() {
+        let registry = builtins();
+
+        for id in registry.ids() {
+            if LINKABLE.contains(&id) {
+                continue;
+            }
+
+            let action = registry.get(id).expect("it came out of the registry");
+
+            assert!(
+                reach::may_run(Trust::Link, id, action.capabilities()).is_err(),
+                "{id} can be run by anything able to put a link in front of somebody",
+            );
+        }
+    }
+
+    /// A shell is the other trust level, and it is the whole registry.
+    #[test]
+    fn a_shell_reaches_all_of_it() {
+        let registry = builtins();
+
+        for id in registry.ids() {
+            let action = registry.get(id).expect("it came out of the registry");
+            assert!(reach::may_run(Trust::Shell, id, action.capabilities()).is_ok());
+        }
+    }
+}

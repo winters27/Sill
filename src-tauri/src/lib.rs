@@ -39,6 +39,7 @@ pub mod meter;
 pub mod navigation;
 pub mod object;
 pub mod ocr;
+pub mod outside;
 pub mod placement;
 pub mod preferences;
 pub mod previews;
@@ -1270,7 +1271,25 @@ pub fn run() {
         // keyboard hook or opens the clipboard database. Two of either is
         // worse than none: the hooks both fire, the shortcut registration
         // loses a race, and the launcher looks broken rather than doubled.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            /*
+             * The second launch may be carrying something.
+             *
+             * Windows starts a protocol handler by running it, so a
+             * `sill://run/...` address somebody clicked arrives here as the
+             * command line of a process that is about to be turned away, and
+             * so does `sill run`. Both are read in one place; see
+             * [`outside::arrived`].
+             *
+             * Asked before the toggle rather than after, because a launcher
+             * window flashing open and shut is not what somebody clicking a
+             * link asked for, and because the card the request raises decides
+             * for itself which window it needs.
+             */
+            if outside::arrived(app, &argv) {
+                return;
+            }
+
             // Someone tried to start Sill again, which almost always means
             // they wanted the window they already have.
             summon::toggle_main(app);
@@ -1623,6 +1642,19 @@ pub fn run() {
                 }
             }
 
+            /*
+             * The command line this process was started with.
+             *
+             * Clicking a `sill://` link while Sill is not running starts it,
+             * so the address arrives here rather than at the single instance
+             * callback, and a launcher that only read the second launch would
+             * answer every link except the first one of the day. Same
+             * function, same gate; the only difference is which of the two
+             * ways in Windows chose.
+             */
+            let started_with: Vec<String> = std::env::args().collect();
+            outside::arrived(&handle, &started_with);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1667,6 +1699,7 @@ pub fn run() {
             commands::ai::ai_limits,
             commands::ai::open_ask,
             commands::ai::ai_decide,
+            commands::ai::ai_outstanding,
             commands::ai::ai_refuse_pending,
             commands::ai::ai_conversations,
             commands::ai::ai_forget,

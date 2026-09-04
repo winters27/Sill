@@ -1,20 +1,27 @@
 /*!
-What Sill is allowed to reach.
+What Sill is allowed to reach, and what is allowed to reach Sill.
 
-Two boundaries live here because they fail the same way and are crossed by the
-same callers: **an address handed to the shell**, and **a file handed to the
-model**. Both start as text somebody else wrote. A quicklink can arrive in an
-exported file from anyone, an extension supplies the target of
-`Action.OpenInBrowser` unread, and every path the model asks for came out of a
-document it was told to summarise. None of those is Sill's own text, and the
-old code treated all of them as if it were.
+Three boundaries live here because they fail the same way and are crossed by
+the same callers: **an address handed to the shell**, **a file handed to the
+model**, and **an address that arrives asking Sill to do something**. All three
+start as text somebody else wrote. A quicklink can arrive in an exported file
+from anyone, an extension supplies the target of `Action.OpenInBrowser` unread,
+every path the model asks for came out of a document it was told to summarise,
+and a `sill://` link is written by whoever wrote the page it was clicked on.
+None of those is Sill's own text, and the old code treated all of them as if it
+were.
 
-Kept in one module rather than beside each caller for the reason rule 22
-gives: there were six places opening an address and each one would have grown
-its own idea of what is safe. There is one idea, and it is here.
+The third one points the other way and still belongs here. It is the same
+question asked backwards: the first two are "may this address be handed to
+Windows", the third is "may this address be handed to the action registry", and
+answering them in two modules would be two ideas about one word. Rule 22, and
+the same reason the first two are together: there were six places opening an
+address and each would have grown its own idea of what is safe.
 */
 
 use std::path::{Component, Path, PathBuf};
+
+use crate::action::Capability;
 
 // ------------------------------------------------------------- addresses
 
@@ -300,6 +307,366 @@ fn same(a: Component, b: Component) -> bool {
     a.as_os_str()
         .to_string_lossy()
         .eq_ignore_ascii_case(&b.as_os_str().to_string_lossy())
+}
+
+// ------------------------------------------------------ reaching Sill
+
+/// Sill's own scheme.
+pub const SCHEME: &str = "sill";
+
+/// The only thing an address may ask Sill for.
+const RUN: &str = "run";
+
+/// How the command is spelled, for the sentence that says it was spelled wrong.
+pub const USAGE: &str = "sill run <action> <target> [--kind <kind>] [--argument <text>]";
+
+/**
+Who is asking Sill to run something.
+
+The two are not the same favour and must not be one type with a flag. A
+`sill://` address is written by whoever wrote the page it sits on, arrives on
+one click, and carries no context at all: the person clicked a link, and
+whatever happens next happens to them. `sill run` was typed into a shell that
+already has every right its owner has, and anything able to type it could have
+run the program itself.
+
+So the two are separated at the door rather than at the point of use, because
+"which of these is it" asked deep inside is a question somebody eventually
+forgets to ask.
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trust {
+    /// A `sill://` address, from wherever addresses come from.
+    Link,
+    /// `sill run`, typed on this machine by somebody with a shell.
+    Shell,
+}
+
+/// What somebody outside this process asked Sill to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ask {
+    pub trust: Trust,
+    /// The registry id, exactly as written. Never matched by prefix.
+    pub action: String,
+    /// What to do it to. For a link, already past [`target`].
+    pub target: String,
+    /// What sort of thing the target is, when it cannot be worked out.
+    pub kind: Option<String>,
+    /// The one answer an action may have had to ask for.
+    pub argument: Option<String>,
+}
+
+/**
+The actions a `sill://` address may name.
+
+**An allow-list, and for a stronger reason than the scheme list above.** The
+registry moves files to the recycle bin, runs scripts, empties the recycle bin,
+quits processes and shuts the machine down, and every one of those is reachable
+by id. A list of the ids a link may not use would be a list that a new action
+joins by default, which is the wrong default for the one caller that is a
+stranger.
+
+Two names, and both of them show somebody something. Opening a file or folder
+and revealing it in Explorer is what a launcher's address is for: a note in a
+wiki that opens the folder it is about. Nothing on this list writes, deletes,
+runs a shell, types, or changes the machine, and [`LINKED`] is what keeps that
+true when one of them grows.
+
+What it costs is worth being plain about. `sill.launch` opens whatever the
+address names, so a link can put a card in front of somebody offering to open a
+program they downloaded. The card names it, Windows still applies its own mark
+of the web to anything that came off the internet, and the person has to say
+yes; that is the whole of the defence and it is the same defence double
+clicking the file has. Adding a third name here is a one-line change and a
+deliberate one.
+*/
+pub const LINKABLE: &[&str] = &["sill.launch", "sill.revealInFolder"];
+
+/**
+Everything an action reached by a link is allowed to declare.
+
+The second gate, and the one that survives the first going stale. [`LINKABLE`]
+is a list of names, and a name says nothing about what the thing behind it
+does: an action on that list that grows a `ShellExecution` next year is still
+on the list, and nobody rereading the list would notice. A capability is
+declared by the action itself, so this gate reads what the action actually is
+rather than what it was called when somebody wrote its name down.
+
+`Ui` is here because drawing inside Sill's own window is free everywhere else
+too, and `ProcessLaunch` because opening the named thing is the entire feature.
+Everything else on [`Capability`] is absent, including the reads: a link that
+could reach the clipboard or the selection would be a page on the internet
+reading what somebody had copied.
+*/
+pub const LINKED: &[Capability] = &[Capability::ProcessLaunch, Capability::Ui];
+
+/**
+Whether this asker may run this action.
+
+**The one place the difference between a link and a shell is written down.**
+Called for both, including the case that always says yes, so that the check is
+part of the path rather than something a link happens to be routed through:
+`verify:source` holds a `perform` in `outside.rs` to having this above it, and
+a gate that only some callers reach cannot be held to anything.
+
+A shell is not gated because there is nothing to gate. Anything that can type
+`sill run` can type the program's name, and refusing it here would protect
+nobody from anything while making the command useless for the half of the
+registry it is actually wanted for.
+*/
+pub fn may_run(trust: Trust, id: &str, capabilities: &[Capability]) -> Result<(), String> {
+    if trust == Trust::Shell {
+        return Ok(());
+    }
+
+    if !LINKABLE.contains(&id) {
+        return Err(format!(
+            "Sill will not run {id} from a link. A {SCHEME}:// link may only run {}.",
+            LINKABLE.join(" or "),
+        ));
+    }
+
+    for capability in capabilities {
+        if !LINKED.contains(capability) {
+            return Err(format!(
+                "Sill will not run {id} from a link, because it {}.",
+                crate::ai::acting::what_it_touches(&[*capability]),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/**
+What a launch of `sill.exe` is asking for, if it is asking for anything.
+
+`None` for an ordinary second launch, which is somebody who wanted the window
+they already have. Takes the whole command line, program name included, because
+that is what both callers hold: `std::env::args` at startup and the argv the
+single instance plugin hands over.
+
+**An address anywhere in the line makes the whole line an address**, and the
+order matters. Windows starts a protocol handler as `sill.exe "%1"`, so an
+address arrives as one argument; a handler somebody registered by hand without
+the quotes would split an address containing a space into several. Reading the
+address wherever it lands means that broken line is still read as the link it
+is, rather than the leading fragment falling through to the shell form and
+being trusted as if somebody had typed it.
+*/
+pub fn asked_of(argv: &[String]) -> Option<Result<Ask, String>> {
+    let given: Vec<&str> = argv.iter().skip(1).map(String::as_str).collect();
+
+    if let Some(address) = given
+        .iter()
+        .find(|given| scheme_of(given).as_deref() == Some(SCHEME))
+    {
+        return Some(link(address));
+    }
+
+    if given.first() == Some(&RUN) {
+        return Some(typed(&given[1..]));
+    }
+
+    None
+}
+
+/// A `sill://` address, read into what it is asking for.
+fn link(address: &str) -> Result<Ask, String> {
+    let address = printable(address)?;
+
+    let rest = address.split_once(':').map_or("", |(_, rest)| rest);
+    let rest = rest.strip_prefix("//").unwrap_or(rest);
+
+    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let mut parts = path.split('/').filter(|part| !part.is_empty());
+
+    if parts.next() != Some(RUN) {
+        return Err(format!(
+            "Sill only understands {SCHEME}://{RUN}/<action>, and {address} is not that.",
+        ));
+    }
+
+    let Some(action) = parts.next() else {
+        return Err(format!("{address} names no action to run."));
+    };
+
+    let action = decoded(action)?;
+    let Some(action) = some_text(Some(action)) else {
+        return Err(format!("{address} names no action to run."));
+    };
+
+    if parts.next().is_some() {
+        return Err(format!(
+            "{address} has more than an action after {RUN}/, so it is not run.",
+        ));
+    }
+
+    let mut target = None;
+    let mut kind = None;
+    let mut argument = None;
+
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let Some((name, value)) = pair.split_once('=') else {
+            return Err(format!("{pair} in that link is not a name and a value."));
+        };
+
+        let value = decoded(value)?;
+
+        // An allow-list here too, and for the ordinary reason: a name nobody
+        // reads is a name somebody can put anything in, and a link that
+        // carries a field Sill ignores is a link whose author believed it did
+        // something.
+        match name {
+            "target" => target = Some(value),
+            "kind" => kind = Some(value),
+            "argument" => argument = Some(value),
+            _ => {
+                return Err(format!(
+                "A {SCHEME}:// link carries target, kind and argument. It does not carry {name}.",
+            ))
+            }
+        }
+    }
+
+    let Some(target) = some_text(target) else {
+        return Err(format!(
+            "{address} says nothing to act on. A link needs ?target= as well.",
+        ));
+    };
+
+    // The same allow-list an address Sill opens goes through, and the answer
+    // is what gets carried on, so the string checked and the string acted on
+    // cannot be different strings.
+    let target = self::target(&target)?;
+
+    Ok(Ask {
+        trust: Trust::Link,
+        action,
+        target,
+        kind: some_text(kind),
+        argument: some_text(argument),
+    })
+}
+
+/// `sill run ...`, read into what it is asking for.
+fn typed(given: &[&str]) -> Result<Ask, String> {
+    let mut action: Option<String> = None;
+    let mut target: Option<String> = None;
+    let mut kind = None;
+    let mut argument = None;
+    let mut at = 0;
+
+    while at < given.len() {
+        let word = given[at];
+
+        if word == "--kind" || word == "--argument" {
+            let Some(value) = given.get(at + 1) else {
+                return Err(format!("{word} was given nothing to be. {USAGE}"));
+            };
+
+            if word == "--kind" {
+                kind = Some((*value).to_string());
+            } else {
+                argument = Some((*value).to_string());
+            }
+
+            at += 2;
+            continue;
+        }
+
+        if word.starts_with("--") {
+            return Err(format!("sill run does not take {word}. {USAGE}"));
+        }
+
+        if action.is_none() {
+            action = Some(word.to_string());
+        } else if target.is_none() {
+            target = Some(word.to_string());
+        } else {
+            return Err(format!(
+                "sill run takes one action and one target, so {word} is one thing too many. {USAGE}",
+            ));
+        }
+
+        at += 1;
+    }
+
+    let (Some(action), Some(target)) = (some_text(action), some_text(target)) else {
+        return Err(format!("Name an action and a thing to do it to. {USAGE}"));
+    };
+
+    Ok(Ask {
+        trust: Trust::Shell,
+        action: printable(&action)?,
+        target: printable(&target)?,
+        kind: some_text(kind),
+        argument: some_text(argument),
+    })
+}
+
+/// What a field amounts to once the whitespace is off it.
+///
+/// Blank is absent, for the reason `ActionCtx` gives: an argument whose value
+/// was left empty is not an answer of `""`, and a target of `""` is not a
+/// target. A query string has no absent, only empty, so everything arriving
+/// from a link needs this.
+fn some_text(given: Option<String>) -> Option<String> {
+    given
+        .map(|given| given.trim().to_string())
+        .filter(|given| !given.is_empty())
+}
+
+/**
+One percent-encoded field, read.
+
+Strict about the escape itself: two characters and both hexadecimal.
+`u8::from_str_radix` on its own accepts `%+f`, which no encoder produces and
+which every other reader of the same address would resolve differently, and a
+disagreement about what an address says is the whole of how a check gets
+bypassed.
+
+**The control character check is after the decoding and not before it**, which
+is the only place it works. `%0A` is three printable characters until it is a
+newline, so an address examined as written is a different string from the one
+that gets acted on. `printable` above sees the address before this and catches
+a raw control character; this catches the encoded one.
+*/
+fn decoded(text: &str) -> Result<String, String> {
+    let raw = text.as_bytes();
+    let mut out = Vec::with_capacity(raw.len());
+    let mut at = 0;
+
+    while at < raw.len() {
+        if raw[at] != b'%' {
+            out.push(raw[at]);
+            at += 1;
+            continue;
+        }
+
+        let digits = text.get(at + 1..at + 3).unwrap_or_default();
+
+        if digits.len() != 2 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(format!(
+                "%{digits} in that link is not a percent escape, so the link is not read.",
+            ));
+        }
+
+        let byte = u8::from_str_radix(digits, 16)
+            .map_err(|_| format!("%{digits} in that link is not a percent escape."))?;
+
+        out.push(byte);
+        at += 3;
+    }
+
+    let said = String::from_utf8(out)
+        .map_err(|_| "That link decodes to something that is not text.".to_string())?;
+
+    if said.chars().any(char::is_control) {
+        return Err("That link has a control character in it, so it is not run.".to_string());
+    }
+
+    Ok(said)
 }
 
 #[cfg(test)]
@@ -630,6 +997,301 @@ mod tests {
             assert!(readable("").is_err());
             assert!(readable("   ").is_err());
             assert!(readable("C:\\x\0y").is_err());
+        }
+    }
+
+    /// What arrives asking Sill to do something.
+    ///
+    /// The most dangerous text in the tree: a `sill://` address is written by
+    /// whoever wrote the page it sits on, and it names an action out of a
+    /// registry that moves files, runs scripts, quits processes and shuts the
+    /// machine down. Every test here is about something being refused.
+    mod arriving {
+        use super::*;
+
+        fn line(words: &[&str]) -> Vec<String> {
+            std::iter::once("C:/Sill/sill.exe")
+                .chain(words.iter().copied())
+                .map(str::to_string)
+                .collect()
+        }
+
+        fn read(words: &[&str]) -> Result<Ask, String> {
+            asked_of(&line(words)).expect("that line asked for something")
+        }
+
+        mod the_address {
+            use super::*;
+
+            #[test]
+            fn an_ordinary_one_names_an_action_and_a_target() {
+                let ask = read(&[r"sill://run/sill.launch?target=C:\Users\me\Notes"])
+                    .expect("a link Sill understands");
+
+                assert_eq!(ask.trust, Trust::Link);
+                assert_eq!(ask.action, "sill.launch");
+                assert_eq!(ask.target, r"C:\Users\me\Notes");
+                assert_eq!(ask.kind, None);
+                assert_eq!(ask.argument, None);
+            }
+
+            #[test]
+            fn the_fields_it_carries_come_through_decoded() {
+                let ask = read(&["sill://run/sill.launch?target=C%3A%5CUsers%5Cme&kind=folder"])
+                    .expect("a link Sill understands");
+
+                assert_eq!(ask.target, r"C:\Users\me");
+                assert_eq!(ask.kind.as_deref(), Some("folder"));
+            }
+
+            /// The address has to say `run`, and nothing else is a spelling of
+            /// it. Anything that shrugs here is a parser somebody can walk
+            /// past by naming a path Sill never meant to answer.
+            #[test]
+            fn an_address_that_does_not_ask_to_run_is_refused() {
+                for wrong in [
+                    "sill://open/sill.launch?target=x",
+                    "sill://sill.launch?target=x",
+                    "sill://",
+                    "sill:",
+                    "sill://run",
+                    "sill://run/",
+                    "sill://run/sill.launch/extra?target=x",
+                ] {
+                    assert!(read(&[wrong]).is_err(), "{wrong} was read as a request");
+                }
+            }
+
+            #[test]
+            fn a_link_with_nothing_to_act_on_says_so() {
+                let refused = read(&["sill://run/sill.launch"]).expect_err("refused");
+                assert!(refused.contains("target"), "{refused}");
+
+                let refused = read(&["sill://run/sill.launch?target="]).expect_err("refused");
+                assert!(refused.contains("target"), "{refused}");
+            }
+
+            /// A field Sill ignores is a field whose author believed it did
+            /// something, which is how a link ends up doing less than the page
+            /// around it claims.
+            #[test]
+            fn a_field_sill_does_not_carry_is_refused_rather_than_ignored() {
+                let refused =
+                    read(&["sill://run/sill.launch?target=x&elevated=true"]).expect_err("refused");
+                assert!(refused.contains("elevated"), "{refused}");
+            }
+
+            /// The one that looks like nothing. `%0A` is three printable
+            /// characters right up until it is a newline, so an address
+            /// checked as written is a different string from the one used.
+            #[test]
+            fn a_control_character_survives_no_encoding() {
+                for evil in [
+                    "sill://run/sill.launch?target=C:%00%5CWindows",
+                    "sill://run/sill.launch?target=x%0Ay",
+                    "sill://run/sill%09launch?target=x",
+                ] {
+                    assert!(read(&[evil]).is_err(), "{evil} was allowed");
+                }
+
+                assert!(
+                    read(&["sill://run/sill.launch?target=x\ty"]).is_err(),
+                    "a raw control character was allowed",
+                );
+            }
+
+            /// `from_str_radix` alone takes `%+f`, which no encoder writes and
+            /// which another reader of the same address resolves differently.
+            #[test]
+            fn a_percent_escape_that_is_not_one_is_refused() {
+                for wrong in [
+                    "sill://run/sill.launch?target=x%zz",
+                    "sill://run/sill.launch?target=x%2",
+                    "sill://run/sill.launch?target=x%+f",
+                    "sill://run/sill.launch?target=x%",
+                ] {
+                    assert!(read(&[wrong]).is_err(), "{wrong} was read");
+                }
+            }
+
+            /// The target goes through the same allow-list an address Sill
+            /// opens goes through, so a link cannot smuggle one past by
+            /// arriving as a target instead of as a quicklink.
+            #[test]
+            fn a_target_that_runs_code_is_refused() {
+                for evil in [
+                    "sill://run/sill.launch?target=javascript%3Aalert(1)",
+                    "sill://run/sill.launch?target=file%3A///C%3A/Windows/System32/cmd.exe",
+                    "sill://run/sill.launch?target=vbscript%3Amsgbox(1)",
+                    "sill://run/sill.launch?target=ms-msdt%3A/id",
+                ] {
+                    assert!(read(&[evil]).is_err(), "{evil} was allowed");
+                }
+            }
+
+            /// A protocol handler registered by hand as `sill.exe %1` rather
+            /// than `sill.exe "%1"` splits an address with a space in it. The
+            /// leading fragment must not then fall through to the typed form
+            /// and be trusted as something somebody sat down and wrote.
+            #[test]
+            fn an_address_anywhere_in_the_line_makes_the_whole_line_an_address() {
+                let ask = read(&["run", "sill://run/sill.launch?target=x", "and", "more"])
+                    .expect("a link");
+
+                assert_eq!(ask.trust, Trust::Link, "a link was trusted as a shell");
+                assert_eq!(ask.action, "sill.launch");
+            }
+
+            /// Somebody who wanted the window they already have.
+            #[test]
+            fn an_ordinary_second_launch_asks_for_nothing() {
+                assert!(asked_of(&line(&[])).is_none());
+                assert!(asked_of(&line(&["--some-flag"])).is_none());
+                assert!(asked_of(&line(&["raycast://run/x"])).is_none());
+                assert!(asked_of(&[]).is_none());
+            }
+        }
+
+        mod what_a_link_may_run {
+            use super::*;
+
+            #[test]
+            fn the_two_named_actions_may_run() {
+                for id in LINKABLE {
+                    assert!(
+                        may_run(Trust::Link, id, &[Capability::ProcessLaunch]).is_ok(),
+                        "{id} is on the list and was refused",
+                    );
+                }
+            }
+
+            /// The whole point of the item. Every one of these is a real
+            /// registry id, and a page on the internet naming one must get a
+            /// refusal rather than a card.
+            #[test]
+            fn everything_else_in_the_registry_is_refused_by_name() {
+                for id in [
+                    "sill.file.recycle",
+                    "sill.file.move",
+                    "sill.file.rename",
+                    "sill.script.run",
+                    "sill.system.run",
+                    "sill.process.quit",
+                    "sill.process.forceQuit",
+                    "sill.app.uninstall",
+                    "sill.pasteSnippet",
+                    "sill.window.close",
+                    "sill.store.remove",
+                    "sill.clipboard.copy",
+                ] {
+                    let refused = may_run(Trust::Link, id, &[]).expect_err("refused");
+                    assert!(refused.contains(id), "{refused}");
+                    assert!(
+                        refused.contains("sill.launch"),
+                        "the refusal does not say what a link may do: {refused}",
+                    );
+                }
+            }
+
+            #[test]
+            fn an_action_nobody_has_heard_of_is_refused() {
+                assert!(may_run(Trust::Link, "", &[]).is_err());
+                assert!(may_run(Trust::Link, "sill.launch.evil", &[]).is_err());
+                assert!(may_run(Trust::Link, "SILL.LAUNCH", &[]).is_err());
+            }
+
+            /**
+            The second gate, and the reason there are two.
+
+            A name says nothing about what the thing behind it does. An action
+            on the list that grows a `ShellExecution` next year is still on the
+            list, and nobody rereading a list of names would notice. The
+            capability is declared by the action itself, so this reads what the
+            action is rather than what it was called when somebody wrote its
+            name down.
+            */
+            #[test]
+            fn a_listed_action_that_grew_a_capability_is_still_refused() {
+                for grown in [
+                    Capability::ShellExecution,
+                    Capability::FileWrite,
+                    Capability::SystemControl,
+                    Capability::InputInjection,
+                    Capability::WindowControl,
+                    Capability::Network,
+                    Capability::SelectionRead,
+                    Capability::ClipboardRead,
+                    Capability::ClipboardWrite,
+                    Capability::FileRead,
+                    Capability::LauncherDismiss,
+                ] {
+                    let refused = may_run(
+                        Trust::Link,
+                        "sill.launch",
+                        &[Capability::ProcessLaunch, grown],
+                    )
+                    .expect_err("refused");
+
+                    assert!(refused.contains("sill.launch"), "{refused}");
+                }
+            }
+        }
+
+        mod what_a_shell_may_run {
+            use super::*;
+
+            /// A different trust level, written down in one place. Anything
+            /// able to type `sill run` can type the program's name.
+            #[test]
+            fn a_shell_reaches_what_a_link_cannot() {
+                for id in ["sill.file.recycle", "sill.script.run", "sill.system.run"] {
+                    assert!(may_run(Trust::Shell, id, &[Capability::ShellExecution]).is_ok());
+                    assert!(may_run(Trust::Link, id, &[Capability::ShellExecution]).is_err());
+                }
+            }
+
+            #[test]
+            fn an_ordinary_command_names_an_action_and_a_target() {
+                let ask =
+                    read(&["run", "sill.file.recycle", r"C:\Users\me\old.txt"]).expect("a command");
+
+                assert_eq!(ask.trust, Trust::Shell);
+                assert_eq!(ask.action, "sill.file.recycle");
+                assert_eq!(ask.target, r"C:\Users\me\old.txt");
+            }
+
+            #[test]
+            fn it_takes_a_kind_and_an_argument() {
+                let ask = read(&[
+                    "run",
+                    "sill.file.rename",
+                    r"C:\notes.md",
+                    "--argument",
+                    "new name.md",
+                    "--kind",
+                    "file",
+                ])
+                .expect("a command");
+
+                assert_eq!(ask.argument.as_deref(), Some("new name.md"));
+                assert_eq!(ask.kind.as_deref(), Some("file"));
+            }
+
+            /// A command spelled wrong says how it is spelled, because the
+            /// person reading it is at a prompt and can fix it.
+            #[test]
+            fn a_command_spelled_wrong_says_how_it_is_spelled() {
+                for wrong in [
+                    vec!["run"],
+                    vec!["run", "sill.launch"],
+                    vec!["run", "sill.launch", "x", "--kind"],
+                    vec!["run", "sill.launch", "x", "--elevated"],
+                    vec!["run", "sill.launch", "x", "y"],
+                ] {
+                    let refused = read(&wrong).expect_err("refused");
+                    assert!(refused.contains("sill run"), "{refused}");
+                }
+            }
         }
     }
 }

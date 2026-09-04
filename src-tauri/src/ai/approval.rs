@@ -29,7 +29,7 @@ use tokio::sync::oneshot;
 const PATIENCE: std::time::Duration = std::time::Duration::from_secs(90);
 
 /// What the window is told, when something needs deciding.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Asking {
     /// What the answer must name, so two cards cannot be confused.
@@ -57,6 +57,23 @@ pub struct Pending {
     waiting: Mutex<HashMap<String, oneshot::Sender<bool>>>,
     /// Numbers the cards, so two in one turn are told apart.
     asked: Mutex<u64>,
+    /**
+    The card that has been put up and not yet answered.
+
+    **Because the event alone loses the card in the one case it matters most.**
+    [`raise`] emits, and then opens the chat window when nothing of Sill's is on
+    screen; a window built in that moment did not exist when the emit happened,
+    its page mounts its listener afterwards, and the question that caused the
+    window to open is the one question that window never hears. Ninety seconds
+    later it refuses itself, which reads to whoever asked as the feature being
+    broken rather than as permission being withheld.
+
+    So the card is also a thing that can be asked for. A window opening reads
+    what is outstanding, which is at most one because the turn that raised it
+    is paused, and draws it. The event stays: it is what makes an already-open
+    window show the card at the moment it is raised rather than never.
+    */
+    showing: Mutex<Option<Asking>>,
 }
 
 impl Pending {
@@ -73,6 +90,43 @@ impl Pending {
 
         *asked += 1;
         format!("ask:{asked}")
+    }
+
+    /// Remembers the card that has just gone up.
+    ///
+    /// Called by [`raise`] and nowhere else, so that what a window asks for
+    /// and what the event carried are one payload rather than two that could
+    /// describe different things.
+    fn raised(&self, asking: &Asking) {
+        let mut showing = match self.showing.lock() {
+            Ok(showing) => showing,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        *showing = Some(asking.clone());
+    }
+
+    /// The card a window that has just opened should draw, if there is one.
+    pub fn outstanding(&self) -> Option<Asking> {
+        match self.showing.lock() {
+            Ok(showing) => showing.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    /// Forgets the card, when the one being forgotten is the one held.
+    ///
+    /// By id, because a card that timed out while a second was already up
+    /// must not clear the second one on its way past.
+    fn done_with(&self, id: &str) {
+        let mut showing = match self.showing.lock() {
+            Ok(showing) => showing,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        if showing.as_ref().is_some_and(|held| held.id == id) {
+            *showing = None;
+        }
     }
 
     /// Waits for one to be answered.
@@ -104,6 +158,11 @@ impl Pending {
         if let Ok(mut waiting) = self.waiting.lock() {
             waiting.remove(id);
         }
+
+        // And it is not a card a window opening now should draw. This is the
+        // one path every answer passes through, including the timeout, which
+        // is why the forgetting is here rather than beside each of them.
+        self.done_with(id);
 
         match answered {
             Ok(Ok(true)) => Answer::Allowed,
@@ -142,6 +201,13 @@ impl Pending {
         for (_, sender) in waiting.drain() {
             let _ = sender.send(false);
         }
+
+        // Said here as well as on the waiter's way out, because leaving is the
+        // one moment nothing may be waiting: a card raised by something that
+        // gave up would otherwise be drawn by the next window to open.
+        if let Ok(mut showing) = self.showing.lock() {
+            *showing = None;
+        }
     }
 }
 
@@ -172,6 +238,12 @@ pub const SURFACES: &[&str] = &["ask", "main"];
 /// Escape away from somebody in the middle of typing.
 pub fn raise(app: &tauri::AppHandle, asking: Asking) {
     use tauri::Manager;
+
+    // Written down before it is emitted, so a window opened by the emit's own
+    // consequence has something to ask for. See [`Pending::showing`].
+    if let Some(pending) = app.try_state::<Pending>() {
+        pending.raised(&asking);
+    }
 
     let _ = tauri::Emitter::emit(app, "sill://ai-asking", &asking);
 
@@ -309,6 +381,108 @@ mod tests {
     #[test]
     fn answering_one_nobody_is_waiting_on_is_not_a_problem() {
         Pending::new().decide("ask:404", true);
+    }
+
+    mod the_card_a_new_window_asks_for {
+        use super::*;
+
+        fn card(id: &str) -> Asking {
+            Asking {
+                id: id.to_string(),
+                title: "Open".to_string(),
+                subject: r"C:\Users\me\notes.txt".to_string(),
+                touches: "opens something".to_string(),
+            }
+        }
+
+        /// The reason this exists at all. `raise` opens the chat window when
+        /// nothing of Sill's is on screen, and that window did not exist when
+        /// the event was emitted, so the question that caused it to open is
+        /// the one question it cannot hear.
+        #[test]
+        fn a_window_that_missed_the_event_can_still_ask_for_it() {
+            let pending = Pending::new();
+            assert_eq!(pending.outstanding(), None, "something was up already");
+
+            pending.raised(&card("ask:1"));
+
+            assert_eq!(
+                pending.outstanding().map(|held| held.id),
+                Some("ask:1".to_string()),
+                "a window opening now would draw nothing",
+            );
+        }
+
+        /// A card drawn after it was answered is a second chance to say yes
+        /// to something already decided.
+        #[tokio::test]
+        async fn one_that_has_been_answered_is_not_offered_again() {
+            let pending = std::sync::Arc::new(Pending::new());
+            let id = pending.next_id();
+            pending.raised(&card(&id));
+
+            {
+                let pending = pending.clone();
+                let id = id.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    pending.decide(&id, true);
+                });
+            }
+
+            assert_eq!(pending.wait(&id).await, Answer::Allowed);
+            assert_eq!(pending.outstanding(), None, "the card outlived its answer");
+        }
+
+        /// Nobody answering is the path that has no decision to hang the
+        /// forgetting off, so it is the one most likely to leave a card up.
+        #[tokio::test]
+        async fn one_nobody_answered_is_not_offered_again() {
+            let pending = Pending::new();
+            let id = pending.next_id();
+            pending.raised(&card(&id));
+
+            let answer = pending
+                .wait_for(&id, std::time::Duration::from_millis(20))
+                .await;
+
+            assert_eq!(answer, Answer::Unanswered);
+            assert_eq!(pending.outstanding(), None, "a lapsed card is still up");
+        }
+
+        /// A card that timed out on its way past must not take a newer one
+        /// with it, or the window that opens for the second draws nothing.
+        #[tokio::test]
+        async fn forgetting_one_does_not_forget_the_next() {
+            let pending = Pending::new();
+            let first = pending.next_id();
+            let second = pending.next_id();
+
+            pending.raised(&card(&first));
+            pending.raised(&card(&second));
+
+            let _ = pending
+                .wait_for(&first, std::time::Duration::from_millis(20))
+                .await;
+
+            assert_eq!(
+                pending.outstanding().map(|held| held.id),
+                Some(second),
+                "the older card cleared the one actually on screen",
+            );
+        }
+
+        /// Leaving takes the card with it, whether or not anything was still
+        /// waiting on an answer.
+        #[test]
+        fn leaving_takes_the_card_down() {
+            let pending = Pending::new();
+            pending.raised(&card("ask:1"));
+
+            pending.refuse_everything();
+
+            assert_eq!(pending.outstanding(), None);
+        }
     }
 
     /// Silence is not a yes. The direction of this default is the whole

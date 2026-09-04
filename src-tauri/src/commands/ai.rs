@@ -292,6 +292,19 @@ pub(crate) fn ai_decide(
     pending.decide(&id, allowed);
 }
 
+/// The card that is up and unanswered, for a window that has just opened.
+///
+/// A window built to hold a card did not exist when the card was emitted, so
+/// the event went nowhere and the question that caused the window to open is
+/// the one it cannot hear. This is how it hears it. At most one, because the
+/// thing that raised it is paused until it is answered.
+#[tauri::command]
+pub(crate) fn ai_outstanding(
+    pending: State<'_, crate::ai::approval::Pending>,
+) -> Option<crate::ai::approval::Asking> {
+    pending.outstanding()
+}
+
 /// Refuses everything still waiting.
 ///
 /// What leaving a conversation means. Without it a card nobody answered holds

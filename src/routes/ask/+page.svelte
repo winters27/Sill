@@ -36,6 +36,7 @@
     aiFollowUp,
     aiForget,
     aiNew,
+    aiOutstanding,
     aiReady,
     aiRefusePending,
     aiResume,
@@ -477,6 +478,22 @@
       wants = await listen<AiAsking>("sill://ai-asking", ({ payload }) => {
         asked = payload;
       });
+
+      /*
+       * The card that was raised before this window existed.
+       *
+       * This window is opened BY a card, when nothing else of Sill's is on
+       * screen: a deep link or an MCP client asks for something, there is
+       * nowhere to show the question, and Rust builds this page to hold it.
+       * The event announcing the card went out while that was happening, so
+       * the one question this window exists to ask is the one it cannot hear.
+       *
+       * After the listener, so a card raised in the gap is not lost either,
+       * and it does not overwrite one that has already arrived.
+       */
+      asked ??= await aiOutstanding().catch(
+        orElse("ask", "the question waiting to be answered", null, "ai"),
+      );
 
       finished = await listen("sill://ai-done", () => {
         if (answering) {
