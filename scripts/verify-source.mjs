@@ -3316,6 +3316,11 @@ if (tracked.status !== 0) {
     // progress and reaches no network at all.
     "src/lib/components/settings/DictationPanel.svelte":
       "the settings window closes rather than hides, and it reads local setup progress",
+    // One wakeup a minute, so "3 minutes ago" under an answer stays true.
+    // Cleared by the effect that made it, so it lives exactly as long as the
+    // window it is in, and it asks Rust nothing and reaches no network.
+    "src/routes/ask/+page.svelte":
+      "one wakeup a minute for relative times, cleared by its own effect",
   };
 
   /** The module that owns the rule, and therefore the one timer that is real. */
@@ -3345,7 +3350,17 @@ if (tracked.status !== 0) {
     if (at === OWNS_THE_RULE || at.endsWith(".test.ts")) continue;
 
     const text = readFileSync(file, "utf8");
-    if (!text.includes("setInterval(")) continue;
+
+    /*
+     * Comments stripped first.
+     *
+     * `Clock.svelte`'s note explains why it is **not** `setInterval(1000)` for
+     * a clock showing minutes, and the rule read that sentence as a timer. A
+     * rule that fails on a file for saying it does not do the thing is a rule
+     * somebody switches off.
+     */
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    if (!code.includes("setInterval(")) continue;
 
     checked += 1;
 
@@ -3363,9 +3378,6 @@ if (tracked.status !== 0) {
      * The helper owns the only one, in `visible.ts`, which is skipped
      * above. Anything else holding a timer is holding it itself.
      */
-    // A timer that never asks Rust anything cannot make a call at rest.
-    if (!/\binvoke[(<]/.test(text)) continue;
-
     if (ALLOWED[at]) continue;
 
     unaccounted += 1;
@@ -3373,9 +3385,10 @@ if (tracked.status !== 0) {
     fail(
       at,
       lineOf(text, text.indexOf("setInterval(")),
-      "a repeating timer of its own that calls into Rust, and no entry here " +
-        "saying why being hidden stops it, so this keeps working for a window " +
-        "nobody can see. Poll through `pollWhileVisible` instead",
+      "a repeating timer of its own, and no entry here saying what stops it " +
+        "when the window is hidden, so it keeps waking the machine for a " +
+        "window nobody can see. Poll through `pollWhileVisible` instead, or " +
+        "add an entry saying why this one is already accounted for",
     );
   }
 
