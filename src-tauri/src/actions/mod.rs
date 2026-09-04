@@ -1963,7 +1963,27 @@ impl Action for RemoveExtension {
     }
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
-        let extension = object.target.clone();
+        let data_dir = crate::state::data_dir(&ctx.app);
+        let home = crate::store::extensions_home(&data_dir);
+
+        /*
+         * The name that came in is whichever of the extension's two names the
+         * screen had.
+         *
+         * The settings panel lists what is installed, so it sends the
+         * directory. The store lists the catalogue, so it sends the slug, and
+         * the two differ for every extension that has ever been renamed:
+         * `translate` in the store is `google-translate` on disk. Handing the
+         * slug straight on removed nothing and said "was not installed" while
+         * the bundles, the index entry and every granted permission stayed.
+         *
+         * Resolved once, here, so the grant that is forgotten and the
+         * directory that is deleted are the same extension. Doing it in two
+         * places is how one of them ends up forgetting the permissions of
+         * something that is still installed.
+         */
+        let extension = crate::store::installed_as(&home, &object.target)
+            .unwrap_or_else(|| object.target.clone());
 
         // Before the removal rather than after, so files that refuse to go do
         // not leave permissions granted to something nobody can see any more.
@@ -1971,7 +1991,6 @@ impl Action for RemoveExtension {
             .state::<std::sync::Arc<crate::exthost::grants::Granted>>()
             .forget(&extension);
 
-        let data_dir = crate::state::data_dir(&ctx.app);
         let name = extension.clone();
 
         // The one `LocalStorage` the application has open, so what an

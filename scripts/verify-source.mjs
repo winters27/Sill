@@ -2025,6 +2025,98 @@ if (tracked.status !== 0) {
   }
 }
 
+/*
+ * Nothing changes what an extension holds without telling the worker running it.
+ *
+ * The capabilities a command is gated by were handed to its worker once, in the
+ * launch payload, and never again. So revoking in Settings wrote the file,
+ * satisfied the next launch, and reached the command on screen not at all: the
+ * extension somebody had just revoked went on reading the disk and reaching the
+ * network until something unloaded it. A permission that can be revoked and
+ * does not take effect is worse than one that cannot.
+ *
+ * `Granted::announce` is what closes that, and the failure this catches is a
+ * fourth way to change a grant written by somebody with no reason to know that,
+ * which compiles, passes every test about the file on disk, and silently puts
+ * the hole back. Every method that changes the map has to announce, so the
+ * check is "mutates and does not announce" rather than a list of method names
+ * that would go stale the moment a fifth one is added.
+ */
+{
+  const GRANTS = "src-tauri/src/exthost/grants.rs";
+  const text = readFileSync(GRANTS, "utf8");
+
+  // Each `fn` in the file with its body, cut at the next one. Crude and
+  // sufficient: what matters is that a mutation and an announcement land in
+  // the same slice.
+  const bodies = text.split(/\n    (?:pub )?fn /).slice(1);
+  let checked = 0;
+
+  for (const body of bodies) {
+    const name = body.split(/[(<]/)[0];
+    if (!body.includes("by_extension.lock()")) continue;
+    if (!/\.(?:entry|remove|get_mut)\(/.test(body)) continue;
+
+    checked += 1;
+    if (body.includes("self.announce(")) continue;
+
+    fail(
+      GRANTS,
+      lineOf(text, text.indexOf(`fn ${name}`)),
+      `\`${name}\` changes what an extension holds and does not call ` +
+        "`self.announce`, so a command already running keeps the permission " +
+        "somebody just took away",
+    );
+  }
+
+  if (checked < 3) {
+    fail(
+      GRANTS,
+      null,
+      `only ${checked} grant-changing methods found, so this is parsing rather ` +
+        "than checking",
+    );
+  }
+}
+
+/*
+ * Nothing is removed by a name that was never resolved.
+ *
+ * An extension has two names and nothing makes them agree: the catalogue is
+ * keyed by a store slug, its directory is named by its own `package.json`, and
+ * `translate` in the store is `google-translate` on disk. `store::installed_as`
+ * is the join, and the failure it exists to stop is quiet in both directions.
+ * Removing by an unresolved slug deletes nothing, says "was not installed", and
+ * leaves the bundles, the index entry and every granted permission where they
+ * were; where something else is installed under that slug, it removes the wrong
+ * extension.
+ *
+ * The check is here rather than inside `uninstall` because that function takes
+ * paths and a directory name, which is the right signature for it: the caller
+ * is the layer that knows which of the two names it was handed.
+ */
+{
+  const REMOVES = /crate::store::install::uninstall\(/g;
+
+  for (const file of sources("src-tauri/src")) {
+    const text = readFileSync(file, "utf8");
+
+    for (const found of text.matchAll(REMOVES)) {
+      const before = text.slice(0, found.index).split("\n").slice(-30).join("\n");
+
+      if (before.includes("installed_as(")) continue;
+
+      fail(
+        file,
+        lineOf(text, found.index),
+        "this removes an extension by a name nothing resolved through " +
+          "`crate::store::installed_as`, so a store slug that differs from the " +
+          "directory removes nothing or removes the wrong one",
+      );
+    }
+  }
+}
+
 console.log(
   failures === 0 ? "source verification passed" : `\n${failures} problem(s) found`,
 );

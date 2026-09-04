@@ -400,6 +400,39 @@ impl ExtHost {
         views_in(&self.sessions.lock().expect("sessions poisoned"))
     }
 
+    /**
+    Tells every running command of one extension what it may reach now.
+
+    **This is what makes a revoke mean something.** What an extension holds was
+    handed to the worker once, at load, so taking a permission away wrote the
+    file, satisfied the next launch, and left the command on screen using the
+    thing somebody had just taken from it. The RPC side of the host never had
+    this problem, because it asks `Permits` per call; the worker's own gate on
+    `require` and on `fetch` is a set it was given, and a set nobody updates.
+
+    Sent to every session of that extension rather than to one, because a
+    person can have a view open and a background command running from the same
+    extension and both hold the same permissions.
+
+    Failures are logged and not returned. The caller is somebody changing a
+    switch in Settings, the file is already written, and there is nothing they
+    could do with "the host did not answer" except see an error for something
+    that did work. A host that is not answering is one that is about to be
+    replaced, and a fresh one reads the file.
+    */
+    pub async fn tell_running(&self, extension: &str, capabilities: &[crate::action::Capability]) {
+        let sessions = sessions_of(
+            &self.sessions.lock().unwrap_or_else(|e| e.into_inner()),
+            extension,
+        );
+
+        for session in sessions {
+            if let Err(err) = self.manager.set_capabilities(&session, capabilities).await {
+                crate::say!("could not tell {extension} what it now holds: {err}");
+            }
+        }
+    }
+
     /// Name of the extension backing a session, if it is still loaded.
     /// The host process's id, for a test that needs to kill it.
     ///
@@ -439,6 +472,23 @@ fn views_in(sessions: &HashMap<String, Session>) -> Vec<String> {
         .collect()
 }
 
+/// Which of these sessions belong to one extension.
+///
+/// A free function over the map for the reason [`views_in`] is one: standing up
+/// an [`ExtHost`] costs a Node process, and "which of these three sessions is
+/// the extension somebody just revoked" is a question about a map.
+///
+/// Every mode, deliberately. A revoke has to reach a no-view command as well as
+/// a view: the background one is the one that is off doing something with the
+/// permission right now, and it is the one nobody is looking at.
+fn sessions_of(sessions: &HashMap<String, Session>, extension: &str) -> Vec<String> {
+    sessions
+        .iter()
+        .filter(|(_, session)| session.extension == extension)
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
 #[cfg(test)]
 mod letting_views_go {
     use super::*;
@@ -466,5 +516,53 @@ mod letting_views_go {
         sessions.insert("working".to_string(), session(CommandMode::NoView));
 
         assert_eq!(views_in(&sessions), vec!["drawing".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod reaching_what_is_running {
+    use super::*;
+
+    fn session(extension: &str, mode: CommandMode) -> Session {
+        let (peer, _outbound, _incoming) = RpcPeer::new();
+        Session {
+            extension: extension.to_string(),
+            peer,
+            mode,
+        }
+    }
+
+    /// A revoke has to find the commands of the extension it revoked, and only
+    /// those.
+    ///
+    /// Telling the wrong session is worse than telling none: the list sent is
+    /// the whole answer, so another extension's worker would be handed a set of
+    /// permissions belonging to something else and believe it.
+    #[test]
+    fn only_the_extension_that_was_revoked() {
+        let mut sessions = HashMap::new();
+        sessions.insert("a".to_string(), session("clipboard", CommandMode::View));
+        sessions.insert("b".to_string(), session("translate", CommandMode::View));
+
+        assert_eq!(sessions_of(&sessions, "clipboard"), vec!["a".to_string()]);
+        assert_eq!(sessions_of(&sessions, "translate"), vec!["b".to_string()]);
+        assert!(sessions_of(&sessions, "never-installed").is_empty());
+    }
+
+    /// Both of them, and the one nobody is looking at especially.
+    ///
+    /// A no-view command is work in flight. It is the session most likely to be
+    /// part way through using the permission at the moment it is taken away, and
+    /// it is the one a "close the screens" rule would skip.
+    #[test]
+    fn every_command_it_has_running_including_the_invisible_one() {
+        let mut sessions = HashMap::new();
+        sessions.insert("watching".to_string(), session("notes", CommandMode::View));
+        sessions.insert("working".to_string(), session("notes", CommandMode::NoView));
+
+        let mut found = sessions_of(&sessions, "notes");
+        found.sort();
+
+        assert_eq!(found, vec!["watching".to_string(), "working".to_string()]);
     }
 }

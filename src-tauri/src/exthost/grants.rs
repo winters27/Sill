@@ -164,6 +164,50 @@ impl Granted {
         }
 
         self.save();
+        self.announce(extension);
+    }
+
+    /**
+    Tells any command of this extension that is already running.
+
+    **The one place this can live.** What an extension holds changes in exactly
+    three ways: it is granted on a card, granted ahead of time by the install
+    screen, or taken back in Settings. Every one of them ends up in `remember`,
+    `revoke` or `forget`, so the announcement goes in those three and a fourth
+    way of changing a grant cannot be written without going through one of them.
+    Announcing from the command layer instead would be three call sites and
+    nothing making them agree, which is the shape this codebase has been bitten
+    by five times.
+
+    Why it is needed at all: the worker's own gate on `require`, `fetch` and
+    `WebSocket` was handed a list when the command loaded, and nothing ever
+    handed it another. So Settings wrote the file, the next launch honoured it,
+    and the command on screen kept the permission somebody had just taken away
+    for as long as it stayed loaded. **A permission that can be revoked and does
+    not take effect is worse than one that cannot**, because the person believes
+    they have taken it away.
+
+    Spawned rather than awaited. The callers are a `Mutex` away from a settings
+    switch and a card being answered, neither of which can be async here, and
+    the send is one small frame down a pipe that is already open. Never starts
+    the host: with nothing running there is nothing holding a stale answer, and
+    the next launch reads the file.
+    */
+    fn announce(&self, extension: &str) {
+        let app = self.app.clone();
+        let extension = extension.to_string();
+        let held = self.held(&extension);
+
+        tauri::async_runtime::spawn(async move {
+            let Some(state) = app.try_state::<crate::state::HostState>() else {
+                return;
+            };
+            let Some(host) = crate::host::running_host(&state).await else {
+                return;
+            };
+
+            host.tell_running(&extension, &held).await;
+        });
     }
 
     /// What one extension holds, for the worker that has to enforce it.
@@ -217,9 +261,13 @@ impl Granted {
         }
 
         self.save();
+        self.announce(extension);
     }
 
     /// Takes one back. The extension is asked again next time it tries.
+    ///
+    /// Reaches a command that is already running, which is the difference
+    /// between a permission and a note about one. See [`Self::announce`].
     pub fn revoke(&self, extension: &str, capability: &Capability) {
         if let Ok(mut held) = self.by_extension.lock() {
             if let Some(list) = held.get_mut(extension) {
@@ -228,6 +276,7 @@ impl Granted {
         }
 
         self.save();
+        self.announce(extension);
     }
 }
 

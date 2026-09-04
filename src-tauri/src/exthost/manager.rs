@@ -219,6 +219,31 @@ impl ManagerClient {
         Ok(result.as_bool().unwrap_or(false))
     }
 
+    /// Tells one running command what it is allowed to reach now.
+    ///
+    /// The other half of the `capabilities` field on [`LoadOptions`], which
+    /// arrives once and was the only time the worker ever heard about this.
+    /// A permission taken away in Settings reached the file and the next
+    /// launch, and never the command somebody was looking at.
+    ///
+    /// The whole list, not a difference. What an extension holds is one answer
+    /// held in one place, and sending "this one has gone" would make the worker
+    /// keep a second copy of the answer that has to agree with the first.
+    pub async fn set_capabilities(
+        &self,
+        session_id: &str,
+        capabilities: &[Capability],
+    ) -> Result<bool, RpcError> {
+        let result = self
+            .peer
+            .request(
+                "Manager/setCapabilities",
+                json!({ "session_id": session_id, "capabilities": capabilities }),
+            )
+            .await?;
+        Ok(result.as_bool().unwrap_or(false))
+    }
+
     /// Sends one API-layer message to a running extension.
     ///
     /// This is a request, not a notification. The host routes request methods

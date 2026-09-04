@@ -72,9 +72,16 @@ fn touching(capability: &Capability) -> Option<&'static str> {
         // Nothing leaves the machine and nothing is altered by these, so a
         // card would be a prompt about nothing. They are still declared, and
         // still shown wherever what an extension can reach is listed.
+        //
+        // `LauncherDismiss` is here and is **not** free to an extension, which
+        // is the difference this file's own threshold is for. Sill's model
+        // hiding the launcher is the ordinary end of the thing the person just
+        // asked it to do; somebody else's extension doing it is a window
+        // disappearing for a reason nobody chose.
         Capability::ClipboardRead
         | Capability::ClipboardWrite
         | Capability::FileRead
+        | Capability::LauncherDismiss
         | Capability::Ui => None,
     }
 }

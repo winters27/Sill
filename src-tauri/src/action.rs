@@ -37,8 +37,31 @@ pub enum Capability {
     /// Synthesises keyboard input into whatever is in front.
     InputInjection,
     Network,
-    /// Opens or changes one of Sill's own windows.
+    /// Draws inside the surface Sill already put on screen.
+    ///
+    /// A toast, a HUD, a dialog, the text in the search bar of the command the
+    /// person is looking at. All of it is paint on a window that is open
+    /// because somebody opened it, which is why this is the one capability an
+    /// extension holds without being asked.
+    ///
+    /// **Making the window go away is not drawing**, and it used to live here.
+    /// See [`Self::LauncherDismiss`].
     Ui,
+    /// Takes Sill's window off the screen while somebody is using it.
+    ///
+    /// Split out of `Ui`, which is free, because the two are not the same
+    /// favour. Drawing a toast asks nothing of the person: the window they
+    /// opened is still the window in front of them. Dismissing it ends what
+    /// they were doing, hands the keyboard back to whatever was behind, and is
+    /// the second half of the copy-then-hide-then-paste chord that types into
+    /// a document Sill was never shown. It is also the whole of a denial of
+    /// service: a command that calls it on every render is a launcher that
+    /// cannot be kept open.
+    ///
+    /// Named for what somebody is agreeing to rather than for the window
+    /// system, because the sentence on the card is "close Sill's window while
+    /// you are using it" and nobody consents to a subsystem.
+    LauncherDismiss,
     /// Changes the machine: the volume, the theme, the lock screen.
     ///
     /// Its own thing rather than folded into `Ui`, which is Sill's own

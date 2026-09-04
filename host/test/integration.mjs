@@ -491,6 +491,159 @@ try {
     (await netLoad(["network"], "yes-net")).includes("reachable"),
     "and is the real one once it is",
   );
+
+  // ---- taking a permission away from something already running ----
+  //
+  // The test that matters for a revoke, and the one nothing could pass before.
+  // Capabilities arrived once, in the launch payload, so revoking in Settings
+  // wrote the file, satisfied the next launch, and reached the worker on
+  // screen not at all: the extension somebody had just revoked went on reading
+  // the disk and reaching the network until something unloaded it.
+  //
+  // One worker throughout. It is granted, it uses both gates, the permissions
+  // are taken away, and it is asked to use them again without being reloaded.
+  const living = await request("Manager/load", {
+    opts: {
+      mode: "View",
+      env: "Development",
+      entrypoint: resolve(root, "test/fixture/keeps-using-what-it-was-given.js"),
+      extension_name: "second-thoughts",
+      command_name: "use",
+      is_raycast: true,
+      preferences: {},
+      arguments: {},
+      launch_type: "User",
+      capabilities: ["fileRead", "fileWrite", "network"],
+    },
+  });
+
+  const livingSession = living.result?.session_id;
+  await request("Manager/ready", { session_id: livingSession });
+
+  /*
+   * What this session draws next, ignoring what it has already drawn.
+   *
+   * `waitFor` searches the whole inbox, which is right everywhere else here
+   * and wrong for one worker asked the same question three times: the render
+   * from before a revoke is still sitting there and matches. So each call
+   * starts from where the last one ended, and a stale match cannot answer for
+   * a fresh one. Without it, the "granted again" check passes on the render
+   * from before the revoke and proves nothing at all.
+   */
+  let readFrom = 0;
+  const drawn = async (pattern, label) => {
+    const from = readFrom;
+
+    const message = await waitFor(
+      (m, at) =>
+        at >= from &&
+        m.method === "Manager/extensionMessage" &&
+        m.params.session_id === livingSession &&
+        JSON.parse(m.params.payload).method === "UI/render" &&
+        pattern.test(JSON.stringify(JSON.parse(m.params.payload).params.ops)),
+      label,
+    );
+
+    readFrom = inbox.indexOf(message) + 1;
+    return JSON.stringify(JSON.parse(message.params.payload).params.ops);
+  };
+
+  /*
+   * The handler the launcher activates to make it try again.
+   *
+   * Read off the first render rather than off the one being waited for below.
+   * A render is a patch: the first carries the whole tree including the
+   * action, and the one that follows the state change carries a changed title
+   * and nothing else. The handler id survives, because it is the same worker
+   * and the same callback on both sides of the revoke.
+   */
+  const created = await waitFor(
+    (m) =>
+      m.method === "Manager/extensionMessage" &&
+      m.params.session_id === livingSession &&
+      JSON.parse(m.params.payload).method === "UI/render" &&
+      JSON.stringify(JSON.parse(m.params.payload).params.ops).includes("$handler"),
+    "the fixture drew an action to activate",
+  );
+
+  const tryAgainId = JSON.stringify(JSON.parse(created.params.payload).params.ops).match(
+    /"\$handler":"([^"]+)"/,
+  )?.[1];
+  assert(typeof tryAgainId === "string", `found the action's handler (${tryAgainId})`);
+
+  const whileAllowed = await drawn(/disk-/, "the granted worker reported what it reached");
+
+  assert(
+    whileAllowed.includes("disk-reached") && whileAllowed.includes("net-reached"),
+    `a granted worker really does reach both, so a later refusal means ` +
+      `something (${whileAllowed})`,
+  );
+
+  const askAgain = (id) =>
+    request("Manager/messageExtension", {
+      session_id: livingSession,
+      payload: JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "EventCore/handlerActivated",
+        params: { id: tryAgainId, args: [] },
+      }),
+    });
+
+  // **The revoke.** Nothing is reloaded and nothing is unloaded.
+  const told = await request("Manager/setCapabilities", {
+    session_id: livingSession,
+    capabilities: [],
+  });
+  assert(told.result === true, "the host accepted a capability change for a live session");
+
+  await askAgain(9400);
+
+  const afterRevoke = await drawn(
+    /disk-refused|net-refused/,
+    "the same worker reported again after the revoke",
+  );
+
+  assert(
+    afterRevoke.includes("disk-refused"),
+    `the running worker is refused the disk it was reading a moment ago (${afterRevoke})`,
+  );
+  assert(
+    afterRevoke.includes("net-refused"),
+    `and the network it was reaching, which is the other gate (${afterRevoke})`,
+  );
+  assert(
+    /not allowed to read and change files/.test(afterRevoke),
+    "the refusal names the permission rather than saying no",
+  );
+  assert(/Settings/.test(afterRevoke), "and says where to turn it back on");
+
+  // Given back, to the same worker, without a reload. A gate that can only
+  // ever close would make every revoke permanent by accident.
+  await request("Manager/setCapabilities", {
+    session_id: livingSession,
+    capabilities: ["fileRead", "fileWrite", "network"],
+  });
+
+  await askAgain(9401);
+
+  const afterRegrant = await drawn(
+    /disk-reached|disk-refused/,
+    "the same worker again after the permission came back",
+  );
+
+  assert(
+    afterRegrant.includes("disk-reached") && afterRegrant.includes("net-reached"),
+    `granting reaches a running worker too (${afterRegrant})`,
+  );
+
+  assert(
+    (await request("Manager/setCapabilities", { session_id: "no-such-session", capabilities: [] }))
+      .result === false,
+    "a revoke arriving after the command closed is nothing to tell rather than a failure",
+  );
+
+  await request("Manager/unload", { session_id: livingSession });
 } catch (err) {
   console.error(`FAIL ${err.message}`);
   failures++;

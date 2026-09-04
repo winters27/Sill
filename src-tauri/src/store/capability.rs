@@ -253,6 +253,17 @@ pub const CAPABILITIES: &[Capability] = &[
         bridge: &["confirm"],
         grants: &[Permission::Ui],
     },
+    Capability {
+        id: "dismiss",
+        title: "Close the launcher",
+        detail: "Takes Sill's window off the screen, whatever you were part-way through.",
+        // `popToRoot` is deliberately not here. That returns to Sill's list,
+        // which is the extension putting away the screen it drew; this row is
+        // for the window going.
+        tokens: &["closeMainWindow"],
+        bridge: &[],
+        grants: &[Permission::LauncherDismiss],
+    },
 ];
 
 /// What agreeing to these capabilities grants, with nothing repeated.
@@ -623,6 +634,39 @@ mod tests {
         assert!(
             !granted.contains(&Permission::InputInjection),
             "pasting is a keystroke into somebody else's window"
+        );
+    }
+
+    /// Drawing in Sill's window is not permission to take it away.
+    ///
+    /// `dialog` grants `Ui`, which is free, and `UI/closeMainWindow` used to
+    /// need exactly that. Somebody agreeing to a yes-or-no box was thereby
+    /// agreeing to the launcher disappearing mid-sentence, and nothing on the
+    /// screen said so.
+    #[test]
+    fn agreeing_to_a_dialog_does_not_agree_to_the_window_going_away() {
+        let granted = granted_by(&["dialog".to_string()]);
+
+        assert!(granted.contains(&Permission::Ui));
+        assert!(
+            !granted.contains(&Permission::LauncherDismiss),
+            "drawing in the window bought closing it",
+        );
+
+        assert_eq!(
+            granted_by(&["dismiss".to_string()]),
+            vec![Permission::LauncherDismiss],
+            "the row somebody actually reads about closing the launcher",
+        );
+    }
+
+    /// A person can turn it off again, which is the half that makes it a
+    /// permission rather than an announcement.
+    #[test]
+    fn closing_the_launcher_is_offered_on_the_settings_screen() {
+        assert!(
+            grantable().contains(&Permission::LauncherDismiss),
+            "the refusal says to grant it in Settings and Settings does not list it",
         );
     }
 

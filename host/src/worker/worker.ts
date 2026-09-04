@@ -12,7 +12,7 @@ import { createElement, type ReactElement } from "react";
 import { RpcPeer, type RpcParams } from "../proto/rpc";
 import { createRenderer } from "../render/renderer";
 import { getBridge, setBridge, type Environment } from "../api/bridge";
-import { gateGlobals, patchRequire } from "./patch-require";
+import { gateGlobals, Held, patchRequire } from "./patch-require";
 
 export interface LaunchData {
   entrypoint: string;
@@ -52,6 +52,31 @@ export function workerMain(): void {
   control.on("Lifecycle/message", (params: RpcParams) => {
     // A reply or event from the host, addressed to the extension.
     api.receive(String(params.payload));
+  });
+
+  /**
+   * What this command is allowed to reach, for as long as it runs.
+   *
+   * Made before the launch rather than inside it, because the answer can
+   * change while the command is on screen and the gates have to be looking at
+   * one object rather than at a copy each.
+   */
+  const held = new Held();
+
+  /*
+   * Somebody changed their mind, and this worker is already running.
+   *
+   * Rust owns what an extension holds and sends the whole list whenever it
+   * changes, so this replaces rather than merges: a revoke is a shorter list,
+   * and a merge could only ever add. It arrives as an event because nothing
+   * here has an answer to give, and the next gated call is the first one that
+   * sees it.
+   *
+   * Before `Lifecycle/launch` is registered, so a change that arrives during a
+   * slow module evaluation is not dropped on the floor.
+   */
+  control.on("Lifecycle/capabilities", (params: RpcParams) => {
+    held.replace(Array.isArray(params.capabilities) ? (params.capabilities as string[]) : []);
   });
 
   /**
@@ -103,8 +128,9 @@ export function workerMain(): void {
   control.handle("Lifecycle/launch", async (params: RpcParams) => {
     const data = params.data as unknown as LaunchData;
 
-    patchRequire(data.capabilities ?? []);
-    gateGlobals(data.capabilities ?? []);
+    held.replace(data.capabilities ?? []);
+    patchRequire(held);
+    gateGlobals(held);
 
     renderer = createRenderer({
       onCommit: (ops) => {
