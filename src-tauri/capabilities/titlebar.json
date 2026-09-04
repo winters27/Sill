@@ -1,11 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "titlebar",
-  "description": "The three things TitleBar.svelte does: the minimise button, the close button, and the drag region that makes the bar behave like a title bar. Only the three windows that draw one. The launcher, the tray menu, the capture overlay and the dictation pill have no chrome and now cannot close or move themselves.",
-  "windows": ["ask", "markup", "settings"],
+  "description": "The three things TitleBar.svelte does: the minimise button, the close button, and the drag region that makes the bar behave like a title bar. Only the three windows that draw one. The launcher, the tray menu, the capture overlay and the dictation pill have no chrome and now cannot close or move themselves. Show and focus are here too, because a window built hidden has to be the one that says it has drawn: shown by Rust on creation it appears empty until the page has loaded.",
+  "windows": [
+    "ask",
+    "markup",
+    "settings"
+  ],
   "permissions": [
     "core:window:allow-minimize",
     "core:window:allow-close",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
   ]
 }

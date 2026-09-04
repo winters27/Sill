@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import SettingsIcon, { type IconName } from "$lib/components/SettingsIcon.svelte";
   import LaunchIcon from "$lib/components/LaunchIcon.svelte";
   import { COLOURS as MARKUP_COLOURS } from "$lib/markup";
@@ -723,7 +724,42 @@
     }
   }
 
+  /**
+   * Shows the window, once there is something in it to look at.
+   *
+   * Rust builds this window hidden, because Tauri shows one the moment it is
+   * built and the frame then sits empty until SvelteKit has loaded, hydrated
+   * and painted. That empty frame is the first thing anybody sees of
+   * settings.
+   *
+   * Two frames rather than one. `onMount` runs after the component tree
+   * exists and before the browser has drawn it; the first `requestAnimationFrame`
+   * is the frame that draws it, and the second is after that frame is on the
+   * glass. Showing on the first one still catches the window mid-paint.
+   *
+   * Focus is taken here rather than at creation, together with visibility: a
+   * window created focused and invisible takes the foreground from whatever
+   * somebody was in, which is a bug `lazy_windows` already paid for once.
+   *
+   * Failing is not fatal and deliberately quiet. A window that cannot show
+   * itself is a window nobody can see, so there is nowhere to put the message
+   * anyway; the log has it.
+   */
+  async function showOnceDrawn() {
+    await new Promise((paint) => requestAnimationFrame(() => requestAnimationFrame(paint)));
+
+    try {
+      const self = getCurrentWindow();
+      await self.show();
+      await self.setFocus();
+    } catch (err) {
+      console.error("the settings window could not show itself", err);
+    }
+  }
+
   onMount(() => {
+    void showOnceDrawn();
+
     let unlisten: UnlistenFn | undefined;
     let changed: UnlistenFn | undefined;
     let wrong: UnlistenFn | undefined;

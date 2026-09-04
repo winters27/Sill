@@ -325,11 +325,25 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
             .decorations(false)
             .transparent(true)
             .center()
-            .focused(true)
+            /*
+             * Built hidden, and shown by the page once it has drawn.
+             *
+             * Tauri shows a window as soon as it is built, so the frame
+             * appeared and then sat empty until SvelteKit had loaded, hydrated
+             * and painted. On a debug build behind a dev server that is most
+             * of a second of blank glass, and it is the first thing anybody
+             * sees of the settings window.
+             *
+             * `focused(false)` goes with `visible(false)` for the reason
+             * `lazy_windows` writes down: a window created focused and
+             * invisible takes the foreground from whatever somebody was in,
+             * which is a bug that cost a session in August. The page takes
+             * focus when it takes visibility, together, in `ready`.
+             */
+            .visible(false)
+            .focused(false)
             .build()
             .map_err(|e| e.to_string())?;
-
-    let _ = window.set_focus();
 
     // The launcher must not hand the screen back to whatever was in front
     // before it. See the same note in `open_ask`.
