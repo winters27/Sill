@@ -79,6 +79,7 @@ const PREFERENCES = {
   actionKeys: {},
   emoji: {},
   privacy: {},
+  mcp: {},
 } satisfies Record<keyof Preferences, unknown>;
 
 /** One ranked row, with only the fields the root list reads. */
