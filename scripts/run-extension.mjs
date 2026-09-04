@@ -541,7 +541,13 @@ const waits = [];
  * Faster than the sleep it replaces in the ordinary case, which is the point
  * of a condition over a guess.
  */
-async function untilDrawn({ patience = 20_000, quiet = 1_500 } = {}) {
+function rowsDrawnNow() {
+  const top = tree.top();
+  if (!top || (top.tag !== "List" && top.tag !== "Grid")) return 0;
+  return itemsOf(rowsOf(tree, top, "")).length;
+}
+
+async function untilDrawn({ patience = 20_000, quiet = 1_500, atLeast = 0 } = {}) {
   const began = Date.now();
   const until = began + patience;
 
@@ -557,6 +563,13 @@ async function untilDrawn({ patience = 20_000, quiet = 1_500 } = {}) {
   const before = renders;
 
   while (Date.now() < until) {
+    // Enough rows is enough, whether or not it has gone quiet: a list that
+    // keeps redrawing has already answered the question being asked of it.
+    if (atLeast > 0 && rowsDrawnNow() >= atLeast) {
+      waits.push(`${rowsDrawnNow()} row(s) after ${Date.now() - began}ms`);
+      return true;
+    }
+
     if (renders > before && Date.now() - lastRenderAt >= quiet) {
       waits.push(`${renders - before} render(s) in ${lastRenderAt - began}ms`);
       return true;
@@ -568,9 +581,11 @@ async function untilDrawn({ patience = 20_000, quiet = 1_500 } = {}) {
   // without saying whether anything ever drew sends the next person to read
   // the renderer, which is where I looked first and it was not there.
   waits.push(
-    renders > before
-      ? `${renders - before} render(s), still drawing after ${patience}ms`
-      : `nothing drew in ${patience}ms`,
+    atLeast > 0
+      ? `only ${rowsDrawnNow()} of ${atLeast} row(s) after ${patience}ms`
+      : renders > before
+        ? `${renders - before} render(s), still drawing after ${patience}ms`
+        : `nothing drew in ${patience}ms`,
   );
 
   return renders > before;
@@ -689,7 +704,27 @@ send({
 
 await settle(500);
 send({ jsonrpc: "2.0", id: 2, method: "Manager/ready", params: { session_id: session } });
-await untilDrawn();
+
+/*
+ * Wait for what is about to be asserted, not merely for the tree to go quiet.
+ *
+ * Quiet was the first fix and it was not enough. `kill-process` draws its list
+ * and its "Processes" section immediately and fills the section once it has
+ * asked the machine what is running. On a build agent that answer takes longer
+ * than any quiet period worth waiting, so the gate read an empty section and
+ * reported zero rows: the same "looked too early" failure one level down.
+ *
+ * The caller already says how many rows it expects. Waiting for that number
+ * turns the deadline into the assertion: the rows arrive and it goes on, or
+ * patience runs out and the count it prints is the real one.
+ */
+const wantsRows = Math.max(
+  Number(argAfter("--expect-icons") ?? 0),
+  Number(argAfter("--expect-accessories") ?? 0) > 0 ? 1 : 0,
+  Number(argAfter("--expect-rows") ?? 0),
+);
+
+await untilDrawn({ atLeast: wantsRows });
 
 /**
  * What the field said, and what it reached.
@@ -1234,4 +1269,9 @@ if (
 }
 
 console.log(top ? "\nextension rendered" : "\nextension produced no view");
+
+// How the waiting went. A failure reading "got 0" without saying whether
+// anything ever drew sends the next person to read the renderer, which is
+// where I looked first and it was not there.
+if (waits.length) console.log(`  waited: ${waits.join("; ")}`);
 process.exit(top && !failed ? 0 : 1);
