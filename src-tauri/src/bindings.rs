@@ -68,6 +68,22 @@ pub enum Source {
     [`Source::touches_clipboard`].
     */
     CurrentSelection,
+    /**
+    The folder open in the Explorer window nearest the front.
+
+    The source `P8-07` needs, and the one that could not be expressed by any
+    of the others. [`Source::CurrentSelection`] asks Explorer what is
+    highlighted **in the window that has the keyboard**, which is right for
+    "act on what I am looking at" and useless here: a dialog jump is pressed
+    inside a Save dialog, so Explorer is behind it by definition and has no
+    selection worth reading. What is wanted is the folder that window is
+    showing, whether or not anything in it is highlighted.
+
+    Not restricted to jumping. It is "the folder I have open", so a key can
+    equally open a terminal there, copy its path, or compress it, and each of
+    those is an action that already exists.
+    */
+    ExplorerFolder,
     /// One particular thing from the index, named once when the binding is
     /// made. This is how a key opens a specific application.
     Command { id: String },
@@ -99,16 +115,23 @@ impl Source {
         match self {
             Source::Selection | Source::Clipboard | Source::ClipboardImage => true,
             Source::CurrentSelection => !files_are_selected,
-            Source::ForegroundWindow | Source::Command { .. } => false,
+            Source::ExplorerFolder | Source::ForegroundWindow | Source::Command { .. } => false,
         }
     }
 
-    /// Whether this source asks Explorer what is highlighted before anything
-    /// else.
+    /// Whether this source asks Explorer what is **highlighted** before
+    /// anything else.
     ///
     /// Only the universal one. Reading Explorer costs a few cross-process COM
     /// calls, which is nothing next to pressing Ctrl+C in somebody's document
     /// but is not nothing on a key that was never going to act on a file.
+    ///
+    /// [`Source::ExplorerFolder`] asks Explorer something too and still
+    /// answers no, which is not an oversight. This question exists to order
+    /// one thing against the clipboard: what is highlighted has to be known
+    /// before the clipboard is taken, because knowing it is what makes taking
+    /// it unnecessary. A folder is not a selection, has nothing to do with the
+    /// clipboard, and is read where every other source is read.
     fn reads_explorer(&self) -> bool {
         matches!(self, Source::CurrentSelection)
     }
@@ -505,6 +528,34 @@ async fn resolve(
         // anything back into.
         Source::ClipboardImage => last_image(app).map(|object| (vec![object], None)),
 
+        /*
+         * The folder Explorer has open behind whatever is in front.
+         *
+         * Read here rather than in `fire` beside the selection, because
+         * nothing about the ordering depends on it: this source never touches
+         * the clipboard, so there is no question of taking it first. Blocking,
+         * on a runtime worker held open by `block_in_place`, and bounded by
+         * `explorer::PATIENCE` the same way the selection read is.
+         */
+        Source::ExplorerFolder => {
+            let path = tokio::task::block_in_place(crate::explorer::folder_in_front)
+                .ok_or_else(|| "no Explorer window has a folder open".to_string())?;
+
+            Ok((
+                vec![Object {
+                    kind: ObjectKind::Folder,
+                    // The same id a folder found by search has, so the
+                    // activity log and the ranker see one identity for one
+                    // folder however it was reached.
+                    id: format!("file:{path}"),
+                    title: crate::files_ops::name_of(std::path::Path::new(&path)),
+                    target: path,
+                    mode: "folder".to_string(),
+                }],
+                None,
+            ))
+        }
+
         // No origin either. Moving a window produces no text, and there is
         // nothing to paste back into.
         Source::ForegroundWindow => crate::windowing::foreground()
@@ -769,12 +820,41 @@ mod tests {
             Source::Clipboard,
             Source::ClipboardImage,
             Source::ForegroundWindow,
+            // Asks Explorer for a folder rather than for a selection, which
+            // is not what this question is about. See `reads_explorer`.
+            Source::ExplorerFolder,
             Source::Command {
                 id: "app:code".into(),
             },
         ] {
             assert!(!source.reads_explorer(), "{source:?}");
         }
+    }
+
+    /// The folder source survives the preferences file.
+    ///
+    /// A variant that serialises to a name the reader does not know is a
+    /// shortcut that quietly disappears from somebody's settings on the next
+    /// start, which is how a launcher loses a key nobody touched.
+    #[test]
+    fn the_folder_source_reads_back_as_itself() {
+        let written = serde_json::to_string(&Source::ExplorerFolder).expect("serialisable");
+        assert_eq!(written, r#"{"from":"explorerFolder"}"#);
+
+        let read: Source = serde_json::from_str(&written).expect("readable");
+        assert_eq!(read, Source::ExplorerFolder);
+    }
+
+    /// Jumping to a folder must not pause clipboard history.
+    ///
+    /// The rule `P8-01` established, arriving at the source `P8-07` added.
+    /// Explorer is asked where it is and answers; nothing is copied, nothing
+    /// is pasted, and suspending the watcher for it would drop whatever the
+    /// person copied in that moment with nothing connecting the two.
+    #[test]
+    fn a_folder_jump_leaves_the_clipboard_alone() {
+        assert!(!Source::ExplorerFolder.touches_clipboard(false));
+        assert!(!Source::ExplorerFolder.touches_clipboard(true));
     }
 
     /// The two ids that are not actions are read as what they are.

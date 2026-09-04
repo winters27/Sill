@@ -19,6 +19,7 @@ pub mod clipboard;
 pub mod commands;
 pub mod complete;
 pub mod desktops;
+pub mod dialog;
 pub mod dictation;
 pub mod emoji;
 pub mod everything_ipc;

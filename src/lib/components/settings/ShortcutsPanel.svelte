@@ -69,6 +69,15 @@
    * which list this row is drawn from, so the two always agree.
    */
   let windowActions = $state<ActionInfo[]>([]);
+  /**
+   * Everything that can be done to a folder.
+   *
+   * The list behind "Explorer's folder", and the reason it is asked for rather
+   * than assumed to be one entry: jumping a dialog is what that source was
+   * added for, and opening a terminal there, copying its path or compressing
+   * it are all keys somebody may reasonably want on the same thing.
+   */
+  let folderActions = $state<ActionInfo[]>([]);
   /** Titles for the commands bindings point at, so the list reads as names. */
   let commandNames = $state<Record<string, string>>({});
 
@@ -174,9 +183,10 @@
   }
 
   onMount(async () => {
-    [textActions, windowActions] = await Promise.all([
+    [textActions, windowActions, folderActions] = await Promise.all([
       actionsFor("text"),
       actionsFor("window"),
+      actionsFor("folder"),
     ]);
   });
 
@@ -209,6 +219,7 @@
    */
   function choicesFor(source: BindingSource): ActionInfo[] {
     if (source.from === "foregroundWindow") return windowActions;
+    if (source.from === "explorerFolder") return [PANEL, ...folderActions];
     if (source.from === "currentSelection") return [PANEL, ...textActions];
     return textActions;
   }
@@ -384,6 +395,7 @@
     if (source.from === "clipboard") return "the clipboard";
     if (source.from === "foregroundWindow") return "the window in front";
     if (source.from === "currentSelection") return "whatever is selected";
+    if (source.from === "explorerFolder") return "the folder open in Explorer";
     return commandNames[source.id] ?? source.id;
   }
 
@@ -399,11 +411,13 @@
     const source: BindingSource =
       from === "foregroundWindow"
         ? { from: "foregroundWindow" }
-        : from === "currentSelection"
-          ? { from: "currentSelection" }
-          : from === "clipboard"
-            ? { from: "clipboard" }
-            : { from: "selection" };
+        : from === "explorerFolder"
+          ? { from: "explorerFolder" }
+          : from === "currentSelection"
+            ? { from: "currentSelection" }
+            : from === "clipboard"
+              ? { from: "clipboard" }
+              : { from: "selection" };
 
     const current = bindings[at];
     const choices = choicesFor(source);
@@ -462,6 +476,7 @@
             { value: "selection", label: "Selected text" },
             { value: "clipboard", label: "Clipboard" },
             { value: "foregroundWindow", label: "Window in front" },
+            { value: "explorerFolder", label: "Explorer's folder" },
           ]}
           onchange={(next) => runOn(at, next as BindingSource["from"])}
           ariaLabel="What it runs on"

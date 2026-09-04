@@ -138,6 +138,49 @@ pub fn could_be_explorer(class: &str) -> bool {
 }
 
 /**
+Whether a window of this class is a folder being browsed.
+
+Narrower than [`could_be_explorer`] and deliberately so. That one answers "is
+there any point asking the shell about this window", which the desktop
+qualifies for: icons are selected on it exactly as they are in a folder. This
+one answers "does this window have a folder open in it that a file dialog could
+be pointed at", and the desktop does not, in the sense that matters: it is not
+a window somebody navigated to and it is not what "the folder I am looking at"
+means when a Save dialog is covering the screen.
+
+Keeping them apart rather than reusing the looser one means [`folder_in_front`]
+cannot pick `Progman` off the bottom of the Z-order and call it the folder the
+person meant. It is the last window in every Z-order, so it would win whenever
+no real Explorer window was open at all, which is the exact case where the
+right answer is to do nothing.
+*/
+pub fn browses_a_folder(class: &str) -> bool {
+    matches!(class, "CabinetWClass" | "ExploreWClass")
+}
+
+/**
+Which open folder window is nearest the front.
+
+`order` is the Z-order, frontmost first, and `open` is what `IShellWindows`
+reported, in the order the shell happens to list them. The answer is an index
+into `open`, because that is the list the COM interfaces are held in.
+
+**Nearest the front rather than the foreground window**, and that is the whole
+difference between this and [`chosen`]. A dialog jump is pressed *in a dialog*,
+so Explorer is by definition not in front; the window somebody means is the one
+the dialog is covering. Falling back to "the first one the shell listed" would
+be the bug [`chosen`] refuses, arriving through a different door: a key that
+jumps to a folder open on another monitor because that window happened to be
+created first.
+*/
+pub fn nearest(order: &[isize], open: &[isize]) -> Option<usize> {
+    order
+        .iter()
+        .filter(|window| **window != 0)
+        .find_map(|window| open.iter().position(|shell| shell == window))
+}
+
+/**
 Which of Explorer's open views the person is actually looking at.
 
 Refuses rather than guessing. `IShellWindows` hands back every Explorer window
@@ -208,7 +251,7 @@ pub fn selection() -> Vec<Selected> {
 
     // Before any COM exists, because the great majority of presses are in
     // something that is not Explorer at all and the whole read is 15 to 23 ms.
-    if !could_be_explorer(&class_of(front)) {
+    if !could_be_explorer(&crate::windowing::class_of(front)) {
         return Vec::new();
     }
 
@@ -236,6 +279,53 @@ pub fn selection() -> Vec<Selected> {
     Vec::new()
 }
 
+#[cfg(not(windows))]
+pub fn folder_in_front() -> Option<String> {
+    None
+}
+
+/// The folder open in the Explorer window nearest the front.
+///
+/// The other way round from [`selection`], and for a reason that is the whole
+/// of `P8-07`. A selection is read with Explorer in front, so the foreground
+/// window is the answer and anything else is refused. A dialog jump is pressed
+/// **in a file dialog**, which means Explorer is behind it by definition, and
+/// the window somebody means is the one the dialog is covering.
+///
+/// So the Z-order decides instead of the foreground, through [`nearest`], and
+/// the cheap half still comes first: the walk reads class names and nothing
+/// else, and stops without creating a COM object at all when no folder window
+/// is open. On a machine with no Explorer running this costs one enumeration
+/// and returns nothing.
+///
+/// Same thread and the same [`PATIENCE`] as [`selection`], for the same
+/// reason: a shell that is stuck on a disconnected drive must not take the
+/// launcher with it.
+#[cfg(windows)]
+pub fn folder_in_front() -> Option<String> {
+    let order = windows_impl::folder_windows();
+
+    // Nothing to ask, so nothing is created. The common miss on a machine
+    // where no folder window is open at all.
+    if order.is_empty() {
+        return None;
+    }
+
+    let (say, hear) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let _ = say.send(windows_impl::read_folder(&order));
+    });
+
+    match hear.recv_timeout(PATIENCE) {
+        Ok(found) => found,
+        Err(_) => {
+            crate::say!("Explorer did not say which folder was open within {PATIENCE:?}");
+            None
+        }
+    }
+}
+
 /// The foreground window's handle, or zero.
 ///
 /// Raw rather than [`crate::windowing::foreground`], which enumerates and
@@ -250,28 +340,6 @@ fn foreground_handle() -> isize {
     unsafe { GetForegroundWindow() }.0 as isize
 }
 
-/// A window's class name, or an empty string.
-///
-/// Empty for a window that has gone since the foreground was read, which
-/// [`could_be_explorer`] then answers no to. That is the right answer: a window
-/// that no longer exists has nothing highlighted in it.
-#[cfg(windows)]
-fn class_of(window: isize) -> String {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
-
-    let mut buffer = [0u16; 128];
-
-    // SAFETY: the buffer is a local and its length is passed honestly; the
-    // call writes at most that many characters and returns how many.
-    let written = unsafe { GetClassNameW(HWND(window as *mut _), &mut buffer) };
-    if written <= 0 {
-        return String::new();
-    }
-
-    String::from_utf16_lossy(&buffer[..written as usize])
-}
-
 #[cfg(windows)]
 mod windows_impl {
     use super::{chosen, is_folder, Selected};
@@ -284,8 +352,8 @@ mod windows_impl {
     use windows::Win32::System::SystemServices::{SFGAO_FLAGS, SFGAO_FOLDER, SFGAO_STREAM};
     use windows::Win32::System::Variant::VARIANT;
     use windows::Win32::UI::Shell::{
-        IFolderView, IShellBrowser, IShellItemArray, IShellWindows, IWebBrowserApp, ShellWindows,
-        SIGDN_FILESYSPATH, SVGIO_SELECTION,
+        IFolderView, IPersistFolder2, IShellBrowser, IShellItemArray, IShellWindows,
+        IWebBrowserApp, SHGetNameFromIDList, ShellWindows, SIGDN_FILESYSPATH, SVGIO_SELECTION,
     };
 
     /// `SID_STopLevelBrowser`, the service that hands back the shell browser.
@@ -328,15 +396,23 @@ mod windows_impl {
         }
     }
 
+    /// Every shell window the shell will admit to, and its handle.
+    ///
+    /// One implementation for both reads. Which window a press means is
+    /// decided differently by each of them, [`chosen`] against the foreground
+    /// and [`nearest`] against the Z-order, but *what the list is* is the same
+    /// question and enumerating it twice in two ways is how the two answers
+    /// would eventually stop agreeing about what a window is.
+    ///
     /// # Safety
     ///
     /// Must be called with COM initialised on this thread.
-    unsafe fn look(front: isize) -> windows::core::Result<Vec<Selected>> {
+    unsafe fn open_windows() -> windows::core::Result<(Vec<IWebBrowserApp>, Vec<isize>)> {
         let shell: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_ALL)?;
         let count = shell.Count()?;
 
         // Every open Explorer window's handle, in the order the shell lists
-        // them, so the index `chosen` returns addresses the same list.
+        // them, so the index either decision returns addresses the same list.
         let mut browsers = Vec::with_capacity(count.max(0) as usize);
         let mut handles = Vec::with_capacity(count.max(0) as usize);
 
@@ -357,13 +433,31 @@ mod windows_impl {
             handles.push(handle);
         }
 
+        Ok((browsers, handles))
+    }
+
+    /// The shell view one of those windows is showing.
+    ///
+    /// # Safety
+    ///
+    /// Must be called with COM initialised on this thread.
+    unsafe fn view_of(browser: &IWebBrowserApp) -> windows::core::Result<IFolderView> {
+        let service: IServiceProvider = browser.cast()?;
+        let shell_browser: IShellBrowser = service.QueryService(&TOP_LEVEL_BROWSER)?;
+        shell_browser.QueryActiveShellView()?.cast()
+    }
+
+    /// # Safety
+    ///
+    /// Must be called with COM initialised on this thread.
+    unsafe fn look(front: isize) -> windows::core::Result<Vec<Selected>> {
+        let (browsers, handles) = open_windows()?;
+
         let Some(at) = chosen(front, &handles) else {
             return Ok(Vec::new());
         };
 
-        let service: IServiceProvider = browsers[at].cast()?;
-        let shell_browser: IShellBrowser = service.QueryService(&TOP_LEVEL_BROWSER)?;
-        let view: IFolderView = shell_browser.QueryActiveShellView()?.cast()?;
+        let view = view_of(&browsers[at])?;
         let items: IShellItemArray = view.Items(SVGIO_SELECTION)?;
 
         let selected = items.GetCount()?;
@@ -403,6 +497,99 @@ mod windows_impl {
         }
 
         Ok(found)
+    }
+
+    /// Every open folder window, frontmost first.
+    ///
+    /// `EnumWindows` walks the Z-order from the top down, which is what
+    /// `windowing::list` already relies on for "which window did I use last".
+    /// Only the class is read, so a window nobody is going to ask about costs
+    /// one call and no allocation, and no COM object exists yet when this
+    /// returns nothing.
+    pub(super) fn folder_windows() -> Vec<isize> {
+        use windows::core::BOOL;
+        use windows::Win32::Foundation::{HWND, LPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, IsWindowVisible};
+
+        unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            // SAFETY: the pointer is the Vec passed in below, which outlives
+            // the enumeration because EnumWindows is synchronous.
+            let found = unsafe { &mut *(lparam.0 as *mut Vec<isize>) };
+
+            // SAFETY: the handle came from the enumeration itself.
+            if unsafe { IsWindowVisible(hwnd) }.as_bool() {
+                let window = hwnd.0 as isize;
+                if super::browses_a_folder(&crate::windowing::class_of(window)) {
+                    found.push(window);
+                }
+            }
+
+            BOOL(1)
+        }
+
+        let mut found: Vec<isize> = Vec::new();
+
+        // SAFETY: the callback matches the required signature and the pointer
+        // points at a live Vec for the duration of this synchronous call.
+        unsafe {
+            let _ = EnumWindows(
+                Some(collect),
+                LPARAM(&mut found as *mut Vec<isize> as isize),
+            );
+        }
+
+        found
+    }
+
+    /// The path of the folder shown in the frontmost of those windows.
+    pub(super) fn read_folder(order: &[isize]) -> Option<String> {
+        // SAFETY: COM is initialised and uninitialised on this one thread
+        // around the whole call, and every interface below is released by its
+        // own Drop before the uninitialise.
+        unsafe {
+            let initialised = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+            let found = current_folder(order).ok().flatten();
+
+            if initialised {
+                CoUninitialize();
+            }
+
+            found
+        }
+    }
+
+    /// # Safety
+    ///
+    /// Must be called with COM initialised on this thread.
+    unsafe fn current_folder(order: &[isize]) -> windows::core::Result<Option<String>> {
+        let (browsers, handles) = open_windows()?;
+
+        let Some(at) = super::nearest(order, &handles) else {
+            return Ok(None);
+        };
+
+        // `IPersistFolder2` rather than the view's items, because the question
+        // is where the window is rather than what is highlighted in it. It is
+        // also the only one of the two that answers for an empty folder, which
+        // is a folder somebody is very likely to be saving into.
+        let folder: IPersistFolder2 = view_of(&browsers[at])?.GetFolder()?;
+        let id = folder.GetCurFolder()?;
+
+        let path = SHGetNameFromIDList(id, SIGDN_FILESYSPATH).map(|name| {
+            let owned = name.to_string().unwrap_or_default();
+            windows::Win32::System::Com::CoTaskMemFree(Some(name.0 as *const _));
+            owned
+        });
+
+        // Freed whichever way the name went, because `GetCurFolder` hands
+        // over ownership of the list and an early return through `?` would
+        // leak it on every press.
+        windows::Win32::System::Com::CoTaskMemFree(Some(id as *const _));
+
+        // A shell folder with no path on disk is This PC, or a library, or a
+        // phone over MTP. Perfectly real, and not somewhere a file dialog can
+        // be pointed.
+        Ok(path.ok().filter(|path| !path.trim().is_empty()))
     }
 
     /// The two attribute bits [`is_folder`] reads, asked for together.
@@ -498,6 +685,69 @@ mod tests {
 
         // No Explorer window at all.
         assert_eq!(chosen(0x1111, &[]), None);
+    }
+
+    /// Which windows are worth asking about, and which are worth jumping to.
+    #[test]
+    fn the_desktop_is_a_shell_view_but_not_a_folder_to_jump_to() {
+        for folder in ["CabinetWClass", "ExploreWClass"] {
+            assert!(browses_a_folder(folder), "{folder}");
+            assert!(could_be_explorer(folder), "{folder}");
+        }
+
+        /*
+         * The desktop, which both questions have to answer differently.
+         *
+         * It is a shell view: icons are selected on it exactly as they are in
+         * a folder, so `could_be_explorer` says yes and reading a selection
+         * from it is right. It is not somewhere a dialog gets pointed, and the
+         * reason this matters is the Z-order: `Progman` is the last window in
+         * every Z-order there is, so a jump that accepted it would silently
+         * work on every machine with no folder window open at all, which is
+         * exactly when the right answer is to do nothing.
+         */
+        for desktop in ["Progman", "WorkerW"] {
+            assert!(could_be_explorer(desktop), "{desktop}");
+            assert!(!browses_a_folder(desktop), "{desktop}");
+        }
+
+        for other in ["#32770", "Chrome_WidgetWin_1", ""] {
+            assert!(!browses_a_folder(other), "{other}");
+        }
+    }
+
+    /// The window nearest the front wins, not the first the shell listed.
+    ///
+    /// `IShellWindows` hands its windows back in creation order, which is the
+    /// order they were opened rather than the order they are stacked. A jump
+    /// pressed in a dialog means the folder window the dialog is covering, so
+    /// the Z-order decides and the shell's own order is only an index into
+    /// the interfaces.
+    #[test]
+    fn the_folder_window_nearest_the_front_is_the_one_meant() {
+        // The shell opened three windows; the person has since raised the
+        // last one and then the second.
+        let open = [0x1111, 0x2222, 0x3333];
+        let stacked = [0x2222, 0x3333, 0x1111];
+
+        assert_eq!(nearest(&stacked, &open), Some(1));
+
+        // A window that is stacked in front but is not one Explorer admits to
+        // is skipped rather than matched.
+        assert_eq!(nearest(&[0x9999, 0x3333], &open), Some(2));
+
+        assert_eq!(nearest(&[], &open), None);
+        assert_eq!(nearest(&stacked, &[]), None);
+    }
+
+    /// A handle Explorer could not report is not a match for a missing one.
+    ///
+    /// `IWebBrowserApp::HWND` failing leaves a zero in the shell's list, and a
+    /// zero in the Z-order would then select it. Same guard as [`chosen`],
+    /// arriving through the other decision.
+    #[test]
+    fn a_window_with_no_handle_is_never_the_nearest() {
+        assert_eq!(nearest(&[0, 0x2222], &[0, 0x2222]), Some(1));
     }
 
     /// A handle that could not be read is not a match for one that could not.

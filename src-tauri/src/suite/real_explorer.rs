@@ -86,6 +86,62 @@ fn what_is_selected_in_the_window_in_front() {
     }
 }
 
+/**
+Which folder Explorer has open behind whatever is in front.
+
+The read `P8-07` needs, and the one the fixtures cannot check: whether the
+Z-order walk finds a real folder window, whether `IShellWindows` reports the
+same handle for it, and whether `IPersistFolder2` gives back a path rather than
+a shell item with no path at all.
+
+Deliberately **not** a foreground read. The terminal running this test is in
+front, exactly as a Save dialog would be, so a run that answers is a run that
+proves the difference between this and [`crate::explorer::selection`]. Open an
+Explorer window, leave it behind the terminal, and run:
+
+```text
+cargo test --lib real_explorer::which_folder -- --ignored --nocapture
+```
+
+Measured on this machine with one Explorer window open behind the terminal:
+
+```text
+read the folder in 32.6845ms
+C:\Sill\.claude\worktrees\agent-aa27b6edf696a3dd3\docs
+```
+
+Thirty milliseconds, which is the price of the whole `IShellWindows` walk and
+is only ever paid on a press that already found a dialog. The press that finds
+nothing costs the Z-order walk and stops.
+*/
+#[test]
+#[ignore]
+#[cfg(windows)]
+fn which_folder_is_open_behind() {
+    std::thread::sleep(wait());
+
+    let started = std::time::Instant::now();
+    let folder = crate::explorer::folder_in_front();
+    let took = started.elapsed();
+
+    println!("read the folder in {took:?}");
+
+    match &folder {
+        Some(path) => println!("{path}"),
+        None => println!("(no folder window is open)"),
+    }
+
+    // Not an assertion that a window was open: a run with none is a good run
+    // and its output says so. What must hold is that an answer is a path.
+    if let Some(path) = folder {
+        assert!(!path.trim().is_empty(), "an answer with nothing in it");
+        assert!(
+            std::path::Path::new(&path).is_dir(),
+            "{path} is not a folder a dialog could be pointed at"
+        );
+    }
+}
+
 /// What it costs when there is no Explorer in front at all.
 ///
 /// The case that runs on every press of a universal key in a text editor, so

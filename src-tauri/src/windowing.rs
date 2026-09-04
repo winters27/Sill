@@ -926,6 +926,33 @@ mod platform {
     pub fn visible_frame(id: isize) -> Option<Rect> {
         frame(hwnd_of(id))
     }
+
+    /// A window's class name, or an empty string.
+    ///
+    /// Here rather than in the two modules that ask, because it is the
+    /// cheapest fact there is about somebody else's window and both of them
+    /// want it for the same reason: to decide whether a window is worth any
+    /// further work before doing that work. `explorer` asks before creating a
+    /// COM object and `dialog` asks before walking a control tree, and neither
+    /// pays for the answer.
+    ///
+    /// Empty for a window that has closed since its handle was read, which
+    /// every caller then answers no to. That is the right answer: a window
+    /// that no longer exists is not the one somebody is looking at.
+    pub fn class_of(window: isize) -> String {
+        use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
+
+        let mut buffer = [0u16; 128];
+
+        // SAFETY: the buffer is a local and its length is passed honestly; the
+        // call writes at most that many characters and returns how many.
+        let written = unsafe { GetClassNameW(hwnd_of(window), &mut buffer) };
+        if written <= 0 {
+            return String::new();
+        }
+
+        String::from_utf16_lossy(&buffer[..written as usize])
+    }
 }
 
 #[cfg(not(windows))]
@@ -980,11 +1007,14 @@ mod platform {
     pub fn visible_frame(_id: isize) -> Option<Rect> {
         None
     }
+    pub fn class_of(_window: isize) -> String {
+        String::new()
+    }
 }
 
 pub use platform::{
-    close, cursor_monitor, find, focus, foreground, front, is_on_top, list, maximize, minimize,
-    monitor_of, monitors, place, restore, set_on_top, visible_frame,
+    class_of, close, cursor_monitor, find, focus, foreground, front, is_on_top, list, maximize,
+    minimize, monitor_of, monitors, place, restore, set_on_top, visible_frame,
 };
 
 /// The open windows, as things the ranker already knows how to sort.
