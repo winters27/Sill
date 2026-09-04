@@ -2240,6 +2240,59 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * A preview asks whether the file is a cloud placeholder before opening it.
+ *
+ * Touching a placeholder downloads it, over a connection nobody chose to
+ * spend, because somebody moved the selection past a row. `look_unless` takes
+ * the question as a parameter so a test can hand over an ordinary file and say
+ * it is a placeholder, which is the only way to test the rule at all: the
+ * attribute cannot be set on a temporary file without a cloud provider signed
+ * in on the machine.
+ *
+ * That makes the rule testable and leaves the wiring untested, which is the
+ * same hole `after_recording` below is guarded against. Replacing
+ * `is_elsewhere` with a closure returning false failed no test at all.
+ */
+{
+  const WATCHED = "src-tauri/src/previews.rs";
+
+  if (existsSync(WATCHED)) {
+    const text = readFileSync(WATCHED, "utf8");
+    const at = text.indexOf("fn look_at(");
+
+    if (at < 0) {
+      fail(WATCHED, null, "look_at is gone, and with it the placeholder refusal");
+    } else {
+      const body = text.slice(at, text.indexOf("\n}", at));
+
+      if (!/look_unless\(\s*path\s*,\s*is_elsewhere\s*\)/.test(body)) {
+        fail(
+          WATCHED,
+          lineOf(text, at),
+          "look_at does not hand look_unless the real cloud question, so a " +
+            "placeholder is opened and downloaded when somebody moves the " +
+            "selection past it",
+        );
+      }
+
+      // And the real question is still the attribute one. A version of this
+      // that always answered false would satisfy the rule above.
+      const asks = text.indexOf("fn is_elsewhere(");
+      const real = asks < 0 ? "" : text.slice(asks, text.indexOf("\n}", asks));
+
+      if (!real.includes("wants_recall(")) {
+        fail(
+          WATCHED,
+          asks < 0 ? null : lineOf(text, asks),
+          "is_elsewhere no longer asks wants_recall, so every placeholder " +
+            "reads as an ordinary file",
+        );
+      }
+    }
+  }
+}
+
+/*
  * Every recorded copy is still followed by the housekeeping.
  *
  * The two bounds on the clipboard, retention and the row cap, run from the
