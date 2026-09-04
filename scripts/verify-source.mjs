@@ -2611,6 +2611,69 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * Open windows are still ranked in the same pass as everything else.
+ *
+ * They used to come back from a command of their own and be appended after
+ * the index results had already been capped, so on a short query the cap
+ * filled with weak command matches and a window whose title was an exact
+ * match landed past the end of the list. Two lists concatenated is not a
+ * ranking, and `P1-01` fixed it by chaining windows into the same corpus.
+ *
+ * `an_exact_window_title_outranks_a_scattered_command_match` proves the
+ * ranker does the right thing given a corpus with a window in it. It says
+ * nothing about whether windows reach that corpus, and `search_commands`
+ * takes Tauri state so no unit test can call it: **deleting the chain removes
+ * windows from search entirely and fails nothing.** Measured, not assumed.
+ *
+ * The same hole as `after_recording` below, and the fourth of its kind found
+ * in this codebase.
+ */
+{
+  const SEARCH = "src-tauri/src/commands/search.rs";
+
+  if (existsSync(SEARCH)) {
+    const text = readFileSync(SEARCH, "utf8");
+    const at = text.indexOf("pub(crate) async fn search_commands(");
+
+    if (at < 0) {
+      fail(SEARCH, null, "search_commands is gone, and it is what a keystroke asks");
+    } else {
+      const opened = text.indexOf("{", at);
+      let depth = 0;
+      let end = opened;
+      for (let i = opened; i < text.length; i++) {
+        if (text[i] === "{") depth++;
+        else if (text[i] === "}" && --depth === 0) {
+          end = i;
+          break;
+        }
+      }
+
+      const body = text.slice(opened, end);
+
+      // Built from the real source, and chained into the one ranked corpus.
+      for (const [needle, why] of [
+        [
+          "windowing::recent_records(",
+          "search_commands no longer asks for the open windows, so nothing " +
+            "you have open is findable by typing its title",
+        ],
+        [
+          ".chain(windows.iter())",
+          "the open windows are not chained into the ranked corpus, so they " +
+            "are either absent or appended after the cap, which is where an " +
+            "exact window title used to land and never be seen",
+        ],
+      ]) {
+        if (!body.includes(needle)) {
+          fail(SEARCH, lineOf(text, at), why);
+        }
+      }
+    }
+  }
+}
+
+/*
  * Every recorded copy is still followed by the housekeeping.
  *
  * The two bounds on the clipboard, retention and the row cap, run from the
