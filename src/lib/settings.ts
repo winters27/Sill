@@ -236,6 +236,14 @@ export interface AiSettings {
   provider: string;
   /** The ones set up. Each key is sealed before this file is written. */
   providers: import("$lib/ai").AiProvider[];
+  /**
+   * Whether running something or writing a file asks for Windows Hello.
+   *
+   * On by default. Turning it off leaves the approval card that was there
+   * before, never nothing, and a machine with no enrolled Hello credential
+   * falls back to that card whichever way this is set.
+   */
+  helloForHeavyActions: boolean;
 }
 
 /** A modifier, as a person thinks of it rather than as Windows sends it. */

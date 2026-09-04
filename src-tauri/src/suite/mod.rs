@@ -63,6 +63,7 @@ mod file_merge;
 mod keyword_matching;
 mod ranking_memory;
 mod real_games;
+mod real_hello;
 mod real_terminals;
 mod registry;
 mod settings_apply_live;

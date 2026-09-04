@@ -202,6 +202,12 @@ pub const SETTINGS: &[Setting] = &[
         "ai api key token secret credential paste anthropic openrouter",
     ),
     s(
+        "ai",
+        "AI Chat",
+        "Windows Hello to run a command or write a file",
+        "hello fingerprint face pin biometric approve approval consent permission \n         confirm shell command script file write ai mcp model prompt injection",
+    ),
+    s(
         "advanced",
         "Advanced",
         "What Sill has done",

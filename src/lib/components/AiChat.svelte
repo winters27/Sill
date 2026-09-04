@@ -175,6 +175,16 @@
       <p class="wants">{asked.title}</p>
       <p class="subject">{asked.subject}</p>
       <p class="touches">This {asked.touches}.</p>
+      <!--
+        Said out loud when the stronger gate could not run.
+
+        Without it the card looks identical whether Windows Hello checked
+        somebody or nothing did, and somebody who switched the gate on would
+        reasonably read a keypress as a fingerprint.
+      -->
+      {#if asked.instead}
+        <p class="instead">{asked.instead}, so pressing Enter is all this asks for.</p>
+      {/if}
       <div class="answers">
         <button class="allow" onclick={() => ondecide(true)}>
           <span class="sill-key">Enter</span> Do it
@@ -377,6 +387,13 @@
   .touches {
     margin: var(--space-1) 0 var(--space-3);
     color: var(--text-2);
+    font-size: var(--text-meta);
+  }
+
+  /* Quieter than what it touches, which is what the decision is about. */
+  .instead {
+    margin: calc(var(--space-3) * -1) 0 var(--space-3);
+    color: var(--text-3);
     font-size: var(--text-meta);
   }
 

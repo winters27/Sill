@@ -299,6 +299,11 @@ impl Permits for Granted {
                     subject: plainly(capability).to_string(),
                     touches: crate::ai::acting::what_it_touches(std::slice::from_ref(capability))
                         .to_string(),
+                    // This card grants a permission for the life of an
+                    // extension rather than running one action, so the Windows
+                    // Hello gate, which is spent on a single run, does not
+                    // apply to it and nothing was withheld.
+                    instead: None,
                 },
             );
 
