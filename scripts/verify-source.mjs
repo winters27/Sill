@@ -2970,9 +2970,20 @@ if (tracked.status !== 0) {
 
     checked += 1;
 
-    // A timer through `pollWhileVisible` is the answer this rule wants, and
-    // needs no entry.
-    if (text.includes("pollWhileVisible")) continue;
+    /*
+     * No exemption for merely mentioning `pollWhileVisible`.
+     *
+     * That was the first version of this rule and it was worth nothing.
+     * Sabotage found it: putting the weather widget's bare `setInterval`
+     * back, with its import of the helper left in place, passed. A file
+     * that names the right helper and then writes its own timer anyway is
+     * exactly the case worth catching.
+     *
+     * There is no honest exemption to write in its place, either, because
+     * a caller of `pollWhileVisible` does not write `setInterval` at all.
+     * The helper owns the only one, in `visible.ts`, which is skipped
+     * above. Anything else holding a timer is holding it itself.
+     */
     // A timer that never asks Rust anything cannot make a call at rest.
     if (!/\binvoke[(<]/.test(text)) continue;
 
@@ -2981,9 +2992,9 @@ if (tracked.status !== 0) {
     fail(
       at,
       lineOf(text, text.indexOf("setInterval(")),
-      "a repeating timer that calls into Rust, in a file that neither goes " +
-        "through `pollWhileVisible` nor says why being hidden stops it, so " +
-        "this keeps working for a window nobody can see",
+      "a repeating timer of its own that calls into Rust, and no entry here " +
+        "saying why being hidden stops it, so this keeps working for a window " +
+        "nobody can see. Poll through `pollWhileVisible` instead",
     );
   }
 
