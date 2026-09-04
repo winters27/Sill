@@ -12,16 +12,19 @@
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
   import DetailPane from "$lib/components/DetailPane.svelte";
-  import ExtDropdown from "$lib/components/ExtDropdown.svelte";
   import RootList from "$lib/components/RootList.svelte";
   import Instead from "$lib/components/Instead.svelte";
+  import SearchRow from "$lib/components/SearchRow.svelte";
+  import Footer from "$lib/components/Footer.svelte";
+  import SwitcherPreview from "$lib/components/SwitcherPreview.svelte";
+  import AiChat, { type Shown } from "$lib/components/AiChat.svelte";
+  import ScriptOutput, { type Ran } from "$lib/components/ScriptOutput.svelte";
   import KeySheet from "$lib/components/KeySheet.svelte";
-  import AiMark from "$lib/components/settings/AiMark.svelte";
-  import Markdown from "$lib/components/Markdown.svelte";
-  import Steps from "$lib/components/Steps.svelte";
-  import { LISTBOX, isBrowsing, optionId, selectionAfter } from "$lib/results";
+  import { isBrowsing, selectionAfter } from "$lib/results";
   import { askedForTheKeys, deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import { asUrl, isPath, isUrl } from "$lib/typed";
+  import { conversationRows as conversationsAsRows } from "$lib/conversations";
+  import { fileSearchRow } from "$lib/results";
   import {
     afterLaunch,
     behaviourOf,
@@ -38,7 +41,8 @@
   import { storeClose, type StoreRow } from "$lib/store";
   import WidgetBoard from "$lib/widgets/Board.svelte";
   import WidgetChin from "$lib/widgets/Chin.svelte";
-  import { actionFor, collectActions, isRunnable } from "$lib/exthost/actions";
+  import { actionFor, collectActions, isRunnable, type ActionEntry } from "$lib/exthost/actions";
+  import { clipboardPanel, rowPanel } from "$lib/panel";
   import { clipboardEntry, clipboardMerge } from "$lib/clipboard";
   import {
     chordFrom,
@@ -63,12 +67,10 @@
     aiReady,
     completePath as finishPath,
     aiTranscript,
-    forgetPreviews,
     searchAppVolume,
     searchProcesses,
     searchDestinations,
     summonPainted,
-    windowPreview,
     systemStates,
     searchCommands,
     unloadExtension,
@@ -122,7 +124,6 @@
     type Preferences,
   } from "$lib/settings";
   import "$lib/theme/theme.css";
-  import { hint } from "$lib/hint";
 
   type UiEvent =
     | { kind: "render"; session: string; ops: Op[] }
@@ -345,15 +346,7 @@
    * lines has nowhere to put them in a subtitle, and a toast that vanishes is
    * the wrong place for something somebody ran deliberately to read.
    */
-  let output = $state<{
-    job: string;
-    title: string;
-    running: boolean;
-    stdout: string;
-    stderr: string;
-    code: number | null;
-    ended: "finished" | "timedOut" | "cancelled" | "started";
-  } | null>(null);
+  let output = $state<Ran | null>(null);
 
   /**
    * Starts one and shows it, without waiting for it to finish.
@@ -733,230 +726,27 @@
    * A list or grid takes them from the selected item; a form or detail has no
    * selected row, so its actions hang off the view itself.
    */
-  const actions = $derived.by(() => {
+  const actions = $derived.by((): ActionEntry[] => {
     version;
 
     // At the root the actions belong to the launcher, not to an extension.
     // Raycast's Cmd+K works here too, and a menu that silently does nothing
     // in half the app is worse than no menu.
+    //
+    // What each of these two offers is a function over what is picked and what
+    // the registry answered, so it lives in `$lib/panel` where a test can call
+    // it. Which of them applies is a question about the mode, so it is here.
     if (mode === "clipboard") {
-      // Merging is only offered once there is something to merge. An action
-      // that is always listed and almost never applicable teaches people to
-      // scroll past the whole panel.
-      const merging =
-        picked.length > 1
-          ? [
-              {
-                id: -30,
-                title: `Merge ${picked.length} Entries`,
-                tag: "Sill.ClipboardMerge",
-                props: {},
-                shortcut: { modifiers: ["ctrl"], key: "m" },
-              },
-              {
-                id: -31,
-                title: `Merge ${picked.length} on One Line`,
-                tag: "Sill.ClipboardMergeInline",
-                props: {},
-                shortcut: undefined,
-              },
-            ]
-          : [];
-
-      // Only for an entry that actually kept formatting. Offering it on a
-      // line of terminal output would be offering to do nothing.
-      const plain = richEntry
-        ? [
-            {
-              id: -32,
-              title: "Paste as Plain Text",
-              tag: "Sill.ClipboardPastePlain",
-              props: {},
-              shortcut: { modifiers: ["ctrl", "shift"], key: "enter" },
-            },
-          ]
-        : [];
-
-      const collecting = [
-        ...(picked.length
-          ? [
-              {
-                id: -33,
-                title: `Add ${picked.length} to a Collection`,
-                tag: "Sill.ClipboardCollect",
-                props: {},
-                shortcut: undefined,
-              },
-            ]
-          : []),
-        ...(openCollection
-          ? [
-              {
-                id: -34,
-                title: `Remove from ${openCollection.name}`,
-                tag: "Sill.ClipboardUncollect",
-                props: {},
-                shortcut: undefined,
-              },
-              {
-                id: -35,
-                title: `Delete the ${openCollection.name} Collection`,
-                tag: "Sill.ClipboardForgetCollection",
-                props: {},
-                shortcut: undefined,
-              },
-            ]
-          : []),
-      ];
-
-      return [
-        ...merging,
-        ...collecting,
-        {
-          id: -10,
-          title: "Paste",
-          tag: "Sill.ClipboardPaste",
-          props: {},
-          shortcut: { modifiers: [], key: "enter" },
-        },
-        ...plain,
-        {
-          id: -11,
-          title: "Copy",
-          tag: "Sill.ClipboardCopy",
-          props: {},
-          shortcut: { modifiers: ["ctrl"], key: "c" },
-        },
-        {
-          id: -12,
-          title: "Pin or Unpin",
-          tag: "Sill.ClipboardPin",
-          props: {},
-          shortcut: { modifiers: ["ctrl"], key: "p" },
-        },
-        {
-          id: -13,
-          title: "Next Type",
-          tag: "Sill.ClipboardFilter",
-          props: {},
-          shortcut: { modifiers: ["ctrl"], key: "t" },
-        },
-        {
-          id: -14,
-          title: "Delete",
-          tag: "Sill.ClipboardDelete",
-          props: {},
-          // Ctrl, because the search field has focus and a bare Delete while
-          // filtering used to destroy the row under the cursor instead of the
-          // character being typed. With nothing typed the bare key still
-          // works; the panel advertises the one that always does.
-          shortcut: { modifiers: ["ctrl"], key: "delete" },
-        },
-        // What can be done to the text itself, from the same registry the
-        // root list draws from. Paste, pin, filter and delete above act on
-        // the list; these act on the content.
-        //
-        // The registry's primary for a clipboard row is a plain Copy, which
-        // this view already offers above. Showing it twice under two
-        // shortcuts is worse than either.
-        ...clipboardActions
-          .filter((action) => !action.primary)
-          .map((action, index) => ({
-          id: -20 - index,
-          title: action.title,
-          tag: `Sill.Action:${action.id}`,
-          props: {},
-          // The action's own, from Rust. These used to arrive with none at
-          // all, so Read Aloud sat on the clipboard list advertising nothing
-          // while the four rows above it advertised chords written by hand.
-          shortcut: action.shortcut,
-        })),
-      ] as typeof extensionActions;
+      return clipboardPanel({
+        picked,
+        rich: richEntry,
+        openCollection,
+        registry: clipboardActions,
+      });
     }
 
-    // Whatever Rust says can be done to the selected result. This used to be
-    // two entries written here by hand, which meant the panel and the Enter
-    // key were two separate opinions about what a result supports.
-    if (hasRowActions(mode)) {
-      const chosen = rowForActions;
-
-      // Naming a result is offered on the result, not buried in settings.
-      // An alias nobody can reach is one nobody sets, and the launcher is
-      // where you are when you notice you want one.
-      /*
-       * Only where a name would still mean something tomorrow.
-       *
-       * An alias points at a command id, so it is only worth offering on a
-       * row whose id survives a restart. A calculator answer exists for as
-       * long as it is on screen, a window's id is a handle that stops being
-       * valid when it closes, and a program's audio session carries the
-       * process number in it, so naming one would be naming this morning's
-       * copy of that program. A running process is that last one exactly: its
-       * id **is** the process number.
-       */
-      const namable =
-        chosen &&
-        chosen.mode !== "answer" &&
-        chosen.mode !== "window" &&
-        chosen.mode !== "audio-session" &&
-        chosen.mode !== "process" &&
-        // An alias points at a command id and is matched against the index. A
-        // conversation is not in the index, so a name given to one would find
-        // nothing however carefully it was chosen.
-        chosen.mode !== "conversation" &&
-        chosen.mode !== "past-conversation" &&
-        // Nor is an extension in the store, for a stronger version of the same
-        // reason: it may not be installed at all, so there is nothing on this
-        // machine for a name to point at. Once it is installed its commands
-        // are in the index and each can be named there.
-        chosen.mode !== "store-listing";
-
-      const naming =
-        namable
-          ? [
-              {
-                id: -40,
-                title: chosen.alias ? `Rename "${chosen.alias}"` : "Give It a Name",
-                tag: "Sill.SetAlias",
-                props: {},
-                shortcut: undefined,
-              },
-              ...(chosen.alias
-                ? [
-                    {
-                      id: -41,
-                      title: `Forget the Name "${chosen.alias}"`,
-                      tag: "Sill.ClearAlias",
-                      props: {},
-                      shortcut: undefined,
-                    },
-                  ]
-                : []),
-            ]
-          : [];
-
-      return [
-        ...rootActions.map((action, index) => ({
-        id: -1 - index,
-        title: action.title,
-        tag: `Sill.Action:${action.id}`,
-        props: {},
-        /*
-         * Enter for the primary one, and otherwise whatever the action says.
-         *
-         * Enter stays written here rather than being declared in Rust,
-         * because for the primary action it is not a shortcut: it is the
-         * `open` movement, handled by the chord map with everything the
-         * launcher does on the way out. Declaring it as a shortcut as well
-         * would put two handlers on one key.
-         */
-        shortcut: action.primary
-          ? { modifiers: [], key: "enter" }
-          : action.shortcut,
-        })),
-        ...naming,
-      ] as typeof extensionActions;
-    }
+    // Whatever Rust says can be done to the selected result.
+    if (hasRowActions(mode)) return rowPanel(rootActions, rowForActions);
 
     const node = tree.top();
     if (!node) return [];
@@ -968,9 +758,6 @@
 
     return collectActions(tree, node);
   });
-
-  /** Only used to give the root list's synthetic actions the right type. */
-  const extensionActions: ReturnType<typeof collectActions> = [];
 
   /**
    * What the action registry says can be done to the selected result.
@@ -2295,36 +2082,6 @@
    * something to read and this is something to do. It sits with the files it
    * is standing in for, and Enter fixes the thing it names.
    */
-  function fileSearchRow(why: FileSearchMissing): RankedCommand {
-    const said = {
-      indexing: {
-        title: "Reading your files",
-        subtitle: "Sill is going through your folders for the first time. This takes a moment and happens once.",
-      },
-      absent: {
-        title: "Turn on file search",
-        subtitle: "Sill is not indexing any folders. Choose this to start, and it will read the ones you work in.",
-      },
-      asleep: {
-        title: "Start file search",
-        subtitle: "Everything is installed but not running, so there is nothing to search. Choose this to start it.",
-      },
-    }[why];
-
-    return {
-      id: "sill:file-search",
-      extension: "sill",
-      extensionTitle: "Files",
-      title: said.title,
-      subtitle: said.subtitle,
-      mode: "file-setup",
-      entrypoint: "",
-      matched: [],
-    };
-  }
-
-
-
   /**
    * Pastes or copies one emoji, and remembers what was typed to reach it.
    *
@@ -2629,75 +2386,14 @@
    * a half-finished command instead is not that.
    */
   /**
-   * A picture of the window under the cursor, in the switcher.
+   * The strip beside the switcher's list, while the switcher is on screen.
    *
-   * Fetched for the selected row only, never for the list: opening the
-   * switcher on twenty windows must not photograph twenty windows.
-   *
-   * Debounced, because holding Down walks the list faster than a window can
-   * be photographed, and every one passed through on the way would be a
-   * capture nobody looked at.
+   * It owns the picture and the capture that produces it. The two moments the
+   * window has to reach in are opening the switcher on top of itself and
+   * dismissing out of it, and each is a method rather than a variable shared
+   * both ways.
    */
-  let preview = $state<string | null>(null);
-  let previewTimer: ReturnType<typeof setTimeout> | undefined;
-
-  /** Which row the picture on screen belongs to, so a stale one is dropped. */
-  let previewOf = "";
-
-  const PREVIEW_SETTLE_MS = 90;
-
-  /**
-   * Drops the pictures when the switcher is left.
-   *
-   * A preview is a picture of a moment, and keeping them would mean showing a
-   * window as it was the last time somebody looked rather than as it is. A
-   * plain variable rather than state, so this only acts on the change.
-   */
-  let wasSwitching = false;
-
-  $effect(() => {
-    const switching = mode === "switcher";
-
-    if (wasSwitching && !switching) {
-      preview = null;
-      previewOf = "";
-      void forgetPreviews();
-    }
-
-    wasSwitching = switching;
-  });
-
-  $effect(() => {
-    // Read so this runs again when either changes.
-    const wanted = mode === "switcher" ? commands[selected]?.entrypoint : undefined;
-
-    clearTimeout(previewTimer);
-
-    if (!wanted) {
-      preview = null;
-      previewOf = "";
-      return;
-    }
-
-    if (wanted === previewOf) return;
-
-    previewTimer = setTimeout(() => {
-      previewOf = wanted;
-
-      void windowPreview(wanted)
-        .then((picture) => {
-          // The selection moved on while this was being taken.
-          if (previewOf === wanted) preview = picture;
-        })
-        // A window that closed or refuses to be photographed is not an error
-        // worth a message, on the surface or anywhere else. The strip is
-        // simply empty, and `windowPreview` answers `null` for the same
-        // reasons without failing at all.
-        .catch(() => {
-          if (previewOf === wanted) preview = null;
-        });
-    }, PREVIEW_SETTLE_MS);
-  });
+  let switcherPreview = $state<ReturnType<typeof SwitcherPreview> | null>(null);
 
   /**
    * The conversation on screen.
@@ -2710,27 +2406,6 @@
 
   /** The answer being written right now, before it becomes a turn. */
   let answering = $state("");
-
-  /** The scrolling column, so it can be kept at the bottom as text arrives. */
-  let chatScroll = $state<HTMLDivElement | null>(null);
-
-  /*
-   * Kept at the bottom while an answer is being written.
-   *
-   * Only while it is being written, and only if the reader is already at the
-   * bottom: yanking somebody back down while they are reading what was said
-   * earlier is worse than letting the new text arrive out of sight.
-   */
-  $effect(() => {
-    answering;
-    conversation;
-
-    const box = chatScroll;
-    if (!box) return;
-
-    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-    if (nearBottom) box.scrollTop = box.scrollHeight;
-  });
 
   /** Whether a question is in flight, so the composer can say so. */
   let asking = $state(false);
@@ -2764,38 +2439,6 @@
    */
   let answersWith = $state<AiReady | null>(null);
 
-  /**
-   * What the chip says when it is hovered.
-   *
-   * The local case earns its own sentence. Whether a question costs money and
-   * whether it leaves the machine is the one thing about a provider worth
-   * knowing before pressing the key, and it is the only thing the mark itself
-   * cannot say.
-   */
-  const askingIs = $derived.by(() => {
-    if (!answersWith) return "";
-    if (!answersWith.ready) return answersWith.whyNot;
-
-    return answersWith.kind === "local"
-      ? `${answersWith.name} answers, on this machine`
-      : `${answersWith.name} answers when you press Tab`;
-  });
-
-  /**
-   * One turn as the window draws it: what was said, and what was looked at to
-   * say it.
-   *
-   * The steps belong to the turn rather than to the conversation, because
-   * that is what they are about. Held here only: they are provenance for the
-   * moment, and a conversation reopened tomorrow is the answer rather than
-   * the working.
-   */
-  interface Shown {
-    role: string;
-    text: string;
-    steps: AiStep[];
-  }
-
   /** What the model has looked at during the turn in flight. */
   let steps = $state<AiStep[]>([]);
 
@@ -2814,26 +2457,11 @@
   }
 
   /**
-   * What to ask, offered to an empty conversation.
-   *
-   * Not decoration. Nothing anywhere else says the model can read this
-   * machine, so somebody who does not already know asks it the questions they
-   * would ask any chat window and never finds out. Each of these needs a tool
-   * to answer, and each names a different one.
-   */
-  const OPENERS = [
-    "What windows do I have open?",
-    "What did I copy earlier?",
-    "Find the largest files in my Downloads folder",
-    "What is my volume set to?",
-  ];
-
-  /**
-   * Fills the field rather than sending it.
+   * Fills the field with one of the chat's examples, rather than sending it.
    *
    * One more keystroke, and the keystroke is the point: an example that sends
    * itself spends money on a question somebody was reading rather than
-   * asking.
+   * asking. Here rather than in the panel because the field is the launcher's.
    */
   function offer(question: string) {
     query = question;
@@ -2846,49 +2474,9 @@
   /**
    * The list, as rows.
    *
-   * Built here rather than in Rust because these never go through search:
-   * the list is short, it is already ordered by when each was last spoken to,
-   * and filtering it is a substring test on the question.
+   * Shaped in `$lib/conversations`, where a test can read what a row says.
    */
-  const conversationRows: RankedCommand[] = $derived.by(() => {
-    const wanted = query.trim().toLowerCase();
-
-    return pastConversations
-      .filter((one) => !wanted || one.title.toLowerCase().includes(wanted))
-      .map((one) => ({
-        id: `chat-row:${one.id}`,
-        extension: "sill",
-        extensionTitle: "Conversations",
-        command: "conversation",
-        title: one.title,
-        subtitle: saidAbout(one),
-        mode: "past-conversation" as const,
-        // Not a switch, and the row shape wants to be told.
-        toggle: undefined,
-        entrypoint: one.id,
-        panel: "ai",
-        score: 0,
-        matched: [],
-      }));
-  });
-
-  /** What a conversation row says underneath the question. */
-  function saidAbout(one: AiConversation): string {
-    const when =
-      one.age < 60
-        ? "Just now"
-        : one.age < 3600
-          ? `${Math.floor(one.age / 60)} min ago`
-          : one.age < 86_400
-            ? `${Math.floor(one.age / 3600)} hr ago`
-            : `${Math.floor(one.age / 86_400)} d ago`;
-
-    const replies = `${one.replies} ${one.replies === 1 ? "reply" : "replies"}`;
-
-    // Saying which one is open stops the row offering to reopen something
-    // that is already open.
-    return one.open ? `${when} · ${replies} · open` : `${when} · ${replies}`;
-  }
+  const conversationRows = $derived(conversationsAsRows(pastConversations, query));
 
   async function openConversations() {
     panelOpen = false;
@@ -3069,8 +2657,7 @@
   async function openSwitcher() {
     panelOpen = false;
     // Whatever was on screen was a picture of a moment that has passed.
-    preview = null;
-    previewOf = "";
+    switcherPreview?.drop();
     mode = "switcher";
     selected = 0;
     query = "";
@@ -3217,11 +2804,9 @@
     // It was opened by its own key to do one thing, and dropping into a
     // general search on the way out is not what "never mind" means.
     if (mode === "switcher") {
-      // The mode does not change on the way out, so the pictures are dropped
-      // here rather than by the effect that watches for it.
-      preview = null;
-      previewOf = "";
-      void forgetPreviews();
+      // The mode does not change on the way out, so the strip is told to let
+      // go here rather than being unmounted into doing it.
+      switcherPreview?.forget();
 
       await dismiss();
       return;
@@ -4114,234 +3699,32 @@
 <svelte:window onkeydown={onKeydown} />
 
 <main>
-  <div class="search">
-    <img class="mark" src="/sill.png" alt="" width="26" height="26" draggable="false" />
-    {#if mode === "argument" && awaiting}
-      <span class="crumb">{awaiting.title}</span>
-    {:else if mode === "output" && output}
-      <span class="crumb">{output.title}</span>
-    {:else if mode === "clipboard"}
-      <span class="crumb">Clipboard History</span>
-    {:else if mode === "switcher"}
-      <span class="crumb">Open Windows</span>
-    {:else if mode === "emoji"}
-      <span class="crumb">Emoji</span>
-    {:else if mode === "keys"}
-      <span class="crumb">Keyboard</span>
-    {:else if mode === "ai"}
-      <!--
-        Who is answering, in the place that says where you are.
-
-        In every other mode the crumb names the surface, because the surface is
-        the thing you are in. Here the thing you are in is a conversation with
-        a particular model, and a bare name said that a launcher feature was open
-        without saying the one fact that changes what comes back. The mark also
-        does the work no label was doing: it is unmistakably a conversation
-        with something rather than another list.
-
-        Still a button, and the same button as the chip in the root list, so
-        changing model is in one place whichever end you reach it from.
-      -->
-      {#if answersWith?.ready}
-        <button
-          class="crumb who-crumb"
-          onclick={() => void openSettings("ai")}
-          use:hint={askingIs}
-        >
-          <AiMark name={answersWith.id} size={13} />
-          <span class="who">{answersWith.model || answersWith.name}</span>
-        </button>
-      {:else}
-        <span class="crumb">AI Chat</span>
-      {/if}
-    {:else if mode === "conversations"}
-      <span class="crumb">Conversations</span>
-    {:else if mode === "appVolume"}
-      <span class="crumb">App Volume</span>
-    {:else if mode === "processes"}
-      <span class="crumb">Processes</span>
-    {:else if mode === "widgets"}
-      <span class="crumb">Widgets</span>
-    {:else if mode === "namingWorkspace"}
-      <span class="crumb">Save workspace</span>
-    {:else if mode === "store"}
-      <span class="crumb">Extension Store</span>
-    {:else if mode === "destination" && moving}
-      <span class="crumb">Move {moving.title}</span>
-    {:else if mode === "collection"}
-      <span class="crumb">Collection</span>
-    {:else if mode === "alias" && naming}
-      <span class="crumb">{naming.title}</span>
-    {:else if running}
-      <span class="crumb">{running.extensionTitle}</span>
-    {/if}
-    <!--
-      A combobox, which is what this is: a field whose typing filters a list
-      below it, where the list is walked with the arrow keys while the field
-      keeps focus.
-
-      Without this a screen reader announces the field and then says nothing
-      as somebody arrows through the results, because focus never moves and
-      nothing tells it what is highlighted. The listbox half of the pattern
-      was already there; this is the half that makes it audible.
-    -->
-    <input
-      role={browsing ? "combobox" : undefined}
-      aria-expanded={browsing ? true : undefined}
-      aria-controls={browsing ? LISTBOX : undefined}
-      aria-activedescendant={browsing ? optionId(selected) : undefined}
-      aria-autocomplete={browsing ? "list" : undefined}
-      aria-label="Search"
-      bind:this={searchInput}
-      bind:value={query}
-      placeholder={mode === "argument"
-        ? "Type what to search for, then Enter…"
-        : mode === "emoji"
-          ? "Search emoji by name…"
-        : mode === "ai"
-          ? asking
-            ? "Waiting for the answer…"
-            : conversation.length === 0
-              ? "Ask anything…"
-              : "Ask a follow-up…"
-        : mode === "conversations"
-          ? "Filter what you have asked…"
-        : mode === "appVolume"
-          ? "Filter by program name…"
-        : mode === "processes"
-          ? "Filter what is running…"
-        : mode === "widgets"
-          ? "Esc to go back…"
-        : mode === "namingWorkspace"
-          ? "Name this arrangement, then Enter…"
-        : mode === "store"
-          ? "Search the extension store…"
-        : mode === "destination"
-          ? "Search for a folder, then Enter…"
-          : mode === "alias"
-            ? "Type a short name, then Enter. Empty forgets it…"
-          : mode === "collection"
-            ? "Name the collection, then Enter…"
-          : mode === "clipboard"
-            ? "Filter what you have copied…"
-          : mode === "switcher"
-            ? "Switch to a window…"
-            : mode === "root"
-            ? "Search for apps and commands…"
-            : String(view?.props.searchBarPlaceholder ?? "Search…")}
-      spellcheck="false"
-      autocomplete="off"
-    />
-
-    <!--
-      Who is about to answer, and the key that asks them.
-
-      The only place anybody discovers that Tab does anything at all, which is
-      why it is drawn even when nothing is set up: an invitation reads better
-      than an empty corner. A button, so changing the model is two clicks from
-      the thing you were about to ask rather than a trip through Settings.
-
-      Only in the root list. In a conversation the crumb already says Ask, and
-      in the clipboard or the switcher Tab is not free to ask anything.
-    -->
-    <!--
-      The set of rows the command is showing, when it offers a choice of them.
-      Beside the field, which is where Raycast puts it and where it belongs:
-      it narrows the same list the field narrows.
-    -->
-    {#if dropdown}
-      <ExtDropdown
-        {dropdown}
-        onpick={(value) => {
-          if (!session || !dropdown?.onChange) return;
-          void activateHandler(session, dropdown.onChange, [value]).catch((err: unknown) => {
-            status = `the command could not change that: ${err}`;
-          });
-        }}
-      />
-    {/if}
-
-    {#if mode === "root" && answersWith}
-      <button
-        class="asker"
-        class:unset={!answersWith.ready}
-        onclick={() => void openSettings("ai")}
-        use:hint={askingIs}
-      >
-        {#if answersWith.ready}
-          <!--
-            The service as its own mark, and then only the model.
-
-            Two names in a chip this size is the service said twice: the mark
-            already carries it, and the model is the half that changes. The
-            model is shortened in Rust, so this and the settings window agree
-            about what it is called.
-          -->
-          <!-- The mark and the model are one thing being said, so they are
-               grouped and sit closer to each other than to the key. -->
-          <span class="whom">
-            <AiMark name={answersWith.id} size={14} />
-            <span class="who">{answersWith.model || answersWith.name}</span>
-          </span>
-          <!-- Revealed only once there is something to ask about, so an empty
-               launcher is not carrying a key nobody can use yet. -->
-          {#if query.trim()}
-            <span class="sill-key">Tab</span>
-          {/if}
-        {:else}
-          <span class="who">Set up AI Chat</span>
-        {/if}
-      </button>
-    {/if}
-  </div>
-
-  <div class="divider"></div>
+  <SearchRow
+    {mode}
+    bind:query
+    bind:field={searchInput}
+    {selected}
+    {browsing}
+    awaitingTitle={awaiting?.title}
+    outputTitle={output?.title}
+    movingTitle={moving?.title}
+    namingTitle={naming?.title}
+    runningTitle={running?.extensionTitle}
+    {answersWith}
+    {asking}
+    conversationEmpty={conversation.length === 0}
+    commandPlaceholder={String(view?.props.searchBarPlaceholder ?? "Search…")}
+    {dropdown}
+    onpick={(value) => {
+      if (!session || !dropdown?.onChange) return;
+      void activateHandler(session, dropdown.onChange, [value]).catch((err: unknown) => {
+        status = `the command could not change that: ${err}`;
+      });
+    }}
+  />
 
   {#if mode === "output" && output}
-    <!--
-      What a script printed. For `fullOutput` that is the answer rather than a
-      description of where the answer is, and it stays on screen once the
-      script has finished, because somebody ran it deliberately to read it.
-    -->
-    <div class="output">
-      <p class="output-said">
-        {#if output.running}
-          Running {output.title}. Escape stops it.
-        {:else if output.ended === "cancelled"}
-          {output.title} was stopped.
-        {:else if output.ended === "timedOut"}
-          {output.title} ran too long and was stopped.
-        {:else if output.ended === "started"}
-          <!-- Before the exit code, because there is not one. Windows started
-               it as administrator and a process at that level hands nothing
-               back to one below it: no output, no code, and no way to stop
-               it. Saying "finished" here would be claiming to know it
-               worked. -->
-          {output.title} was started as administrator. Sill cannot see what it does.
-        {:else if output.code !== 0}
-          {output.title} failed with code {output.code}.
-        {:else}
-          {output.title} finished.
-        {/if}
-      </p>
-
-      {#if output.stdout.trim()}
-        <pre class="output-text sill-scrolls">{output.stdout}</pre>
-      {/if}
-
-      {#if output.stderr.trim()}
-        <!-- Kept apart from the output rather than mixed into it. A script
-             that printed a result and a warning has said two things, and
-             running them together loses which was which. -->
-        <pre class="output-text output-wrong sill-scrolls">{output.stderr}</pre>
-      {/if}
-
-      <!-- Not for an elevated start, which printed nothing here because Sill
-           was never holding its output, rather than because it was quiet. -->
-      {#if !output.running && output.ended !== "started" && !output.stdout.trim() && !output.stderr.trim()}
-        <p class="output-said">It printed nothing.</p>
-      {/if}
-    </div>
+    <ScriptOutput {output} />
   {/if}
 
   {#if mode === "argument" && awaiting}
@@ -4385,103 +3768,16 @@
       oncollection={(open) => (openCollection = open)}
     />
   {:else if mode === "ai"}
-    <!--
-      A conversation, with each side on its own.
-
-      A question sits right in a bubble of its own and an answer sits left with
-      none. That asymmetry is the point rather than an oversight: the question
-      is a few words and reads as a card, the answer is prose and reads as
-      prose, and boxing both makes a long answer into a wall inside a wall.
-      The field below stays the composer, so a follow-up is typed where the
-      question was.
-    -->
-    <div class="chat sill-scrolls" bind:this={chatScroll}>
-      <!--
-        An empty conversation says what this is and what it can reach.
-
-        The launcher's own answer to a blank window: not a greeting, but the
-        four questions that are worth asking here and nowhere else. They are
-        the only place the tools are visible before one runs.
-      -->
-      {#if conversation.length === 0 && !asking && !answering}
-        <div class="opening">
-          {#if answersWith?.ready}
-            <!-- An invitation rather than a label. The crumb two lines above
-                 already names the model; saying it again as a heading reads as
-                 the same fact twice, and as part of a sentence it does not. -->
-            <p class="lead">
-              <AiMark name={answersWith.id} size={15} />
-              <span>Ask {answersWith.model || answersWith.name} anything</span>
-            </p>
-          {/if}
-          <p class="reach">
-            It can look through this machine to answer: what is installed and
-            open, what you have copied or selected, a file or a folder, and
-            what is on screen.
-          </p>
-          <div class="openers">
-            {#each OPENERS as opener (opener)}
-              <button class="opener" onclick={() => offer(opener)}>{opener}</button>
-            {/each}
-          </div>
-        </div>
-      {/if}
-
-      {#each conversation as turn, at (at)}
-        {#if turn.role === "user"}
-          <article class="turn asked"><p>{turn.text}</p></article>
-        {:else}
-          <!--
-            What was looked at, above the answer it produced.
-
-            One line per tool with what it was used on, because ten lookups
-            that all read "Searched" read as a stutter and say nothing about
-            what was searched for. It stays after the answer arrives: knowing
-            that a question about your machine was answered by reading your
-            clipboard is part of the answer.
-          -->
-          <Steps steps={turn.steps} />
-          <article class="turn said md"><Markdown text={turn.text} /></article>
-        {/if}
-      {/each}
-
-      {#if asking}
-        <Steps {steps} live />
-      {/if}
-
-      {#if asked}
-        <!--
-          What it wants to do, and the two keys that answer.
-
-          Enter and Escape rather than buttons, because the field already has
-          focus and reaching for a mouse to answer a question about your own
-          files is the wrong shape. The keys are drawn anyway: a control that
-          exists only as a keystroke nobody was told about is a control nobody
-          uses.
-        -->
-        <div class="permission">
-          <p class="wants">{asked.title}</p>
-          <p class="subject">{asked.subject}</p>
-          <p class="touches">This {asked.touches}.</p>
-          <div class="answers">
-            <button class="allow" onclick={() => decide(true)}>
-              <span class="sill-key">Enter</span> Do it
-            </button>
-            <button class="refuse" onclick={() => decide(false)}>
-              <span class="sill-key">Esc</span> Not now
-            </button>
-          </div>
-        </div>
-      {/if}
-
-      {#if answering}
-        <article class="turn said md"><Markdown text={answering} /></article>
-      {:else if asking && !asked}
-        <!-- Something between pressing Tab and the first token arriving,
-             because a blank panel reads as nothing having happened. -->
-        <p class="thinking">Thinking<span class="dots" aria-hidden="true"></span></p>
-      {/if}
-    </div>
+    <AiChat
+      {conversation}
+      {answering}
+      {asking}
+      {asked}
+      {steps}
+      {answersWith}
+      ondecide={decide}
+      onoffer={offer}
+    />
 
   <!--
     Not `isListMode`. This set is not the same one: `alias` draws the list too,
@@ -4570,11 +3866,10 @@
         photographed does not shuffle the list sideways.
       -->
       {#if mode === "switcher"}
-        <aside class="preview" aria-hidden="true">
-          {#if preview}
-            <img src={preview} alt="" />
-          {/if}
-        </aside>
+        <SwitcherPreview
+          bind:this={switcherPreview}
+          entrypoint={commands[selected]?.entrypoint}
+        />
       {/if}
     </div>
   {:else if view?.tag === "List"}
@@ -4640,439 +3935,26 @@
     />
   {/if}
 
-  <!--
-    No divider above the footer.
-
-    The window already carries one under the search field, and the raised
-    pill below is its own edge. A second full-width rule turned the quietest
-    part of the window into a boxed-in strip.
-  -->
-  <footer>
-    <LauncherMenu
-      onbuiltin={(id) => {
-        const found = commands.find((c) => c.id === `sill:${id}`);
-        if (found) void launchCommand(found.id);
-      }}
-    />
-    {#if toast}
-      <span class="toast" data-style={toast.style}>{toast.title}</span>
-    {:else if status}
-      <span class="toast">{status}</span>
-    {/if}
-    <span class="spacer"></span>
-
-    <!-- Whatever is pinned, sitting in what was empty space between the
-         status and the keys. -->
-    <WidgetChin prefs={prefs ?? null} />
-
-    <!-- Escape sits outside the pill and stays plain, so the pill holds
-         exactly the two things somebody reaches for. -->
-    <span class="escape">
-      {mode === "root" ? "Close" : "Back"}
-      <span class="esc-key">Esc</span>
-    </span>
-
-    <!--
-      The action pill.
-
-      `tabindex="-1"` and a prevented mousedown on both segments, because the
-      search field must keep document focus. A plain button would take it on
-      click, and the arrow keys would stop moving the selection with no
-      visible cause.
-    -->
-    <div class="pill">
-      <button
-        class="segment"
-        tabindex="-1"
-        onmousedown={(e) => e.preventDefault()}
-        onclick={() => void openSelected()}
-      >
-        {mode === "clipboard" ? "Paste" : mode === "root" ? "Open" : view?.tag === "Form" ? "Submit" : "Run"}
-        <span class="sill-key">↵</span>
-      </button>
-      {#if actions.length}
-        <span class="split"></span>
-        <button
-          class="segment"
-          tabindex="-1"
-          onmousedown={(e) => e.preventDefault()}
-          onclick={() => {
-            panelOpen = !panelOpen;
-            panelSelected = 0;
-          }}
-        >
-          Actions
-          <span class="sill-key">Ctrl K</span>
-        </button>
-      {/if}
-    </div>
-  </footer>
+  <Footer
+    {mode}
+    {toast}
+    {status}
+    prefs={prefs ?? null}
+    viewTag={view?.tag}
+    hasActions={actions.length > 0}
+    onbuiltin={(id) => {
+      const found = commands.find((c) => c.id === `sill:${id}`);
+      if (found) void launchCommand(found.id);
+    }}
+    onrun={() => void openSelected()}
+    onactions={() => {
+      panelOpen = !panelOpen;
+      panelSelected = 0;
+    }}
+  />
 </main>
 
 <style>
-  .output {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-4);
-    overflow: hidden;
-  }
-
-  .output-said {
-    margin: 0;
-    color: var(--text-2);
-    font-size: var(--text-meta);
-  }
-
-  .output-text {
-    max-height: 40vh;
-    margin: 0;
-    padding: var(--space-3);
-    border-radius: var(--radius-md);
-    background: var(--fill-1);
-    box-shadow: var(--ring);
-    color: var(--text-1);
-    font-family: var(--font-mono);
-    font-size: var(--text-meta);
-    line-height: 1.5;
-    overflow: auto;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .output-wrong {
-    color: var(--text-2);
-  }
-
-  /*
-   * A conversation, which reads as a column of paragraphs rather than a list.
-   *
-   * It scrolls on its own so the field below stays put: a composer that moves
-   * down the window as the answer grows is a composer you have to chase.
-   */
-  /*
-   * The chip at the end of the field.
-   *
-   * Quiet by default: it is a label that happens to be pressable, not a call
-   * to action competing with what somebody is typing. It brightens on hover
-   * and takes the accent only when there is nothing set up, which is the one
-   * state that is asking to be pressed.
-   */
-  .asker {
-    display: inline-flex;
-    align-items: center;
-    flex: none;
-    gap: var(--space-2);
-    padding: var(--space-snug) var(--space-2) var(--space-snug) var(--space-1);
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--fill-1);
-    box-shadow: var(--ring);
-    color: var(--text-2);
-    font: inherit;
-    font-size: var(--text-meta);
-    white-space: nowrap;
-    cursor: pointer;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
-  }
-
-  .asker:hover {
-    background: var(--fill-2);
-    color: var(--text-1);
-  }
-
-  .asker:focus-visible {
-    outline: none;
-    box-shadow: var(--ring-accent);
-  }
-
-  .asker.unset {
-    background: var(--accent-fill);
-    box-shadow: none;
-    color: var(--accent);
-  }
-
-  /* Who is answering: the mark and the model, held together. */
-  .whom {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    min-width: 0;
-  }
-
-  .who {
-    max-width: 22ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .chat {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    /* Wider between turns than inside one, so the conversation reads as
-       exchanges rather than as a single column of paragraphs. */
-    gap: var(--space-4);
-    padding: var(--space-4) var(--space-4) var(--space-5);
-  }
-
-  .turn {
-    font-size: var(--text-body);
-  }
-
-  /*
-   * The question, to the right and in a ground of its own.
-   *
-   * Short by nature, so it can afford a bubble and gains from one: it is the
-   * only thing on screen that somebody wrote themselves, and finding it again
-   * in a long conversation is how you remember what you asked.
-   */
-  .asked {
-    align-self: flex-end;
-    max-width: 78%;
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
-    background: var(--accent-fill);
-    box-shadow: var(--ring-accent-faint);
-  }
-
-  .asked p {
-    margin: 0;
-    color: var(--text-1);
-    line-height: 1.55;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  /*
-   * The answer, to the left and unboxed.
-   *
-   * No ground, because prose in a box is a wall inside a wall, and the width
-   * is capped where a line stops being comfortable to read rather than at the
-   * window edge.
-   */
-  .said {
-    align-self: flex-start;
-    max-width: 68ch;
-    width: 100%;
-    color: var(--text-1);
-  }
-
-  /*
-   * What was asked, set apart from what was answered.
-   *
-   * Quieter rather than boxed. A question is a heading for the answer under
-   * it, and drawing a bubble round each turn would make a short exchange look
-   * like a chat application rather than a launcher.
-   */
-  .asked p {
-    color: var(--text-2);
-  }
-
-  /*
-   * The empty conversation.
-   *
-   * Left aligned with the answers rather than centred, because it sits where
-   * the first answer will and centring it would move everything the moment one
-   * arrives.
-   */
-  .opening {
-    align-self: flex-start;
-    max-width: 62ch;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding-top: var(--space-2);
-  }
-
-  .lead {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin: 0;
-    color: var(--text-1);
-    font-size: var(--text-heading);
-    font-weight: var(--weight-strong);
-  }
-
-  .reach {
-    margin: 0;
-    color: var(--text-2);
-    font-size: var(--text-body);
-    line-height: 1.6;
-  }
-
-  .openers {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-
-  /*
-   * An example, which fills the field rather than sending it.
-   *
-   * Drawn as something pressable rather than as a bullet, because it is; and
-   * quiet rather than accented, because four accented chips in an empty window
-   * read as the main event when they are a way in.
-   */
-  .opener {
-    padding: var(--space-1) var(--space-3);
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--fill-1);
-    box-shadow: var(--ring);
-    color: var(--text-2);
-    font: inherit;
-    font-size: var(--text-meta);
-    text-align: left;
-    cursor: pointer;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
-  }
-
-  .opener:hover {
-    background: var(--fill-2);
-    color: var(--text-1);
-  }
-
-  .opener:focus-visible {
-    outline: none;
-    box-shadow: var(--ring-accent);
-  }
-
-  /*
-   * The card that asks before something changes.
-   *
-   * The one thing in a conversation that is not a message, so it is the one
-   * thing with a ground and an outline. It sits where the next answer would,
-   * because that is where somebody is already looking.
-   */
-  .permission {
-    align-self: flex-start;
-    max-width: 62ch;
-    width: 100%;
-    padding: var(--space-3);
-    border-radius: var(--radius-lg);
-    background: var(--fill-1);
-    box-shadow: var(--ring-accent-faint);
-  }
-
-  .wants {
-    margin: 0;
-    color: var(--accent);
-    font-size: var(--text-meta);
-    font-weight: var(--weight-strong);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  /* What it acts on, which is the line somebody actually decides on. */
-  .subject {
-    margin: var(--space-1) 0 0;
-    color: var(--text-1);
-    font-size: var(--text-body);
-    line-height: 1.5;
-    overflow-wrap: anywhere;
-  }
-
-  .touches {
-    margin: var(--space-1) 0 var(--space-3);
-    color: var(--text-2);
-    font-size: var(--text-meta);
-  }
-
-  .answers {
-    display: flex;
-    gap: var(--space-2);
-  }
-
-  .answers button {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-1) var(--space-3);
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--fill-2);
-    color: var(--text-2);
-    font: inherit;
-    font-size: var(--text-meta);
-    cursor: pointer;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
-  }
-
-  .answers button:hover {
-    color: var(--text-1);
-  }
-
-  /*
-   * The affirmative takes the accent, and only the affirmative.
-   *
-   * Two coloured buttons is two things shouting; a refusal that looks like a
-   * warning also reads as the dangerous one, which is backwards.
-   */
-  .allow {
-    background: var(--accent-fill);
-    color: var(--accent);
-  }
-
-  .allow:hover {
-    background: var(--accent-fill-strong);
-  }
-
-  .answers button:focus-visible {
-    outline: none;
-    box-shadow: var(--ring-accent);
-  }
-
-  /*
-   * The wait, said without a spinner.
-   *
-   * A launcher is meant to feel instant and a spinner advertises that it is
-   * not. Three dots that fill in say the same thing while making the wait a
-   * detail rather than the subject.
-   */
-  .thinking {
-    align-self: flex-start;
-    margin: 0;
-    color: var(--text-2);
-    font-size: var(--text-body);
-  }
-
-  .dots::after {
-    content: "";
-    animation: thinking var(--motion-pulse) steps(4, end) infinite;
-  }
-
-  @keyframes thinking {
-    0% {
-      content: "";
-    }
-    25% {
-      content: ".";
-    }
-    50% {
-      content: "..";
-    }
-    75% {
-      content: "...";
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .dots::after {
-      animation: none;
-      content: "…";
-    }
-  }
-
   /*
    * The list, with room beside it for a picture in the switcher.
    *
@@ -5090,35 +3972,6 @@
   .listing > :global(*:first-child) {
     flex: 1;
     min-width: 0;
-  }
-
-  /*
-   * The strip the picture is drawn in.
-   *
-   * A fixed width whether or not there is a picture, so arrowing past a window
-   * that refuses to be photographed does not shuffle the list sideways. That
-   * shuffle is worse than an empty strip: the row under the cursor moves while
-   * somebody is reading it.
-   */
-  .preview {
-    flex: none;
-    width: 280px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-3);
-    overflow: hidden;
-  }
-
-  .preview img {
-    max-width: 100%;
-    max-height: 100%;
-    border-radius: var(--radius-sm);
-    /* The picture is of somebody's window, which may be any colour and may
-       end in a flat edge against the launcher's own. A hairline separates the
-       two without drawing a frame around it. */
-    box-shadow: var(--ring-outside);
-    object-fit: contain;
   }
 
   main {
@@ -5141,113 +3994,6 @@
        only stacks onto that edge. The single light inset is the glass catch. */
     box-shadow: var(--bevel-window);
     overflow: hidden;
-  }
-
-  /*
-   * 60px, and stated rather than left to the input's line box.
-   *
-   * The window's corner radius is fixed at 8px by DWM, so the launcher cannot
-   * be made to feel less boxy at the edges. It can be made to feel less
-   * cramped inside, and the query row is where that reads first: this is the
-   * one element somebody looks at before anything has been typed.
-   */
-  .search {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    height: var(--search-height);
-    /*
-     * The same room at both ends.
-     *
-     * There was none on the right, because until the chip arrived nothing was
-     * over there: the field simply ran to the edge, where a text caret needs
-     * no margin. A pill does, and without this it sat against the glass while
-     * the mark on the left had a comfortable inset, which reads as the row
-     * being pushed sideways rather than as one element being tight.
-     */
-    padding-left: var(--space-4);
-    padding-right: var(--space-4);
-    flex: none;
-  }
-
-  /* The mark stands where a magnifier would, so the window is identifiable
-     the moment it appears rather than only from its contents.
-
-     The app icon itself, at the size it is drawn everywhere else. There is
-     no separate in-app mark any more: the art lost its plaque, so the thing
-     on the taskbar is already the right thing to put here. */
-  .mark {
-    flex: none;
-    width: var(--icon-tile);
-    height: var(--icon-tile);
-    -webkit-user-drag: none;
-  }
-
-  /* A chip, not a tile. The sheen-and-bevel recipe belongs to something that
-     reads as a raised object; this is a label saying where you are. */
-  .crumb {
-    flex: none;
-    padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-sm);
-    background: var(--fill-2);
-    color: var(--text-2);
-    font-size: var(--text-meta);
-    white-space: nowrap;
-  }
-
-  /* The one crumb that is pressable, so it says so on hover rather than only
-     when the pointer is already on it. */
-  .who-crumb {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    border: 0;
-    padding-left: var(--space-1);
-    font: inherit;
-    font-size: var(--text-meta);
-    cursor: pointer;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
-  }
-
-  .who-crumb:hover {
-    background: var(--hairline-strong);
-    color: var(--text-1);
-  }
-
-  .who-crumb:focus-visible {
-    outline: none;
-    box-shadow: var(--ring-accent);
-  }
-
-  .search input {
-    flex: 1;
-    min-width: 0;
-    padding: 0 var(--space-3) 0 0;
-    border: 0;
-    background: transparent;
-    color: var(--text-1);
-    /* Segoe has a separate cut for text this size; Inter resolves this back
-       to itself. */
-    font-family: var(--font-display);
-    font-size: var(--text-query);
-    font-weight: 400;
-    /* Large text wants a touch of negative tracking; at 17px the default
-       spacing reads loose next to a 13px list. */
-    letter-spacing: var(--track-tight);
-    outline: none;
-    user-select: text;
-  }
-
-  .search input::placeholder {
-    color: var(--text-4);
-  }
-
-  .divider {
-    flex: none;
-    height: 1px;
-    background: var(--hairline);
   }
 
   .argument-hint {
@@ -5273,118 +4019,4 @@
     color: var(--text-3);
   }
 
-  /*
-   * The chin, and it carries no surface of its own.
-   *
-   * It briefly had a dark wash, on the reasoning that a plane has to recede
-   * for the pill to read as raised. That was wrong in practice: a full-width
-   * band draws a hard line across the window and cuts the list off, which is a
-   * lot of weight to spend on something whose whole job is to hold two
-   * controls.
-   *
-   * The controls carry the layering instead. The pill is genuinely raised, on
-   * its own fill and bevel, and reads that way against the window exactly as
-   * the search row's chip does. Nothing else here needs a background at all.
-   *
-   * 8px of side padding puts the pill on the same right edge as the action
-   * panel that rises out of it.
-   */
-  /*
-   * The chin: a plane the two controls sit on, back in flow.
-   *
-   * It briefly had no surface and let the list dissolve underneath it, which
-   * was an attempt to get a blurred chin without an opaque window. That cannot
-   * work; see the note on `--chin` in theme.css. A plain recessed wash is what
-   * is left, and it is honest about being a bar.
-   */
-  footer {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex: none;
-    height: var(--chin-height);
-    padding: 0 var(--space-2);
-    background: var(--chin);
-    font-size: var(--text-meta);
-    color: var(--text-3);
-  }
-
-  /* Outside the pill and quieter than it. Escape is the key nobody needs
-     reminding of, so it does not get to sit in the affordance. */
-  /* Outside the pill and quieter than it. Escape is the key nobody needs
-     reminding of, so it does not get to sit in the affordance. */
-  .escape {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    color: var(--text-4);
-  }
-
-  .esc-key {
-    font-weight: var(--weight-medium);
-  }
-
-  /*
-   * The action pill.
-   *
-   * One raised cluster holding the primary action and the action menu, which
-   * is the shape every launcher uses and the thing Sill's flat row of five
-   * faint hints was standing in for. The bevel is the tile recipe: unlike the
-   * window, this sits ON a surface, so an outer edge has something to fall on.
-   */
-  /* Lifted off the chin, which is a known background again. */
-  .pill {
-    display: flex;
-    align-items: center;
-    flex: none;
-    height: var(--control-height);
-    border-radius: var(--radius-lg);
-    background: var(--fill-2);
-    box-shadow: var(--bevel-tile);
-    overflow: hidden;
-  }
-
-  .segment {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    height: 100%;
-    padding: 0 var(--space-2);
-    border: 0;
-    background: transparent;
-    color: var(--text-2);
-    font: inherit;
-    font-size: var(--text-meta);
-    white-space: nowrap;
-    cursor: default;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
-  }
-
-  .segment:hover {
-    background-color: var(--fill-2);
-    color: var(--text-1);
-  }
-
-  .split {
-    width: 1px;
-    height: 16px;
-    flex: none;
-    background: var(--hairline-strong);
-  }
-
-  .spacer {
-    flex: 1;
-  }
-
-  .toast[data-style="success"] {
-    color: var(--success);
-  }
-  .toast[data-style="failure"] {
-    color: var(--danger);
-  }
-  .toast[data-style="animated"] {
-    color: var(--info);
-  }
 </style>

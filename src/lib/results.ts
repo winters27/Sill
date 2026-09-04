@@ -10,7 +10,7 @@
  * and a generated id would have to be threaded between them to be useful.
  */
 
-import type { RankedCommand } from "$lib/exthost/commands";
+import type { FileSearchMissing, RankedCommand } from "$lib/exthost/commands";
 
 /**
  * The id of the list on screen, which the search field points at.
@@ -106,4 +106,45 @@ export function selectionAfter(
   // The row is gone: a source answered differently, or the list shrank. The
   // top rather than the same number, which would be an arbitrary row.
   return held.index < rows.length ? held.index : 0;
+}
+
+/**
+ * The row that appears where files would have been.
+ *
+ * A row rather than a message under the field, because a message is something
+ * to read and this is something to do. It sits with the files it is standing
+ * in for, and Enter fixes the thing it names.
+ *
+ * Here rather than in the window because there really are three answers and
+ * each says something different about what has gone wrong: an index still
+ * being built is not the same as no folders chosen, and neither is the same as
+ * a program that is installed and not running. One wording for all three would
+ * tell somebody to turn on a thing that is already on.
+ */
+export function fileSearchRow(why: FileSearchMissing): RankedCommand {
+  const said = {
+    indexing: {
+      title: "Reading your files",
+      subtitle: "Sill is going through your folders for the first time. This takes a moment and happens once.",
+    },
+    absent: {
+      title: "Turn on file search",
+      subtitle: "Sill is not indexing any folders. Choose this to start, and it will read the ones you work in.",
+    },
+    asleep: {
+      title: "Start file search",
+      subtitle: "Everything is installed but not running, so there is nothing to search. Choose this to start it.",
+    },
+  }[why];
+
+  return {
+    id: "sill:file-search",
+    extension: "sill",
+    extensionTitle: "Files",
+    title: said.title,
+    subtitle: said.subtitle,
+    mode: "file-setup",
+    entrypoint: "",
+    matched: [],
+  };
 }
