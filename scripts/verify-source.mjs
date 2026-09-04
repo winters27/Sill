@@ -2386,6 +2386,67 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * The uninstaller takes everything Sill actually leaves behind.
+ *
+ * `leavings.rs` is Sill's own list of what it writes outside its install
+ * directory, and `installer/hooks.nsh` is what the uninstaller does about it.
+ * They are one fact written twice, in two languages, and nothing in either
+ * file makes them agree.
+ *
+ * That shape has gone stale four times in this codebase already. The cost
+ * here is worse than usual in both directions: a stale list leaves somebody's
+ * clipboard history and their sealed keys on a machine they thought they had
+ * cleaned, or it deletes a folder Sill never owned.
+ *
+ * So adding somewhere Sill writes means adding it to both, and this refuses
+ * the build until it is.
+ */
+{
+  const LIST = "src-tauri/src/leavings.rs";
+  const HOOKS = "src-tauri/installer/hooks.nsh";
+
+  if (existsSync(LIST) && existsSync(HOOKS)) {
+    const list = readFileSync(LIST, "utf8");
+    const hooks = readFileSync(HOOKS, "utf8");
+
+    // `where_it_is: r"..."`, which is how every entry names its place.
+    const places = [...list.matchAll(/where_it_is:\s*r?"([^"]+)"/g)].map((m) => m[1]);
+
+    if (places.length === 0) {
+      fail(LIST, null, "no leavings are listed, so the uninstaller cleans up nothing");
+    }
+
+    for (const place of places) {
+      // A registry value is named in two parts by NSIS, so the key and the
+      // value are checked rather than the path as one string.
+      const wanted = place.startsWith("HKCU\\")
+        ? place.slice("HKCU\\".length).split("\\").slice(0, -1).join("\\")
+        : place;
+
+      if (!hooks.includes(wanted)) {
+        fail(
+          LIST,
+          lineOf(list, list.indexOf(place)),
+          `${place} is something Sill writes and the uninstaller never mentions it, ` +
+            "so it is left on the machine after an uninstall",
+        );
+      }
+    }
+
+    // And the other way: the hooks must not remove something nothing claims.
+    for (const removed of [...hooks.matchAll(/RMDir \/r "([^"]+)"/g)].map((m) => m[1])) {
+      if (!places.includes(removed)) {
+        fail(
+          HOOKS,
+          lineOf(hooks, hooks.indexOf(removed)),
+          `the uninstaller deletes ${removed} and leavings.rs does not say Sill wrote it`,
+        );
+      }
+    }
+  }
+}
+
+/*
  * Every recorded copy is still followed by the housekeeping.
  *
  * The two bounds on the clipboard, retention and the row cap, run from the

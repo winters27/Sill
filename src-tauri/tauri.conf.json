@@ -55,6 +55,11 @@
   },
   "bundle": {
     "active": true,
+    "windows": {
+      "nsis": {
+        "installerHooks": "./installer/hooks.nsh"
+      }
+    },
     "targets": "all",
     "icon": [
       "icons/32x32.png",

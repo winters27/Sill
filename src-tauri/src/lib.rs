@@ -36,6 +36,7 @@ pub mod job;
 pub mod json_store;
 pub mod keysheet;
 pub mod lazy_windows;
+pub mod leavings;
 pub mod live;
 pub mod lnk;
 pub mod log;
