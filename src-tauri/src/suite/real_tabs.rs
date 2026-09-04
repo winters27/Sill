@@ -471,3 +471,44 @@ fn working_set(exe: &str, pid: u32) -> String {
 
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
+
+/// What a browser page search really costs on this machine.
+///
+/// Written because Brandon reported the launcher sticking for seconds while
+/// typing, and turning browsers off fixed it. Measured here: the copy is 9 ms
+/// and the query 7 ms against the file directly, profiles list in ~24 ms, and
+/// the whole search is 65 to 101 ms with three profiles and a 31 MB history.
+///
+/// So **no part of this path is slow on its own**, which is the useful thing
+/// it says. Whatever costs the seconds is interaction rather than any one of
+/// these, and a future session should start from that rather than re-timing
+/// the copy.
+#[test]
+#[ignore]
+#[cfg(windows)]
+fn what_a_page_search_costs_here() {
+    let scratch = std::env::temp_dir().join("sill-pages-probe");
+    let _ = std::fs::create_dir_all(&scratch);
+
+    let want = crate::browsers::Want {
+        history: true,
+        bookmarks: true,
+    };
+
+    for round in 0..3 {
+        let at = std::time::Instant::now();
+        let found = crate::browsers::profiles();
+        let listing = at.elapsed();
+
+        let at = std::time::Instant::now();
+        let hits = crate::browsers::search("game", 6, want, &scratch);
+        println!(
+            "round {round}: {} profiles listed in {listing:?}, {} hits in {:?}",
+            found.len(),
+            hits.len(),
+            at.elapsed()
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
