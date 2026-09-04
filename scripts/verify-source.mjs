@@ -910,6 +910,11 @@ else if (Number(css[1]) !== Number(rust[1])) {
     ],
     "snippets/expander.rs": ["APP", "EXPANDER", "KEYS_SEEN", "START"],
 
+    // A window procedure is the same constraint as a hook callback: Windows
+    // calls a bare `extern "system" fn` and the only context it offers is the
+    // `usize` handed to `SetWindowSubclass`, which cannot hold an `AppHandle`.
+    "session.rs": ["APP"],
+
     // Read from `restore_foreground`, which runs while a window is being put
     // away and has only the window. Worth moving; not worth moving badly.
     "summon.rs": ["PREVIOUS_FOREGROUND"],
