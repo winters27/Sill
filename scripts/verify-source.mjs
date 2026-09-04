@@ -2441,6 +2441,181 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * And the comparison is made between the two preferences, not conjured.
+ *
+ * The rule above asks that every field of `Redo` is acted on. It says nothing
+ * about where the `Redo` came from, and that is a hole with a name: replacing
+ * `Redo::between(&previous, &prefs)` with `Redo::default()` leaves all three
+ * arms present, satisfies the rule above, and **passes 2,020 Rust tests**.
+ * Every source switch, script folder and indexed root would then save, report
+ * itself saved, and change nothing until the next start. Measured, not
+ * assumed.
+ *
+ * Both arguments are named rather than only the call, because the diff is only
+ * a diff if it is between the state that was stored and the state arriving.
+ * `Redo::between(&prefs, &prefs)` is empty for every save ever made.
+ */
+{
+  const WHERE = "src-tauri/src/commands/settings.rs";
+  const acts = readFileSync(WHERE, "utf8");
+  const at = acts.indexOf("pub(crate) async fn set_preferences(");
+
+  if (at < 0) {
+    fail(WHERE, null, "set_preferences is gone, and it is what a settings save calls");
+  } else {
+    // Counted from the function, not from the file. A whole-file search here
+    // would be satisfied by the phrase appearing in a doc comment somewhere
+    // else in a 1,300 line module, which is how two rules in this script
+    // passed their own sabotage before.
+    const opened = acts.indexOf("{", at);
+    let depth = 0;
+    let end = opened;
+    for (let i = opened; i < acts.length; i += 1) {
+      if (acts[i] === "{") depth += 1;
+      else if (acts[i] === "}" && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+
+    const body = acts.slice(opened, end);
+
+    if (!/Redo::between\(\s*&previous\s*,\s*&prefs\s*\)/.test(body)) {
+      fail(
+        WHERE,
+        lineOf(acts, at),
+        "set_preferences does not compare the stored preferences with the " +
+          "ones arriving, so nothing below it can be true: the sources, the " +
+          "script folders and the indexed roots are saved and never applied",
+      );
+    }
+  }
+}
+
+/*
+ * Every source switch is one the comparison reads.
+ *
+ * `Sources::scanned` is the tuple `Redo::between` compares, and it is a
+ * hand-written list of the struct's own fields. A switch added to `Sources`
+ * and not added there is a switch somebody can turn on in Settings that
+ * changes nothing at all: the panel saves, the file is written, and the index
+ * is never told, with no restart short of a Rebuild putting it right.
+ *
+ * Proved rather than supposed. An eighth `pub bool` on `Sources`, absent from
+ * `scanned`, passes **2,020 Rust tests and this whole script**. This project
+ * has been bitten five times by two lists that must agree with nothing making
+ * them agree, and this is that shape exactly.
+ *
+ * Only the booleans. `folders` is in the tuple as a slice, and `excluded`,
+ * `hidden` and `pinned` are deliberately out of it: they are read on every
+ * query, so a word added to one is in effect on the next keystroke and asking
+ * the machine to scan itself again for them would be a minute of work to
+ * change nothing.
+ */
+{
+  const WHERE = "src-tauri/src/preferences.rs";
+  const text = readFileSync(WHERE, "utf8");
+  const struct = text.match(/pub struct Sources \{([\s\S]*?)\n\}/)?.[1];
+  const at = text.indexOf("fn scanned(&self)");
+
+  if (!struct) {
+    fail(WHERE, null, "`Sources` is gone, and it is what the source switches are");
+  } else if (at < 0) {
+    fail(WHERE, null, "`Sources::scanned` is gone, and it is what a save compares");
+  } else {
+    const opened = text.indexOf("{", at);
+    let depth = 0;
+    let end = opened;
+    for (let i = opened; i < text.length; i += 1) {
+      if (text[i] === "{") depth += 1;
+      else if (text[i] === "}" && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+
+    // Comments stripped, so a field named only in the prose above the tuple
+    // does not read as one the comparison looks at.
+    const compared = text
+      .slice(opened, end)
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, ""))
+      .join("\n");
+
+    for (const m of struct.matchAll(/\n {4}pub ([a-z_]+): bool,/g)) {
+      if (compared.includes(`self.${m[1]}`)) continue;
+
+      fail(
+        WHERE,
+        lineOf(text, at),
+        `\`Sources::${m[1]}\` is a switch \`scanned\` never reads, so turning ` +
+          "it on or off saves and leaves the index exactly as it was",
+      );
+    }
+  }
+}
+
+/*
+ * A stored extension host is only handed back while it is still answering.
+ *
+ * `ExtHost` marks itself dead when its stream ends, and `tests/exthost.rs`
+ * proves that: it kills a real Node and watches `alive()` turn over. What no
+ * test reaches is the half that uses the answer. `host_of` takes an
+ * `AppHandle`, so **deleting the liveness check hands a corpse back for the
+ * rest of the session and fails nothing at all**, including the integration
+ * test whose own name is about a host that died. Measured.
+ *
+ * What that costs: a crashed host left its handle in the slot and every later
+ * launch got it back and failed with "channel is closed". The idle watchdog
+ * could not clear it either, because asking for the host is what marks it
+ * used, so a dead host looked permanently busy. Extensions stayed broken until
+ * Sill was restarted.
+ */
+{
+  const WHERE = "src-tauri/src/host.rs";
+
+  if (existsSync(WHERE)) {
+    const text = readFileSync(WHERE, "utf8");
+    const at = text.indexOf("pub(crate) async fn host_of(");
+
+    if (at < 0) {
+      fail(WHERE, null, "host_of is gone, and it is what every extension launch asks");
+    } else {
+      const opened = text.indexOf("{", at);
+      let depth = 0;
+      let end = opened;
+      for (let i = opened; i < text.length; i += 1) {
+        if (text[i] === "{") depth += 1;
+        else if (text[i] === "}" && --depth === 0) {
+          end = i;
+          break;
+        }
+      }
+
+      const body = text.slice(opened, end);
+
+      for (const [needle, why] of [
+        [
+          "host.alive()",
+          "host_of hands back whatever is in the slot without asking whether " +
+            "it still answers, so one crash breaks every extension until Sill " +
+            "is restarted",
+        ],
+        [
+          "*slot = None",
+          "host_of never clears a dead host out of the slot, so the next " +
+            "launch finds it there again and starts nothing",
+        ],
+      ]) {
+        if (!body.includes(needle)) {
+          fail(WHERE, lineOf(text, at), why);
+        }
+      }
+    }
+  }
+}
+
+/*
  * The two pages that name keys do not write a chord down.
  *
  * Every key on the reference comes from `keyboard_reference`, and every

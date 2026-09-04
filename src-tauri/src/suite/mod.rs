@@ -60,6 +60,7 @@ mod acl_parity;
 mod clipboard_collections;
 mod clipboard_merge;
 mod file_merge;
+mod host_answering;
 mod keyword_matching;
 mod private_mode;
 mod ranking_memory;
