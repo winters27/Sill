@@ -363,6 +363,8 @@ function serveApi(method, params) {
   switch (method) {
     case "UI/render":
       tree.apply(params.ops ?? []);
+      renders += 1;
+      lastRenderAt = Date.now();
       return null;
     case "Storage/get":
       return storage.has(params.key) ? storage.get(params.key) : null;
@@ -508,6 +510,72 @@ function manifestPreferences() {
 
 const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * How many times the extension has drawn, and when it last did.
+ *
+ * Written where the renders arrive rather than inferred, because the point of
+ * waiting is to know whether one has happened and a wait cannot ask the tree:
+ * an extension that renders an empty list looks exactly like one that has not
+ * rendered at all.
+ */
+let renders = 0;
+let lastRenderAt = 0;
+const waits = [];
+
+/**
+ * Waits for the extension to finish drawing, rather than for a fixed time.
+ *
+ * This used to be `settle(2500)`, which is generous on a developer's machine
+ * and not on a shared build agent. **It is why CI was red**: the gate read the
+ * tree before the first render landed and reported zero rows, zero
+ * accessories, an undefined root. Always zero, never a wrong number, and a
+ * different extension each run, which is what looking too early looks like
+ * rather than what a broken renderer looks like.
+ *
+ * Quiet rather than merely present, because several extensions draw an empty
+ * list and fill it once a promise settles. So: wait for at least one render,
+ * then for `quiet` with no further one. An extension that never draws at all
+ * still ends at `patience`, and the assertions then fail on what it drew,
+ * which is the honest failure.
+ *
+ * Faster than the sleep it replaces in the ordinary case, which is the point
+ * of a condition over a guess.
+ */
+async function untilDrawn({ patience = 20_000, quiet = 1_500 } = {}) {
+  const began = Date.now();
+  const until = began + patience;
+
+  /*
+   * Renders from **this** point on, not renders ever.
+   *
+   * The first version counted every render since the worker started, so the
+   * second call returned instantly: the initial draw had long since gone
+   * quiet, and `Action.Push` read the tree before the pushed screen existed.
+   * It reported the list it had pushed from, which reads exactly like a push
+   * that did not happen.
+   */
+  const before = renders;
+
+  while (Date.now() < until) {
+    if (renders > before && Date.now() - lastRenderAt >= quiet) {
+      waits.push(`${renders - before} render(s) in ${lastRenderAt - began}ms`);
+      return true;
+    }
+    await settle(50);
+  }
+
+  // Out of patience. Said rather than swallowed: a gate that fails on "got 0"
+  // without saying whether anything ever drew sends the next person to read
+  // the renderer, which is where I looked first and it was not there.
+  waits.push(
+    renders > before
+      ? `${renders - before} render(s), still drawing after ${patience}ms`
+      : `nothing drew in ${patience}ms`,
+  );
+
+  return renders > before;
+}
+
 /** Text to type into the search field once the first render has landed. */
 const typedArg = args.indexOf("--type");
 const typed = typedArg === -1 ? undefined : args[typedArg + 1];
@@ -621,7 +689,7 @@ send({
 
 await settle(500);
 send({ jsonrpc: "2.0", id: 2, method: "Manager/ready", params: { session_id: session } });
-await settle(2500);
+await untilDrawn();
 
 /**
  * What the field said, and what it reached.
@@ -639,10 +707,10 @@ if (typed !== undefined) {
   field.before = before ? itemsOf(rowsOf(tree, before, "")).length : 0;
   field.heard = type(field.props.onChange, typed);
 
-  // Long enough for a handler that fetches, re-renders and settles. The gate
-  // runs offline against extensions that filter in memory, so this is slack
-  // rather than a wait anybody watches.
-  await settle(2000);
+  // Until the handler has finished re-rendering, rather than for a fixed
+  // time. An extension that filters in memory answers in one frame and one
+  // that fetches takes as long as it takes.
+  await untilDrawn({ quiet: 500 });
 
   const after = tree.top();
   const narrow = field.props?.filtering ? typed : "";
@@ -677,12 +745,15 @@ if (journey.wanted) {
   journey.eager = lazyFor !== undefined && said.includes(lazyFor);
   journey.found = activate(action?.handler);
 
-  await settle(1500);
+  // A push draws the screen it went to, and a pop draws the one underneath,
+  // so both are waits for a render rather than for a length of time. Same
+  // reason as the first one: 1.5 s is a guess that holds on a fast machine.
+  await untilDrawn({ quiet: 400 });
   journey.pushedTo = tree.top()?.tag;
   journey.depth = navigation.depth;
 
   activate(navigation.pop);
-  await settle(1500);
+  await untilDrawn({ quiet: 400 });
   journey.poppedTo = tree.top()?.tag;
 }
 
