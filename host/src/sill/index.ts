@@ -69,7 +69,15 @@ export type SillObjectKind =
   | "process"
   | "workspace"
   | "conversation"
-  | "storeListing";
+  | "storeListing"
+  /** A note somebody wrote in Sill. Only present when notes are switched on. */
+  | "note"
+  /**
+   * A reminder before it has been set.
+   *
+   * The one after it fires is `text`, because setting it is over by then.
+   */
+  | "reminder";
 
 /**
  * One thing in Sill, and enough to act on it.

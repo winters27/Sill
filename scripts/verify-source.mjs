@@ -1359,6 +1359,100 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Somebody's own writing is read entry by entry, never all or nothing.
+ *
+ * `json_store::load` refuses the whole document when one field cannot be read
+ * and moves the file aside; `load_list` keeps every entry it can. For seven of
+ * the eight stores either would be survivable, because a snippet or a
+ * quicklink can be typed again. A paragraph somebody wrote cannot.
+ *
+ * The reason this is a rule and not a test: `notes.rs` extracts its reading
+ * into a `read` function so a test can call it without a running application,
+ * and a test that calls `read` would go on passing if `read` were changed to
+ * the whole-document version and the store still called it. That is the same
+ * hole three tests of clipboard pruning had, where taking the call out of the
+ * recording path failed nothing. So the file is held to the choice directly.
+ */
+{
+  const STORE = "src-tauri/src/notes.rs";
+  const text = readFileSync(STORE, "utf8");
+
+  if (!text.includes("json_store::load_list(")) {
+    fail(STORE, null, "nothing here reads the notes file, so this rule is asleep");
+  }
+
+  for (const m of text.matchAll(/json_store::load(?:_with)?\(/g)) {
+    fail(
+      STORE,
+      lineOf(text, m.index),
+      "this reads the whole notes file at once, so one entry serde cannot read " +
+        "costs every note in it. Use `json_store::load_list`",
+    );
+  }
+}
+
+/*
+ * A row Rust builds out of the query has something bound to Enter.
+ *
+ * These are the rows that are not in the index: a calculator answer, what is
+ * playing, a terminal profile, a note, a reminder. `launch_command` looks a
+ * row's id up in the index, so pressing Enter on one of them answers "no such
+ * command" unless the window intercepts the mode first. That is not
+ * hypothetical: it is what happened to every sum anybody pressed Enter on
+ * before the answer row got its branch, and the audit records that deleting
+ * the media branch is caught by nothing.
+ *
+ * So the modes are read out of `registry.rs`, which is where the rows are
+ * built, and each one has to be named somewhere in the launcher. Naming is a
+ * low bar on purpose: a branch, a list, a `case`, whatever the window
+ * eventually uses. What it catches is a row arriving with no Enter at all.
+ */
+{
+  const RECORDS = "src-tauri/src/registry.rs";
+  const PAGE = "src/routes/+page.svelte";
+  const rust = readFileSync(RECORDS, "utf8");
+  const page = readFileSync(PAGE, "utf8");
+
+  /*
+   * Every `mode` a `RankedCommand`-building function sets.
+   *
+   * Scoped to the functions that return a `RankedCommand`, because those are
+   * exactly the rows spliced into a search rather than found in it. A
+   * `CommandRecord` on its own is an index entry, and an index entry is
+   * something `launch_command` can look up.
+   */
+  const built = new Map();
+
+  for (const found of rust.matchAll(
+    /pub fn (\w+)\([^)]*\)\s*->\s*RankedCommand \{([\s\S]*?)\n\}/g,
+  )) {
+    const mode = found[2].match(/\bmode: "([^"]*)"\.to_string\(\)/);
+    if (mode) built.set(mode[1], { fn: found[1], line: lineOf(rust, found.index) });
+  }
+
+  if (built.size < 4) {
+    fail(
+      RECORDS,
+      null,
+      `only ${built.size} row builders were found, so this rule is not ` +
+        "checking anything. The shape it scans for has changed",
+    );
+  }
+
+  for (const [mode, where] of built) {
+    if (page.includes(`"${mode}"`)) continue;
+
+    fail(
+      PAGE,
+      null,
+      `${RECORDS}:${where.line} builds a row with mode ${JSON.stringify(mode)} ` +
+        `in ${where.fn}, and nothing in the launcher names it. That row is not ` +
+        "in the index, so pressing Enter on it answers \"no such command\"",
+    );
+  }
+}
+
+/*
  * The launcher window does not decide what Ctrl+K means.
  *
  * `navigation.rs` resolves every movement chord, presets and overrides
@@ -1993,25 +2087,42 @@ for (const file of sources("src-tauri/src")) {
    * A generous list on purpose. The point is not to catch a clever evasion,
    * it is to make somebody reaching for one of these stop and reread the
    * paragraph at the top of that file about why there is no loop.
+   *
+   * `timers.rs` is held to the same line, and it is the file where somebody
+   * would most reasonably reach for one: `P3-11` said timers must tick, and
+   * the whole answer here is that the ticking is Windows' and not Sill's. A
+   * countdown written here would work perfectly and would quietly undo the
+   * only claim the feature makes.
+   *
+   * `notes.rs` too, for a different reason. Nothing about notes wants a
+   * timer, which is exactly why one would arrive later as a convenience: an
+   * autosave sweep, or a watcher on the file. Both are a thread woken on an
+   * idle machine for a prototype that is switched off.
    */
-  for (const wakes of [
-    "thread::spawn",
-    "spawn_blocking",
-    "tokio::time",
-    "interval(",
-    "Instant::now",
-  ]) {
-    if (!core.includes(wakes)) continue;
+  const QUIET = [CORE, "src-tauri/src/timers.rs", "src-tauri/src/notes.rs"];
 
-    fail(
-      CORE,
-      lineOf(core, core.indexOf(wakes)),
-      "`" +
-        wakes +
-        "` here, and the point of this module is that Windows owns the " +
-        "schedule and Sill owns no loop. Anything periodic belongs in the " +
-        "task, not in the process",
-    );
+  for (const file of QUIET) {
+    const text = readFileSync(file, "utf8");
+
+    for (const wakes of [
+      "thread::spawn",
+      "spawn_blocking",
+      "tokio::time",
+      "interval(",
+      "Instant::now",
+    ]) {
+      if (!text.includes(wakes)) continue;
+
+      fail(
+        file,
+        lineOf(text, text.indexOf(wakes)),
+        "`" +
+          wakes +
+          "` here, and the point of this file is that Windows owns the " +
+          "schedule and Sill owns no loop. Anything periodic belongs in the " +
+          "task, not in the process",
+      );
+    }
   }
 
   // A second way to run an action, which is the one thing an automation must

@@ -137,6 +137,18 @@ pub enum When {
     AtLogon,
     /// When this account unlocks the machine.
     OnUnlock,
+    /**
+    Once, at a moment, and then never again.
+
+    The one that leaves nothing behind. A task with no end has to be removed by
+    whoever made it, and a timer nobody removes is a folder that grows by one
+    every time somebody boils an egg. This carries an end boundary a minute
+    after it starts and asks Windows to delete it once that has passed, so the
+    scheduler holds a one-off timer for exactly as long as the timer runs.
+
+    See [`crate::timers`], which is the only thing that makes one.
+    */
+    Once { at: crate::timers::Local },
 }
 
 impl When {
@@ -146,6 +158,7 @@ impl When {
             Self::Daily { hour, minute } => format!("every day at {hour:02}:{minute:02}"),
             Self::AtLogon => "when you sign in".to_string(),
             Self::OnUnlock => "when you unlock this PC".to_string(),
+            Self::Once { at } => format!("once, at {}", at.clock()),
         }
     }
 
@@ -158,6 +171,12 @@ impl When {
         match self {
             Self::Daily { hour, minute } if hour > 23 || minute > 59 => {
                 Err(format!("There is no {hour:02}:{minute:02} in a day."))
+            }
+            // The same check, on the moment a one-off fires. It reaches
+            // Windows as text inside XML too, and a 32nd of September makes a
+            // task that registers and then never runs.
+            Self::Once { at } if !at.is_a_moment() => {
+                Err(format!("There is no such moment as {}.", at.boundary()))
             }
             _ => Ok(()),
         }
@@ -204,6 +223,14 @@ pub fn may_schedule(id: &str, capabilities: &[Capability]) -> Result<(), String>
     Ok(())
 }
 
+/// The characters a task name may not hold.
+///
+/// One spelling, read by both the check and the repair. Two lists of awkward
+/// characters is the shape that lets [`sanitised_name`] produce something
+/// [`task_name`] then refuses, which would be a reminder failing to set with a
+/// message about a name nobody typed.
+const REFUSED: &str = r#"\/:*?"<>|"#;
+
 /// How long a name may be.
 ///
 /// Task Scheduler takes far more. This is short enough to read in a list and
@@ -239,7 +266,7 @@ pub fn task_name(name: &str) -> Result<String, String> {
     // A path separator is the one that matters. The rest come with it because
     // Windows refuses them in a task name anyway and a refusal in Sill's own
     // words is worth more than the same refusal from the scheduler.
-    if let Some(bad) = name.chars().find(|c| r#"\/:*?"<>|"#.contains(*c)) {
+    if let Some(bad) = name.chars().find(|c| REFUSED.contains(*c)) {
         return Err(format!("A trigger's name cannot contain {bad}."));
     }
 
@@ -326,6 +353,7 @@ pub fn definition(exe: &Path, trigger: &Trigger) -> Result<String, String> {
             "    <RunOnlyIfIdle>false</RunOnlyIfIdle>\n",
             "    <WakeToRun>false</WakeToRun>\n",
             "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n",
+            "{expiry}",
             "    <Priority>7</Priority>\n",
             "  </Settings>\n",
             "  <Actions Context=\"Author\">\n",
@@ -338,6 +366,7 @@ pub fn definition(exe: &Path, trigger: &Trigger) -> Result<String, String> {
         ),
         described = escaped(&described),
         triggers = when_xml(trigger.when),
+        expiry = expiry_xml(trigger.when),
         command = escaped(&argv[0]),
         arguments = escaped(&arguments),
     ))
@@ -370,6 +399,77 @@ fn when_xml(when: When) -> String {
                            <StateChange>SessionUnlock</StateChange>\n    \
                            </SessionStateChangeTrigger>\n"
             .to_string(),
+        /*
+         * A moment, and an end a minute after it.
+         *
+         * The end boundary is not decoration. `DeleteExpiredTaskAfter` only
+         * applies to a task that can expire, and a `TimeTrigger` with no end
+         * never does, so without this pair a one-off timer would sit in the
+         * folder for good. A minute is long enough for Task Scheduler to start
+         * the task and short enough that a machine which was asleep at the
+         * moment comes back to a reminder that has quietly expired rather than
+         * to one that is hours stale.
+         */
+        When::Once { at } => {
+            let ends = crate::timers::fires_at(at, std::time::Duration::from_secs(60));
+
+            format!(
+                "    <TimeTrigger>\n\
+                 \x20     <StartBoundary>{start}</StartBoundary>\n\
+                 \x20     <EndBoundary>{end}</EndBoundary>\n\
+                 \x20     <Enabled>true</Enabled>\n\
+                 \x20   </TimeTrigger>\n",
+                start = at.boundary(),
+                end = ends.boundary(),
+            )
+        }
+    }
+}
+
+/// The setting that has Windows tidy a one-off away once it has run.
+///
+/// Empty for everything else, and that is the point rather than an omission: a
+/// daily trigger has no end boundary, so it can never expire, and asking for it
+/// to be deleted when it does would be a line that never means anything.
+fn expiry_xml(when: When) -> &'static str {
+    match when {
+        When::Once { .. } => "    <DeleteExpiredTaskAfter>PT0S</DeleteExpiredTaskAfter>\n",
+        When::Daily { .. } | When::AtLogon | When::OnUnlock => "",
+    }
+}
+
+/**
+A name Task Scheduler will take, out of words somebody wrote.
+
+[`task_name`] refuses rather than repairs, which is right for a name typed into
+a form: somebody who put a colon in one should be told so. A reminder's name is
+not typed, it is built out of the reminder's own message, so refusing would
+mean `timer 5m call the 9:30 client` produced nothing and blamed the message.
+
+Here rather than beside the caller, so that what a task may be called is one
+answer in one file. The round trip is what the test holds: whatever this
+returns, [`task_name`] accepts.
+*/
+pub fn sanitised_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if REFUSED.contains(c) || c.is_control() {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+
+    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let short: String = collapsed.chars().take(NAME_AT_MOST).collect();
+    let trimmed = short.trim().to_string();
+
+    if trimmed.is_empty() {
+        "Reminder".to_string()
+    } else {
+        trimmed
     }
 }
 
@@ -1028,6 +1128,115 @@ mod tests {
             },
         )
         .is_err());
+    }
+
+    /// A one-off names a moment and an end, and asks Windows to tidy it away.
+    ///
+    /// All three together or none of them. `DeleteExpiredTaskAfter` does
+    /// nothing to a task that cannot expire, so the end boundary is what makes
+    /// it mean anything, and without both the timers feature would leave one
+    /// dead task in the folder for every reminder anybody ever set.
+    #[test]
+    fn a_one_off_removes_itself_once_it_has_run() {
+        let xml = definition(
+            &exe(),
+            &Trigger {
+                when: When::Once {
+                    at: crate::timers::Local {
+                        year: 2026,
+                        month: 9,
+                        day: 4,
+                        hour: 14,
+                        minute: 35,
+                        second: 0,
+                    },
+                },
+                ..trigger()
+            },
+        )
+        .expect("that trigger is fine");
+
+        assert!(
+            xml.contains("<StartBoundary>2026-09-04T14:35:00</StartBoundary>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<EndBoundary>2026-09-04T14:36:00</EndBoundary>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<DeleteExpiredTaskAfter>PT0S</DeleteExpiredTaskAfter>"),
+            "{xml}"
+        );
+    }
+
+    /// And nothing else asks to be deleted, because nothing else expires.
+    #[test]
+    fn a_repeating_trigger_is_never_asked_to_delete_itself() {
+        for when in [
+            When::Daily { hour: 9, minute: 5 },
+            When::AtLogon,
+            When::OnUnlock,
+        ] {
+            let xml =
+                definition(&exe(), &Trigger { when, ..trigger() }).expect("that trigger is fine");
+
+            assert!(
+                !xml.contains("DeleteExpiredTaskAfter"),
+                "{when:?} would be deleted, and it has no end to expire at: {xml}"
+            );
+        }
+    }
+
+    /// A moment that does not exist is refused before it becomes a task.
+    #[test]
+    fn a_one_off_at_no_such_moment_is_refused() {
+        let bad = definition(
+            &exe(),
+            &Trigger {
+                when: When::Once {
+                    at: crate::timers::Local {
+                        year: 2026,
+                        month: 9,
+                        day: 31,
+                        hour: 14,
+                        minute: 35,
+                        second: 0,
+                    },
+                },
+                ..trigger()
+            },
+        );
+
+        assert!(bad.is_err(), "September has thirty days");
+    }
+
+    /// Whatever `sanitised_name` makes, `task_name` takes.
+    ///
+    /// Two ideas about what a task may be called is the shape that would let a
+    /// reminder fail to set over a colon in the message, blaming a name
+    /// nobody typed.
+    #[test]
+    fn a_repaired_name_is_always_a_name_that_is_accepted() {
+        let long = "x".repeat(400);
+
+        for awful in [
+            "Reminder at 14:35 call Sam",
+            r#"a/b\c*d?e"f<g>h|i"#,
+            "with\u{7}bell",
+            "   ",
+            "",
+            long.as_str(),
+            "\u{1f600} tea",
+        ] {
+            let repaired = sanitised_name(awful);
+
+            assert_eq!(
+                task_name(&repaired),
+                Ok(repaired.clone()),
+                "{awful:?} was repaired into {repaired:?}, which is refused"
+            );
+        }
     }
 
     /// The splitter is the parser Windows uses, not one that merely agrees

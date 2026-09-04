@@ -40,6 +40,24 @@
   ; person's data, it is a pointer to a program that no longer exists.
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Sill"
 
+  ; The automations and reminders Sill asked Windows to run.
+  ;
+  ; Not a file and not a value Sill wrote for itself: this is work the Task
+  ; Scheduler is holding on Sill's behalf, and it outlives the process, the
+  ; reboot and the uninstall. A one-off timer deletes itself once it fires,
+  ; but a pending one and every daily trigger survive, and what they start is
+  ; sill.exe, which by then is gone. Kept, they would fail at three in the
+  ; morning forever, in a log nobody reads.
+  ;
+  ; schtasks rather than deleting a folder: a task lives in the registry as
+  ; well as on disk, so removing only the files leaves the service listing
+  ; entries it can no longer run. /F so it does not stop to ask, and the
+  ; result is discarded because a machine that never had a task is not an
+  ; error worth showing somebody who is uninstalling.
+  nsExec::ExecToLog '"$SYSDIR\schtasks.exe" /Delete /TN "Task Scheduler\Sill" /F'
+  Pop $0
+
+
   ; The browser engine's cache for Sill's own windows. Nothing of theirs is in
   ; it that is not also in the folder below, so it goes without asking.
   RMDir /r "$LOCALAPPDATA\app.winters.sill"

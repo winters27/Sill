@@ -136,6 +136,24 @@ pub enum ObjectKind {
     /// system. Not in the index either: the list is Terminal's settings file
     /// and the registry's WSL keys, read when somebody asks for it.
     TerminalProfile,
+    /// A note somebody wrote here.
+    ///
+    /// The one kind whose target is a person's own writing rather than
+    /// something Sill found. Not an [`ObjectKind::File`], which is a thing on
+    /// disk that other programs also own: a note is kept by Sill, has no path
+    /// anybody types, and the only things worth doing to one are reading it
+    /// and taking a copy of it. Not in the index either, and deliberately:
+    /// notes are a prototype behind a switch that is off, so nothing about
+    /// them may cost a keystroke that has not asked for one.
+    Note,
+    /// A reminder, before it has been set.
+    ///
+    /// Not an [`ObjectKind::Text`], which is text that already exists
+    /// somewhere. This is a sentence plus a moment, built out of what somebody
+    /// typed into the search field, and the only thing to do with one is put
+    /// it on the clock. Once it has fired it arrives back as ordinary text,
+    /// because by then it is a thing to read rather than a thing to set.
+    Reminder,
 }
 
 impl ObjectKind {
@@ -177,6 +195,8 @@ impl ObjectKind {
         Self::Conversation,
         Self::StoreListing,
         Self::TerminalProfile,
+        Self::Note,
+        Self::Reminder,
     ];
 
     /**
@@ -222,6 +242,8 @@ impl ObjectKind {
             Self::Conversation => "conversation",
             Self::StoreListing => "extension in the store",
             Self::TerminalProfile => "terminal profile",
+            Self::Note => "note",
+            Self::Reminder => "reminder",
         }
     }
 
@@ -276,6 +298,8 @@ impl ObjectKind {
             Self::Workspace => "workspace",
             Self::Conversation => "conversation",
             Self::StoreListing => "storeListing",
+            Self::Note => "note",
+            Self::Reminder => "reminder",
         }
     }
 
@@ -340,6 +364,23 @@ impl ObjectKind {
             // read out of Terminal's settings and the WSL registry keys when
             // a query asks for one.
             "terminal-profile" => Self::TerminalProfile,
+            // Not in the index either, and behind a switch on top of that: the
+            // rows are built by the search when somebody asks for them and
+            // only when notes are turned on at all.
+            "note" => Self::Note,
+            // The row offering to set one.
+            "reminder" => Self::Reminder,
+            /*
+             * And the same reminder once it has arrived, which is a different
+             * kind of thing.
+             *
+             * Two modes, one kind, like `app` and `exe`: a reminder that has
+             * fired is a piece of text, and the useful things to do with it
+             * are the things you do with text. Setting it is over. Keeping the
+             * mode says where it came from, which is how the row it lands on
+             * is headed "Reminder" rather than "Selection".
+             */
+            "reminder-shown" => Self::Text,
             _ => return None,
         })
     }
@@ -587,6 +628,25 @@ mod tests {
         );
     }
 
+    /// A reminder is two things and they are not the same thing.
+    ///
+    /// The one before it fires is a sentence and a moment, and the only thing
+    /// to do with it is put it on the clock. The one after it has fired is
+    /// text, and the things to do with it are the things you do with text.
+    /// Sharing a kind would put "Set a Reminder" in the panel of a reminder
+    /// that had already arrived.
+    #[test]
+    fn a_reminder_before_and_after_it_fires_are_different_kinds() {
+        assert_eq!(
+            ObjectKind::from_mode("reminder"),
+            Some(ObjectKind::Reminder)
+        );
+        assert_eq!(
+            ObjectKind::from_mode("reminder-shown"),
+            Some(ObjectKind::Text),
+        );
+    }
+
     #[test]
     fn the_mode_survives_onto_the_object() {
         // Two modes share a kind, so an action that genuinely has to tell them
@@ -652,12 +712,14 @@ mod tests {
                 ObjectKind::Conversation => 23,
                 ObjectKind::StoreListing => 24,
                 ObjectKind::TerminalProfile => 25,
+                ObjectKind::Note => 26,
+                ObjectKind::Reminder => 27,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            26,
+            28,
             "a kind was added or removed without `ALL` being told",
         );
 

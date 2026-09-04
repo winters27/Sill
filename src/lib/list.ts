@@ -66,6 +66,16 @@ const HEADINGS: Record<string, string> = {
    * terminal.
    */
   "terminal-profile": "Terminals",
+  note: "Notes",
+  /*
+   * Both halves of a timer under one heading.
+   *
+   * The row offering to set one and the reminder that arrives when it fires
+   * are different kinds to Rust, deliberately, because different things can be
+   * done to them. They are the same feature to somebody reading a list.
+   */
+  reminder: "Reminders",
+  "reminder-shown": "Reminders",
   view: "Commands",
   "no-view": "Commands",
   builtin: "Sill",

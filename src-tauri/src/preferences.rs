@@ -30,6 +30,23 @@ pub struct General {
     /// see `log.rs` on why there is no setting in the other direction.
     #[serde(default)]
     pub detailed_log: bool,
+    /**
+    Whether notes exist at all.
+
+    **A prototype, and this is what makes it one.** `P3-11` asked for notes
+    behind a flag, and the flag earns its place twice over. It is honest about
+    an unfinished feature: one note at a time, in one window, with no folders,
+    no tags and no formatting, which is not what somebody who reads "Notes" in
+    a launcher expects. And it is rule 23: with this off, `notes::matched`
+    answers on a `bool` and the file is never opened, never read and never
+    held, so a machine that has not switched it on pays nothing for it on any
+    keystroke.
+
+    Off by default for the first of those reasons. Everything else in Sill that
+    is on by default is finished.
+    */
+    #[serde(default)]
+    pub notes: bool,
 }
 
 impl Default for General {
@@ -44,6 +61,8 @@ impl Default for General {
             // Off, because it is the setting somebody turns on for an
             // afternoon and forgets, and what it costs is the log.
             detailed_log: false,
+            // Off, because it is a prototype and because off costs nothing.
+            notes: false,
         }
     }
 }

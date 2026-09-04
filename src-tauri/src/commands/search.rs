@@ -40,13 +40,17 @@ pub(crate) async fn search_commands(
 ) -> Result<Vec<registry::SearchResult>, String> {
     let _timing = timings.inner().timing("commands");
 
-    let (excluded, hidden, pinned, tone) = {
+    let (excluded, hidden, pinned, tone, notes_on) = {
         let prefs = prefs.inner.lock().await;
         (
             prefs.sources.excluded.clone(),
             prefs.sources.hidden.clone(),
             prefs.sources.pinned.clone(),
             prefs.emoji.tone,
+            // A prototype, off unless somebody has said otherwise. Read here
+            // with everything else rather than behind its own lock: a switch
+            // that is off has to cost a keystroke a `bool` and no more.
+            prefs.general.notes,
         )
     };
     // A snapshot rather than a lock: ranking reads it from beginning to end
@@ -270,6 +274,58 @@ pub(crate) async fn search_commands(
             .map(registry::jumplist_record)
             .collect::<Vec<_>>(),
     );
+
+    /*
+     * The notes somebody has written, when the query asks for one.
+     *
+     * The same gate the media, terminal and jump list rows have, with a switch
+     * in front of it: `notes::matched` answers on a `bool` before it reaches
+     * the word, so a machine with notes turned off never constructs the
+     * service, never opens the file and never sorts a list.
+     *
+     * The gate is deliberately narrower than the others. A note's text is
+     * searched, and searching it from every query would put a paragraph out of
+     * somebody's diary underneath an application, so the word has to be asked
+     * for by name before any of it is looked at.
+     *
+     * `New Note` last, not first. Somebody typing `note` twice a day is
+     * usually going back to the one they wrote this morning, and a row that
+     * makes something new sitting under the cursor is the wrong default for a
+     * key pressed without looking.
+     */
+    let notes = crate::notes::matched(&query, notes_on, || {
+        app.state::<crate::notes::Notes>().all(&app)
+    });
+
+    if let Some(asked) = notes {
+        let mut rows: Vec<registry::RankedCommand> =
+            asked.found.iter().map(registry::note_record).collect();
+        rows.push(registry::new_note_record());
+
+        splice_suggestions(&mut results, rows);
+    }
+
+    /*
+     * The timer somebody has just described, before it is set.
+     *
+     * `timers::matched` holds its own gate on the first word, so a query that
+     * is not asking pays a `split_whitespace` and three comparisons. Nothing
+     * is written down here and no clock is set: the row says what will happen
+     * and Enter is what makes it happen.
+     *
+     * The clock is read only once a timer has actually been recognised, which
+     * is what keeps the row's "at 14:35" honest without asking the machine the
+     * time on every keystroke.
+     */
+    #[cfg(windows)]
+    if let Some(timer) = crate::timers::matched(&query) {
+        let at = crate::timers::fires_at(crate::timers::now(), timer.after);
+
+        splice_suggestions(
+            &mut results,
+            vec![registry::reminder_record(&query, &timer, at)],
+        );
+    }
 
     /*
      * Above everything, because when a query IS a sum, or a request for a

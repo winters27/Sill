@@ -16,6 +16,7 @@ pub mod diagnostics;
 pub mod extensions;
 pub mod launch;
 pub mod mcp;
+pub mod notes;
 pub mod scripts;
 pub mod search;
 pub mod settings;

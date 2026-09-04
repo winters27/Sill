@@ -285,6 +285,23 @@ fn kind_named(named: &str) -> Option<ObjectKind> {
         // not an action a file accepts. It is the only kind here that is a
         // path and still needs saying, which is why it is the exception.
         "script" => ObjectKind::Script,
+        /*
+         * A reminder, which is a sentence and nothing else.
+         *
+         * Here because a scheduled timer names it on its own command line:
+         * `sill run sill.reminder.show <message> --kind reminder` reaches
+         * `outside.rs`, which builds the object through this function. Without
+         * this line the reminder Windows starts would arrive as "Sill has no
+         * kind called reminder" and nothing would say why.
+         *
+         * Safe to let the model name too. The only thing that accepts it puts
+         * a sentence on screen in a window Sill already owns.
+         */
+        "reminder" => ObjectKind::Reminder,
+        // A note, by the id a row carries, so a trigger can put yesterday's
+        // scratchpad on screen when you sign in. Refused by the action itself
+        // when notes are switched off, which is where that decision lives.
+        "note" => ObjectKind::Note,
         _ => return None,
     })
 }
@@ -299,8 +316,10 @@ fn title_for(target: &str, kind: ObjectKind) -> String {
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| target.to_string()),
-        // Loose text names itself, cut to something a card can carry.
-        ObjectKind::Text => {
+        // Loose text names itself, cut to something a card can carry. A
+        // reminder is the same thing: the message is all there is of it, and a
+        // paragraph of it in a log line or a card is a paragraph too many.
+        ObjectKind::Text | ObjectKind::Reminder => {
             let short: String = target.chars().take(60).collect();
             if target.chars().count() > 60 {
                 format!("{short}\u{2026}")

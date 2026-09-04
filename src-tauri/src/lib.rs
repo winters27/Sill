@@ -48,6 +48,7 @@ pub mod log;
 pub mod media;
 pub mod meter;
 pub mod navigation;
+pub mod notes;
 pub mod object;
 pub mod ocr;
 pub mod outside;
@@ -85,6 +86,7 @@ pub mod system;
 pub mod taps;
 pub mod terminals;
 pub mod text;
+pub mod timers;
 pub mod timing;
 pub mod tts;
 pub mod uia;
@@ -1699,6 +1701,10 @@ pub fn run() {
         // they leave it. Nothing here fetches, warms up or refreshes.
         .manage(store::StoreState::default())
         .manage(tts::sapi::Sapi::default())
+        // An empty `Vec` behind a lock, and it stays empty. The file is not
+        // opened until a query's first word asks for a note, and on a machine
+        // where notes are switched off that never happens.
+        .manage(notes::Notes::default())
         // Which file or browser search is the newest, so an overtaken one can
         // stop rather than finish an answer nobody will look at.
         .manage(state::Searching::default())
@@ -2131,6 +2137,9 @@ pub fn run() {
             commands::automation::schedule,
             commands::automation::unschedule,
             commands::mcp::mcp_tools,
+            commands::notes::note_read,
+            commands::notes::note_write,
+            commands::notes::note_forget,
             commands::search::search_commands,
             commands::search::search_elsewhere,
             commands::search::complete_path,

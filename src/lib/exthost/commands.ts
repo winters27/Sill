@@ -155,7 +155,32 @@ export interface RankedCommand {
      * launched by id. Its entrypoint says which of the two it is, because the
      * two start different programs.
      */
-    | "terminal-profile";
+    | "terminal-profile"
+    /**
+     * A note somebody wrote here, or the row that starts a new one.
+     *
+     * Never from the index, and behind a switch on top of that: the rows exist
+     * only when a query's first word asks for notes and only when notes are
+     * turned on at all. An empty entrypoint is the row that makes a new one.
+     */
+    | "note"
+    /**
+     * A reminder somebody has described and not yet set.
+     *
+     * The entrypoint is the whole query as it was typed, and Rust reads it
+     * again when Enter is pressed. Carrying the message and the delay
+     * separately would be a second reading of one sentence, and the two would
+     * eventually disagree.
+     */
+    | "reminder"
+    /**
+     * A reminder that has arrived, which is a piece of text.
+     *
+     * Windows started `sill.exe` for it and the action put it on screen with
+     * the action panel open. It is `text` to Rust; the mode survives so the
+     * row can say where it came from.
+     */
+    | "reminder-shown";
   entrypoint: string;
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;

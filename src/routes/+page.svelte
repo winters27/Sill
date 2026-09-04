@@ -197,6 +197,20 @@
    */
   const NOT_NAVIGATED = { depth: 1, pop: "" };
 
+  /**
+   * Rows Rust built out of the query, whose Enter is the registry's primary.
+   *
+   * These have no entry in the index, so `launch_command` cannot look their
+   * ids up and answers "no such command" for every one of them. Every row of
+   * that shape before these two got a branch of its own naming the action by
+   * hand; this is the same interception with the action asked for instead,
+   * which means the launcher no longer holds an opinion about what Enter does.
+   *
+   * `verify:source` holds this list against the modes `registry.rs` actually
+   * builds rows for, so a third one cannot arrive with a dead Enter key.
+   */
+  const BUILT_HERE: string[] = ["note", "reminder"];
+
   let nav = $state<{ depth: number; pop: string }>(NOT_NAVIGATED);
 
   /** Root browses installed commands; command shows one that is running. */
@@ -1917,6 +1931,40 @@
           const outcome = await runObjectAction("sill.media.playPause", asTarget(command));
           status = outcome.message;
           await refreshRoot();
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
+      /*
+       * A row Rust built out of the query rather than found in the index, and
+       * whose Enter is whatever the registry says is primary for its kind.
+       *
+       * One branch for both, and for the next one too, because the shape is
+       * the same every time: `launch_command` cannot look these up, so it
+       * would answer "no such command" the way it did for a calculator answer,
+       * a media row and a window. Naming the ids here instead of the modes
+       * would be the launcher deciding what Enter means, which is the thing
+       * `P0-10` moved into the registry.
+       *
+       * Both get out of the way afterwards, for opposite reasons that come to
+       * the same thing: opening a note puts another window in front, and
+       * setting a reminder is finished the moment Windows has been told.
+       */
+      if (BUILT_HERE.includes(command.mode)) {
+        try {
+          const actions = await actionsFor(command.mode);
+          const primary = actions.find((action) => action.primary);
+
+          if (!primary) {
+            status = `Nothing is bound to Enter for ${command.mode}`;
+            return;
+          }
+
+          const outcome = await runObjectAction(primary.id, asTarget(command));
+          status = outcome.message;
+          await dismiss();
         } catch (err) {
           status = `${err}`;
         }

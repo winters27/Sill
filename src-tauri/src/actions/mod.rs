@@ -108,6 +108,15 @@ pub fn builtins() -> ActionRegistry {
         Box::new(RemoveExtension),
         Box::new(ReadAloud),
         Box::new(StopReading),
+        // Notes and reminders, both behind their own gates rather than this
+        // list: a note action refuses when notes are switched off, and setting
+        // a reminder is refused to a trigger by `may_schedule`. Being in the
+        // registry is what makes them reachable by a key, by the model and by
+        // the command line Windows starts when a timer fires.
+        Box::new(OpenNote),
+        Box::new(CopyNote),
+        Box::new(SetReminder),
+        Box::new(ShowReminder),
     ];
 
     ActionRegistry::new(
@@ -3782,6 +3791,273 @@ fn outcome_of(script: &crate::scripts::Script, ran: &crate::shell::Ran) -> Outco
     }
 }
 
+// ------------------------------------------------------------------- notes
+
+/**
+Whether notes are switched on at all.
+
+Read here rather than trusted from the caller, and read by both note actions,
+because these are reachable by id: a key, the model, a `sill://` link and a
+scheduled task all reach the registry without going anywhere near the search
+that would have hidden the row. A prototype behind a switch has to be behind it
+on every path, or the switch is decoration.
+*/
+async fn notes_are_on(ctx: &ActionCtx) -> Result<(), String> {
+    let prefs = ctx.app.state::<crate::state::PrefsState>();
+    let on = prefs.inner.lock().await.general.notes;
+
+    if on {
+        return Ok(());
+    }
+
+    Err("Notes are switched off. Turn them on in Settings, under General.".to_string())
+}
+
+/// Opens a note in the notes window, making one if there is none yet.
+///
+/// One action for both, because an empty entrypoint is what the `New Note` row
+/// carries and opening a note that does not exist yet is the same act from
+/// where somebody is standing: the window comes up with a cursor in it either
+/// way.
+struct OpenNote;
+
+#[async_trait]
+impl Action for OpenNote {
+    fn id(&self) -> &str {
+        "sill.note.open"
+    }
+
+    fn title(&self) -> &str {
+        "Open"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Note
+    }
+
+    /// Drawing in a window Sill owns, and nothing else.
+    ///
+    /// Not `FileWrite`, even though a new note is eventually written to disk.
+    /// The capability is about what somebody is being asked to agree to, and
+    /// what this does is put a window on screen with a cursor in it; the file
+    /// is Sill's own store, the same way a clipboard entry is, and every store
+    /// in the application would need `FileWrite` if this one did.
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::Ui]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Note
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        notes_are_on(ctx).await?;
+
+        let notes = ctx.app.state::<crate::notes::Notes>();
+
+        let note = if object.target.is_empty() {
+            notes.write(&ctx.app, "", "", crate::state::now_seconds())?
+        } else {
+            notes
+                .one(&ctx.app, &object.target)
+                .ok_or_else(|| format!("There is no note called {}.", object.target))?
+        };
+
+        crate::commands::notes::show_note(&ctx.app, &note.id)?;
+
+        Ok(Outcome::done(format!("Opened {}", note.title())))
+    }
+}
+
+/// Copies what a note says.
+struct CopyNote;
+
+#[async_trait]
+impl Action for CopyNote {
+    fn id(&self) -> &str {
+        "sill.note.copy"
+    }
+
+    fn title(&self) -> &str {
+        "Copy Note"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Note
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardWrite]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        notes_are_on(ctx).await?;
+
+        let note = ctx
+            .app
+            .state::<crate::notes::Notes>()
+            .one(&ctx.app, &object.target)
+            .ok_or_else(|| format!("There is no note called {}.", object.target))?;
+
+        if note.text.trim().is_empty() {
+            return Err("That note is empty.".to_string());
+        }
+
+        copy_with_undo(ctx, &note.text, &format!("Copied {}", note.title()))
+    }
+}
+
+// ---------------------------------------------------------------- reminders
+
+/// Puts a reminder on Windows' clock.
+///
+/// The object's target is the whole query, exactly as it was typed, and
+/// [`crate::timers::matched`] reads it here for the second and last time. The
+/// row that offered this read it once to say what would happen; nothing in
+/// between interpreted it, so the two readings cannot disagree.
+struct SetReminder;
+
+#[async_trait]
+impl Action for SetReminder {
+    fn id(&self) -> &str {
+        "sill.reminder.set"
+    }
+
+    fn title(&self) -> &str {
+        "Set Reminder"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Reminder
+    }
+
+    /**
+    Changes this machine, and that is not a formality.
+
+    Writing a scheduled task puts something in Windows that outlives Sill's
+    process, survives a reboot and survives an uninstall. `SystemControl` is
+    the capability that already means exactly that, and declaring it buys two
+    rules at once without either being written here: the model stops and asks
+    before setting one, and `automation::may_schedule` refuses to schedule
+    this, so **a trigger cannot make more triggers**.
+    */
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::SystemControl]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Reminder
+    }
+
+    #[cfg(windows)]
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let timer = crate::timers::matched(&object.target)
+            .ok_or_else(|| format!("{} is not a length of time.", object.target))?;
+
+        let at = crate::timers::fires_at(crate::timers::now(), timer.after);
+
+        /*
+         * Through the same command the automations panel writes a trigger
+         * with, rather than reaching `automation::register` directly.
+         *
+         * That command is where `may_schedule` is consulted, where the action
+         * is checked against the kind it will act on, and where the task name
+         * is validated, and `verify:source` holds it to having the gate inside
+         * it. A second caller of `register` would be a second place that has
+         * to remember all of that, which is the shape this codebase has paid
+         * for four times.
+         */
+        let said = crate::commands::automation::schedule(
+            ctx.app.clone(),
+            crate::automation::Trigger {
+                // The message, repaired into something Task Scheduler takes.
+                // The time is in it so two reminders with the same words at
+                // different moments are two tasks rather than one replacing
+                // the other.
+                name: crate::automation::sanitised_name(&format!(
+                    "{} at {}",
+                    timer.message,
+                    at.clock().replace(':', ".")
+                )),
+                action: ShowReminder.id().to_string(),
+                target: timer.message.clone(),
+                kind: Some(ObjectKind::Reminder.name().to_string()),
+                argument: None,
+                when: crate::automation::When::Once { at },
+            },
+        )
+        .await?;
+
+        crate::say!("[timers] {said}");
+
+        Ok(Outcome::done(format!(
+            "Reminder set for {}, in {}",
+            at.clock(),
+            crate::timers::said(timer.after)
+        )))
+    }
+
+    #[cfg(not(windows))]
+    async fn run(&self, _ctx: &ActionCtx, _object: &Object) -> Result<Outcome, String> {
+        Err("Timers need the Windows task scheduler.".to_string())
+    }
+}
+
+/**
+Puts a reminder on screen, which is what a fired timer runs.
+
+The one action a timer's task names, and the whole reason it may be scheduled
+at all: it draws in a window Sill already owns and does nothing else, so it is
+`Capability::Ui` and `automation::may_schedule` lets it through.
+
+What it hands the launcher is a **piece of text**, not a reminder. Setting one
+is over by the time it arrives, and the useful things to do with it now are the
+things anybody does with text: copy it, have it read out, act on it. The mode
+says where it came from, so the row is headed "Reminder" rather than
+"Selection".
+*/
+struct ShowReminder;
+
+#[async_trait]
+impl Action for ShowReminder {
+    fn id(&self) -> &str {
+        "sill.reminder.show"
+    }
+
+    fn title(&self) -> &str {
+        "Show It Now"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Reminder
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::Ui]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let message = if object.target.trim().is_empty() {
+            "Timer".to_string()
+        } else {
+            object.target.clone()
+        };
+
+        crate::summon::show_actions(
+            &ctx.app,
+            &[Object {
+                kind: ObjectKind::Text,
+                id: format!("reminder:{message}"),
+                target: message.clone(),
+                title: message.clone(),
+                mode: "reminder-shown".to_string(),
+            }],
+        );
+
+        Ok(Outcome::done(format!("Reminder: {message}")))
+    }
+}
+
 #[cfg(test)]
 mod running_a_script {
     use super::*;
@@ -4033,5 +4309,40 @@ mod what_a_trigger_may_run {
         assert!(may_schedule(RunScript.id(), RunScript.capabilities()).is_err());
         assert!(may_schedule(Launch.id(), Launch.capabilities()).is_err());
         assert!(may_schedule(RecycleFile.id(), RecycleFile.capabilities()).is_err());
+    }
+
+    /// The one a timer's task names has to be schedulable, or the feature
+    /// cannot exist.
+    ///
+    /// This is the whole of why `ShowReminder` draws and does nothing else. It
+    /// fires with nobody at the machine, so it must be something that never
+    /// stops to ask, and the narrowing `may_schedule` applies is the rule that
+    /// decides rather than a list anybody keeps.
+    #[test]
+    fn showing_a_reminder_is_something_windows_may_start() {
+        assert!(may_schedule(ShowReminder.id(), ShowReminder.capabilities()).is_ok());
+    }
+
+    /// And setting one is not, so a trigger cannot make more triggers.
+    ///
+    /// Not enforced by a rule written here. `SetReminder` declares
+    /// `SystemControl` because writing a scheduled task changes the machine,
+    /// and the narrowing that already exists does the rest.
+    #[test]
+    fn a_trigger_cannot_schedule_more_triggers() {
+        assert!(may_schedule(SetReminder.id(), SetReminder.capabilities()).is_err());
+    }
+
+    /// Both note actions may be scheduled, and that is worth saying out loud.
+    ///
+    /// Opening one draws in a window Sill owns. Copying one goes through the
+    /// deliberate `ClipboardWrite` exception `needs_asking` documents: a copy
+    /// looks destructive and is not, because the history keeps what was there.
+    /// So `note read this every morning` is a trigger somebody can make, and
+    /// the switch in Settings is still what decides whether it does anything.
+    #[test]
+    fn a_trigger_may_reach_a_note() {
+        assert!(may_schedule(OpenNote.id(), OpenNote.capabilities()).is_ok());
+        assert!(may_schedule(CopyNote.id(), CopyNote.capabilities()).is_ok());
     }
 }

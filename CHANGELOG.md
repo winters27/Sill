@@ -87,6 +87,22 @@ keeps appearing until it stops, rather than only reaching `sill.log`. A panic
 writes to that log, which in a packaged build is the only place anything can be
 said at all.
 
+**Timers are held by Windows, so Sill runs nothing while one is pending.**
+Typing `remind me in 20 minutes to call Sam`, or `timer 5m tea`, offers a row
+saying when it will arrive; pressing Enter writes a one-off scheduled task and
+Windows does the waiting. Nothing in Sill ticks, the reminder survives Sill
+being restarted, and the task deletes itself once it has fired. With no timer
+set there is no task, so a machine with none of them is a machine where this
+feature does not exist.
+
+**Notes, as a prototype that is switched off.** One note at a time, in one
+window, found by typing `note` and whatever you remember of it. There are no
+folders, no tags and no formatting, which is why it is off in Settings under
+General rather than on: turned off, Sill never opens the notes file at all. A
+note that cannot be read costs that note rather than the file, and a file that
+cannot be read at all is kept beside itself and said out loud rather than
+quietly replaced.
+
 **A string somebody else wrote is not an address Sill will open.** Text arriving
 from a file, a clipboard entry or an extension is no longer treated as a link
 just because it looks like one.

@@ -9,8 +9,15 @@
 //! Ignored, because it registers a real task on the machine it runs on:
 //!
 //! ```text
-//! cargo test --lib real_tasks -- --ignored --nocapture
+//! cargo test --lib real_tasks -- --ignored --nocapture --test-threads=1
 //! ```
+//!
+//! **One at a time, and the flag is not optional.** Both tests assert that no
+//! task they did not create changed, and they share one folder, so run in
+//! parallel each one sees the other's task appear and disappear underneath it
+//! and both fail on a machine where nothing is wrong. Run together they also
+//! enumerate the folder while the other is registering into it, which Task
+//! Scheduler answers with `0x80070002` rather than an empty list.
 //!
 //! **It cleans up after itself, and the assertion order is why.** The removal
 //! happens before anything that could fail after registration, so a broken
@@ -87,5 +94,98 @@ fn one_trigger_goes_in_and_comes_out() {
 
     assert_eq!(ask.action, "sill.copyPath");
     assert_eq!(ask.target, trigger.target);
+    assert_eq!(ask.trust, crate::reach::Trust::Shell);
+}
+
+/// A one-off timer, all the way into Windows and out again.
+///
+/// What no fixture can say: whether Task Scheduler accepts a `TimeTrigger`
+/// with an end boundary and a `DeleteExpiredTaskAfter` beside it, and whether
+/// what it hands back still carries both. That pair is the whole of why a
+/// timer leaves nothing behind, and it is written in somebody else's schema.
+///
+/// The moment is a day out, so nothing here depends on how long the test takes
+/// and nothing fires while it runs. The removal happens before the reading is
+/// checked, for the reason the test above gives.
+#[test]
+#[ignore]
+#[cfg(windows)]
+fn a_timer_goes_in_as_a_task_that_removes_itself() {
+    use crate::automation::{self, Trigger, When};
+    use crate::timers;
+
+    let name = "Sill P3-11 timer verification (safe to delete)";
+    let exe = std::env::current_exe().expect("a test binary knows where it is");
+
+    let at = timers::fires_at(timers::now(), std::time::Duration::from_secs(24 * 60 * 60));
+
+    let trigger = Trigger {
+        name: name.to_string(),
+        action: "sill.reminder.show".to_string(),
+        target: "Take the bread out & call Sam".to_string(),
+        kind: Some("reminder".to_string()),
+        argument: None,
+        when: When::Once { at },
+    };
+
+    let before = automation::held().expect("the folder can be read");
+    let others: Vec<String> = before
+        .iter()
+        .filter(|task| task.name != name)
+        .map(|task| task.name.clone())
+        .collect();
+
+    let xml = automation::definition(&exe, &trigger).expect("that trigger is fine");
+    automation::register(name, &xml).expect("Windows accepted the document");
+
+    let during = automation::held().expect("the folder can be read");
+    let found = during
+        .iter()
+        .find(|task| task.name == name)
+        .cloned()
+        .expect("the timer Sill just wrote is in Sill's folder");
+
+    println!("next run: {:?}", found.next);
+    println!("boundary: {}", at.boundary());
+
+    automation::forget(name).expect("Windows removed it");
+
+    let after = automation::held().expect("the folder can be read");
+    assert!(
+        !after.iter().any(|task| task.name == name),
+        "the test's own timer is still in {}",
+        automation::FOLDER_PATH,
+    );
+
+    let still: Vec<String> = after.iter().map(|task| task.name.clone()).collect();
+    assert_eq!(still, others, "a task this test did not create changed");
+
+    /*
+     * The two elements the whole claim rests on, read out of what Windows
+     * handed back rather than out of what Sill sent.
+     *
+     * Task Scheduler rewrites the document it is given, so a setting it does
+     * not understand can simply be absent on the way out. That is exactly the
+     * failure worth catching here: it would leave a dead task in the folder
+     * for every reminder anybody ever set, and nothing about the feature
+     * working would look wrong.
+     */
+    assert!(
+        found.xml.contains("DeleteExpiredTaskAfter"),
+        "Windows dropped the setting that removes the task: {}",
+        found.xml
+    );
+    assert!(
+        found.xml.contains("EndBoundary"),
+        "Windows dropped the end boundary, so the task can never expire: {}",
+        found.xml
+    );
+
+    // And it is still Sill's own reminder on the way back.
+    let ask = automation::read_back(&exe, &found.xml).expect("Sill's own timer reads back");
+
+    assert_eq!(ask.action, "sill.reminder.show");
+    assert_eq!(ask.target, "Take the bread out & call Sam");
+    assert_eq!(ask.kind.as_deref(), Some("reminder"));
     assert_eq!(ask.trust, crate::reach::Trust::Shell);
 }

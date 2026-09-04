@@ -64,6 +64,26 @@ pub const LEAVINGS: &[Leaving] = &[
         theirs: true,
     },
     Leaving {
+        /*
+         * The Task Scheduler folder automations and timers are registered in.
+         *
+         * This is the one leaving that is not a file and not a registry value
+         * Sill wrote for itself: it is work Windows is holding **on Sill's
+         * behalf**, and it outlives the process, the reboot and the uninstall.
+         * A one-off timer deletes itself once it has fired, so those do not
+         * pile up, but a pending one and every daily trigger survive, and what
+         * they run is `sill.exe`, which by then is not there.
+         *
+         * Removed without asking, because a scheduled task that starts a
+         * program nobody has any more is not something anybody would choose to
+         * keep. What it would do instead is fail at three in the morning,
+         * forever, in a log nobody reads.
+         */
+        where_it_is: r"Task Scheduler\Sill",
+        what_it_is: "the automations and reminders Sill asked Windows to run",
+        theirs: false,
+    },
+    Leaving {
         // Tauri's WebView2 user data folder, which is Chromium's profile for
         // the windows Sill draws. Nothing of the person's is in it that is not
         // already in the folder above, so it goes without asking.
@@ -127,7 +147,9 @@ mod tests {
     fn nothing_names_one_particular_machine() {
         for one in LEAVINGS {
             assert!(
-                one.where_it_is.starts_with('$') || one.where_it_is.starts_with("HKCU\\"),
+                one.where_it_is.starts_with('$')
+                    || one.where_it_is.starts_with("HKCU\\")
+                    || one.where_it_is.starts_with("Task Scheduler\\"),
                 "{} is not a constant the uninstaller can resolve",
                 one.where_it_is
             );
@@ -159,6 +181,26 @@ mod tests {
         assert_eq!(
             removed_quietly().count() + worth_asking_about().count(),
             LEAVINGS.len()
+        );
+    }
+
+    /// The scheduled tasks go, and nobody is asked about them.
+    ///
+    /// They are the one leaving that is work Windows holds on Sill's behalf
+    /// rather than a file Sill wrote, and they outlive the uninstall. What a
+    /// kept one would do is start a program that is not there any more, at
+    /// three in the morning, forever.
+    #[test]
+    fn the_scheduled_tasks_go_without_asking() {
+        let tasks = LEAVINGS
+            .iter()
+            .find(|one| one.where_it_is.contains("Task Scheduler"))
+            .expect("the scheduled tasks are not listed at all");
+
+        assert!(!tasks.theirs, "somebody would be asked to keep a dead task");
+        assert!(
+            tasks.where_it_is.ends_with(crate::automation::FOLDER),
+            "the leaving names a different folder from the one tasks are written to"
         );
     }
 }
