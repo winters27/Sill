@@ -76,6 +76,15 @@ export interface RankedCommand {
     | "audio-session"
     /** One running program, while it is running. */
     | "process"
+    /**
+     * What is playing, as one row with play, pause and next on it.
+     *
+     * Not an index entry and never more than one: the search builds it when
+     * the query is one of the words that asks for it, and only if something is
+     * actually playing. Its actions act on whatever Windows says the current
+     * session is, which is the session a media key on the keyboard would reach.
+     */
+    | "media"
     /** A folder offered as somewhere to move something into. */
     | "destination"
     /**

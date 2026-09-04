@@ -1668,6 +1668,28 @@
         return;
       }
 
+      /*
+       * What is playing, paused or played again without the launcher leaving.
+       *
+       * Intercepted here for the reason the answer row is: the row was built
+       * by the search rather than found in the index, so `launch_command`
+       * cannot look its id up.
+       *
+       * The list stays where it is, like a Windows switch and like the volume
+       * list. The question is whether it went quiet, and closing the window is
+       * not an answer to it; the row redraws saying which way it is now.
+       */
+      if (command.mode === "media") {
+        try {
+          const outcome = await runObjectAction("sill.media.playPause", asTarget(command));
+          status = outcome.message;
+          await refreshRoot();
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
       // The row standing in for the files that could not be searched.
       if (command.mode === "file-setup") {
         try {

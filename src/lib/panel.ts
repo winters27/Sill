@@ -210,6 +210,10 @@ const UNNAMABLE = new Set([
   "window",
   "audio-session",
   "process",
+  // One row for whatever is playing, built by the search and gone the moment
+  // the music stops. Its id is fixed, so a name given to it would survive and
+  // point at nothing, which is worse than not offering one.
+  "media",
   "conversation",
   "past-conversation",
   "store-listing",

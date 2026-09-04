@@ -86,6 +86,17 @@ const HEADINGS: Record<string, string> = {
   websearch: "Web Search",
   emoji: "Emoji",
   "audio-session": "Playing Now",
+  /*
+   * What is playing, which is one row and never a list.
+   *
+   * A heading of its own rather than "Playing Now", which is the App Volume
+   * list's. The two are different questions: one is every program making a
+   * noise and how loud each is, this is the track and the three keys. They are
+   * never on screen together, so the two headings never sit beside each other
+   * to be confused, but a row filed under the other one would say the wrong
+   * thing about what it is.
+   */
+  media: "Media",
   destination: "Folders",
   // What they are rather than who uses them: plenty of these ship with
   // Windows and have nothing to do with development.

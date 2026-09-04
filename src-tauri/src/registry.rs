@@ -1443,6 +1443,52 @@ pub fn conversation_record(id: &str, title: &str, said: &str) -> CommandRecord {
     }
 }
 
+/// What is playing, shaped as a row the search can splice in.
+///
+/// A `RankedCommand` rather than a `CommandRecord` for the reason the
+/// calculator's answer is one: it was not found by ranking anything, so there
+/// is no class for the matcher to have worked out. The class is
+/// `ExactTitle` because the query really was the exact word that asks for
+/// this, and it is what puts the row among the strong matches rather than
+/// below the weak ones.
+///
+/// No icon. The only thing naming the player is an app user model id, which is
+/// not a file the shell can be asked to draw, so the row wears the lettered
+/// tile every row without an icon wears rather than a wrong one.
+pub fn now_playing_record(now: &crate::media::NowPlaying) -> RankedCommand {
+    RankedCommand {
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            // Fixed, because there is only ever one. A row keyed on the track
+            // would be a new row every time the track changed, and the
+            // selection is held by id: the highlight would fall off the row
+            // the moment the song did.
+            id: "sill:now-playing".to_string(),
+            extension: "sill".to_string(),
+            // The player, which is the only place it is named: the title is
+            // the track.
+            extension_title: crate::media::player_for(now),
+            command: "now-playing".to_string(),
+            title: crate::media::title_for(now),
+            subtitle: crate::media::subtitle_for(now),
+            description: String::new(),
+            mode: "media".to_string(),
+            // Windows' own name for the player. Every action here acts on
+            // whatever the current session is rather than on this, so it is
+            // carried to say what was on screen rather than to find anything.
+            entrypoint: now.source.clone(),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
 pub fn answer_record(text: &str, input: &str) -> RankedCommand {
     RankedCommand {
         // An answer is only ever produced because the query was a sum, so it

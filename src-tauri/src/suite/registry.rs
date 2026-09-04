@@ -2961,6 +2961,72 @@ mod a_program_volume_row {
     }
 }
 
+/// What is playing, shaped into a row.
+mod a_now_playing_row {
+    use super::*;
+    use crate::media::NowPlaying;
+
+    fn track(title: &str, artist: &str, playing: bool) -> NowPlaying {
+        NowPlaying {
+            title: title.to_string(),
+            artist: artist.to_string(),
+            source: "Spotify.exe".to_string(),
+            playing,
+            can_next: true,
+        }
+    }
+
+    /// The row's mode is a kind the registry can act on.
+    ///
+    /// The one thing that can be wrong here without looking wrong. A mode
+    /// nothing maps to draws a row with an empty action panel and a dead
+    /// Enter, and the two strings live in two files with nothing else joining
+    /// them.
+    #[test]
+    fn the_row_names_a_kind_the_action_registry_knows() {
+        let row = registry::now_playing_record(&track("Weightless", "Marconi Union", true));
+
+        assert_eq!(row.command.mode, "media");
+        assert_eq!(
+            crate::object::ObjectKind::from_mode(&row.command.mode),
+            Some(crate::object::ObjectKind::NowPlaying),
+        );
+    }
+
+    /// One row, under one id, however often the track changes.
+    ///
+    /// The selection is held by id, so a row keyed on the track would take the
+    /// highlight off the row the moment the song changed under it.
+    #[test]
+    fn the_row_keeps_its_id_when_the_track_changes() {
+        let first = registry::now_playing_record(&track("Weightless", "Marconi Union", true));
+        let second = registry::now_playing_record(&track("Something Else", "Somebody", false));
+
+        assert_eq!(first.command.id, second.command.id);
+    }
+
+    /// The track is the title and the player is the label beside it.
+    #[test]
+    fn the_row_says_the_track_and_names_the_player() {
+        let row = registry::now_playing_record(&track("Weightless", "Marconi Union", true));
+
+        assert_eq!(row.command.title, "Weightless");
+        assert_eq!(row.command.subtitle, "Playing · Marconi Union");
+        assert_eq!(row.command.extension_title, "Spotify");
+    }
+
+    /// No icon, because an app user model id is not a file to take one from.
+    ///
+    /// A row whose icon is a string the shell cannot resolve draws nothing at
+    /// all where the tile should be, which reads as a broken row rather than
+    /// as a row without a picture.
+    #[test]
+    fn nothing_pretends_to_have_an_icon_it_does_not() {
+        let row = registry::now_playing_record(&track("Weightless", "Marconi Union", true));
+        assert_eq!(row.command.icon, None);
+    }
+}
+
 /// Saving the ranking history leaves nothing behind and reads back whole.
 ///
 /// The reason it is staged and renamed is that it is written on **every

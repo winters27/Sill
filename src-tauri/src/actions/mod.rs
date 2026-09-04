@@ -38,6 +38,18 @@ pub fn builtins() -> ActionRegistry {
         Box::new(MarkUp),
         Box::new(SearchWeb),
         Box::new(OpenUrl),
+        // Play or Pause claims Enter and so is lifted to the front whatever
+        // this order says. Enter is the key somebody presses without looking,
+        // and on a row that appeared because they typed "pause", stopping the
+        // noise is what they meant by it; skipping a track is not undoable by
+        // pressing the same key again.
+        //
+        // What this position does decide is the pair staying together. Both
+        // are above "Copy Name", the only other action a media row has,
+        // because a panel of three reading play, copy, next has put something
+        // unrelated between the two halves of one control.
+        Box::new(PlayPause),
+        Box::new(NextTrack),
         // Above every other "Copy something", because the panel filters by
         // substring and is drawn in this order. Below them, typing "copy" on
         // an emoji selected "Copy Name" and copied the words "grinning face".
@@ -816,6 +828,124 @@ impl Action for SessionFull {
 
     async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
         nudge(ctx, object, |_| 1.0).await
+    }
+}
+
+/*
+ * What is playing, and the two things worth doing to it.
+ *
+ * Both act on **whatever Windows says the current session is**, not on the
+ * session the row was drawn from. That is deliberate, and it is what the media
+ * keys on a keyboard do: the current session is the one the system would send
+ * a key press to, and a launcher that picked a different one would mean
+ * pressing Enter here and pressing the key on the keyboard did different
+ * things. The row carries the player's name so the message can say what was on
+ * screen, and nothing looks a session up by it.
+ *
+ * Neither is destructive and neither ships with a chord. They are reached by
+ * Enter and by the panel.
+ */
+
+/// Drops the reading of what is playing, after something has changed it.
+///
+/// Shared by both so they cannot drift on it. Without it the row would show
+/// what was playing a moment ago for up to a second, which is exactly the
+/// moment somebody is looking at the row they just pressed.
+fn media_changed(ctx: &ActionCtx) {
+    crate::media::forget(
+        &ctx.app
+            .state::<crate::state::Fresh<Option<crate::media::NowPlaying>>>(),
+    );
+}
+
+/// Plays what is paused, and pauses what is playing.
+struct PlayPause;
+
+#[async_trait]
+impl Action for PlayPause {
+    fn id(&self) -> &'static str {
+        "sill.media.playPause"
+    }
+
+    fn title(&self) -> &'static str {
+        "Play or Pause"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::NowPlaying
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::SystemControl]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        // Blocking: two calls out of this process and into a player that may
+        // be busy. The same reason the volume actions are on one.
+        let playing = tokio::task::spawn_blocking(crate::media::play_pause)
+            .await
+            .map_err(|err| format!("could not reach the player: {err}"))??;
+
+        media_changed(ctx);
+
+        // What it did rather than what it was asked to do, which is the rule
+        // the system switches follow: the sentence stays true if something
+        // else changed it in between.
+        Ok(Outcome::done(format!(
+            "{} is {}",
+            object.title,
+            if playing { "playing" } else { "paused" }
+        )))
+    }
+}
+
+/// Moves to the next track.
+struct NextTrack;
+
+#[async_trait]
+impl Action for NextTrack {
+    fn id(&self) -> &'static str {
+        "sill.media.next"
+    }
+
+    fn title(&self) -> &'static str {
+        "Next Track"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::NowPlaying
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::SystemControl]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        /*
+         * Offered whether or not the player said it could be skipped, and
+         * refused here rather than hidden there.
+         *
+         * `accepts` answers per kind, so there is no way to offer this on one
+         * row and not another. The refusing belongs at this end anyway: a
+         * hotkey, a workflow and the model all reach an action without passing
+         * through a list, so a list that quietly dropped the row would protect
+         * nobody. `media::next` says "there is nothing after this one" when the
+         * player says no, which is the same answer with a reason.
+         */
+        tokio::task::spawn_blocking(crate::media::next)
+            .await
+            .map_err(|err| format!("could not reach the player: {err}"))??;
+
+        media_changed(ctx);
+
+        // The track that ended, because the one that started is not known yet:
+        // a player updates its session a moment after it is told to skip, and
+        // reading again straight away races that.
+        Ok(Outcome::done(format!("Skipped {}", object.title)))
     }
 }
 

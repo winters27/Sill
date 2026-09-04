@@ -337,6 +337,10 @@
         return "Open Window";
       case "audio-session":
         return "App Volume";
+      // The player, when Windows gave a name that is one. The row's own title
+      // is the track, so this is the only place the program is named.
+      case "media":
+        return command.extensionTitle;
       case "destination":
         return "Folder";
       case "emoji":
