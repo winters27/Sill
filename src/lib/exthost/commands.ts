@@ -290,6 +290,32 @@ export function forgetPreviews(): Promise<void> {
   return invoke<void>("forget_previews");
 }
 
+/** What a file turned out to look like. */
+export interface FileLook {
+  /** `image` or `text`. */
+  kind: "image" | "text";
+  /** A data URI for a picture, the text itself for text. */
+  body: string;
+  /** Whether there is more of it than this. */
+  more: boolean;
+}
+
+/**
+ * A look inside the one file under the cursor.
+ *
+ * `null` for most files: an executable, an archive, a folder, a picture too
+ * big to be worth sending, or one whose bytes are still in somebody's cloud.
+ * None of those are errors and none of them deserve a message.
+ */
+export function filePreview(path: string): Promise<FileLook | null> {
+  return invoke<FileLook | null>("file_preview", { path });
+}
+
+/** Drops every look inside a file. Called when the list goes away or hides. */
+export function forgetFilePreviews(): Promise<void> {
+  return invoke<void>("forget_file_previews");
+}
+
 /** Something handed to the model along with a question. */
 export interface AiAttached {
   name: string;

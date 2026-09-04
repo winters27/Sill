@@ -1462,6 +1462,17 @@ fn manage_before_windows(app: &tauri::App) {
     app.manage(state::Fresh::<Option<media::NowPlaying>>::new(
         media::FRESH_FOR,
     ));
+    /*
+     * The Recent folder's listing, for the same reason as the four above.
+     *
+     * A directory of a few hundred shortcuts, read when a query asks and held
+     * for a few seconds so typing one character at a time reads it once. Behind
+     * an `Arc` because `Fresh` hands back a clone and three hundred strings per
+     * keystroke would cost more than the listing does.
+     */
+    app.manage(state::Fresh::<Arc<Vec<files::Trace>>>::new(
+        files::RECENT_FRESH_FOR,
+    ));
 
     /*
      * The file index's container, empty, whether or not anything will fill it.
@@ -2005,6 +2016,8 @@ pub fn run() {
             commands::ai::ai_models,
             commands::search::window_preview,
             commands::search::forget_previews,
+            commands::search::file_preview,
+            commands::search::forget_file_previews,
             commands::search::timings,
             commands::search::search_app_volume,
             commands::search::search_processes,

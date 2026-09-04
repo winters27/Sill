@@ -3,7 +3,7 @@
 use tauri::{AppHandle, Manager, State};
 
 use crate::state::{now_seconds, CatalogState, PrefsState, RegistryState};
-use crate::{browsers, calculator, files, registry, windowing};
+use crate::{browsers, calculator, catalog, files, registry, windowing};
 
 /// What the row offering a conversation back says underneath the question.
 ///
@@ -277,6 +277,41 @@ pub(crate) async fn window_preview(app: AppHandle, id: String) -> Result<Option<
 #[tauri::command]
 pub(crate) fn forget_previews(previews: State<'_, crate::previews::Previews>) {
     previews.forget();
+}
+
+/// A look inside the one file under the cursor.
+///
+/// Asked for the selected row only and only once the selection has settled,
+/// never for the list: arrowing through twenty results must not open twenty of
+/// somebody's files. `None` when there is nothing worth showing, which is most
+/// files and is not an error.
+#[tauri::command]
+pub(crate) async fn file_preview(
+    app: AppHandle,
+    path: String,
+) -> Result<Option<crate::previews::Look>, String> {
+    /*
+     * On a blocking task, because this opens somebody's file. Eight kilobytes
+     * for anything that is not a picture, and up to two megabytes and a base64
+     * for one that is, neither of which belongs on an async worker.
+     *
+     * The state is fetched inside rather than borrowed from a `State`
+     * parameter, for the reason `window_preview` gives: a borrow cannot cross
+     * onto another thread and a handle can.
+     */
+    tokio::task::spawn_blocking(move || app.state::<crate::previews::Previews>().of_file(&path))
+        .await
+        .map_err(|err| format!("could not look inside that file: {err}"))
+}
+
+/// Drops every look inside a file.
+///
+/// Called when the list showing them goes away and when the window hides. Up to
+/// twelve of these hold up to two megabytes each of somebody's picture, and a
+/// hidden launcher holding those is exactly the shape of leak `P2-06` closed.
+#[tauri::command]
+pub(crate) fn forget_file_previews(previews: State<'_, crate::previews::Previews>) {
+    previews.forget_files();
 }
 
 /// The window has painted, which is when a summon is actually over.
@@ -809,6 +844,7 @@ pub(crate) async fn search_elsewhere(
     catalog: State<'_, CatalogState>,
     searching: State<'_, crate::state::Searching>,
     timings: State<'_, crate::timing::Timings>,
+    recent: State<'_, crate::state::Fresh<std::sync::Arc<Vec<files::Trace>>>>,
     query: String,
 ) -> Result<Elsewhere, String> {
     let token = searching.begin();
@@ -823,6 +859,23 @@ pub(crate) async fn search_elsewhere(
     // outlives this borrow.
     let catalog = std::sync::Arc::clone(&catalog.inner.load_full());
 
+    /*
+     * The Recent folder, read at most once every few seconds.
+     *
+     * Windows keeps a shortcut in it to everything that has been opened, which
+     * is the one source that knows a file was worked on this morning without
+     * Sill having watched anybody work. It is a directory listing rather than
+     * an index, so it is held for the length of a summon rather than read per
+     * keystroke, and the `Arc` is what makes taking it out of the cache a
+     * pointer rather than three hundred strings.
+     */
+    let traces = recent.get(|| {
+        std::sync::Arc::new(match files::recent_folder() {
+            Some(folder) => files::traces(&folder, files::RECENT_MOST),
+            None => Vec::new(),
+        })
+    });
+
     // Together rather than one after the other. Neither needs the other's
     // answer, and the browser search used to wait out the file search first.
     //
@@ -833,7 +886,7 @@ pub(crate) async fn search_elsewhere(
     let (files, pages) = tokio::join!(
         async {
             let _timing = clock.timing("files");
-            matching_files(&query, files_settings, catalog, &searching, token).await
+            matching_files(&query, files_settings, catalog, traces, &searching, token).await
         },
         async {
             let _timing = clock.timing("browser pages");
@@ -852,6 +905,7 @@ async fn matching_files(
     query: &str,
     settings: crate::preferences::FileSearch,
     catalog: std::sync::Arc<crate::catalog::Catalog>,
+    traces: std::sync::Arc<Vec<files::Trace>>,
     searching: &crate::state::Searching,
     token: u64,
 ) -> Result<Vec<files::FileHit>, String> {
@@ -872,6 +926,30 @@ async fn matching_files(
     // sources would be a setting that half worked, which is worse than one
     // that does not exist.
     let ours = catalog.search(query.trim(), wanted, &settings.only_in);
+
+    /*
+     * Then what was open lately, which is a different question.
+     *
+     * The index answers "what is on this machine called that". The Recent
+     * folder answers "what did you have open", and the two disagree often
+     * enough to be worth both: a document under a folder nobody added as a
+     * root is not in the index at all, and the thing somebody wants is usually
+     * the thing they were just looking at.
+     *
+     * **A query that used an operator sits this out.** `ext:`, `size:` and
+     * `date:` are questions about a file's metadata, answered from numbers the
+     * index holds. The Recent folder holds shortcuts, so answering the same
+     * question of it would mean opening every one of them and then asking the
+     * disk about whatever each points at. Half-applying the operators would be
+     * worse: a `size:>1mb` that quietly listed small files from one source is a
+     * filter that cannot be trusted, which is worse than one that says less.
+     */
+    let ours = if catalog::operators(&query).1.asked_for_nothing() {
+        let lately = files::from_recent(&traces, query.trim(), wanted, &settings.only_in);
+        blend(ours, lately, query.trim(), wanted)
+    } else {
+        ours
+    };
 
     /*
      * Our own index is a few milliseconds and has already run. The other one
@@ -900,6 +978,66 @@ async fn matching_files(
     .unwrap_or_default();
 
     Ok(merge(ours, theirs, wanted))
+}
+
+/// Two ranked lists of files made into one ranking.
+///
+/// Not concatenated, and the difference matters. Sill's index and the Recent
+/// folder both rank with `registry::match_name`, so their classes are directly
+/// comparable, and putting one list after the other would sit a weak match from
+/// the index above an exact one from the Recent folder. That is the same fault
+/// `search_commands` had while open windows were a second list appended to the
+/// results, and the note there says it: two lists concatenated is not a ranking.
+///
+/// The sort is stable and the index goes in first, so two rows of equal class
+/// and equal length keep the index's own order and its tie-break on the path.
+///
+/// [`merge`] below is the other case and stays as it is: a whole-volume indexer
+/// ranks by its own rules, which are not these, so its answers fill in after
+/// rather than being sorted against them.
+pub fn blend(
+    ours: Vec<files::FileHit>,
+    lately: Vec<files::FileHit>,
+    query: &str,
+    limit: usize,
+) -> Vec<files::FileHit> {
+    if lately.is_empty() {
+        return ours.into_iter().take(limit).collect();
+    }
+
+    let needle: Vec<char> = query.to_lowercase().chars().collect();
+
+    let mut ranked: Vec<(registry::MatchClass, usize, files::FileHit)> = ours
+        .into_iter()
+        .chain(lately)
+        .map(|hit| {
+            // A row that reached here matched at the source, so a miss means
+            // the two are asking slightly different questions rather than that
+            // the row is wrong. Last is the honest place for it.
+            let class = registry::match_name(&needle, &hit.name)
+                .map(|(class, _)| class)
+                .unwrap_or(registry::MatchClass::TitleTypo);
+
+            (class, hit.name.chars().count(), hit)
+        })
+        .collect();
+
+    ranked.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(limit.min(ranked.len()));
+
+    for (_, _, hit) in ranked {
+        if out.len() >= limit {
+            break;
+        }
+
+        if seen.insert(hit.path.to_lowercase()) {
+            out.push(hit);
+        }
+    }
+
+    out
 }
 
 /// Puts two sets of file results together without repeating anything.

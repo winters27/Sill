@@ -17,6 +17,7 @@
   import SearchRow from "$lib/components/SearchRow.svelte";
   import Footer from "$lib/components/Footer.svelte";
   import SwitcherPreview from "$lib/components/SwitcherPreview.svelte";
+  import FilePreview from "$lib/components/FilePreview.svelte";
   import AiChat, { type Shown } from "$lib/components/AiChat.svelte";
   import ScriptOutput, { type Ran } from "$lib/components/ScriptOutput.svelte";
   import KeySheet from "$lib/components/KeySheet.svelte";
@@ -2516,6 +2517,26 @@
   let switcherPreview = $state<ReturnType<typeof SwitcherPreview> | null>(null);
 
   /**
+   * Whether the list has any files in it at all.
+   *
+   * What decides whether the strip beside the list is drawn, rather than
+   * whether the selected row is a file. A strip that came and went as somebody
+   * arrowed between a file and a command would move the row they were reading;
+   * this way the layout is fixed for as long as one query's results are.
+   */
+  let showsFilePreview = $derived(commands.some((row) => row.mode === "file"));
+
+  /**
+   * The file the strip is looking inside, when the selected row is one.
+   *
+   * Undefined on every other row, which empties the strip rather than leaving
+   * one file's contents sitting under another row's name.
+   */
+  let fileUnderCursor = $derived(
+    commands[selected]?.mode === "file" ? commands[selected].entrypoint : undefined,
+  );
+
+  /**
    * The conversation on screen.
    *
    * Held in Rust, not here: this window is closed most of the time and
@@ -4039,6 +4060,16 @@
           bind:this={switcherPreview}
           entrypoint={commands[selected]?.entrypoint}
         />
+      {:else if showsFilePreview}
+        <!--
+          A look inside the file under the cursor.
+
+          Drawn whenever the list holds files at all, rather than only when a
+          file is selected. The strip appearing and disappearing as somebody
+          arrows between a file and a command would move the row they are
+          reading, and within one query this way it does not move at all.
+        -->
+        <FilePreview path={fileUnderCursor} />
       {/if}
     </div>
   {:else if view?.tag === "List"}
