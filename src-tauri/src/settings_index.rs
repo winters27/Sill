@@ -780,6 +780,18 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "advanced",
         "Advanced",
+        "Export settings",
+        "backup save copy migrate move machine transfer share",
+    ),
+    s(
+        "advanced",
+        "Advanced",
+        "Import settings",
+        "restore backup migrate powertoys run raycast rayconfig transfer",
+    ),
+    s(
+        "advanced",
+        "Advanced",
         "Data folder",
         "appdata preferences cache open",
     ),

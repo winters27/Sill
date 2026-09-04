@@ -43,6 +43,7 @@ pub mod object;
 pub mod ocr;
 pub mod placement;
 pub mod preferences;
+pub mod preferences_transfer;
 pub mod previews;
 pub mod processes;
 pub mod profiles;
@@ -1682,6 +1683,10 @@ pub fn run() {
             quicklinks::commands::import_quicklinks,
             commands::settings::get_preferences,
             commands::settings::set_preferences,
+            commands::settings::export_preferences,
+            commands::settings::import_preferences,
+            commands::settings::reset_panel,
+            commands::settings::resettable_panels,
             commands::settings::open_settings,
             commands::system::quit_app,
             commands::search::search_commands,

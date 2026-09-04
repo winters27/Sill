@@ -531,6 +531,68 @@ export function setPreferences(prefs: Preferences): Promise<void> {
   return invoke("set_preferences", { prefs });
 }
 
+/**
+ * Writes every setting to a file, with every credential left out.
+ *
+ * Answers with where it went, or nothing if the dialog was closed without
+ * choosing, which is an ordinary thing to do and needs no message.
+ *
+ * The file carries no API key and no token, in either the plain form Sill
+ * holds or the sealed form its own file holds. A sealed value is bound to one
+ * Windows account on one machine, so exporting one would leak a credential and
+ * hand over something that could not be used anyway. `withheld` in the file
+ * names what was left out.
+ */
+export function exportPreferences(): Promise<string | null> {
+  return invoke<string | null>("export_preferences");
+}
+
+/** What an import of a settings file did. */
+export interface Imported {
+  /** What the file turned out to be, said the way somebody would say it. */
+  readAs: string;
+  /** The settings sections the file had something to say about. */
+  sections: string[];
+  /** Credentials the file did not carry, so the ones already here were kept. */
+  keptKeys: number;
+  /** Only for a Raycast export, which carries snippets rather than settings. */
+  snippets?: { added: number; updated: number; skipped: number; keywordsTaken: number } | null;
+  quicklinks?: { added: number; updated: number; skipped: number; keywordsTaken: number } | null;
+}
+
+/**
+ * Reads a settings file over the settings held now.
+ *
+ * Reads a Sill export, a `preferences.json`, PowerToys Run's settings, or a
+ * Raycast `.rayconfig`. A section the file says nothing about keeps what it
+ * has, and **every way this can fail leaves the settings exactly as they
+ * were**: the whole file is turned into settings before any of it is saved.
+ */
+export function importPreferences(): Promise<Imported | null> {
+  return invoke<Imported | null>("import_preferences");
+}
+
+/**
+ * Puts one settings panel back to what it shipped with.
+ *
+ * Which sections a panel owns is decided in Rust, so a reset cannot reach the
+ * panel next to it.
+ */
+export function resetPanel(panel: string): Promise<void> {
+  return invoke("reset_panel", { panel });
+}
+
+/**
+ * The panels that have something of their own to reset.
+ *
+ * Asked rather than listed here, so the button appears exactly where the
+ * command would do something. An empty answer draws no buttons, which is the
+ * right outcome for a window that could not reach Rust.
+ */
+export function resettablePanels(): Promise<string[]> {
+  return invoke<string[]>("resettable_panels").catch(silently([]));
+}
+
 /** Opens settings, optionally jumping straight to one section. */
 export function openSettings(section?: string): Promise<void> {
   return invoke("open_settings", { section: section ?? null });
