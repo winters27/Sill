@@ -196,7 +196,10 @@
       control that visibly does nothing, which is worse than no control. */
   const CHROMATIC: Theme[] = ["oilslick", "aberration"];
 
-  type SourceKey = Exclude<keyof Preferences["sources"], "excluded" | "hidden">;
+  type SourceKey = Exclude<
+    keyof Preferences["sources"],
+    "excluded" | "hidden" | "folders"
+  >;
 
   /** The switches that decide what a scan goes and looks at. */
   const SOURCES: { key: SourceKey; title: string; hint: string }[] = [
@@ -229,6 +232,11 @@
       key: "windowsSettings",
       title: "Windows settings pages",
       hint: "Settings pages, Control Panel applets and management consoles",
+    },
+    {
+      key: "games",
+      title: "Installed games",
+      hint: "Read from your Steam and Epic libraries, which nothing else here can see",
     },
   ];
 
@@ -1396,6 +1404,17 @@
                   full
                   mono
                 />
+              {/snippet}
+            </Row>
+          </Section>
+
+          <Section
+            label="Your own folders"
+            description="Walked exactly as the Start Menu is, so a shortcut or a program in one of these appears with its own icon. Useful if you keep portable applications somewhere Windows does not list."
+          >
+            <Row title="Folders of your own">
+              {#snippet children()}
+                <PathList bind:paths={p.sources.folders} onchange={commit} />
               {/snippet}
             </Row>
           </Section>

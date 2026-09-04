@@ -48,6 +48,42 @@ fn a_source_switch_asks_for_a_scan() {
     assert_eq!(redo.file_roots, None);
 }
 
+/// A named folder is somewhere that has to be walked before anything in it
+/// can be found, so adding one is a scan and not a filter.
+///
+/// The distinction is the reason it sits with the source switches rather than
+/// beside `excluded`: a word added to `excluded` takes effect on the next
+/// keystroke, and a folder added here does nothing at all until a scan reads
+/// it. Leaving it out of the comparison would leave the panel saying the
+/// folder was added and the index saying nothing was there.
+#[test]
+fn a_folder_of_your_own_asks_for_a_scan() {
+    let before = Preferences::default();
+    let mut after = before.clone();
+    after.sources.folders.push(r"D:\Portable".to_string());
+
+    let redo = Redo::between(&before, &after);
+    assert!(
+        redo.sources,
+        "a folder nobody has walked yet holds nothing anybody can find"
+    );
+
+    // And an exclusion still does not, because it is read on every query.
+    let mut filtered = before.clone();
+    filtered.sources.excluded.push("vendor".to_string());
+    assert!(!Redo::between(&before, &filtered).sources);
+}
+
+/// Games are a source like any other, so switching them off is a scan.
+#[test]
+fn switching_games_off_asks_for_a_scan() {
+    let before = Preferences::default();
+    let mut after = before.clone();
+    after.sources.games = false;
+
+    assert!(Redo::between(&before, &after).sources);
+}
+
 #[test]
 fn a_script_folder_asks_for_a_walk() {
     let before = Preferences::default();

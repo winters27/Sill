@@ -171,7 +171,22 @@ impl Action for Launch {
     }
 
     async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
-        if let Some(app_id) = object.target.strip_prefix(crate::apps::APPS_FOLDER) {
+        if object.target.starts_with(crate::games::GAME) {
+            // A game is started by its own library rather than by the shell.
+            // The target is an identifier, not a path, and `games::command` is
+            // where it is checked: see that module's note on why this is not a
+            // `steam://` address.
+            let (exe, args) = crate::games::command(
+                &object.target,
+                crate::games::steam_root().as_deref(),
+                crate::games::epic_launcher().as_deref(),
+            )?;
+
+            std::process::Command::new(&exe)
+                .args(&args)
+                .spawn()
+                .map_err(|err| format!("could not launch {}: {err}", object.title))?;
+        } else if let Some(app_id) = object.target.strip_prefix(crate::apps::APPS_FOLDER) {
             // A packaged app has no path to open. Explorer resolves an
             // AppUserModelID through the Apps folder, which is how the Start
             // Menu launches them too.

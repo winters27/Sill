@@ -188,6 +188,34 @@ pub fn scan_shortcuts() -> Vec<AppRecord> {
     found
 }
 
+/// Shortcuts and executables in folders somebody added themselves.
+///
+/// The five roots Windows itself lists are not everywhere people keep things.
+/// A portable applications folder, a drive of tools carried between machines
+/// and a scripts directory are all normal, and none of them are in the Start
+/// Menu; before this the only way to reach one was to make a shortcut to it in
+/// a folder Sill already read, which is an errand rather than a setting.
+///
+/// Walked with exactly the same code as the Start Menu, so an entry found here
+/// carries the same icon, the same noise filtering and the same suffix set. A
+/// folder that does not exist is skipped in silence: somebody who names a
+/// folder on a drive that is not always plugged in should not be told off for
+/// it every time they open the launcher.
+pub fn scan_folders(roots: &[String]) -> Vec<AppRecord> {
+    let mut found = Vec::new();
+
+    for root in roots {
+        let expanded = crate::icons::expand_env(root);
+        if expanded.trim().is_empty() {
+            continue;
+        }
+        walk(Path::new(&expanded), 0, &mut found);
+    }
+
+    dedupe(&mut found);
+    found
+}
+
 /// Everything the Apps folder lists, which is what Explorer and Raycast show.
 ///
 /// The Start Menu walk only sees `.lnk` files, so it misses every packaged
@@ -518,6 +546,12 @@ fn package_logo(install_location: &str) -> Option<String> {
 pub fn categorize(record: &AppRecord) -> &'static str {
     if record.path.starts_with(APPS_FOLDER) {
         return "Store App";
+    }
+
+    // A game's target is an identifier rather than a path, so nothing below
+    // would recognise it, and every rule below is about where a file sits.
+    if record.path.starts_with(crate::games::GAME) {
+        return "Game";
     }
 
     let lower_path = record.path.to_ascii_lowercase();
@@ -898,8 +932,13 @@ fn entries_under(root: windows::Win32::System::Registry::HKEY, path: &str) -> Ve
     out
 }
 
+/// One string value out of the registry.
+///
+/// `pub(crate)` because the game libraries record where they are installed the
+/// same way, and a second copy of this would be a second set of buffer sizing
+/// mistakes to make.
 #[cfg(windows)]
-fn read_string(
+pub(crate) fn read_string(
     root: windows::Win32::System::Registry::HKEY,
     path: &str,
     value: &str,
@@ -1118,5 +1157,84 @@ mod uninstalling {
     fn an_empty_command_is_nothing_rather_than_a_program_called_nothing() {
         assert_eq!(split_command("", |_| false), None);
         assert_eq!(split_command("   ", |_| false), None);
+    }
+}
+
+#[cfg(test)]
+mod discovering {
+    use super::*;
+
+    /// A folder somebody named is walked on exactly the terms the Start Menu
+    /// is, which is the whole reason it reuses `walk`.
+    ///
+    /// Three claims in one place because they are one behaviour: the shortcut
+    /// is found, the uninstaller beside it is not, and a folder that is not
+    /// there is passed over rather than being an error somebody has to dismiss
+    /// every time a removable drive is unplugged.
+    #[test]
+    fn a_folder_of_your_own_is_walked_like_the_start_menu() {
+        let dir = tempfile::tempdir().expect("a temp directory");
+        let root = dir.path();
+
+        std::fs::write(root.join("Portable Editor.lnk"), b"").expect("a shortcut");
+        std::fs::write(root.join("Uninstall Portable Editor.lnk"), b"").expect("a shortcut");
+        std::fs::write(root.join("notes.txt"), b"").expect("a file");
+
+        let nested = root.join("Tools");
+        std::fs::create_dir(&nested).expect("a folder");
+        std::fs::write(nested.join("Deeper.exe"), b"").expect("an executable");
+
+        let found = scan_folders(&[
+            root.to_string_lossy().to_string(),
+            root.join("not-here").to_string_lossy().to_string(),
+        ]);
+
+        let names: Vec<&str> = found.iter().map(|one| one.name.as_str()).collect();
+
+        assert!(names.contains(&"Portable Editor"), "{names:?}");
+        assert!(
+            names.contains(&"Deeper"),
+            "the walk did not recurse: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|one| one.starts_with("Uninstall")),
+            "the noise filter did not apply: {names:?}"
+        );
+        assert!(
+            !names.contains(&"notes"),
+            "a file that is not launchable was indexed: {names:?}"
+        );
+    }
+
+    /// A folder written with an environment variable in it is expanded.
+    ///
+    /// The reason it matters is that a settings field is typed by a person,
+    /// and `%USERPROFILE%\Tools` is how somebody writes a folder that has to
+    /// work on more than one machine. Without expansion it is a literal path
+    /// that exists nowhere and fails silently, which is the worst of both.
+    #[test]
+    fn a_folder_written_with_an_environment_variable_is_expanded() {
+        let dir = tempfile::tempdir().expect("a temp directory");
+        std::fs::write(dir.path().join("Named.lnk"), b"").expect("a shortcut");
+
+        // Set rather than borrowed from the machine, so the test says what it
+        // depends on. Scoped to this process.
+        std::env::set_var("SILL_TEST_FOLDER", dir.path());
+
+        let found = scan_folders(&["%SILL_TEST_FOLDER%".to_string()]);
+        assert_eq!(
+            found
+                .iter()
+                .map(|one| one.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Named"]
+        );
+    }
+
+    /// An empty list walks nothing, which is what most machines will do.
+    #[test]
+    fn no_folders_means_no_work() {
+        assert!(scan_folders(&[]).is_empty());
+        assert!(scan_folders(&["   ".to_string()]).is_empty());
     }
 }

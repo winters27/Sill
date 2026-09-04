@@ -592,6 +592,18 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "sources",
         "Sources",
+        "Installed games",
+        "steam epic game library play",
+    ),
+    s(
+        "sources",
+        "Sources",
+        "Folders of your own",
+        "custom folder directory portable tools scan add",
+    ),
+    s(
+        "sources",
+        "Sources",
         "What Sill found",
         "alias hotkey nickname shortcut name list index everything hide",
     ),

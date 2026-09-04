@@ -24,6 +24,7 @@ pub mod extension_install;
 pub mod exthost;
 pub mod files;
 pub mod files_ops;
+pub mod games;
 pub mod hooks;
 pub mod host;
 pub mod host_bridge;
@@ -308,6 +309,17 @@ pub(crate) fn scan_everything(
         Vec::new()
     };
 
+    // Folders somebody named themselves, walked exactly as the Start Menu is.
+    let mine = apps::scan_folders(&sources.folders);
+
+    // Games, which no other source above can see: Steam writes a Start Menu
+    // entry for almost nothing, so a machine full of them looks empty.
+    let games = if sources.games {
+        games::scan()
+    } else {
+        Vec::new()
+    };
+
     let mut names: std::collections::HashSet<String> =
         out.iter().map(|c| c.title.to_lowercase()).collect();
     let mut targets: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -328,6 +340,31 @@ pub(crate) fn scan_everything(
     };
 
     for app in &shortcuts {
+        if keep(app, &mut names, &mut targets) {
+            out.push(registry::app_record(
+                &app.name,
+                &app.path,
+                app.icon_source.clone(),
+                apps::categorize(app),
+            ));
+        }
+    }
+
+    // Before the registry sources: somebody who named a folder meant the copy
+    // in it, and a name collision should not hand the row to a guess made from
+    // an uninstall entry.
+    for app in &mine {
+        if keep(app, &mut names, &mut targets) {
+            out.push(registry::app_record(
+                &app.name,
+                &app.path,
+                app.icon_source.clone(),
+                apps::categorize(app),
+            ));
+        }
+    }
+
+    for app in &games {
         if keep(app, &mut names, &mut targets) {
             out.push(registry::app_record(
                 &app.name,
@@ -363,10 +400,12 @@ pub(crate) fn scan_everything(
     }
 
     println!(
-        "[sill] {} shortcuts, {} packaged, {} on PATH",
+        "[sill] {} shortcuts, {} packaged, {} on PATH, {} in named folders, {} games",
         shortcuts.len(),
         packaged.len(),
-        on_path.len()
+        on_path.len(),
+        mine.len(),
+        games.len()
     );
 
     registry::one_per_id(out)
@@ -1496,9 +1535,20 @@ pub fn run() {
              * installed while Sill was running was invisible and the way to
              * find out was to fail to find it.
              */
-            if let Some(watcher) =
-                apps_watch::AppWatcher::start(handle.clone(), apps::shortcut_roots())
-            {
+            // A folder somebody added is watched on the same terms as the
+            // Start Menu. Dropping a shortcut into your own tools folder and
+            // having to restart to find it is the exact complaint the watcher
+            // exists to answer.
+            let mut watched = apps::shortcut_roots();
+            watched.extend(
+                prefs
+                    .sources
+                    .folders
+                    .iter()
+                    .map(|one| std::path::PathBuf::from(icons::expand_env(one))),
+            );
+
+            if let Some(watcher) = apps_watch::AppWatcher::start(handle.clone(), watched) {
                 app.manage(watcher);
             }
 

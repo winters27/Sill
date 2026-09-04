@@ -392,6 +392,12 @@ fn entries_are_categorised_by_where_they_resolve() {
         )),
         "Store App"
     );
+    // A game's target is an identifier rather than a path, so every rule
+    // below the first two would read it as a relative path under nothing.
+    assert_eq!(
+        categorize(&record("Counter-Strike 2", "sill-game:steam/730")),
+        "Game"
+    );
     // A bookmark is not a program.
     assert_eq!(
         categorize(&record("Git FAQs", r"C:\Program Files\Git\faq.url")),

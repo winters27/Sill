@@ -118,6 +118,10 @@ export interface Sources {
   installedPrograms: boolean;
   pathExecutables: boolean;
   windowsSettings: boolean;
+  /** Installed games, read from the Steam and Epic libraries. */
+  games: boolean;
+  /** Extra folders walked exactly as the Start Menu is. */
+  folders: string[];
   excluded: string[];
   /** Individual entries switched off by id. */
   hidden: string[];

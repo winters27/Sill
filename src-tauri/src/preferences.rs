@@ -436,6 +436,20 @@ pub struct Sources {
     pub path_executables: bool,
     /// Windows settings pages and Control Panel applets.
     pub windows_settings: bool,
+    /// Installed games, read from the Steam and Epic libraries.
+    ///
+    /// On by default because a game is invisible to every other source. Steam
+    /// writes a Start Menu entry for almost nothing, so before this a machine
+    /// with eight games installed had none of them in the launcher.
+    pub games: bool,
+    /// Extra folders to walk for shortcuts and executables.
+    ///
+    /// Walked exactly as the Start Menu is. Empty by default: this is for
+    /// somebody who keeps portable applications somewhere of their own, and
+    /// guessing where that is would mean walking folders nobody asked us to
+    /// read.
+    #[serde(default)]
+    pub folders: Vec<String>,
     /// Entries whose name or path contains any of these are never shown.
     pub excluded: Vec<String>,
     /// Individual entries switched off by id.
@@ -596,6 +610,8 @@ impl Default for Sources {
             // a bug they cannot explain.
             path_executables: false,
             windows_settings: true,
+            games: true,
+            folders: Vec::new(),
             excluded: Vec::new(),
             hidden: Vec::new(),
             pinned: Vec::new(),
@@ -1044,15 +1060,23 @@ impl Sources {
     /// every query, so a word added to either takes effect on the next
     /// keystroke and asking the machine to scan itself again for them would
     /// be a minute of work to change nothing.
-    fn scanned(&self) -> [bool; 6] {
-        [
-            self.shortcuts,
-            self.packaged_apps,
-            self.app_paths,
-            self.installed_programs,
-            self.path_executables,
-            self.windows_settings,
-        ]
+    fn scanned(&self) -> ([bool; 7], &[String]) {
+        (
+            [
+                self.shortcuts,
+                self.packaged_apps,
+                self.app_paths,
+                self.installed_programs,
+                self.path_executables,
+                self.windows_settings,
+                self.games,
+            ],
+            // Named folders belong here rather than beside `excluded`. A word
+            // added to `excluded` is applied on the next keystroke, but a
+            // folder is somewhere that has to be walked before anything in it
+            // can be found, so adding one is a scan.
+            &self.folders,
+        )
     }
 }
 
