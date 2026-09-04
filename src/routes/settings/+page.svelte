@@ -985,6 +985,30 @@
                 />
               {/snippet}
             </Row>
+            <!--
+              The row that says Sill is not recording, and the only place in
+              Settings that can say it. Every switch it overrides lives on
+              another panel and goes on reading "on" while it is: the Clipboard
+              panel's own toggle is about whether the history is wanted, not
+              about whether anything is being written right now.
+
+              The description carries the standing report while it is on, the
+              same way the two rows above carry theirs, so the panel says which
+              state it is in rather than only offering the switch.
+            -->
+            <Row
+              title="Private mode"
+              description={troubleOf("privacy")?.message ??
+                "Pauses the clipboard history, dictation and screen capture together. It stays on until you switch it off, restarts included."}
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.privacy.paused}
+                  onchange={commit}
+                  label="Private mode"
+                />
+              {/snippet}
+            </Row>
           </Section>
 
           <Section label="Opening and closing">

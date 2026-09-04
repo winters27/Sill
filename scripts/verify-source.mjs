@@ -5,7 +5,7 @@
  * all accept, which is why it needs a pass of its own. Each one has happened.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join, extname, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { SOURCE, TAURI_POINTER, read, source, tauriVersion } from "./versions.mjs";
@@ -1176,6 +1176,71 @@ else if (Number(css[1]) !== Number(rust[1])) {
         lineOf(text, found.index),
         `mode "${found[1]}" has no heading in ${LIST}, so its rows are filed ` +
           "under whichever extension produced them rather than under a name",
+      );
+    }
+  }
+}
+
+/*
+ * Private mode is not a check anybody has to remember.
+ *
+ * Two things it stops are enforced by the compiler already: a screen capture
+ * takes a `privacy::Allowed`, which only `privacy::allow` can make, so a new
+ * way of photographing the screen does not build until it has asked. The third
+ * is not, and cannot be: the clipboard watcher's `Rules` are a plain struct,
+ * and anybody filling one in by hand would produce a watcher that records
+ * while private mode is on. That is exactly how it was before, in two places
+ * that each spelled the same seven fields out.
+ *
+ * So both halves are checked here rather than trusted.
+ *
+ * - `monitor::Rules { .. }` is built in `privacy.rs` and nowhere else, which
+ *   is what makes the startup path and the settings path give the same answer.
+ * - `privacy::allowed_regardless()` is the one way past the capture gate, and
+ *   it belongs only where there is nobody whose screen it could be: a test, or
+ *   an `#[ignore]` probe somebody runs by hand.
+ */
+{
+  const OWNS_RULES = "src-tauri/src/privacy.rs";
+  const DECLARES_RULES = "src-tauri/src/clipboard/monitor.rs";
+
+  for (const file of sources("src-tauri")) {
+    if (extname(file) !== ".rs") continue;
+
+    const text = readFileSync(file, "utf8");
+    const normal = file.split(sep).join("/");
+
+    if (normal !== OWNS_RULES && normal !== DECLARES_RULES) {
+      for (const found of text.matchAll(/\bmonitor::Rules\s*\{/g)) {
+        fail(
+          file,
+          lineOf(text, found.index),
+          "fills in the clipboard watcher's rules by hand, so private mode " +
+            `is whatever this line says it is. Call \`privacy::clipboard_rules\` ` +
+            `(${OWNS_RULES}) instead`,
+        );
+      }
+    }
+
+    if (!text.includes("allowed_regardless")) continue;
+
+    // Where the test code starts, if there is any. A `#[cfg(test)]` module is
+    // the last thing in a Rust file by convention here, and a file under
+    // `tests/` is all test code.
+    const tests = normal.includes("src-tauri/tests/")
+      ? 0
+      : (text.indexOf("#[cfg(test)]") + 1 || text.length + 1) - 1;
+
+    for (const found of text.matchAll(/\ballowed_regardless\s*\(/g)) {
+      if (normal === OWNS_RULES) continue;
+      if (found.index >= tests) continue;
+
+      fail(
+        file,
+        lineOf(text, found.index),
+        "takes a screen capture past private mode. `allowed_regardless` is " +
+          "for tests and hand-run probes; a capture somebody could be looking " +
+          "at asks `privacy::allow` instead",
       );
     }
   }

@@ -182,14 +182,14 @@ impl Previews {
     /// `None` when the window has closed or refuses to be photographed, which
     /// is not an error: a switcher with no picture is a switcher, and a
     /// message about it would be about Sill rather than about the window.
-    pub fn of(&self, id: isize) -> Option<String> {
+    pub fn of(&self, allowed: &crate::privacy::Allowed, id: isize) -> Option<String> {
         if let Ok(kept) = self.inner.lock() {
             if let Some(already) = kept.get(&id) {
                 return Some(already.clone());
             }
         }
 
-        let taken = take(id)?;
+        let taken = take(allowed, id)?;
 
         if let Ok(mut kept) = self.inner.lock() {
             // Bounded, and crudely. There is no order worth keeping here: the
@@ -350,7 +350,13 @@ fn is_elsewhere(_about: &std::fs::Metadata) -> bool {
 }
 
 /// Photographs one window, small, as a data URI.
-fn take(id: isize) -> Option<String> {
+///
+/// Takes the permission rather than asking for it, because it is called from a
+/// blocking task with no `AppHandle` to hand. The asking is at the top of
+/// `preview`, once, which is also where it belongs: a switcher in private mode
+/// should show no pictures at all rather than one per arrow key that each
+/// separately fails.
+fn take(allowed: &crate::privacy::Allowed, id: isize) -> Option<String> {
     // Revalidated rather than trusted. A handle can be reused by a different
     // window once the first one closes, and photographing a stranger is worse
     // than showing nothing.
@@ -364,6 +370,7 @@ fn take(id: isize) -> Option<String> {
     }
 
     let shot = crate::capture::window(
+        allowed,
         id,
         (
             window.rect.x,

@@ -1041,6 +1041,29 @@ pub struct Preferences {
     /// Skin tone and what Enter does, for the emoji picker.
     #[serde(default)]
     pub emoji: crate::emoji::Settings,
+    /// Whether Sill is recording anything at all.
+    #[serde(default)]
+    pub privacy: Privacy,
+}
+
+/// Private mode.
+///
+/// Its own struct rather than a field on `General` because what it means is
+/// "override three other settings", and a switch that overrides other settings
+/// filed among them reads as one of them.
+///
+/// **It persists on purpose.** Everything it pauses is a thing that records,
+/// and a mode that quietly switched itself back on the next time Sill started
+/// would put somebody in the one state this exists to prevent: believing they
+/// are private when they are not. The cost the other way is somebody
+/// eventually wondering why their clipboard history is empty, and the row that
+/// switched it on says so every time it is looked at.
+///
+/// See `privacy.rs` for what it actually stops and how.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Privacy {
+    pub paused: bool,
 }
 
 impl Appearance {

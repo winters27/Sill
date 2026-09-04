@@ -182,8 +182,27 @@ pub fn virtual_screen() -> (i32, i32, i32, i32) {
 /// Coordinates are the screen's own, so they can be negative on a multi-display
 /// desk. They are physical pixels rather than the ones a window reports, which
 /// differ by the display's scaling.
+///
+/// ## Why it takes a permission it never reads
+///
+/// `_allowed` is [`crate::privacy::Allowed`], which nothing outside
+/// `privacy` can construct. So private mode is not a check this function
+/// remembers to make; it is a value the caller cannot produce while private
+/// mode is on, and a new way of photographing the screen does not compile
+/// until it has asked for one.
+///
+/// This is the chokepoint every picture passes through, which is what makes
+/// the claim checkable: the screenshot commands, the picker, the switcher's
+/// previews, reading text out of the screen and handing the screen to a model
+/// are all this function, twice.
 #[cfg(windows)]
-pub fn region(left: i32, top: i32, width: i32, height: i32) -> Result<Shot, String> {
+pub fn region(
+    _allowed: &crate::privacy::Allowed,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+) -> Result<Shot, String> {
     use windows::Win32::Graphics::Gdi::{
         BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
         GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
@@ -289,7 +308,13 @@ pub fn region(left: i32, top: i32, width: i32, height: i32) -> Result<Shot, Stri
 }
 
 #[cfg(not(windows))]
-pub fn region(_left: i32, _top: i32, _width: i32, _height: i32) -> Result<Shot, String> {
+pub fn region(
+    _allowed: &crate::privacy::Allowed,
+    _left: i32,
+    _top: i32,
+    _width: i32,
+    _height: i32,
+) -> Result<Shot, String> {
     Err("screen capture needs Windows".to_string())
 }
 
@@ -445,16 +470,24 @@ mod tests {
 
     #[test]
     fn an_empty_area_is_refused_rather_than_captured() {
-        assert!(region(0, 0, 0, 100).is_err());
-        assert!(region(0, 0, 100, 0).is_err());
-        assert!(region(0, 0, -5, -5).is_err());
+        let anyway = crate::privacy::allowed_regardless();
+        assert!(region(&anyway, 0, 0, 0, 100).is_err());
+        assert!(region(&anyway, 0, 0, 100, 0).is_err());
+        assert!(region(&anyway, 0, 0, -5, -5).is_err());
     }
 
     /// Coordinates that have gone wrong ask for something enormous, and the
     /// allocation is what would be noticed rather than the mistake.
     #[test]
     fn an_absurd_area_is_refused_before_anything_is_allocated() {
-        let err = region(0, 0, 100_000, 100_000).expect_err("should refuse");
+        let err = region(
+            &crate::privacy::allowed_regardless(),
+            0,
+            0,
+            100_000,
+            100_000,
+        )
+        .expect_err("should refuse");
 
         assert!(err.contains("too large"), "{err}");
     }
@@ -472,7 +505,11 @@ mod tests {
 /// checked, and a blank one falls back to reading the screen, which is at
 /// least what somebody can see.
 #[cfg(windows)]
-pub fn window(handle: isize, fallback: (i32, i32, i32, i32)) -> Result<Shot, String> {
+pub fn window(
+    allowed: &crate::privacy::Allowed,
+    handle: isize,
+    fallback: (i32, i32, i32, i32),
+) -> Result<Shot, String> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Gdi::{
         CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
@@ -544,12 +581,16 @@ pub fn window(handle: isize, fallback: (i32, i32, i32, i32)) -> Result<Shot, Str
         // Either it refused to draw, or it drew nothing. Reading the screen
         // gets whatever is actually there, which is worse than the window on
         // its own and much better than an empty rectangle.
-        _ => region(left, top, width, height),
+        _ => region(allowed, left, top, width, height),
     }
 }
 
 #[cfg(not(windows))]
-pub fn window(_handle: isize, _fallback: (i32, i32, i32, i32)) -> Result<Shot, String> {
+pub fn window(
+    _allowed: &crate::privacy::Allowed,
+    _handle: isize,
+    _fallback: (i32, i32, i32, i32),
+) -> Result<Shot, String> {
     Err("window capture needs Windows".to_string())
 }
 

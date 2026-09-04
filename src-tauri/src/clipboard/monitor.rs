@@ -420,6 +420,16 @@ impl Clipboard {
 ///
 /// Compared case-insensitively on a substring, so "chrome" covers every
 /// Chrome window without anyone having to know the executable's exact name.
+/// Whether a copy out of this application is written down.
+///
+/// The whole of the recording gate, in one place and pure, so that "private
+/// mode stops the clipboard history" is a thing a test can put a value into
+/// and get an answer out of rather than a line somebody reads. `capture_with`
+/// asks this and returns without opening the clipboard when the answer is no.
+pub fn records(rules: &Rules, source: Option<&str>) -> bool {
+    rules.enabled && !is_ignored(source, &rules.ignored_apps)
+}
+
 pub fn is_ignored(app: Option<&str>, ignored: &[String]) -> bool {
     let Some(app) = app else {
         // Nothing known about the source, so no rule can exclude it. The
@@ -561,6 +571,9 @@ fn capture_with(
     }
 
     let rules = clipboard.rules();
+    // Before the clipboard is opened and before the foreground application is
+    // read, because a recording that is not going to happen should not cost a
+    // window enumeration either.
     if !rules.enabled {
         return Ok(());
     }
@@ -570,7 +583,7 @@ fn capture_with(
     let name = source.as_ref().map(|app| app.name.clone());
     let exe = source.as_ref().map(|app| app.path.clone());
 
-    if is_ignored(name.as_deref(), &rules.ignored_apps) {
+    if !records(&rules, name.as_deref()) {
         return Ok(());
     }
 

@@ -100,6 +100,12 @@ pub(crate) fn dismiss(window: tauri::WebviewWindow) {
 /// no single scale that would work.
 #[tauri::command]
 pub(crate) async fn begin_capture(app: AppHandle) -> Result<(), String> {
+    // Refused here as well as at the picture, which is not the same check
+    // twice. The overlay is a full-screen thing somebody drags a rectangle
+    // across, and putting it up in order to say no at the end of it would be
+    // a worse way of saying the same word.
+    crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
+
     // Built on the first capture rather than declared, so an overlay nobody
     // uses this session costs nothing.
     let window = crate::lazy_windows::ensure(&app, "capture")?;
@@ -197,7 +203,13 @@ pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, 
         found.rect.height,
     );
 
-    let shot = tokio::task::spawn_blocking(move || crate::capture::window(id, rect))
+    // Asked before the picture rather than after it, and asked of the one
+    // thing that can say yes. `Allowed` cannot be made anywhere else, so this
+    // line is not a check somebody remembered to write: without it the call
+    // below does not compile.
+    let allowed = crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
+
+    let shot = tokio::task::spawn_blocking(move || crate::capture::window(&allowed, id, rect))
         .await
         .map_err(|err| format!("the capture failed: {err}"))??;
 
@@ -225,8 +237,9 @@ pub(crate) async fn capture_display(app: AppHandle, index: usize) -> Result<Stri
         .ok_or_else(|| "there is no display with that number".to_string())?;
 
     let rect = screen.full;
+    let allowed = crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
     let shot = tokio::task::spawn_blocking(move || {
-        crate::capture::region(rect.x, rect.y, rect.width, rect.height)
+        crate::capture::region(&allowed, rect.x, rect.y, rect.width, rect.height)
     })
     .await
     .map_err(|err| format!("the capture failed: {err}"))??;
@@ -265,10 +278,12 @@ pub(crate) async fn capture_area(
     // the picture, which looks like the capture darkened it.
     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
 
-    let shot =
-        tokio::task::spawn_blocking(move || crate::capture::region(left, top, width, height))
-            .await
-            .map_err(|err| format!("the capture failed: {err}"))??;
+    let allowed = crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
+    let shot = tokio::task::spawn_blocking(move || {
+        crate::capture::region(&allowed, left, top, width, height)
+    })
+    .await
+    .map_err(|err| format!("the capture failed: {err}"))??;
 
     let size = format!("{}x{}", shot.width, shot.height);
     after_capture(&app, shot).await?;
@@ -286,10 +301,12 @@ pub(crate) async fn capture_screen(app: AppHandle) -> Result<String, String> {
 
     let (left, top, width, height) = crate::capture::virtual_screen();
 
-    let shot =
-        tokio::task::spawn_blocking(move || crate::capture::region(left, top, width, height))
-            .await
-            .map_err(|err| format!("the capture failed: {err}"))??;
+    let allowed = crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
+    let shot = tokio::task::spawn_blocking(move || {
+        crate::capture::region(&allowed, left, top, width, height)
+    })
+    .await
+    .map_err(|err| format!("the capture failed: {err}"))??;
 
     let size = format!("{}x{}", shot.width, shot.height);
     after_capture(&app, shot).await?;

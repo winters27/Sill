@@ -60,6 +60,7 @@ pub fn builtins() -> ActionRegistry {
         Box::new(RevealInFolder),
         Box::new(CopyName),
         Box::new(TerminalHere),
+        Box::new(OpenTerminalProfile),
         Box::new(ToggleSystem),
         Box::new(VerifyFile),
         Box::new(LookUpFile),
@@ -525,6 +526,44 @@ impl Action for RunBuiltin {
                     installed.title,
                     installed.commands.join(", ")
                 )));
+            }
+            /*
+             * Private mode, flipped through the one path that applies
+             * settings.
+             *
+             * Not by reaching into the clipboard watcher and the dictation
+             * hook from here. `set_preferences` writes the file and then
+             * applies everything that can change without a restart, which
+             * already includes stopping the clipboard's thread, removing the
+             * keyboard hook, pointing the capture mirror at the new value and
+             * putting up the standing report. Doing any of that here would be
+             * a second implementation of the thing rule 14 exists to prevent,
+             * and the half somebody forgot would be the half that still
+             * records.
+             */
+            crate::registry::PRIVATE_MODE => {
+                let prefs = app.state::<crate::state::PrefsState>();
+
+                let next = {
+                    let held = prefs.inner.lock().await;
+                    let mut next = held.clone();
+                    next.privacy.paused = !next.privacy.paused;
+                    next
+                };
+
+                let paused = next.privacy.paused;
+                crate::commands::settings::set_preferences(app.clone(), prefs, next).await?;
+
+                // What it is now rather than what it was asked to do, which is
+                // the rule the system switches follow: the sentence stays true
+                // whatever else changed in between.
+                return Ok(Outcome::done(if paused {
+                    "Private mode on. The clipboard history, dictation and screen capture \
+                     are paused."
+                } else {
+                    "Private mode off. The clipboard history, dictation and screen capture \
+                     are back."
+                }));
             }
             "quicklinks" => {
                 crate::commands::settings::open_settings(app.clone(), panel("quicklinks")).await?
@@ -1594,6 +1633,59 @@ impl Action for TerminalHere {
             Some(profile) => format!("Opened {profile} in {}", name_of(&here)),
             None => format!("Opened a terminal in {}", name_of(&here)),
         }))
+    }
+}
+
+/// Opens one Windows Terminal profile, or one WSL distribution.
+///
+/// The row this acts on already knows which of the two it is, and that decides
+/// the program: `wt -p` for a profile Terminal knows about, `wsl -d` for a
+/// distribution it has never generated one for. Asking `wt` to open a profile
+/// it does not have is not an error it reports; it opens nothing and says
+/// nothing, which from the outside is indistinguishable from Sill being
+/// broken.
+///
+/// No starting folder, deliberately. A profile carries its own
+/// `startingDirectory` and somebody who wanted a particular folder has
+/// "Open Terminal Here" on that folder, which is a different question with a
+/// different answer.
+struct OpenTerminalProfile;
+
+#[async_trait]
+impl Action for OpenTerminalProfile {
+    fn id(&self) -> &'static str {
+        "sill.terminal.open"
+    }
+
+    fn title(&self) -> &'static str {
+        "Open Terminal"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::TerminalProfile
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ProcessLaunch]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        // The row carries which program to run, in its mode, because the row
+        // is the only thing that knows: by the time this runs, the settings
+        // file and the registry have both been left behind.
+        let profile = crate::terminals::profile_from(&object.title, &object.target);
+        let (program, args) = crate::terminals::opening(&profile);
+
+        std::process::Command::new(program)
+            .args(&args)
+            .spawn()
+            .map_err(|err| format!("{program} would not start: {err}"))?;
+
+        Ok(Outcome::done(format!("Opened {}", object.title)))
     }
 }
 

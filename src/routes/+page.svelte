@@ -2069,6 +2069,27 @@
         return;
       }
 
+      /*
+       * A terminal profile is not in the index either.
+       *
+       * It is read out of Windows Terminal's settings and the WSL keys in the
+       * registry when somebody types one of the words that asks, so
+       * `launchCommand` would look its id up and find nothing, which is the
+       * failure the comment above describes for files. The action registry is
+       * what knows that a Terminal profile is opened by `wt -p` and a WSL
+       * distribution with no profile by `wsl -d`, and the row carries which.
+       */
+      if (command.mode === "terminal-profile") {
+        void recordUse(command.id, query);
+        try {
+          await runObjectAction("sill.terminal.open", asTarget(command));
+          await dismiss();
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
       // A search is not in the index either, and there is not even an address
       // yet: the words are carried and Rust turns them into one, because which
       // engine to use is a setting and the escaping is the part that is easy to

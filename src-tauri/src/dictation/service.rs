@@ -67,6 +67,18 @@ pub struct DictationService {
     /// Set by the first cancel when `confirm_cancel` is on, so the second one
     /// goes through. Cleared whenever a recording starts or ends.
     cancel_armed: AtomicBool,
+    /// Whether private mode is on.
+    ///
+    /// **Separate from `settings.enabled`, and it has to be.** That setting is
+    /// about the keyboard trigger, which its own row in Settings says: it
+    /// installs a low-level hook, it is off by default, and the "Dictate" row
+    /// exists to start a dictation without it. Refusing to listen whenever the
+    /// trigger is off would break that row on every machine that has never
+    /// turned the hook on.
+    ///
+    /// Private mode is the other thing: nothing may listen, however it was
+    /// asked.
+    paused: AtomicBool,
 }
 
 impl DictationService {
@@ -87,6 +99,31 @@ impl DictationService {
         }
     }
 
+    /// Whether private mode is on.
+    pub fn paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
+    /// Points this at what the preferences say. See `apply_dictation`.
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+    }
+
+    /// Whether the microphone may be opened at all.
+    ///
+    /// Its own function so it can be tested without an application, and so
+    /// that what refuses is one sentence rather than a condition written out
+    /// again at each of the three places that reach `start`.
+    pub fn may_listen(&self) -> Result<()> {
+        if !self.paused() {
+            return Ok(());
+        }
+
+        Err(DictationError::Validation(
+            crate::privacy::REFUSED_LISTENING.to_string(),
+        ))
+    }
+
     pub fn is_listening(&self) -> bool {
         self.active
             .lock()
@@ -100,6 +137,18 @@ impl DictationService {
     /// restarting: the hook guards against auto-repeat, but a deep link or a
     /// launcher command could still arrive mid-recording.
     pub fn start(&self, app: &AppHandle) -> Result<()> {
+        /*
+         * Before the lock, before the microphone, before anything.
+         *
+         * Taking the keyboard hook away is not the same as refusing to listen,
+         * and the gap was real: three things reach this without passing the
+         * hook at all. The "Dictate" row exists for exactly that, the deep
+         * link `sill://dictate` is a second, and the hook thread itself is the
+         * third. Private mode that only disarmed the trigger would have left
+         * a row on screen that opens the microphone and says "Listening".
+         */
+        self.may_listen()?;
+
         let mut active = self
             .active
             .lock()
