@@ -7,7 +7,7 @@
  * `actions.length === 0` is true in both of the two branches that tested it.
  */
 import { describe, expect, test } from "vitest";
-import { couldNot, noMatch, standing, whileEmpty, type Reading } from "$lib/instead";
+import { couldNot, noMatch, rootEmpty, standing, whileEmpty, type Reading } from "$lib/instead";
 
 const reading = (over: Partial<Reading> = {}): Reading => ({
   failed: false,
@@ -166,5 +166,49 @@ describe("what an extension's own list says when it is empty", () => {
    */
   test("fetching beats a query that has not been answered yet", () => {
     expect(whileEmpty(reading({ loading: true }), "tada", words).headline).toBe("Still looking");
+  });
+});
+
+/*
+ * The root list with nothing in it, which is two different silences.
+ *
+ * On a first run Sill reads every shortcut, every uninstall entry and every
+ * executable on `PATH` before the list has anything in it, and that second is
+ * exactly when somebody types their first word. The answer used to be "No
+ * results for chrome", which is a claim about their machine made before Sill
+ * had looked at it, in the first minute of using the application.
+ */
+describe("an empty root list", () => {
+  test("says it is still reading rather than that there is nothing", () => {
+    const said = rootEmpty("chrome", true);
+    expect(said.headline).toBe("Still reading what is installed");
+  });
+
+  /*
+   * The word is deliberately not named while the scan is running. It matched
+   * nothing yet, and naming it is the same wrong claim in a politer voice.
+   */
+  test("does not blame the word typed while the first scan is running", () => {
+    const said = rootEmpty("chrome", true);
+    expect(`${said.headline} ${said.hint}`).not.toContain("chrome");
+  });
+
+  test("names the word once the scan has landed", () => {
+    const said = rootEmpty("chrome", false);
+    expect(said.headline).toBe("No results for chrome");
+    expect(said.hint).toContain("fewer letters");
+  });
+
+  test("an empty field with nothing found is not blamed on a word either", () => {
+    expect(rootEmpty("", false).headline).toBe("No results");
+  });
+
+  /*
+   * And the tone the list draws it in. `loading` is what stops the mark and
+   * the wording being the ones for a finished, genuinely empty answer.
+   */
+  test("still reading is a loading state, not an empty one", () => {
+    expect(standing({ failed: false, loading: true, count: 0 })).toBe("loading");
+    expect(standing({ failed: false, loading: false, count: 0 })).toBe("empty");
   });
 });

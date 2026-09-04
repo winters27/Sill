@@ -14,7 +14,9 @@
   import "$lib/theme/theme.css";
   import AiChat, { type Shown } from "$lib/components/AiChat.svelte";
   import ScriptOutput from "$lib/components/ScriptOutput.svelte";
-  import type { AiReady } from "$lib/exthost/commands";
+  import Welcome from "$lib/components/Welcome.svelte";
+  import RootList from "$lib/components/RootList.svelte";
+  import type { AiReady, Welcome as Greeting } from "$lib/exthost/commands";
 
   const answersWith = {
     ready: true,
@@ -24,6 +26,76 @@
     kind: "remote",
     whyNot: "",
   } as unknown as AiReady;
+
+  /*
+   * The welcome in its two states, copied out of what Rust returns.
+   *
+   * A first run happens once per machine, so without this the only way to look
+   * at the screen everybody meets first is to throw away a profile. Fixtures
+   * rather than a call: the point of looking at these side by side is the
+   * difference between them, and a machine can only be in one of them.
+   *
+   * The chords here are fixture data, the same way the wallpapers in the
+   * gallery are. Nothing in this route ships.
+   */
+  const KEY_WORKS: Greeting = {
+    opening: {
+      headline: "Press Alt+Space to open Sill",
+      body: "Press it again to put Sill away. There is no taskbar button, so Sill stays out of the way until you ask for it.",
+    },
+    summonTaken: false,
+    tray: {
+      headline: "The icon in the notification area is Sill",
+      body: "Click it to open the launcher and right click it for a menu. Its label is also where Sill says so when something it tried to do did not work.",
+    },
+    steps: [
+      {
+        id: "folders",
+        title: "Choose which folders Sill searches",
+        subtitle:
+          "C:\\Users\\someone is indexed to start with. Add more, or point Sill somewhere else, in Settings.",
+        does: "chooseFolders",
+      },
+      {
+        id: "everything",
+        title: "Search whole drives too",
+        subtitle:
+          "Sill searches the folders it indexes. It also asks Everything, a separate file indexer, whenever that is running, and it is not on this machine.",
+        does: "chooseFolders",
+      },
+      {
+        id: "keys",
+        title: "See every key Sill answers to",
+        subtitle:
+          "Built from the keys that really are bound, so nothing on it is a key that does nothing.",
+        does: "showKeys",
+      },
+      { id: "start", title: "Start searching", subtitle: "Escape does the same.", does: "finish" },
+    ],
+  };
+
+  /** The case this whole screen exists for, and the one live on this machine. */
+  const KEY_TAKEN: Greeting = {
+    ...KEY_WORKS,
+    opening: {
+      headline: "Alt+Space belongs to another application",
+      body: "Sill asked Windows for Alt+Space when it started and was refused, so that combination does nothing here. Choose a different one below.",
+    },
+    summonTaken: true,
+    steps: [
+      {
+        id: "key",
+        title: "Choose a key that is free",
+        subtitle:
+          "Settings opens on the row that sets it, and the new key takes effect straight away.",
+        does: "chooseKey",
+      },
+      ...KEY_WORKS.steps,
+    ],
+  };
+
+  let works = $state(0);
+  let taken = $state(0);
 
   const conversation: Shown[] = [
     { role: "user", text: "What windows do I have open?", steps: [] },
@@ -36,6 +108,66 @@
 </script>
 
 <div class="stage">
+  <section>
+    <h2>A first run where the summon key registered</h2>
+    <div class="window">
+      <Welcome
+        said={KEY_WORKS}
+        selected={works}
+        onselect={(i) => (works = i)}
+        onrun={(i) => (works = i)}
+      />
+    </div>
+  </section>
+
+  <section>
+    <h2>A first run where another application already had the summon key</h2>
+    <div class="window">
+      <Welcome
+        said={KEY_TAKEN}
+        selected={taken}
+        onselect={(i) => (taken = i)}
+        onrun={(i) => (taken = i)}
+      />
+    </div>
+  </section>
+
+  <!--
+    The two silences an empty root list can be.
+
+    Side by side because the whole point is that they look identical on a real
+    machine and mean opposite things: one is worth waiting a second for, the
+    other is worth retyping. The second is what somebody got on their first run
+    until `P5-08`, in the first minute of using the application.
+  -->
+  <section>
+    <h2>Nothing found while the first scan is still running</h2>
+    <div class="window short">
+      <RootList
+        commands={[]}
+        selected={0}
+        query="chrome"
+        building={true}
+        onselect={() => {}}
+        onrun={() => {}}
+      />
+    </div>
+  </section>
+
+  <section>
+    <h2>Nothing found once the index is built</h2>
+    <div class="window short">
+      <RootList
+        commands={[]}
+        selected={0}
+        query="chrome"
+        building={false}
+        onselect={() => {}}
+        onrun={() => {}}
+      />
+    </div>
+  </section>
+
   <section>
     <h2>An empty conversation</h2>
     <div class="window">

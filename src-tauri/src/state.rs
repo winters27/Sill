@@ -603,6 +603,46 @@ pub(crate) struct RegistryState {
     /// does not hold the change. Remembered rather than started at once, for
     /// the same reason the flag above exists.
     pub(crate) rescan: Arc<std::sync::atomic::AtomicBool>,
+    /**
+    Set until the first index has landed, however that turns out.
+
+    Not the same question as `scanning`, which is "is a scan running". This is
+    "has there ever been an index", and it is asked by the launcher's empty
+    state. An empty root list on a first run and an empty root list because a
+    word matched nothing look identical and are not: one is worth waiting a
+    second for and the other is worth retyping. Without this the launcher told
+    somebody on their first minute with Sill that there were no results for
+    what they typed, while it was still reading what was installed.
+
+    True from construction rather than set when the scan starts. Tauri creates
+    the window before the `setup` hook that starts it, so a page asking early
+    has to be told the truthful "not yet" rather than "there is nothing".
+    */
+    pub(crate) first_scan: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/**
+Holds `first_scan` up while the first index is read, and puts it down however
+that ends.
+
+A guard rather than a store at each exit. The startup scan gives up in three
+places, one of which is a `spawn_blocking` that can fail, and a flag left
+standing by any of them leaves the launcher saying it is still reading files
+forever. Drop runs on every one of those paths and on a panic.
+*/
+pub(crate) struct FirstScan(Arc<std::sync::atomic::AtomicBool>);
+
+impl FirstScan {
+    pub(crate) fn hold(flag: Arc<std::sync::atomic::AtomicBool>) -> Self {
+        flag.store(true, std::sync::atomic::Ordering::Release);
+        Self(flag)
+    }
+}
+
+impl Drop for FirstScan {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 impl RegistryState {
@@ -883,6 +923,47 @@ mod tests {
         );
     }
 
+    /**
+    The launcher stops saying it is still reading, however the read ended.
+
+    What hangs on it is one sentence over an empty root list: "still reading
+    what is installed" while the first scan runs, "no results for that word"
+    once it has landed. The startup scan gives up in three places, and a flag
+    left standing by any of them would leave the launcher claiming forever that
+    it had not finished looking, on every search that found nothing.
+
+    A guard rather than a store at each exit, so a path added later cannot
+    forget. `?` on a failed disk read is exactly such a path and already exists.
+    */
+    #[test]
+    fn the_first_scan_flag_comes_down_however_the_scan_ends() {
+        let flag = Arc::new(AtomicBool::new(false));
+
+        {
+            let _held = FirstScan::hold(flag.clone());
+            assert!(flag.load(Ordering::Acquire), "the scan did not raise it");
+        }
+
+        assert!(
+            !flag.load(Ordering::Acquire),
+            "an ordinary end left it raised"
+        );
+
+        // And the one the guard exists for: an early return, which here is
+        // whatever leaves the scope without reaching the bottom of it.
+        fn gives_up(flag: Arc<AtomicBool>) {
+            let _held = FirstScan::hold(flag);
+            #[allow(clippy::needless_return)]
+            return;
+        }
+
+        gives_up(flag.clone());
+        assert!(
+            !flag.load(Ordering::Acquire),
+            "a scan that gave up early left the launcher saying it was still reading"
+        );
+    }
+
     /// Nothing changed, so nothing more to do.
     #[test]
     fn a_walk_that_nothing_interrupted_stops() {
@@ -951,6 +1032,7 @@ mod tests {
             recording: Arc::new(std::sync::Mutex::new(())),
             scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             rescan: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            first_scan: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
