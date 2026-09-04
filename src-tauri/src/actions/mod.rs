@@ -3799,3 +3799,43 @@ mod running_a_script {
         }
     }
 }
+
+/**
+Which of these a trigger may name.
+
+`P8-02` narrows automation to the actions that never stop and ask, and that
+narrowing is one line reading [`Action::capabilities`]. What it does not do on
+its own is say whether anything useful is left: a rule refusing the entire
+registry would be green in every test written about the rule itself.
+
+So it is checked against real actions, and the ones that have to survive it
+are named rather than counted. A count stays green while the half of the list
+somebody would actually use quietly leaves it.
+
+**Not `builtins()`.** For the reason [`crate::suite`] already gives about the
+`actions` integration test: building the registry retains the dialog plugin's
+`TaskDialogIndirect`, which the library's own test binary has no manifest to
+resolve, so the whole `--lib` run dies at load with
+`STATUS_ENTRYPOINT_NOT_FOUND` before a single test starts. That was reproduced
+here rather than taken on trust. The concrete types below are called directly,
+so no trait object is built and none of it is linked in.
+*/
+#[cfg(test)]
+mod what_a_trigger_may_run {
+    use super::*;
+    use crate::automation::may_schedule;
+
+    #[test]
+    fn the_useful_ones_survive_the_narrowing() {
+        assert!(may_schedule(CopyPath.id(), CopyPath.capabilities()).is_ok());
+        assert!(may_schedule(CopyName.id(), CopyName.capabilities()).is_ok());
+        assert!(may_schedule(HashFile.id(), HashFile.capabilities()).is_ok());
+    }
+
+    #[test]
+    fn the_ones_that_would_ask_do_not() {
+        assert!(may_schedule(RunScript.id(), RunScript.capabilities()).is_err());
+        assert!(may_schedule(Launch.id(), Launch.capabilities()).is_err());
+        assert!(may_schedule(RecycleFile.id(), RecycleFile.capabilities()).is_err());
+    }
+}

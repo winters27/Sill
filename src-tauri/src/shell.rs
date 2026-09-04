@@ -189,7 +189,7 @@ A token with nothing awkward in it is left bare, so a command line stays
 readable in Task Manager and in a log.
 */
 #[cfg(windows)]
-fn one_argument(one: &str) -> String {
+pub(crate) fn one_argument(one: &str) -> String {
     let awkward = |c: char| c == ' ' || c == '\t' || c == '"' || c == '\n' || c == '\u{b}';
 
     if !one.is_empty() && !one.contains(awkward) {

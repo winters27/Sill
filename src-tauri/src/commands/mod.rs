@@ -11,6 +11,7 @@
 //! reason about, and it does so gradually enough that nobody notices.
 
 pub mod ai;
+pub mod automation;
 pub mod diagnostics;
 pub mod extensions;
 pub mod launch;
