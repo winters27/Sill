@@ -43,6 +43,16 @@ export interface RankedCommand {
     /** A window that is open right now. Never from the index. */
     | "window"
     /**
+     * One tab of a browser that is running right now.
+     *
+     * Read out of the browser through UI Automation when the query was typed,
+     * with nothing kept afterwards, so like a window it is switched to through
+     * the action registry rather than launched by id. Its entrypoint is a
+     * description of where the tab was rather than a hold on it, and Rust
+     * reads the strip again before it acts.
+     */
+    | "browser-tab"
+    /**
      * A web address a browser remembers. Never from the index either.
      *
      * Read out of a browser's own database when the query was typed, and gone
@@ -177,6 +187,16 @@ export interface LaunchedCommand {
     /** A window that is open right now. Never from the index. */
     | "window"
     /**
+     * One tab of a browser that is running right now.
+     *
+     * Read out of the browser through UI Automation when the query was typed,
+     * with nothing kept afterwards, so like a window it is switched to through
+     * the action registry rather than launched by id. Its entrypoint is a
+     * description of where the tab was rather than a hold on it, and Rust
+     * reads the strip again before it acts.
+     */
+    | "browser-tab"
+    /**
      * A web address a browser remembers. Never from the index either.
      *
      * Read out of a browser's own database when the query was typed, and gone
@@ -291,6 +311,32 @@ export function forgetPreviews(): Promise<void> {
   return invoke<void>("forget_previews");
 }
 
+/** What a file turned out to look like. */
+export interface FileLook {
+  /** `image` or `text`. */
+  kind: "image" | "text";
+  /** A data URI for a picture, the text itself for text. */
+  body: string;
+  /** Whether there is more of it than this. */
+  more: boolean;
+}
+
+/**
+ * A look inside the one file under the cursor.
+ *
+ * `null` for most files: an executable, an archive, a folder, a picture too
+ * big to be worth sending, or one whose bytes are still in somebody's cloud.
+ * None of those are errors and none of them deserve a message.
+ */
+export function filePreview(path: string): Promise<FileLook | null> {
+  return invoke<FileLook | null>("file_preview", { path });
+}
+
+/** Drops every look inside a file. Called when the list goes away or hides. */
+export function forgetFilePreviews(): Promise<void> {
+  return invoke<void>("forget_file_previews");
+}
+
 /** Something handed to the model along with a question. */
 export interface AiAttached {
   name: string;
@@ -372,6 +418,82 @@ export type KeySection = { title: string; keys: KeyLine[] };
  */
 export function keyboardReference(): Promise<KeySection[]> {
   return invoke<KeySection[]>("keyboard_reference");
+}
+
+/** A block of prose on the welcome: the line to read and the one under it. */
+export type Said = { headline: string; body: string };
+
+/** What choosing a row on the welcome does. */
+export type WelcomeDoes =
+  | "chooseKey"
+  | "chooseFolders"
+  | "startEverything"
+  | "showKeys"
+  | "finish";
+
+/** One row of the welcome. */
+export type WelcomeStep = {
+  id: string;
+  title: string;
+  subtitle: string;
+  does: WelcomeDoes;
+};
+
+/** Everything the welcome says, assembled in Rust. */
+export type Welcome = {
+  opening: Said;
+  summonTaken: boolean;
+  tray: Said;
+  steps: WelcomeStep[];
+};
+
+/**
+ * What to say on a first run, or nothing.
+ *
+ * ## Why the window writes none of this
+ *
+ * The first line of a welcome names the key that opens Sill, and the settings
+ * file is the wrong place to read it from: it holds the key that was asked
+ * for, not the one Windows agreed to. Those two have disagreed on the machine
+ * this was written on at every start for weeks. Rust reads what registration
+ * answered and hands back sentences; nothing here composes one.
+ *
+ * ## Two ways of asking, and why both exist
+ *
+ * `again: false` is the question that puts a welcome on screen, and Rust
+ * answers it at most once. `null` from it can also mean "the summon key has
+ * not been registered yet", because this window exists before the code that
+ * registers it. So it is asked on mount **and** when Rust says the launcher
+ * was opened for this, and exactly one of those two lands after the answer
+ * exists.
+ *
+ * `again: true` refreshes a welcome that is already up, which is what stops it
+ * saying a key is taken after somebody has changed it.
+ *
+ * Reported rather than silent. A first run that quietly shows nothing is a
+ * first run nobody can tell went wrong.
+ */
+export function welcome(again = false): Promise<Welcome | null> {
+  return invoke<Welcome | null>("welcome", { again }).catch(
+    orElse("launcher", "work out what to show you on a first run", null, "shortcuts"),
+  );
+}
+
+/** Starts the whole-drive indexer that is on this machine already. */
+export function startEverything(): Promise<string> {
+  return invoke<string>("start_everything");
+}
+
+/**
+ * Whether Sill has finished its first look at what is installed.
+ *
+ * What an empty root list means depends on it: still reading, or genuinely no
+ * match for the word typed. Silent, and false when it fails, because false is
+ * the ordinary answer and the cost of the fallback is one wrong sentence over
+ * an empty list rather than a claim about somebody's machine.
+ */
+export function indexBuilding(): Promise<boolean> {
+  return invoke<boolean>("index_building").catch(silently(false));
 }
 
 export function completePath(typed: string): Promise<string | null> {
@@ -466,6 +588,15 @@ export interface AiAsking {
   subject: string;
   /** What it touches, in words somebody deciding would use. */
   touches: string;
+  /**
+   * Why this is a keypress rather than Windows Hello, when it should have been.
+   *
+   * Absent on every card that was never meant to be more than a card. Present
+   * only when the Hello gate is switched on and this machine cannot run it, so
+   * that a weaker answer is never mistaken for the stronger one somebody
+   * turned on.
+   */
+  instead?: string;
 }
 
 /**
@@ -824,6 +955,7 @@ export function indexFolder(path: string, wanted: boolean): Promise<string[]> {
 export interface Elsewhere {
   files: FileHit[];
   pages: BrowserHit[];
+  tabs: BrowserTab[];
 }
 
 export function searchElsewhere(query: string): Promise<Elsewhere> {
@@ -833,7 +965,7 @@ export function searchElsewhere(query: string): Promise<Elsewhere> {
   // whose whole job is to answer before the next character arrives. What a
   // failure costs is one query's results, and the next keystroke asks again.
   return invoke<Elsewhere>("search_elsewhere", { query }).catch(
-    silently({ files: [], pages: [] }),
+    silently({ files: [], pages: [], tabs: [] }),
   );
 }
 
@@ -948,6 +1080,57 @@ export function browserAsCommand(hit: BrowserHit): RankedCommand {
     // Zen are told apart at a glance, and neither is dressed as one of Sill's
     // own commands, which is the same rule the Windows switches follow.
     icon: hit.icon ?? undefined,
+    matched: [],
+  };
+}
+
+/** A tab a browser has open right now. */
+export interface BrowserTab {
+  /** The window it is in and the browser's own name for it. */
+  id: string;
+  title: string;
+  /** Which browser it belongs to, which is the group heading. */
+  browser: string;
+  /** The browser's own program, for the row's icon. */
+  program: string | null;
+  /** Already the tab in front of its own window. */
+  active: boolean;
+  /**
+   * Everything the action needs to find this tab again.
+   *
+   * **Composed by Rust and read back by Rust**, and opaque here on purpose.
+   * The row carries a description of where a tab was rather than a hold on
+   * one, because between the keystroke that produced the row and the Enter
+   * that runs it, tabs get opened, closed, dragged and renamed. Writing that
+   * description here would put its format in two languages, and a format in
+   * two languages agrees until the day somebody adds a field to one.
+   */
+  entrypoint: string;
+}
+
+/**
+ * A tab as a result row.
+ *
+ * Reuses the command row exactly as a file and a remembered page do, so
+ * selection, grouping and the keyboard work without knowing what a tab is.
+ *
+ * The subtitle says the browser and nothing else. A tab has no address to show
+ * here: a tab strip exposes what a tab is called and not where it points, and
+ * a subtitle guessed from the title would be a row that lies about what it
+ * knows.
+ */
+export function tabAsCommand(tab: BrowserTab): RankedCommand {
+  return {
+    id: tab.id,
+    extension: "browser-tab",
+    extensionTitle: tab.browser,
+    title: tab.title,
+    subtitle: tab.active ? `${tab.browser}, in front` : tab.browser,
+    mode: "browser-tab",
+    entrypoint: tab.entrypoint,
+    // The browser's own mark, for the reason a history hit wears one: going to
+    // a tab is Sill handing you back to that browser, not Sill doing something.
+    icon: tab.program ?? undefined,
     matched: [],
   };
 }

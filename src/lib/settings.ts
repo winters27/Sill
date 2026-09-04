@@ -141,6 +141,16 @@ export interface Browsers {
   /** Pages that were saved, which is the smaller and more deliberate set. */
   bookmarks: boolean;
   maxResults: number;
+  /** Tabs the running browsers have open, read when somebody types. */
+  tabs: boolean;
+  /**
+   * Whether that includes Firefox and the browsers built on it.
+   *
+   * Its own switch because it is the one setting in Sill whose cost lands in
+   * another program: a Firefox keeps its accessibility engine off until a
+   * client asks, and reading tabs is the asking.
+   */
+  tabsFirefox: boolean;
 }
 
 /** The extension store. */
@@ -236,6 +246,14 @@ export interface AiSettings {
   provider: string;
   /** The ones set up. Each key is sealed before this file is written. */
   providers: import("$lib/ai").AiProvider[];
+  /**
+   * Whether running something or writing a file asks for Windows Hello.
+   *
+   * On by default. Turning it off leaves the approval card that was there
+   * before, never nothing, and a machine with no enrolled Hello credential
+   * falls back to that card whichever way this is set.
+   */
+  helloForHeavyActions: boolean;
 }
 
 /** A modifier, as a person thinks of it rather than as Windows sends it. */
@@ -259,6 +277,8 @@ export interface TapSettings {
 export type BindingSource =
   | { from: "selection" }
   | { from: "clipboard" }
+  /** The window in front, which is what makes a window action bindable. */
+  | { from: "foregroundWindow" }
   | { from: "command"; id: string };
 
 /** A key that runs an action without the launcher appearing. */

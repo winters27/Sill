@@ -67,3 +67,69 @@ fn one_source_answering_nothing_is_not_a_problem() {
 
     assert!(crate::commands::search::merge(Vec::new(), Vec::new(), 10).is_empty());
 }
+
+// ------------------------------------ the index and what was open lately
+
+/// The two sources that rank alike are ranked together, not stacked.
+///
+/// Sill's index and the Recent folder both score with `registry::match_name`,
+/// so appending one to the other would put a weak match from the index above an
+/// exact one from the Recent folder. That is the fault `search_commands` had
+/// while open windows were a second list, and its own note says it: two lists
+/// concatenated is not a ranking.
+#[test]
+fn a_recent_file_that_matches_exactly_beats_a_weak_one_from_the_index() {
+    // The index found something whose name merely contains the word. The
+    // Recent folder found the file that is called it.
+    let ours = vec![hit(r"C:\archive\budget-notes-old-copy.md")];
+    let lately = vec![hit(r"C:\work\budget.md")];
+
+    let blended = crate::commands::search::blend(ours, lately, "budget", 10);
+
+    assert_eq!(
+        blended[0].path, r"C:\work\budget.md",
+        "the exact match was pushed below the weaker one: {blended:?}"
+    );
+}
+
+/// And a tie keeps the index's order, which it earned by ranking first.
+#[test]
+fn two_equally_good_answers_keep_the_index_ahead() {
+    let ours = vec![hit(r"C:\work\notes.md")];
+    let lately = vec![hit(r"C:\elsewhere\notes.md")];
+
+    let blended = crate::commands::search::blend(ours, lately, "notes", 10);
+
+    assert_eq!(blended[0].path, r"C:\work\notes.md", "{blended:?}");
+    assert_eq!(blended.len(), 2);
+}
+
+#[test]
+fn the_same_file_from_the_index_and_from_recent_is_listed_once() {
+    // A file under an indexed folder that was also opened lately. The shortcut
+    // records whatever capitalisation the shell wrote.
+    let ours = vec![hit(r"C:\work\notes.md")];
+    let lately = vec![hit(r"c:\WORK\notes.md")];
+
+    assert_eq!(
+        crate::commands::search::blend(ours, lately, "notes", 10).len(),
+        1
+    );
+}
+
+#[test]
+fn blending_with_nothing_recent_changes_nothing() {
+    // The ordinary case: no shortcut in the Recent folder matched. The index's
+    // own order, and its own tie-break on the path, have to survive untouched.
+    let ours = vec![
+        hit(r"C:\work\notes.md"),
+        hit(r"C:\work\notebook.md"),
+        hit(r"C:\work\notes-from-the-meeting.md"),
+    ];
+    let before: Vec<String> = ours.iter().map(|h| h.path.clone()).collect();
+
+    let blended = crate::commands::search::blend(ours, Vec::new(), "notes", 10);
+    let after: Vec<String> = blended.iter().map(|h| h.path.clone()).collect();
+
+    assert_eq!(after, before);
+}

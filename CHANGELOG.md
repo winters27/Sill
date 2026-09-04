@@ -34,6 +34,24 @@ results that were found but sorted as though they were not.
 far as every match agrees, the way a shell does, with a trailing separator on a
 folder so the next Tab reads inside it.
 
+**Three words narrow a file search.** `ext:pdf`, `size:>1mb` and `date:week`
+filter what Sill's own index answers with, and they combine, so
+`notes ext:md date:month` is the notes touched this month. One on its own is a
+question too: `ext:pdf` lists the PDFs. Typing anything else is not slower for
+them existing.
+
+**Recently opened files are findable by name.** Windows keeps a note of
+everything that has been opened and Sill reads it when a query asks rather than
+watching it, so a document in a folder nobody added as a search root is still
+one word away.
+
+**The file under the cursor shows what is inside it.** A picture, or the first
+screenful of text, once the selection has stopped moving. A path in a subtitle
+says where a file is and not what it is, and two files with the same name in
+two folders were two rows nobody could tell apart. Folders, programs, archives
+and anything whose bytes are still in somebody's cloud are left alone: a
+preview never downloads a file and never opens one it cannot show.
+
 **Every action can be given a key, and the keys are listed.** Actions carry
 their own shortcut rather than the launcher knowing about four of them, and
 Settings > Shortcuts shows every action with the key that runs it, which

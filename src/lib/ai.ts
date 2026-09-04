@@ -5,6 +5,7 @@
  * what a request looks like. This side only shows and collects.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { silently } from "$lib/status";
 
 /** The shape a service expects, or the CLI that is not a shape at all. */
 export type AiWire = "openAi" | "anthropic" | "claudeCode";
@@ -35,6 +36,31 @@ export interface AiModel {
 /** The services Sill knows how to reach, ready to be added. */
 export function aiKnown(): Promise<AiProvider[]> {
   return invoke<AiProvider[]>("ai_known");
+}
+
+/** What Windows Hello can do on this machine. */
+export interface AiHelloHere {
+  /** Whether a face, a fingerprint or a Hello PIN can be asked for. */
+  ready: boolean;
+  /** Why not, when not. Absent when it can. */
+  why?: string;
+}
+
+/**
+ * Asks Windows whether the Hello gate can actually run here.
+ *
+ * For the settings row, so a switch shown as on can say when the thing it
+ * switches on is not available on this machine. Answering "cannot" when the
+ * call itself fails is the honest direction: the row would rather understate
+ * what is protecting somebody than overstate it.
+ */
+export function aiHello(): Promise<AiHelloHere> {
+  return invoke<AiHelloHere>("ai_hello").catch(
+    silently({
+      ready: false,
+      why: "Windows could not be asked about Windows Hello",
+    }),
+  );
 }
 
 /**

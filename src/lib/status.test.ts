@@ -23,8 +23,16 @@ const { forgetUnreadable, orElse, silently } = await import("$lib/status");
 const { clipboardCollections, clipboardCollectionEntries, clipboardLastSkipped } =
   await import("$lib/clipboard");
 const { captureTargets } = await import("$lib/capture");
-const { defaultBrowser, fileSearchMissing, listDrives, queryHistory, recordUse, searchEmoji } =
-  await import("$lib/exthost/commands");
+const {
+  defaultBrowser,
+  fileSearchMissing,
+  indexBuilding,
+  listDrives,
+  queryHistory,
+  recordUse,
+  searchEmoji,
+  welcome,
+} = await import("$lib/exthost/commands");
 
 /** What `note_unreadable` was told, or null if it was never called. */
 function reported(): Record<string, string> | null {
@@ -83,6 +91,22 @@ describe("a failure that leaves the window saying something untrue", () => {
     });
   });
 
+  /**
+   * A first run happens once. If the welcome cannot be built the launcher
+   * simply comes up on an empty list, which is indistinguishable from Sill
+   * having nothing to say, and there is no second chance to notice.
+   */
+  test("a welcome that could not be built is reported", async () => {
+    refuse("welcome");
+
+    await expect(welcome()).resolves.toBeNull();
+    expect(reported()).toMatchObject({
+      surface: "launcher",
+      what: "work out what to show you on a first run",
+      section: "shortcuts",
+    });
+  });
+
   /** No machine has no drives, so an empty list is never the truth. */
   test("the drives are reported", async () => {
     refuse("list_drives");
@@ -120,6 +144,9 @@ describe("a failure where the fallback is the honest answer", () => {
     ["record_use", () => recordUse("sill:clipboard"), undefined],
     ["search_emoji", () => searchEmoji("smile"), []],
     ["default_browser", () => defaultBrowser(), null],
+    // False is the ordinary answer, and what it costs is one wrong sentence
+    // over a list that is empty anyway rather than a claim about the machine.
+    ["index_building", () => indexBuilding(), false],
   ])("%s says nothing", async (command, call, fallback) => {
     refuse(command);
 

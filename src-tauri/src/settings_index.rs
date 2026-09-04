@@ -202,6 +202,12 @@ pub const SETTINGS: &[Setting] = &[
         "ai api key token secret credential paste anthropic openrouter",
     ),
     s(
+        "ai",
+        "AI Chat",
+        "Windows Hello to run a command or write a file",
+        "hello fingerprint face pin biometric approve approval consent permission \n         confirm shell command script file write ai mcp model prompt injection",
+    ),
+    s(
         "advanced",
         "Advanced",
         "What Sill has done",
@@ -699,6 +705,18 @@ pub const SETTINGS: &[Setting] = &[
         "Sources",
         "History",
         "browser visited pages recently",
+    ),
+    s(
+        "sources",
+        "Sources",
+        "Open browser tabs",
+        "browser tabs open switch to tab chrome edge firefox zen window",
+    ),
+    s(
+        "sources",
+        "Sources",
+        "Include Firefox and browsers built on it",
+        "firefox zen librewolf waterfox tabs accessibility cost",
     ),
     s(
         "sources",

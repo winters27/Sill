@@ -3,7 +3,7 @@
 use tauri::{AppHandle, Manager, State};
 
 use crate::state::{now_seconds, CatalogState, PrefsState, RegistryState};
-use crate::{browsers, calculator, files, registry, windowing};
+use crate::{browsers, calculator, catalog, files, registry, windowing};
 
 /// What the row offering a conversation back says underneath the question.
 ///
@@ -277,6 +277,41 @@ pub(crate) async fn window_preview(app: AppHandle, id: String) -> Result<Option<
 #[tauri::command]
 pub(crate) fn forget_previews(previews: State<'_, crate::previews::Previews>) {
     previews.forget();
+}
+
+/// A look inside the one file under the cursor.
+///
+/// Asked for the selected row only and only once the selection has settled,
+/// never for the list: arrowing through twenty results must not open twenty of
+/// somebody's files. `None` when there is nothing worth showing, which is most
+/// files and is not an error.
+#[tauri::command]
+pub(crate) async fn file_preview(
+    app: AppHandle,
+    path: String,
+) -> Result<Option<crate::previews::Look>, String> {
+    /*
+     * On a blocking task, because this opens somebody's file. Eight kilobytes
+     * for anything that is not a picture, and up to two megabytes and a base64
+     * for one that is, neither of which belongs on an async worker.
+     *
+     * The state is fetched inside rather than borrowed from a `State`
+     * parameter, for the reason `window_preview` gives: a borrow cannot cross
+     * onto another thread and a handle can.
+     */
+    tokio::task::spawn_blocking(move || app.state::<crate::previews::Previews>().of_file(&path))
+        .await
+        .map_err(|err| format!("could not look inside that file: {err}"))
+}
+
+/// Drops every look inside a file.
+///
+/// Called when the list showing them goes away and when the window hides. Up to
+/// twelve of these hold up to two megabytes each of somebody's picture, and a
+/// hidden launcher holding those is exactly the shape of leak `P2-06` closed.
+#[tauri::command]
+pub(crate) fn forget_file_previews(previews: State<'_, crate::previews::Previews>) {
+    previews.forget_files();
 }
 
 /// The window has painted, which is when a summon is actually over.
@@ -824,6 +859,115 @@ async fn matching_pages(
 pub(crate) struct Elsewhere {
     files: Vec<files::FileHit>,
     pages: Vec<browsers::Hit>,
+    /// Tabs the running browsers have open right now.
+    tabs: Vec<TabRow>,
+}
+
+/// One open tab, as a row.
+///
+/// A shape of its own rather than the domain type, for the one reason rule 9
+/// allows: `entrypoint` is a **format**, and the window that draws the row is
+/// the wrong place to know it. Written there, the composing and the parsing
+/// would be one function in TypeScript and one in Rust, and the pair would
+/// hold only for as long as nobody added a field. Here it is `Where`'s own
+/// writer, and `Where`'s own reader takes it back.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TabRow {
+    /// Stable while the tab lives, which is as long as the row is worth
+    /// anything: the window it is in and the browser's own name for it.
+    id: String,
+    title: String,
+    /// Which browser, for the row's group and its label.
+    browser: String,
+    /// That browser's program, for the row's icon.
+    program: Option<String>,
+    /// Already the tab in front of its own window.
+    active: bool,
+    /// Everything the action needs to find this tab again. See `uia::Where`.
+    entrypoint: String,
+}
+
+impl TabRow {
+    /// What the row carries, for the probe that presses Enter on one.
+    ///
+    /// The field stays private: everything else reads this through JSON, and
+    /// a reader inside Rust would be a second way to get at a value whose only
+    /// consumer is a `#[tauri::command]`'s answer.
+    #[cfg(test)]
+    pub(crate) fn entrypoint(&self) -> &str {
+        &self.entrypoint
+    }
+}
+
+impl From<crate::uia::Tab> for TabRow {
+    fn from(tab: crate::uia::Tab) -> Self {
+        let located = tab.located();
+
+        Self {
+            id: format!("browser-tab:{}:{}", tab.window, tab.key),
+            title: tab.title,
+            browser: tab.browser,
+            program: tab.program,
+            active: tab.active,
+            entrypoint: located.to_entrypoint(),
+        }
+    }
+}
+
+/// Tabs the running browsers have open, matching a query.
+///
+/// Here rather than beside `search_commands` for the same reason files and
+/// history are here: it asks another program a question, so the window shows
+/// what Sill already knows first and lets this arrive after.
+///
+/// **Nothing is read unless a browser is running.** The window list is
+/// something the launcher enumerates anyway, so a machine with no browser open
+/// spends one filter over a list it already has and never touches UI
+/// Automation at all.
+async fn matching_tabs(
+    query: &str,
+    settings: crate::preferences::Browsers,
+    searching: &crate::state::Searching,
+    token: u64,
+) -> Result<Vec<TabRow>, String> {
+    if !settings.tabs {
+        return Ok(Vec::new());
+    }
+
+    let mut families = vec![crate::browsers::Family::Chromium];
+
+    // Firefox separately, because reading one switches that browser's
+    // accessibility engine on and it stays on. See `preferences::Browsers`.
+    if settings.tabs_firefox {
+        families.push(crate::browsers::Family::Firefox);
+    }
+
+    let open = crate::uia::browser_windows(&crate::windowing::list(), &families);
+
+    if open.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Checked here rather than earlier because the check above is the cheap
+    // one and this is the expensive one: past this line the read crosses into
+    // another program's process, once per window.
+    if !searching.is_current(token) {
+        return Ok(Vec::new());
+    }
+
+    let query = query.to_string();
+    let wanted = settings.max_results as usize;
+
+    // Cross-process COM calls that block, so never on an async worker.
+    tokio::task::spawn_blocking(move || {
+        crate::uia::rank(crate::uia::read(&open), &query, wanted)
+            .into_iter()
+            .map(TabRow::from)
+            .collect()
+    })
+    .await
+    .map_err(|err| format!("browser tab search failed: {err}"))
 }
 
 /// Both of the slow sources, asked once and answered together.
@@ -843,6 +987,7 @@ pub(crate) async fn search_elsewhere(
     catalog: State<'_, CatalogState>,
     searching: State<'_, crate::state::Searching>,
     timings: State<'_, crate::timing::Timings>,
+    recent: State<'_, crate::state::Fresh<std::sync::Arc<Vec<files::Trace>>>>,
     query: String,
 ) -> Result<Elsewhere, String> {
     let token = searching.begin();
@@ -857,6 +1002,23 @@ pub(crate) async fn search_elsewhere(
     // outlives this borrow.
     let catalog = std::sync::Arc::clone(&catalog.inner.load_full());
 
+    /*
+     * The Recent folder, read at most once every few seconds.
+     *
+     * Windows keeps a shortcut in it to everything that has been opened, which
+     * is the one source that knows a file was worked on this morning without
+     * Sill having watched anybody work. It is a directory listing rather than
+     * an index, so it is held for the length of a summon rather than read per
+     * keystroke, and the `Arc` is what makes taking it out of the cache a
+     * pointer rather than three hundred strings.
+     */
+    let traces = recent.get(|| {
+        std::sync::Arc::new(match files::recent_folder() {
+            Some(folder) => files::traces(&folder, files::RECENT_MOST),
+            None => Vec::new(),
+        })
+    });
+
     // Together rather than one after the other. Neither needs the other's
     // answer, and the browser search used to wait out the file search first.
     //
@@ -864,20 +1026,28 @@ pub(crate) async fn search_elsewhere(
     // they are separately named here: they run at the same time, so a total
     // for both would be whichever of them is slower and would never say which.
     let clock = timings.inner();
-    let (files, pages) = tokio::join!(
+    // The same settings answer two questions here, so each half takes its own
+    // copy rather than one borrowing while the other moves.
+    let tab_settings = browser_settings.clone();
+    let (files, pages, tabs) = tokio::join!(
         async {
             let _timing = clock.timing("files");
-            matching_files(&query, files_settings, catalog, &searching, token).await
+            matching_files(&query, files_settings, catalog, traces, &searching, token).await
         },
         async {
             let _timing = clock.timing("browser pages");
             matching_pages(&query, browser_settings, scratch, &searching, token).await
+        },
+        async {
+            let _timing = clock.timing("browser tabs");
+            matching_tabs(&query, tab_settings, &searching, token).await
         },
     );
 
     Ok(Elsewhere {
         files: files?,
         pages: pages?,
+        tabs: tabs?,
     })
 }
 
@@ -886,6 +1056,7 @@ async fn matching_files(
     query: &str,
     settings: crate::preferences::FileSearch,
     catalog: std::sync::Arc<crate::catalog::Catalog>,
+    traces: std::sync::Arc<Vec<files::Trace>>,
     searching: &crate::state::Searching,
     token: u64,
 ) -> Result<Vec<files::FileHit>, String> {
@@ -906,6 +1077,30 @@ async fn matching_files(
     // sources would be a setting that half worked, which is worse than one
     // that does not exist.
     let ours = catalog.search(query.trim(), wanted, &settings.only_in);
+
+    /*
+     * Then what was open lately, which is a different question.
+     *
+     * The index answers "what is on this machine called that". The Recent
+     * folder answers "what did you have open", and the two disagree often
+     * enough to be worth both: a document under a folder nobody added as a
+     * root is not in the index at all, and the thing somebody wants is usually
+     * the thing they were just looking at.
+     *
+     * **A query that used an operator sits this out.** `ext:`, `size:` and
+     * `date:` are questions about a file's metadata, answered from numbers the
+     * index holds. The Recent folder holds shortcuts, so answering the same
+     * question of it would mean opening every one of them and then asking the
+     * disk about whatever each points at. Half-applying the operators would be
+     * worse: a `size:>1mb` that quietly listed small files from one source is a
+     * filter that cannot be trusted, which is worse than one that says less.
+     */
+    let ours = if catalog::operators(&query).1.asked_for_nothing() {
+        let lately = files::from_recent(&traces, query.trim(), wanted, &settings.only_in);
+        blend(ours, lately, query.trim(), wanted)
+    } else {
+        ours
+    };
 
     /*
      * Our own index is a few milliseconds and has already run. The other one
@@ -934,6 +1129,66 @@ async fn matching_files(
     .unwrap_or_default();
 
     Ok(merge(ours, theirs, wanted))
+}
+
+/// Two ranked lists of files made into one ranking.
+///
+/// Not concatenated, and the difference matters. Sill's index and the Recent
+/// folder both rank with `registry::match_name`, so their classes are directly
+/// comparable, and putting one list after the other would sit a weak match from
+/// the index above an exact one from the Recent folder. That is the same fault
+/// `search_commands` had while open windows were a second list appended to the
+/// results, and the note there says it: two lists concatenated is not a ranking.
+///
+/// The sort is stable and the index goes in first, so two rows of equal class
+/// and equal length keep the index's own order and its tie-break on the path.
+///
+/// [`merge`] below is the other case and stays as it is: a whole-volume indexer
+/// ranks by its own rules, which are not these, so its answers fill in after
+/// rather than being sorted against them.
+pub fn blend(
+    ours: Vec<files::FileHit>,
+    lately: Vec<files::FileHit>,
+    query: &str,
+    limit: usize,
+) -> Vec<files::FileHit> {
+    if lately.is_empty() {
+        return ours.into_iter().take(limit).collect();
+    }
+
+    let needle: Vec<char> = query.to_lowercase().chars().collect();
+
+    let mut ranked: Vec<(registry::MatchClass, usize, files::FileHit)> = ours
+        .into_iter()
+        .chain(lately)
+        .map(|hit| {
+            // A row that reached here matched at the source, so a miss means
+            // the two are asking slightly different questions rather than that
+            // the row is wrong. Last is the honest place for it.
+            let class = registry::match_name(&needle, &hit.name)
+                .map(|(class, _)| class)
+                .unwrap_or(registry::MatchClass::TitleTypo);
+
+            (class, hit.name.chars().count(), hit)
+        })
+        .collect();
+
+    ranked.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(limit.min(ranked.len()));
+
+    for (_, _, hit) in ranked {
+        if out.len() >= limit {
+            break;
+        }
+
+        if seen.insert(hit.path.to_lowercase()) {
+            out.push(hit);
+        }
+    }
+
+    out
 }
 
 /// Puts two sets of file results together without repeating anything.
@@ -1002,6 +1257,33 @@ pub(crate) async fn file_search_missing(
     ))
 }
 
+/// Whether Sill has finished looking at what is installed for the first time.
+///
+/// Asked on mount and again when Rust says the index changed, which is two
+/// calls per session rather than anything that repeats. What it decides is one
+/// sentence: an empty root list while this is true is "still reading what is
+/// installed", and an empty root list once it is false is "no results for that
+/// word". They look the same on screen and mean opposite things, and the wrong
+/// one on a first run tells somebody there is nothing here.
+#[tauri::command]
+pub(crate) fn index_building(registry: State<'_, RegistryState>) -> bool {
+    registry
+        .first_scan
+        .load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Starts the whole-drive indexer that is already on this machine.
+///
+/// Its own command rather than a branch of `start_file_search`, which answers
+/// the question "what is stopping file search from answering" and rightly says
+/// nothing at all when Sill's own index is working. This is the other case:
+/// file search answers, and there is still a program sitting closed that would
+/// see the rest of the machine.
+#[tauri::command]
+pub(crate) async fn start_everything() -> Result<String, String> {
+    files::start().map(|()| "Starting whole drive search.".to_string())
+}
+
 /// Whether the index is being rebuilt right now.
 fn busy(catalog: &CatalogState) -> bool {
     catalog.building.load(std::sync::atomic::Ordering::Acquire)
@@ -1013,10 +1295,8 @@ fn busy(catalog: &CatalogState) -> bool {
 /// row does the right thing. Which of the two it is was already decided by
 /// [`files::missing`], and asking again here keeps the decision in one place.
 ///
-/// The install runs in a console window somebody can see. A package manager
-/// asks about agreements and can fail on a network, and a launcher that
-/// swallowed all of that and reported nothing would be worse than one that
-/// shows the same output a person would have seen typing it themselves.
+/// Nothing here installs anything. It used to, and the row that ran it said
+/// something else entirely while it did; see the `Absent` arm below.
 #[tauri::command]
 pub(crate) async fn start_file_search(
     state: State<'_, PrefsState>,
@@ -1161,8 +1441,69 @@ pub(crate) async fn open_path(path: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::splice_suggestions;
+    use super::{splice_suggestions, TabRow};
     use crate::registry::{CommandRecord, MatchClass, RankedCommand};
+
+    /// A row's entrypoint is read back by the action that runs it.
+    ///
+    /// The one seam in this feature where a mistake is silent: the row is
+    /// written here and parsed in `sill.browser.tab.focus`, and if the two
+    /// disagree the row is simply refused with "is not a tab". Both sides are
+    /// `Where`'s own, which is what this holds in place.
+    #[test]
+    fn a_tab_row_carries_something_the_action_can_read_back() {
+        for title in [
+            "Plain",
+            "",
+            // Chromium's real tab names, colons and all.
+            "Alpha Tab - Memory usage - 21.0 MB",
+            "Comparing v3.17.16...v3.18.0 \u{b7} cline/cline",
+            "12:34:56",
+        ] {
+            let tab = crate::uia::Tab {
+                browser: "Zen".to_string(),
+                program: None,
+                window: -4242,
+                index: 9,
+                title: title.to_string(),
+                active: true,
+                key: "42.16190184.4.0.0.753".to_string(),
+            };
+
+            let located = tab.located();
+            let row = TabRow::from(tab);
+
+            assert_eq!(
+                crate::uia::Where::parse(&row.entrypoint),
+                Some(located),
+                "the row written for {title:?} is not one the action can read"
+            );
+        }
+    }
+
+    /// A tab with no identifier still produces a readable row.
+    ///
+    /// The fallback path, which is what a browser that will not name its own
+    /// elements gets. An empty field in the middle of a written record is
+    /// exactly the case a parser gets wrong.
+    #[test]
+    fn a_tab_the_browser_would_not_name_still_writes_a_row() {
+        let tab = crate::uia::Tab {
+            browser: "Chrome".to_string(),
+            program: Some(r"C:\chrome.exe".to_string()),
+            window: 7,
+            index: 0,
+            title: "Inbox".to_string(),
+            active: false,
+            key: String::new(),
+        };
+
+        let located = tab.located();
+        let row = TabRow::from(tab);
+
+        assert_eq!(crate::uia::Where::parse(&row.entrypoint), Some(located));
+        assert_eq!(row.id, "browser-tab:7:");
+    }
 
     /// A result that matched by name, or one that merely matched.
     ///

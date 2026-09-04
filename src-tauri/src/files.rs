@@ -135,7 +135,7 @@ fn verdict(
 /// the remedy offered then is an install that the package manager will decline
 /// as already present. That is a worse answer than the truth and a better one
 /// than silence.
-fn installed() -> bool {
+pub(crate) fn installed() -> bool {
     [
         r"C:\Program Files\Everything\Everything.exe",
         r"C:\Program Files (x86)\Everything\Everything.exe",
@@ -326,9 +326,190 @@ fn looks_like_attributes(token: &str) -> bool {
         && !token.contains('/')
 }
 
+// ------------------------------------------------------- what was open lately
+
+/// How long a reading of the Recent folder is good for.
+///
+/// The folder changes when somebody opens a file, which is not something that
+/// happens while they are typing into the launcher. Reading it per keystroke
+/// would be a directory listing per character for an answer that is the same
+/// every time; reading it once and holding it for the length of a summon is
+/// the whole of what this costs.
+///
+/// Short enough that a file opened, and then looked for a moment later, is
+/// there. Long enough that a query typed one character at a time reads the
+/// folder once.
+pub const RECENT_FRESH_FOR: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How many shortcuts are kept.
+///
+/// The folder holds a few hundred on a machine that has been used for a while
+/// and Windows prunes it itself. Newest first and capped, so the memory is
+/// stated rather than however many shortcuts happen to be there: at roughly a
+/// hundred and eighty bytes each this is **under sixty kilobytes**, and it is
+/// let go of when the launcher hides.
+pub const RECENT_MOST: usize = 300;
+
+/// One shortcut in the Recent folder, before anything has been opened.
+///
+/// The name is the shortcut's own, without `.lnk`, which is the name of the
+/// file it points at. That is the whole reason a listing is enough to match
+/// against: **nothing is read until a row is going to be shown**, so a query
+/// that matches two of three hundred shortcuts opens two files and not three
+/// hundred.
+#[derive(Debug, Clone)]
+pub struct Trace {
+    pub name: String,
+    pub at: std::path::PathBuf,
+}
+
+/// Where Windows keeps a shortcut to everything recently opened.
+pub fn recent_folder() -> Option<std::path::PathBuf> {
+    let appdata = std::env::var_os("APPDATA")?;
+    let folder = std::path::PathBuf::from(appdata).join(r"Microsoft\Windows\Recent");
+
+    folder.is_dir().then_some(folder)
+}
+
+/// The shortcuts in one folder, newest first.
+///
+/// The write time comes from the directory listing, which on Windows is
+/// already in hand from the scan, so ordering three hundred of them costs no
+/// disk at all. Only the ordering needs it, so it is not kept.
+pub fn traces(folder: &std::path::Path, most: usize) -> Vec<Trace> {
+    let Ok(listing) = std::fs::read_dir(folder) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<(std::time::SystemTime, Trace)> = Vec::new();
+
+    for entry in listing.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+
+        // `.lnk` and nothing else. The folder also holds `AutomaticDestinations`
+        // and `CustomDestinations`, which are jump list databases rather than
+        // shortcuts, and a `.url` is a web page rather than a file.
+        let Some(stem) = strip_extension(name, "lnk") else {
+            continue;
+        };
+
+        let when = entry
+            .metadata()
+            .and_then(|md| md.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+
+        found.push((
+            when,
+            Trace {
+                name: stem.to_string(),
+                at: entry.path(),
+            },
+        ));
+    }
+
+    found.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    found.truncate(most);
+    found.into_iter().map(|(_, trace)| trace).collect()
+}
+
+/// A file name with one particular extension taken off, when it has it.
+fn strip_extension<'a>(name: &'a str, extension: &str) -> Option<&'a str> {
+    let dot = name.rfind('.')?;
+
+    (dot != 0 && name[dot + 1..].eq_ignore_ascii_case(extension)).then(|| &name[..dot])
+}
+
+/// The recently opened files a query matches.
+///
+/// Ranked by the same code that ranks everything else, so a recent file sorts
+/// against the rest of the list rather than by its own idea of a good match.
+///
+/// Shortcuts are opened only for the rows that are going to be returned, which
+/// is what keeps this a listing rather than three hundred file reads. A
+/// shortcut whose target has since been deleted is dropped rather than offered:
+/// a row that cannot be opened is worse than one that is not there.
+pub fn from_recent(
+    traces: &[Trace],
+    query: &str,
+    limit: usize,
+    only_in: &[String],
+) -> Vec<FileHit> {
+    let query = query.trim();
+    if query.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+
+    let needle: Vec<char> = query.to_lowercase().chars().collect();
+
+    let mut scored: Vec<(crate::registry::MatchClass, usize, &Trace)> = traces
+        .iter()
+        .filter_map(|trace| {
+            let (class, _) = crate::registry::match_name(&needle, &trace.name)?;
+            Some((class, trace.name.chars().count(), trace))
+        })
+        .collect();
+
+    scored.sort_unstable_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.name.cmp(&b.2.name))
+    });
+
+    let mut out = Vec::new();
+
+    for (_, _, trace) in scored {
+        if out.len() >= limit {
+            break;
+        }
+
+        let Some(target) = crate::lnk::target_of(&trace.at) else {
+            continue;
+        };
+
+        if !crate::catalog::inside_any(&target, only_in) {
+            continue;
+        }
+
+        if !still_there(&target) {
+            continue;
+        }
+
+        let path = std::path::Path::new(&target);
+        let is_dir = path.is_dir();
+
+        out.push(FileHit {
+            name: crate::files_ops::name_of(path),
+            path: target,
+            is_dir,
+        });
+    }
+
+    out
+}
+
+/// Whether the file a shortcut points at is still on the machine.
+///
+/// A share is believed without being asked. `exists()` on a UNC path that is
+/// not reachable blocks until SMB gives up, which is tens of seconds, and this
+/// runs while somebody is typing. The catalog's own root check makes the same
+/// trade for the same reason. Offering a row that turns out to be gone is a
+/// far smaller fault than a launcher that stops responding.
+fn still_there(target: &str) -> bool {
+    if target.starts_with("\\\\") || target.starts_with("//") {
+        return true;
+    }
+
+    std::path::Path::new(target).exists()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{looks_like_attributes, parse_line, verdict, Missing};
+    use super::{
+        from_recent, looks_like_attributes, parse_line, strip_extension, traces, verdict, Missing,
+    };
 
     #[test]
     fn a_bare_path_line_parses() {
@@ -406,6 +587,193 @@ mod tests {
         // remedy is worded.
         assert_eq!(verdict(true, 0, false, true, false), None);
         assert_eq!(verdict(true, 0, false, true, true), None);
+    }
+
+    // ------------------------------------------------- what was open lately
+
+    /// The smallest shortcut the parser will read, pointing where told.
+    ///
+    /// A real one carries a target ID list, a volume record and a description;
+    /// none of that is read here, so none of it is written. See `lnk` for the
+    /// layout: a fixed header, then a `LinkInfo` whose ANSI path sits at the
+    /// offset its own header names.
+    fn a_shortcut_to(target: &str) -> Vec<u8> {
+        const HAS_LINK_INFO: u32 = 1 << 1;
+        const INFO_HEADER: u32 = 0x1C;
+
+        let mut out = vec![0u8; 0x4C];
+        out[0..4].copy_from_slice(&0x4Cu32.to_le_bytes());
+        out[0x14..0x18].copy_from_slice(&HAS_LINK_INFO.to_le_bytes());
+
+        let path = target.as_bytes();
+        let size = INFO_HEADER + path.len() as u32 + 1;
+
+        for field in [size, INFO_HEADER, 0, 0, INFO_HEADER, 0, 0] {
+            out.extend_from_slice(&field.to_le_bytes());
+        }
+
+        out.extend_from_slice(path);
+        out.push(0);
+        out
+    }
+
+    #[test]
+    fn a_shortcut_is_named_after_the_file_it_points_at() {
+        // Which is what makes a listing enough to match against, and so what
+        // stops a keystroke opening three hundred files.
+        assert_eq!(
+            strip_extension("budget.xlsx.lnk", "lnk"),
+            Some("budget.xlsx")
+        );
+        assert_eq!(strip_extension("notes.LNK", "lnk"), Some("notes"));
+        assert_eq!(strip_extension("notes.url", "lnk"), None);
+        assert_eq!(strip_extension("nodots", "lnk"), None);
+        // A name that is nothing but an extension is a dotfile, not a
+        // shortcut called nothing.
+        assert_eq!(strip_extension(".lnk", "lnk"), None);
+    }
+
+    #[test]
+    fn only_shortcuts_are_read_from_the_recent_folder() {
+        // The folder also holds the jump list databases, which are not
+        // shortcuts and do not parse as any.
+        let dir = tempfile::tempdir().expect("temp dir");
+
+        for name in [
+            "budget.xlsx.lnk",
+            "notes.md.lnk",
+            "somewhere.url",
+            "f01b4d95cf55d32a.automaticDestinations-ms",
+        ] {
+            std::fs::write(dir.path().join(name), b"anything").expect("write");
+        }
+
+        let mut found: Vec<String> = traces(dir.path(), 10)
+            .into_iter()
+            .map(|trace| trace.name)
+            .collect();
+        found.sort();
+
+        assert_eq!(found, vec!["budget.xlsx", "notes.md"]);
+    }
+
+    #[test]
+    fn the_recent_listing_is_capped_and_takes_the_newest() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let now = std::time::SystemTime::now();
+
+        for age in 0..10u64 {
+            let at = dir.path().join(format!("file{age}.txt.lnk"));
+            std::fs::write(&at, b"anything").expect("write");
+
+            let file = std::fs::File::options()
+                .write(true)
+                .open(&at)
+                .expect("open");
+            file.set_modified(now - std::time::Duration::from_secs(age * 60))
+                .expect("set the write time");
+        }
+
+        let found = traces(dir.path(), 3);
+
+        assert_eq!(
+            found.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            vec!["file0.txt", "file1.txt", "file2.txt"],
+            "the cap should keep the newest, not whichever three the \
+             filesystem listed first"
+        );
+    }
+
+    #[test]
+    fn a_recently_opened_file_is_found_by_its_name() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let real = dir.path().join("budget.xlsx");
+        std::fs::write(&real, b"a spreadsheet").expect("write");
+
+        let recent = dir.path().join("recent");
+        std::fs::create_dir(&recent).expect("a folder");
+        std::fs::write(
+            recent.join("budget.xlsx.lnk"),
+            a_shortcut_to(&real.to_string_lossy()),
+        )
+        .expect("write");
+
+        let found = from_recent(&traces(&recent, 10), "budget", 5, &[]);
+
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].name, "budget.xlsx");
+        assert_eq!(found[0].path, real.to_string_lossy());
+    }
+
+    /// A shortcut outlives the file it points at, and a dead row is worse than
+    /// a missing one.
+    ///
+    /// Windows leaves the shortcut behind when a document is deleted or moved,
+    /// so the Recent folder on any machine that has been used for a while is
+    /// partly a list of things that are not there.
+    #[test]
+    fn a_shortcut_whose_file_is_gone_is_not_offered() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let recent = dir.path().join("recent");
+        std::fs::create_dir(&recent).expect("a folder");
+
+        std::fs::write(
+            recent.join("deleted.docx.lnk"),
+            a_shortcut_to(&dir.path().join("deleted.docx").to_string_lossy()),
+        )
+        .expect("write");
+
+        assert!(
+            from_recent(&traces(&recent, 10), "deleted", 5, &[]).is_empty(),
+            "a row that cannot be opened was offered"
+        );
+    }
+
+    /// And the folder setting narrows these as well as the index.
+    ///
+    /// It says "only show results in". A source that ignored it would be a
+    /// setting that half works, which is worse than one that is not there.
+    #[test]
+    fn the_folder_setting_narrows_what_was_open_lately() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).expect("a folder");
+
+        let real = elsewhere.join("budget.xlsx");
+        std::fs::write(&real, b"a spreadsheet").expect("write");
+
+        let recent = dir.path().join("recent");
+        std::fs::create_dir(&recent).expect("a folder");
+        std::fs::write(
+            recent.join("budget.xlsx.lnk"),
+            a_shortcut_to(&real.to_string_lossy()),
+        )
+        .expect("write");
+
+        let listing = traces(&recent, 10);
+
+        assert_eq!(
+            from_recent(
+                &listing,
+                "budget",
+                5,
+                &[elsewhere.to_string_lossy().into_owned()]
+            )
+            .len(),
+            1,
+            "the folder it is in should not have excluded it"
+        );
+
+        assert!(
+            from_recent(
+                &listing,
+                "budget",
+                5,
+                &[dir.path().join("nowhere").to_string_lossy().into_owned()]
+            )
+            .is_empty(),
+            "a file outside the only folder asked for was offered anyway"
+        );
     }
 
     #[test]

@@ -105,7 +105,7 @@ pub fn read(path: &str) -> Result<Attached, String> {
 /// A file called `.png` that is really a JPEG is common enough, and a provider
 /// handed the wrong type answers with a message about the request rather than
 /// about the file. The magic numbers are short and stable.
-fn image_type(data: &[u8]) -> Option<&'static str> {
+pub(crate) fn image_type(data: &[u8]) -> Option<&'static str> {
     if data.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
         return Some("image/png");
     }

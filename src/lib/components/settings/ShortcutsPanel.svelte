@@ -60,6 +60,15 @@
 
   /** Everything that can be done to text, which is what a key can bind to. */
   let textActions = $state<ActionInfo[]>([]);
+  /**
+   * Everything that can be done to a window.
+   *
+   * A separate list because a key runs one action on one kind of thing, and
+   * offering "Snap Left" beside "Uppercase" in one list would let somebody
+   * build a shortcut that can never work. The source picker below chooses
+   * which list this row is drawn from, so the two always agree.
+   */
+  let windowActions = $state<ActionInfo[]>([]);
   /** Titles for the commands bindings point at, so the list reads as names. */
   let commandNames = $state<Record<string, string>>({});
 
@@ -165,8 +174,16 @@
   }
 
   onMount(async () => {
-    textActions = await actionsFor("text");
+    [textActions, windowActions] = await Promise.all([
+      actionsFor("text"),
+      actionsFor("window"),
+    ]);
   });
+
+  /** The actions a row may choose from, which follows what it runs on. */
+  function choicesFor(source: BindingSource): ActionInfo[] {
+    return source.from === "foregroundWindow" ? windowActions : textActions;
+  }
 
   /**
    * The key that runs each action, and what is contesting it.
@@ -337,17 +354,45 @@
   function describe(source: BindingSource): string {
     if (source.from === "selection") return "the selected text";
     if (source.from === "clipboard") return "the clipboard";
+    if (source.from === "foregroundWindow") return "the window in front";
     return commandNames[source.id] ?? source.id;
+  }
+
+  /**
+   * Changes what a row runs on, and the action with it.
+   *
+   * Both together, because an action that cannot be done to the new thing is
+   * a key that does nothing, and a row that quietly keeps one is a row that
+   * lies. Moving to a different kind takes the first action of that kind,
+   * which is the one a person is most likely to have meant.
+   */
+  function runOn(at: number, from: BindingSource["from"]) {
+    const source: BindingSource =
+      from === "foregroundWindow"
+        ? { from: "foregroundWindow" }
+        : from === "clipboard"
+          ? { from: "clipboard" }
+          : { from: "selection" };
+
+    const current = bindings[at];
+    const choices = choicesFor(source);
+    const keeps = choices.some((action) => action.id === current.action);
+
+    update(at, {
+      source,
+      action: keeps ? current.action : (choices[0]?.id ?? current.action),
+    });
   }
 </script>
 
 <Section
   label="Shortcuts"
-  description="A key that runs an action on whatever is selected, without the launcher appearing. Highlight some text, press the key, and the text changes where it sits."
+  description="A key that runs an action without the launcher appearing. Highlight some text, press the key, and the text changes where it sits. Or point it at the window in front and move that instead."
 >
   {#each bindings as binding, at (at)}
     <Row
-      title={textActions.find((a) => a.id === binding.action)?.title ?? binding.action}
+      title={choicesFor(binding.source).find((a) => a.id === binding.action)?.title ??
+        binding.action}
       description={binding.accelerator && conflicts.includes(binding.accelerator)
         ? "Another application already has this combination, so it does nothing. Choose a different one."
         : `Runs on ${describe(binding.source)}`}
@@ -371,7 +416,10 @@
 
         <Select
           value={binding.action}
-          options={textActions.map((action) => ({ value: action.id, label: action.title }))}
+          options={choicesFor(binding.source).map((action) => ({
+            value: action.id,
+            label: action.title,
+          }))}
           onchange={(next) => update(at, { action: next })}
           ariaLabel="What it does"
         />
@@ -381,11 +429,9 @@
           options={[
             { value: "selection", label: "Selection" },
             { value: "clipboard", label: "Clipboard" },
+            { value: "foregroundWindow", label: "Window in front" },
           ]}
-          onchange={(next) =>
-            update(at, {
-              source: next === "clipboard" ? { from: "clipboard" } : { from: "selection" },
-            })}
+          onchange={(next) => runOn(at, next as BindingSource["from"])}
           ariaLabel="What it runs on"
         />
 

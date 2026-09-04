@@ -9,6 +9,39 @@ use crate::ai::openai::Attached;
 use crate::ai::provider::{self, Provider};
 use crate::state::PrefsState;
 
+/// What Windows Hello can do on this machine.
+///
+/// For the settings row that offers the gate. A switch shown as on while the
+/// thing it switches on cannot run is worse than no switch: somebody reads it
+/// and believes a model cannot touch their machine without their fingerprint,
+/// which on a machine with nothing enrolled is not true. The row says which it
+/// is, and the approval card says it again at the moment it matters.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HelloHere {
+    /// Whether a person can actually be asked for.
+    pub ready: bool,
+    /// Why not, when not. Absent when they can.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// Asks Windows, on a thread that is allowed to wait for it.
+///
+/// Only ever called by the settings panel opening, so the WinRT round trip is
+/// bought once by somebody looking at the row rather than on any hot path.
+#[tauri::command]
+pub(crate) async fn ai_hello() -> Result<HelloHere, String> {
+    let had = tauri::async_runtime::spawn_blocking(crate::hello::available)
+        .await
+        .map_err(|err| format!("could not ask Windows about Windows Hello: {err}"))?;
+
+    Ok(HelloHere {
+        ready: had.ready(),
+        why: had.why().map(str::to_string),
+    })
+}
+
 /// Who is set up to answer, and who is chosen.
 ///
 /// Read by the chip at the end of the search field, which is the only place
@@ -604,6 +637,7 @@ mod tests {
                     provider("a", "https://a.example/v1", "m"),
                     provider("b", "https://b.example/v1", "m"),
                 ],
+                ..Ai::default()
             };
 
             assert_eq!(chosen(&settings).map(|p| p.id), Some("b".to_string()));
@@ -616,6 +650,7 @@ mod tests {
             let settings = Ai {
                 provider: String::new(),
                 providers: vec![provider("a", "https://a.example/v1", "m")],
+                ..Ai::default()
             };
 
             assert_eq!(chosen(&settings).map(|p| p.id), Some("a".to_string()));
@@ -631,6 +666,7 @@ mod tests {
                     provider("a", "https://a.example/v1", "m"),
                     provider("b", "https://b.example/v1", "m"),
                 ],
+                ..Ai::default()
             };
 
             assert!(chosen(&settings).is_none());
@@ -643,6 +679,7 @@ mod tests {
             let settings = Ai {
                 provider: "deleted".into(),
                 providers: vec![provider("a", "https://a.example/v1", "m")],
+                ..Ai::default()
             };
 
             assert_eq!(chosen(&settings).map(|p| p.id), Some("a".to_string()));

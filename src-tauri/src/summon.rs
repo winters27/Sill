@@ -497,6 +497,25 @@ pub fn show_with(app: &tauri::AppHandle, command: Option<String>) {
     }
 }
 
+/// Shows the launcher on the welcome, the first time Sill runs here.
+///
+/// The same shape as `show_switcher`: Rust puts the window up and says what it
+/// was opened for, and the page decides what that looks like.
+///
+/// The event is not the only way the page finds out, and it must not be. Tauri
+/// creates this window before the `setup` hook runs, so the page may still be
+/// loading and have no listener yet when this fires. It asks on mount as well,
+/// and `FirstRun` hands the welcome to whichever of the two arrives after the
+/// summon key has been registered.
+pub fn show_welcome(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    show(&window);
+    let _ = window.emit("sill://welcome", ());
+}
+
 /// Hides the launcher and returns focus.
 pub fn hide(window: &WebviewWindow) {
     let _ = window.hide();

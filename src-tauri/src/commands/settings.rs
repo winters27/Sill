@@ -720,6 +720,76 @@ pub(crate) async fn keyboard_reference(
     Ok(crate::keysheet::reference(&summon, &moving, &acting))
 }
 
+/// What the launcher says the first time Sill runs on a machine.
+///
+/// ## Why this reads registration rather than preferences
+///
+/// The first sentence of a welcome names the key that opens Sill. Preferences
+/// hold the key that was **asked for**; `HotkeyConflicts` holds what Windows
+/// **answered**, and on the machine this was written on those two have
+/// disagreed at every start for weeks. Reading the settings file here would
+/// open somebody's first minute with Sill by telling them to press a key that
+/// does nothing.
+///
+/// ## Why `None` is not "no welcome"
+///
+/// Tauri creates the launcher's window before the `setup` hook that registers
+/// that key, so this can be called before the answer exists. `None` then means
+/// "not yet": the window asks on mount and again when Rust says the launcher
+/// was opened for this, and `FirstRun` hands the welcome to whichever of those
+/// arrives second.
+///
+/// `again` is for a welcome that is already on screen. The rows offer to fix
+/// the very things the words above them describe, so coming back from Settings
+/// with a working key should not leave the page still saying it is taken.
+#[tauri::command]
+pub(crate) async fn welcome(
+    app: AppHandle,
+    prefs: State<'_, crate::state::PrefsState>,
+    again: bool,
+) -> Result<Option<crate::welcome::Welcome>, String> {
+    let first = app.state::<crate::FirstRun>();
+
+    if !first.answerable() {
+        return Ok(None);
+    }
+
+    // Taken exactly once, and only when this is the question that puts a
+    // welcome on screen. Refreshing one that is already up must not consume
+    // anything, and must not depend on there being anything left to consume.
+    if !again && !first.take() {
+        return Ok(None);
+    }
+
+    let (summon, tray, roots) = {
+        let current = prefs.inner.lock().await;
+        (
+            current.hotkey.summon.clone(),
+            current.general.show_in_tray,
+            current.files.indexed_roots(),
+        )
+    };
+
+    let summon_taken = app
+        .try_state::<crate::HotkeyConflicts>()
+        .map(|conflicts| conflicts.all().iter().any(|key| key == &summon))
+        .unwrap_or(false);
+
+    Ok(Some(crate::welcome::greeting(&crate::welcome::Facts {
+        summon: &summon,
+        summon_taken,
+        tray,
+        roots: roots
+            .iter()
+            .map(|root| root.display().to_string())
+            .collect(),
+        // Asked once, when the welcome is drawn. Both are a file test and a
+        // window lookup, and neither answer changes because somebody typed.
+        everything_running: crate::files::available(),
+        everything_installed: crate::files::installed(),
+    })))
+}
+
 /// The terminal profiles this machine offers.
 ///
 /// Asked for when the list is opened, not on a keystroke: it reads a settings

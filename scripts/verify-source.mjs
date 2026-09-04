@@ -1139,15 +1139,41 @@ else if (Number(css[1]) !== Number(rust[1])) {
    */
   const byExtension = new Set(["snippet"]);
 
-  for (const file of sources("src-tauri/src")) {
-    const rust = readFileSync(file, "utf8");
+  /*
+   * The window builds rows too, and this check could not see them.
+   *
+   * It read Rust only, on the assumption that a row's mode is Rust's to
+   * decide. Six row builders in `commands.ts` and `results.ts` set one
+   * themselves, and every one of those modes happened also to appear in Rust,
+   * so the hole never showed. A row whose mode exists **only** in the window
+   * went straight past: browser tabs are read by Rust and shaped into a row
+   * here, and this file passed with the heading deleted.
+   *
+   * The preview gallery is not in the list. Its `mode` fields are extension
+   * manifest data on fake listings, not row kinds, and `menu-bar` is a real
+   * value there and not a heading anything is missing.
+   */
+  const BUILDERS = [
+    "src/lib/exthost/commands.ts",
+    "src/lib/results.ts",
+    "src/lib/conversations.ts",
+    "src/routes/+page.svelte",
+  ];
 
-    for (const found of rust.matchAll(/\bmode:\s*"([a-z][a-z-]*)"/g)) {
+  const looked = [
+    ...sources("src-tauri/src"),
+    ...BUILDERS.filter((one) => existsSync(one)),
+  ];
+
+  for (const file of looked) {
+    const text = readFileSync(file, "utf8");
+
+    for (const found of text.matchAll(/\bmode:\s*"([a-z][a-z-]*)"/g)) {
       if (named.has(found[1]) || byExtension.has(found[1])) continue;
 
       fail(
         file,
-        lineOf(rust, found.index),
+        lineOf(text, found.index),
         `mode "${found[1]}" has no heading in ${LIST}, so its rows are filed ` +
           "under whichever extension produced them rather than under a name",
       );
@@ -1726,6 +1752,73 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * Nothing a model asks for reaches an action without going past the gate.
+ *
+ * `ai/tools.rs` is the one door the AI panel and every MCP client come
+ * through, and `acting::gate` is what decides whether a keypress is enough or
+ * whether Windows Hello has to say a person is there. The threat is not a
+ * mischievous model: it is a web page, a document or an extension's output
+ * telling the model to run something, and the gate is where the person rather
+ * than the text authorises it.
+ *
+ * Three things are checked. There must be exactly ONE `perform` in the file,
+ * because a second is a second path and the whole design is that there is not
+ * one. `acting::gate` must appear before it, because a gate consulted
+ * afterwards is not a gate. And the `Gate::Hello` arm and the call it makes
+ * must both sit between the two, because an arm that decides Hello is needed
+ * and then falls through to the run is the gate being deleted while its
+ * decision function still passes all of its own tests.
+ *
+ * Written as a rule rather than left to the tests for the reason the
+ * `outside.rs` check above is: an `ActionCtx` holds a concrete `AppHandle`, so
+ * nothing in a test can run an action body, and the sequence of calls in this
+ * function is checkable only by reading it. This reads it.
+ */
+{
+  const DOOR = "src-tauri/src/ai/tools.rs";
+  const text = readFileSync(DOOR, "utf8");
+
+  const performs = [...text.matchAll(/\.perform\(/g)];
+  const gate = text.indexOf("acting::gate(");
+
+  if (performs.length !== 1) {
+    fail(
+      DOOR,
+      performs[1] ? lineOf(text, performs[1].index) : null,
+      `this file runs an action in ${performs.length} places and must run it in ` +
+        "one. A second route from a model to the registry is a second place to " +
+        "remember the gate",
+    );
+  }
+
+  for (const found of performs) {
+    if (gate !== -1 && gate < found.index) continue;
+
+    fail(
+      DOOR,
+      lineOf(text, found.index),
+      "this runs an action with no `acting::gate` above it, so a model that " +
+        "read an instruction in somebody else's document reaches whatever it named",
+    );
+  }
+
+  if (gate !== -1 && performs[0]) {
+    const between = text.slice(gate, performs[0].index);
+
+    for (const wanted of ["Gate::Hello", "prove_somebody_is_there("]) {
+      if (between.includes(wanted)) continue;
+
+      fail(
+        DOOR,
+        lineOf(text, gate),
+        `no \`${wanted}\` between the gate and the run, so running a command ` +
+          "or writing a file never asks Windows Hello and nothing else notices",
+      );
+    }
+  }
+}
+
+/*
  * The high contrast fallback, still in place.
  *
  * Windows high contrast replaces every colour the page chose and DELETES
@@ -2093,23 +2186,34 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
- * The keyboard reference does not write a chord down.
+ * The two pages that name keys do not write a chord down.
  *
- * Every key on that page comes from `keyboard_reference`, which assembles it
- * from the movement preset, the action shortcuts and the summon key. A chord
- * typed into the component is a promise nothing keeps: it survives the key
- * being rebound, and the person reading it has no way to tell it is stale.
+ * Every key on the reference comes from `keyboard_reference`, and every
+ * sentence on the welcome comes from `welcome`, both assembled in Rust from
+ * the keys that are actually bound. A chord typed into either component is a
+ * promise nothing keeps: it survives the key being rebound, and the person
+ * reading it has no way to tell it is stale.
+ *
+ * The welcome is the worse of the two, and it is why this rule grew a second
+ * file. It is read once, before anybody knows enough to doubt it, and the key
+ * it names has been **refused at every start on this machine for weeks**. A
+ * hand-typed "Press Alt+Space" there is a first sentence that is false for
+ * whoever most needs it to be true.
  *
  * This project has been bitten four times by a hand-kept list quietly
  * disagreeing with the thing it describes, which is why the rule is a build
  * failure rather than a note.
  */
 {
-  const SHEET = "src/lib/components/KeySheet.svelte";
+  const PAGES = [
+    ["src/lib/components/KeySheet.svelte", "keyboard_reference"],
+    ["src/lib/components/Welcome.svelte", "welcome"],
+  ];
   const CHORD = /"(?:Ctrl|Alt|Shift|Cmd|Meta|Super)\+[A-Za-z0-9+]+"/g;
 
-  if (existsSync(SHEET)) {
-    const text = readFileSync(SHEET, "utf8");
+  for (const [sheet, from] of PAGES) {
+    if (!existsSync(sheet)) continue;
+    const text = readFileSync(sheet, "utf8");
 
     text.split("\n").forEach((line, at) => {
       // A comment may name a chord as an example; only code counts.
@@ -2117,13 +2221,167 @@ for (const file of sources("src-tauri/src")) {
 
       for (const found of line.matchAll(CHORD)) {
         fail(
-          SHEET,
+          sheet,
           at + 1,
-          `${found[0]} is written here rather than read from keyboard_reference, ` +
+          `${found[0]} is written here rather than read from ${from}, ` +
             "so it goes on saying so after the key is rebound",
         );
       }
     });
+  }
+}
+
+/*
+ * The welcome reads what registration answered, not what was configured.
+ *
+ * This is the whole point of `P5-08`. `preferences.hotkey.summon` is the key
+ * that was **asked for**; `HotkeyConflicts` holds what Windows **gave**, and
+ * the two have disagreed on this machine at every start for weeks. A `welcome`
+ * command that built its sentences from preferences alone would compile, pass
+ * every test that does not run it, and open somebody's first minute with Sill
+ * by telling them to press a key that does nothing.
+ *
+ * Nothing else can catch it. The command needs an `AppHandle` so no unit test
+ * reaches it, and the module it calls is pure and would go on passing its own
+ * tests while being handed a `summon_taken` that is always false.
+ */
+{
+  const WHERE = "src-tauri/src/commands/settings.rs";
+
+  if (existsSync(WHERE)) {
+    const text = readFileSync(WHERE, "utf8");
+    const at = text.indexOf("pub(crate) async fn welcome(");
+
+    if (at < 0) {
+      fail(WHERE, null, "the welcome command is gone, and with it the first run");
+    } else {
+      // To the closing brace of the function, counting from its own body.
+      const opened = text.indexOf("{", at);
+      let depth = 0;
+      let end = opened;
+      for (let i = opened; i < text.length; i++) {
+        if (text[i] === "{") depth++;
+        else if (text[i] === "}" && --depth === 0) {
+          end = i;
+          break;
+        }
+      }
+
+      if (!text.slice(opened, end).includes("HotkeyConflicts")) {
+        fail(
+          WHERE,
+          lineOf(text, at),
+          "the welcome is built without reading HotkeyConflicts, so it says " +
+            "the key in the settings file opens Sill whether or not Windows " +
+            "ever gave it to us",
+        );
+      }
+    }
+  }
+}
+
+/*
+ * A refused summon key opens the panel that actually holds that key.
+ *
+ * With the summon key taken there is no launcher to read a message in, so
+ * `P1-11` opens the settings window instead. It opened `general`, which held
+ * the row when that was written and stopped holding it when `P5-06` moved
+ * every hotkey under Shortcuts. The window went on opening, on the wrong
+ * panel, showing everything except the one control it was opened for, and
+ * nothing anywhere said so.
+ *
+ * The settings catalogue already records which panel every row is in, so the
+ * two are checked against each other rather than both being trusted.
+ */
+{
+  const WHERE = "src-tauri/src/lib.rs";
+  const CATALOGUE = "src-tauri/src/settings_index.rs";
+
+  if (existsSync(WHERE) && existsSync(CATALOGUE)) {
+    const named = /const SUMMON_SECTION: &str = "([^"]+)";/.exec(readFileSync(WHERE, "utf8"));
+
+    if (!named) {
+      fail(
+        WHERE,
+        null,
+        "SUMMON_SECTION is gone, so nothing says which panel a refused summon " +
+          "key should open",
+      );
+    } else {
+      /*
+       * The entry for the row itself, as `s(panel, name, title, keywords)`.
+       * Matched on the title rather than on position, because the catalogue is
+       * ordered by panel and an entry moving is not the failure being caught.
+       */
+      const entry = new RegExp(
+        String.raw`s\(\s*"([^"]+)",\s*"[^"]*",\s*"Summon hotkey"`,
+      ).exec(readFileSync(CATALOGUE, "utf8"));
+
+      if (!entry) {
+        fail(CATALOGUE, null, 'the catalogue has no "Summon hotkey" row to open');
+      } else if (entry[1] !== named[1]) {
+        fail(
+          WHERE,
+          null,
+          `a refused summon key opens the ${named[1]} panel and the row that ` +
+            `sets it is in ${entry[1]}, so the window opens on everything ` +
+            "except the one control it was opened for",
+        );
+      }
+    }
+  }
+}
+
+/*
+ * A preview asks whether the file is a cloud placeholder before opening it.
+ *
+ * Touching a placeholder downloads it, over a connection nobody chose to
+ * spend, because somebody moved the selection past a row. `look_unless` takes
+ * the question as a parameter so a test can hand over an ordinary file and say
+ * it is a placeholder, which is the only way to test the rule at all: the
+ * attribute cannot be set on a temporary file without a cloud provider signed
+ * in on the machine.
+ *
+ * That makes the rule testable and leaves the wiring untested, which is the
+ * same hole `after_recording` below is guarded against. Replacing
+ * `is_elsewhere` with a closure returning false failed no test at all.
+ */
+{
+  const WATCHED = "src-tauri/src/previews.rs";
+
+  if (existsSync(WATCHED)) {
+    const text = readFileSync(WATCHED, "utf8");
+    const at = text.indexOf("fn look_at(");
+
+    if (at < 0) {
+      fail(WATCHED, null, "look_at is gone, and with it the placeholder refusal");
+    } else {
+      const body = text.slice(at, text.indexOf("\n}", at));
+
+      if (!/look_unless\(\s*path\s*,\s*is_elsewhere\s*\)/.test(body)) {
+        fail(
+          WATCHED,
+          lineOf(text, at),
+          "look_at does not hand look_unless the real cloud question, so a " +
+            "placeholder is opened and downloaded when somebody moves the " +
+            "selection past it",
+        );
+      }
+
+      // And the real question is still the attribute one. A version of this
+      // that always answered false would satisfy the rule above.
+      const asks = text.indexOf("fn is_elsewhere(");
+      const real = asks < 0 ? "" : text.slice(asks, text.indexOf("\n}", asks));
+
+      if (!real.includes("wants_recall(")) {
+        fail(
+          WATCHED,
+          asks < 0 ? null : lineOf(text, asks),
+          "is_elsewhere no longer asks wants_recall, so every placeholder " +
+            "reads as an ordinary file",
+        );
+      }
+    }
   }
 }
 
@@ -2523,6 +2781,119 @@ if (tracked.status !== 0) {
   }
 }
 
+/*
+ * The page's account of what an extension may reach is the gate's own.
+ *
+ * `docs/extensions.md` tells a reader which Node built-ins cost a permission,
+ * which come free, and by implication which are refused outright, and somebody
+ * choosing whether to install a stranger's code reads that. A page saying `fs`
+ * is gated while the gate had quietly stopped gating it is the worst kind of
+ * documentation drift there is, and this project has already shipped the
+ * reverse of it once: the same page said `eval` and a dynamic `import()` were
+ * ways out long after one of them was a hole and after none of them was.
+ *
+ * So both lists are held to `patch-require.ts`. The gated table is checked in
+ * both columns, name and permission phrase, because a row naming the wrong
+ * permission is a row that reads as a promise and is not one. The free list is
+ * checked by name, and it is the security-relevant one: a built-in that stops
+ * being free is a built-in the page still says costs nothing.
+ */
+{
+  const DOC = "docs/extensions.md";
+  const GATE = "host/src/worker/patch-require.ts";
+
+  /** One section of a marked region, as raw text. */
+  function region(text, name) {
+    const between = text.match(new RegExp(`<!-- ${name} -->([\\s\\S]*?)<!-- /${name} -->`));
+    if (!between) {
+      fail(DOC, null, `no \`${name}\` region, so nothing there is being checked`);
+      return undefined;
+    }
+    return between[1];
+  }
+
+  /** Everything backticked in a stretch of the page. */
+  const backticked = (text) => new Set([...text.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+
+  const gate = readFileSync(GATE, "utf8");
+
+  /**
+   * `GATED` as the gate declares it, module name to the phrase a refusal uses.
+   *
+   * Read between the declaration and its closing brace rather than over the
+   * whole file, so the `BINDINGS` table below it, which is keyed by binding
+   * name and not by module, cannot be swept in.
+   */
+  const gatedSource = gate.match(/const GATED[^{]*\{([\s\S]*?)\n\};/)?.[1] ?? "";
+  const gated = new Map(
+    [...gatedSource.matchAll(/^\s*(\w+):\s*\{[^}]*plainly:\s*"([^"]+)"/gm)].map((m) => [
+      m[1],
+      m[2],
+    ]),
+  );
+
+  const freeSource = gate.match(/const FREE = new Set\(\[([\s\S]*?)\]\)/)?.[1] ?? "";
+  const free = new Set([...freeSource.matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+
+  // A regex that found nothing agrees with anything, so the floors turn a
+  // broken parse into a failure rather than a silent pass.
+  for (const [what, size, least] of [
+    ["gated", gated.size, 8],
+    ["free", free.size, 15],
+  ]) {
+    if (size >= least) continue;
+    fail(GATE, null, `only ${size} ${what} module(s) parsed out, so this is not checking`);
+  }
+
+  const gatedRegion = region(readFileSync(DOC, "utf8"), "coverage:gated");
+  const freeRegion = region(readFileSync(DOC, "utf8"), "coverage:free");
+
+  if (gatedRegion !== undefined) {
+    const rows = new Map(
+      [...gatedRegion.matchAll(/^\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|/gm)].map((m) => [m[1], m[2]]),
+    );
+
+    for (const [name, plainly] of gated) {
+      if (rows.get(name) === plainly) continue;
+      fail(
+        DOC,
+        null,
+        `\`${name}\` needs a row under \`coverage:gated\` reading "${plainly}", the ` +
+          `phrase its refusal uses; the page says ` +
+          `${rows.has(name) ? `"${rows.get(name)}"` : "nothing"}`,
+      );
+    }
+
+    for (const name of rows.keys()) {
+      if (gated.has(name)) continue;
+      fail(
+        DOC,
+        null,
+        `\`${name}\` has a row under \`coverage:gated\` and ${GATE} does not gate it, ` +
+          "so the page describes a permission nothing asks for",
+      );
+    }
+  }
+
+  if (freeRegion !== undefined) {
+    const named = backticked(freeRegion);
+
+    for (const name of free) {
+      if (named.has(name)) continue;
+      fail(DOC, null, `\`${name}\` is handed over for free and \`coverage:free\` omits it`);
+    }
+
+    for (const name of named) {
+      if (free.has(name)) continue;
+      fail(
+        DOC,
+        null,
+        `\`coverage:free\` says \`${name}\` costs nothing and ${GATE} does not hand ` +
+          "it over, so the page promises a module an extension will be refused",
+      );
+    }
+  }
+}
 
 /*
  * Nothing repeating in the window may talk to Rust unless being hidden stops
@@ -2636,6 +3007,7 @@ if (tracked.status !== 0) {
     }
   }
 }
+
 
 console.log(
   failures === 0 ? "source verification passed" : `\n${failures} problem(s) found`,

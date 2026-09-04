@@ -290,7 +290,7 @@ impl Default for Taps {
 }
 
 /// Who answers when you ask something.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Ai {
     /// The id of the provider that answers. Empty means none is set up, and
@@ -298,6 +298,38 @@ pub struct Ai {
     pub provider: String,
     /// The ones configured. Each key is sealed before this file is written.
     pub providers: Vec<crate::ai::provider::Provider>,
+    /**
+    Whether running something or writing a file asks for Windows Hello.
+
+    **On, which is the unusual direction for a setting that adds a prompt, and
+    it is the right one here.** The alternative is a gate somebody has to know
+    exists before it protects them, and the person who most needs it is the one
+    who has not thought about prompt injection yet. The cost of being wrong in
+    this direction is a fingerprint; the cost of being wrong in the other is a
+    command line a web page talked a model into running.
+
+    It also costs nothing to leave on where it cannot be used. A machine with
+    no enrolled Hello credential falls back to the approval card that was there
+    before, so switching this on by default changes nothing at all for
+    everybody in that case, and the settings row says so rather than claiming a
+    protection that is not running.
+
+    The switch exists because it has to: somebody whose reader is on the far
+    side of a docking station, or who runs Sill's AI in a loop they are
+    watching, needs a way to say no. Turning it off leaves the card, never
+    nothing.
+    */
+    pub hello_for_heavy_actions: bool,
+}
+
+impl Default for Ai {
+    fn default() -> Self {
+        Self {
+            provider: String::new(),
+            providers: Vec::new(),
+            hello_for_heavy_actions: true,
+        }
+    }
 }
 
 impl Default for Snippets {
@@ -844,6 +876,29 @@ pub struct Browsers {
     pub bookmarks: bool,
     /// Results requested per query.
     pub max_results: u32,
+    /// Tabs that are open right now, read through UI Automation.
+    ///
+    /// Its own switch rather than a part of `enabled`, because it is a
+    /// different act: `enabled` copies and reads files a browser wrote about
+    /// where somebody has been, and this asks a running browser what is on its
+    /// screen. Somebody can reasonably want either one without the other.
+    pub tabs: bool,
+    /// Whether the tab list includes Firefox and the browsers built on it.
+    ///
+    /// **The only setting in Sill that exists because of a cost inside
+    /// somebody else's program.** Chromium exposes its own window to
+    /// accessibility whether or not anybody looks. Firefox does not: it keeps
+    /// its accessibility engine switched off until a client asks, the asking
+    /// is unavoidable, and it stays on until that browser is restarted.
+    /// Measured on this machine, reading Zen's tabs once cost that browser
+    /// about **10 MB in the window's process and 85 MB across its content
+    /// processes**, and the first read took 374 ms against 54 ms for every
+    /// read after it.
+    ///
+    /// On by default once tabs are on at all, because somebody who turned this
+    /// feature on wants their own browser in it, and off is here for somebody
+    /// who reads that paragraph and would rather not.
+    pub tabs_firefox: bool,
 }
 
 impl Default for Browsers {
@@ -853,6 +908,8 @@ impl Default for Browsers {
             history: true,
             bookmarks: true,
             max_results: 6,
+            tabs: false,
+            tabs_firefox: true,
         }
     }
 }
@@ -1401,6 +1458,58 @@ mod tests {
         });
         seal_secrets(&mut null_key);
         assert!(null_key["dictation"]["provider"]["apiKey"].is_null());
+    }
+}
+
+#[cfg(test)]
+mod the_hello_gate_is_on_unless_somebody_says_otherwise {
+    use super::*;
+
+    /// A fresh install has it on.
+    ///
+    /// The direction is the decision, so it is pinned rather than left to
+    /// whichever way a derived `Default` happens to fall. A gate somebody has
+    /// to find before it protects them protects the wrong people: whoever has
+    /// not yet thought about a document telling a model to run something is
+    /// exactly whoever needed it.
+    #[test]
+    fn a_fresh_install_asks_for_a_person() {
+        assert!(Ai::default().hello_for_heavy_actions);
+    }
+
+    /// And so does a settings file written before this existed.
+    ///
+    /// The one that actually ships. Everybody upgrading has an `ai` object in
+    /// their file with no such key in it, and serde fills a missing field from
+    /// `Default::default()` **for the field**, which for a bool is `false`.
+    /// The struct-level `#[serde(default)]` is not enough on its own either:
+    /// it only covers `ai` being absent altogether. Only a `Default` impl that
+    /// says `true` reaches the person who already had settings.
+    #[test]
+    fn an_upgraded_settings_file_asks_for_a_person() {
+        let before: Ai = serde_json::from_value(serde_json::json!({
+            "provider": "openai",
+            "providers": [],
+        }))
+        .expect("an older ai section still reads");
+
+        assert_eq!(before.provider, "openai");
+        assert!(
+            before.hello_for_heavy_actions,
+            "everybody who already had settings upgraded into the gate switched off",
+        );
+    }
+
+    /// Somebody who turned it off keeps it off. A default that overrode a
+    /// stored `false` would be a switch that will not stay pressed.
+    #[test]
+    fn turning_it_off_survives_being_read_back() {
+        let said: Ai = serde_json::from_value(serde_json::json!({
+            "helloForHeavyActions": false,
+        }))
+        .expect("reads");
+
+        assert!(!said.hello_for_heavy_actions);
     }
 }
 

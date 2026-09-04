@@ -294,8 +294,9 @@ mod platform {
         EnumWindows, GetAncestor, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect,
         GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible,
         PostMessageW, SetWindowPos, ShowWindow, GA_ROOTOWNER, GWL_EXSTYLE, HWND_TOP,
-        MONITORINFOF_PRIMARY, SWP_NOACTIVATE, SWP_NOZORDER, SW_MINIMIZE, SW_RESTORE,
-        SW_SHOWMAXIMIZED, SW_SHOWMINIMIZED, WINDOWPLACEMENT, WM_CLOSE, WS_EX_TOOLWINDOW,
+        MONITORINFOF_PRIMARY, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_MINIMIZE,
+        SW_RESTORE, SW_SHOWMAXIMIZED, SW_SHOWMINIMIZED, WINDOWPLACEMENT, WM_CLOSE,
+        WS_EX_TOOLWINDOW,
     };
 
     fn hwnd_of(id: isize) -> HWND {
@@ -653,6 +654,49 @@ mod platform {
         Ok(())
     }
 
+    /// Whether a window is pinned above the others.
+    pub fn is_on_top(id: isize) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, WS_EX_TOPMOST};
+
+        let Ok(hwnd) = alive(id) else {
+            return false;
+        };
+
+        // SAFETY: the handle is checked live directly above.
+        let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+        style & WS_EX_TOPMOST.0 != 0
+    }
+
+    /// Pins a window above the others, or stops.
+    ///
+    /// A toggle rather than two actions because the answer is a fact about the
+    /// window that can be read, so a single row can say which way it will go.
+    /// Two rows would mean one of them is always the wrong one to press.
+    pub fn set_on_top(id: isize, on: bool) -> Result<(), String> {
+        use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST};
+
+        let hwnd = alive(id)?;
+
+        // Position and size are left alone: this changes only where the window
+        // sits in the stack, so `SWP_NOMOVE | SWP_NOSIZE` and the zero
+        // rectangle below are never read.
+        //
+        // SAFETY: the handle is checked live directly above and the flags are
+        // valid for this call.
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                Some(if on { HWND_TOPMOST } else { HWND_NOTOPMOST }),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+            )
+            .map_err(|err| format!("that window would not stay on top: {err}"))
+        }
+    }
+
     pub fn maximize(id: isize) -> Result<(), String> {
         let hwnd = alive(id)?;
         // SAFETY: the handle is checked live directly above.
@@ -790,6 +834,12 @@ mod platform {
     pub fn minimize(_id: isize) -> Result<(), String> {
         Err("windows only".to_string())
     }
+    pub fn is_on_top(_id: isize) -> bool {
+        false
+    }
+    pub fn set_on_top(_id: isize, _on: bool) -> Result<(), String> {
+        Err("windows only".to_string())
+    }
     pub fn maximize(_id: isize) -> Result<(), String> {
         Err("windows only".to_string())
     }
@@ -811,8 +861,8 @@ mod platform {
 }
 
 pub use platform::{
-    close, cursor_monitor, find, focus, foreground, list, maximize, minimize, monitor_of, monitors,
-    place, restore, visible_frame,
+    close, cursor_monitor, find, focus, foreground, is_on_top, list, maximize, minimize,
+    monitor_of, monitors, place, restore, set_on_top, visible_frame,
 };
 
 /// The open windows, as things the ranker already knows how to sort.

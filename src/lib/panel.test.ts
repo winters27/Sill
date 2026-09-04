@@ -141,6 +141,7 @@ describe("which rows are worth naming", () => {
     for (const mode of [
       "answer",
       "window",
+      "browser-tab",
       "audio-session",
       "process",
       "conversation",

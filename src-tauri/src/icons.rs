@@ -390,7 +390,7 @@ fn is_a_placeholder(path: &str) -> bool {
 /// cloud files by decades, tape archival software sets it, and some
 /// providers set it on files that are in fact local. Treating it as a
 /// placeholder would silently drop icons for files that are right there.
-fn wants_recall(attributes: u32) -> bool {
+pub(crate) fn wants_recall(attributes: u32) -> bool {
     /// The file is a placeholder and opening it fetches it.
     const RECALL_ON_OPEN: u32 = 0x0004_0000;
     /// The file is partly here and reading the rest fetches it.

@@ -740,6 +740,50 @@ pub(crate) fn save_workspace(app: tauri::AppHandle, name: String) -> Result<usiz
     Ok(count)
 }
 
+/// Rewrites a saved arrangement as named positions, where they fit.
+///
+/// Separate from saving because it is a decision, not a detail. A captured
+/// arrangement is exactly where the windows were, which is right on the desk
+/// it was captured on and approximate everywhere else. Converting it says
+/// "what I meant was left half, right half", which is exact on any display
+/// and no longer records the pixel widths somebody dragged to.
+///
+/// Answers how many windows became a named position, so the outcome can say
+/// whether it did anything. A window that fits no slot keeps its rectangle,
+/// so this never makes an arrangement worse, only more portable where it can
+/// be.
+#[tauri::command]
+pub(crate) fn make_workspace_portable(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<usize, String> {
+    let file = crate::profiles_store::path(&app);
+    let all = crate::profiles_store::load(&file);
+
+    let profile = all
+        .iter()
+        .find(|one| one.name.eq_ignore_ascii_case(name.trim()))
+        .ok_or_else(|| format!("There is no workspace called \"{name}\"."))?;
+
+    let works: Vec<crate::windowing::Rect> = crate::windowing::monitors()
+        .into_iter()
+        .map(|monitor| monitor.work)
+        .collect();
+
+    let portable = crate::profiles::to_slots(profile, &works);
+    let named = portable
+        .windows
+        .iter()
+        .filter(|placed| placed.slot.is_some())
+        .count();
+
+    let all = crate::profiles_store::put(all, portable);
+    crate::profiles_store::save(&file, &all)
+        .map_err(|err| format!("could not save the workspace: {err}"))?;
+
+    Ok(named)
+}
+
 /// Puts a saved arrangement back.
 #[tauri::command]
 pub(crate) async fn restore_workspace(

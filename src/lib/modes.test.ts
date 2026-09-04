@@ -124,6 +124,11 @@ describe("what each mode behaves like", () => {
       // in the history is the same kind of thing, so the answer cannot differ
       // between them and it is fetched once instead of per selection.
       clipboard: "one fetch for the whole list, because every row is alike",
+      // The rows are not things, they are five offers Sill made. There is no
+      // object behind "choose a key that is free" for the registry to describe
+      // and nothing it could do to one, so Ctrl+K here would open a panel
+      // about nothing on somebody's first minute with the application.
+      welcome: "the rows are offers rather than objects",
     };
 
     for (const mode of MODES) {

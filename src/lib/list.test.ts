@@ -54,6 +54,20 @@ describe("what a row is filed under", () => {
   });
 
   /**
+   * A tab that is open now and a page you once had open are not the same row.
+   *
+   * Both come out of a browser and they answer different questions: one takes
+   * you to a window on this screen, the other opens the page again. Under one
+   * heading they would be indistinguishable until Enter was pressed, and the
+   * default this file exists to guard would have filed a tab under
+   * "Applications".
+   */
+  test("an open tab is filed apart from a remembered page", () => {
+    expect(groupOf(command("browser-tab"))).toBe("Open Tabs");
+    expect(groupOf(command("url"))).toBe("Browser");
+  });
+
+  /**
    * The four the old default was silently wrong about.
    *
    * `groupOf` was a switch returning "Applications" for anything it did not

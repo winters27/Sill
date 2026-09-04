@@ -1,5 +1,7 @@
 <script lang="ts">
   import Section from "./Section.svelte";
+  import Row from "./Row.svelte";
+  import Toggle from "../Toggle.svelte";
   import Button from "./Button.svelte";
   import Select from "./Select.svelte";
   import TextField from "./TextField.svelte";
@@ -7,9 +9,11 @@
   import Instead from "../Instead.svelte";
   import { drawer } from "$lib/motion";
   import {
+    aiHello,
     aiKnown,
     aiModels,
     aiNamed,
+    type AiHelloHere,
     type AiModel,
     type AiProvider,
   } from "$lib/ai";
@@ -25,6 +29,27 @@
 
   /** The services Sill knows how to reach, for the Add list. */
   let known = $state<AiProvider[]>([]);
+
+  /**
+   * Whether this PC can actually run the Windows Hello gate.
+   *
+   * Asked because the switch below would otherwise claim a protection that is
+   * not running. Most machines have nothing enrolled, and somebody reading a
+   * switch that says on is entitled to believe it means something.
+   */
+  let hello = $state<AiHelloHere | null>(null);
+
+  /**
+   * What the Hello row says under its title.
+   *
+   * Three sentences and never a promise the machine cannot keep: what it does,
+   * what happens when it cannot, and, when this is that machine, why.
+   */
+  const helloDescription = $derived(
+    hello && !hello.ready
+      ? `Not available here: ${hello.why ?? "Windows Hello is not set up on this PC"}. Sill still stops and asks before running a command or writing a file, and the card says a keypress is all it got.`
+      : "A face, a fingerprint or a Hello PIN, rather than a keypress anything running as you could send. Machines without Windows Hello fall back to the same card as everything else.",
+  );
 
   /** Which provider is open for setup, by id. Empty means none. */
   let editing = $state("");
@@ -52,6 +77,12 @@
 
   $effect(() => {
     void aiKnown().then((list) => (known = list));
+  });
+
+  // Once, when the panel opens. Not a subscription: enrolling a fingerprint
+  // means going to Windows Settings and coming back, which reopens this.
+  $effect(() => {
+    void aiHello().then((here) => (hello = here));
   });
 
   /** The ones not set up yet, so Add offers each service once. */
@@ -461,6 +492,30 @@
       {/each}
     </div>
   {/if}
+</Section>
+
+<!--
+  What the model has to get past before it changes anything.
+
+  Its own section rather than a line under a provider, because it is about
+  every provider and about MCP clients that have no card here at all.
+-->
+<Section
+  label="Before it acts"
+  description="Anything that changes something stops and asks you first. Running a command and writing a file can ask for more than a keypress."
+>
+  <Row
+    title="Windows Hello to run a command or write a file"
+    description={helloDescription}
+  >
+    {#snippet control()}
+      <Toggle
+        bind:checked={prefs.ai.helloForHeavyActions}
+        onchange={save}
+        label="Windows Hello to run a command or write a file"
+      />
+    {/snippet}
+  </Row>
 </Section>
 
 {#if addable.length}

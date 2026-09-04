@@ -88,6 +88,7 @@ pub fn builtins() -> ActionRegistry {
         // removes a program should not sit above the ones that do not.
         Box::new(UninstallApp),
         Box::new(RestoreWorkspace),
+        Box::new(MakeWorkspacePortable),
         Box::new(ForgetWorkspace),
         Box::new(ForgetConversation),
         Box::new(CopyConversation),
@@ -104,6 +105,7 @@ pub fn builtins() -> ActionRegistry {
     ActionRegistry::new(
         core.into_iter()
             .chain(transforms())
+            .chain(std::iter::once(Box::new(SwitchToTab) as Box<dyn Action>))
             .chain(window_actions())
             .collect(),
     )
@@ -1890,6 +1892,42 @@ impl Action for RestoreWorkspace {
     }
 }
 
+/// Rewrites a saved arrangement as named positions.
+struct MakeWorkspacePortable;
+
+#[async_trait]
+impl Action for MakeWorkspacePortable {
+    fn id(&self) -> &'static str {
+        "sill.workspace.portable"
+    }
+
+    fn title(&self) -> &'static str {
+        "Use Named Positions"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Workspace
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let named = crate::commands::system::make_workspace_portable(
+            ctx.app.clone(),
+            object.target.clone(),
+        )?;
+
+        Ok(Outcome::done(match named {
+            0 => "None of those windows sit in a named position, so the arrangement still holds their exact sizes"
+                .to_string(),
+            1 => "One window now says where it goes rather than how big it was".to_string(),
+            many => format!("{many} windows now say where they go rather than how big they were"),
+        }))
+    }
+}
+
 /// Forgets a saved arrangement. P2.12.
 struct ForgetWorkspace;
 
@@ -2515,6 +2553,45 @@ impl Action for WindowState {
     }
 }
 
+/// Pins a window above the others, or stops.
+struct KeepOnTop;
+
+#[async_trait]
+impl Action for KeepOnTop {
+    fn id(&self) -> &'static str {
+        "sill.window.keepOnTop"
+    }
+
+    fn title(&self) -> &'static str {
+        "Keep on Top"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Window
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let id = window_handle(object)?;
+
+        // Toggled from what the window actually is rather than from anything
+        // Sill remembers. Another program can pin or unpin a window at any
+        // time, and a remembered answer would then send it the way it already
+        // was, which reads as the key having done nothing.
+        let already = crate::windowing::is_on_top(id);
+        crate::windowing::set_on_top(id, !already)?;
+
+        Ok(Outcome::done(if already {
+            format!("{} no longer stays on top", object.title)
+        } else {
+            format!("{} stays on top", object.title)
+        }))
+    }
+}
+
 /// Sends a window to a named position on the display it is already on.
 struct SnapWindow {
     slot: crate::windowing::Slot,
@@ -2590,6 +2667,55 @@ impl Action for NextDisplay {
     }
 }
 
+/// Brings one browser tab to the front of its browser.
+///
+/// The only action a tab has, and that is the whole of what a tab is for in a
+/// launcher. Copying its address would need the address, which a tab strip does
+/// not carry: a tab exposes what it is called and nothing else, and inventing
+/// an address from a title would be a row that lies.
+struct SwitchToTab;
+
+#[async_trait]
+impl Action for SwitchToTab {
+    fn id(&self) -> &'static str {
+        "sill.browser.tab.focus"
+    }
+
+    fn title(&self) -> &'static str {
+        "Switch To Tab"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::BrowserTab
+    }
+
+    /// The same capability switching to a window needs, deliberately.
+    ///
+    /// Going to a tab is going to the window it lives in and then changing
+    /// what that window shows. A capability of its own would let something
+    /// hold `WindowControl` and still be refused this, or the other way round,
+    /// and neither is a distinction anybody wants to reason about.
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    /// Reads the strip again rather than trusting what the row was built from.
+    ///
+    /// See `uia::pick`. The row carries a description of a tab, not a hold on
+    /// one, and between the query and the Enter the strip can have changed.
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let want = crate::uia::Where::parse(&object.target)
+            .ok_or_else(|| format!("{} is not a tab", object.title))?;
+
+        crate::uia::activate(&want)?;
+        Ok(Outcome::done(format!("Switched to {}", object.title)))
+    }
+}
+
 /// Everything that can be done to a window.
 ///
 /// Switch first because it is what a window in a result list is for. The
@@ -2616,6 +2742,7 @@ fn window_actions() -> Vec<Box<dyn Action>> {
             apply: crate::windowing::restore,
             said: "restored",
         }),
+        Box::new(KeepOnTop),
     ];
 
     actions.extend(

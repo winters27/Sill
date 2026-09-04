@@ -40,6 +40,22 @@ pub struct Asking {
     pub subject: String,
     /// What it touches, in words somebody deciding would use.
     pub touches: String,
+    /**
+    Why this is a keypress rather than Windows Hello, when it should have been.
+
+    `None` on every card that was never meant to be more than a card, which is
+    most of them, and the field is left out of the payload entirely in that
+    case so the window has nothing to draw.
+
+    It exists because the alternative is a silent downgrade. Somebody who has
+    turned the Hello gate on, and whose machine cannot run it, would otherwise
+    see the ordinary card and reasonably believe the stronger thing happened.
+    A keypress proves a key was pressed; that is worth having and it is not
+    what they were promised, and the difference belongs on the card rather than
+    in the log.
+    */
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instead: Option<String>,
 }
 
 /// How it was answered.
@@ -392,6 +408,7 @@ mod tests {
                 title: "Open".to_string(),
                 subject: r"C:\Users\me\notes.txt".to_string(),
                 touches: "opens something".to_string(),
+                instead: None,
             }
         }
 

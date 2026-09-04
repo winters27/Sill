@@ -124,6 +124,8 @@
     <span class="crumb">Emoji</span>
   {:else if mode === "keys"}
     <span class="crumb">Keyboard</span>
+  {:else if mode === "welcome"}
+    <span class="crumb">Welcome</span>
   {:else if mode === "ai"}
     <!--
       Who is answering, in the place that says where you are.
@@ -209,6 +211,8 @@
         ? "Filter what is running…"
       : mode === "widgets"
         ? "Esc to go back…"
+      : mode === "welcome"
+        ? "Esc to start searching…"
       : mode === "namingWorkspace"
         ? "Name this arrangement, then Enter…"
       : mode === "store"

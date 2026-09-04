@@ -179,6 +179,36 @@ outside the code.
 | Keystroke to the frame that draws it, **debug build behind a dev server** | 215 ms median, 298 ms worst, over 9 keystrokes |
 | The same keystrokes to the frame after that | 219 ms median, 308 ms worst |
 | Remote connections at rest, 12 minutes, three widgets pinned | 0 |
+| Browser tabs, resident with the feature on | 0, nothing exists between two searches |
+| Browser tabs, one query against a browser that is not running | 1.5 ms, the window list, then nothing |
+| Browser tabs, one query, one window, 13 tabs | 40 to 60 ms debug, 35 of it the walk |
+| Browser tabs, standing the automation client up | 0.1 to 0.2 ms of that |
+| Browser tabs, the first query against a Firefox | 374 ms, once, then 54 |
+| Browser tabs, what that first query costs the Firefox | about 10 MB in its window process, 85 MB across its pages, until it restarts |
+
+### What the browser tab numbers are worth
+
+The first two rows are the point of the design and the last two are its price.
+
+Nothing about this feature exists between one search and the next: no handler
+is registered, no tree is cached, and the UI Automation client itself is
+created and released inside the call. **That client costs 0.1 ms to stand up**,
+which is the measurement that decided it: holding one for the life of the
+process would save a fifth of a millisecond and would be a permanent object
+whose whole purpose is to be ready for something nobody has asked for yet.
+
+The walk is where a query actually goes, and it is a cost paid inside the
+browser rather than here. Asking for a node's children one sibling at a time
+took 39 ms of a 43 ms read; asking for a whole level at once with the
+properties attached took it to 33. It is still the bulk of the number.
+
+**The Firefox row is a cost in somebody else's program**, which is why the
+setting for it is separate and why the settings pane states the number. Firefox
+keeps its accessibility engine off until a client asks, `ElementFromHandle` is
+the asking, and it does not go off again: a read twenty minutes after the first
+one, with none in between, cost 40 ms rather than 374, which is what says the
+engine stayed up. Chromium exposes its own window either way and a read costs
+it nothing beyond the read.
 
 ### What the idle numbers are worth
 
