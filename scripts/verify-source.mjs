@@ -2087,25 +2087,42 @@ for (const file of sources("src-tauri/src")) {
    * A generous list on purpose. The point is not to catch a clever evasion,
    * it is to make somebody reaching for one of these stop and reread the
    * paragraph at the top of that file about why there is no loop.
+   *
+   * `timers.rs` is held to the same line, and it is the file where somebody
+   * would most reasonably reach for one: `P3-11` said timers must tick, and
+   * the whole answer here is that the ticking is Windows' and not Sill's. A
+   * countdown written here would work perfectly and would quietly undo the
+   * only claim the feature makes.
+   *
+   * `notes.rs` too, for a different reason. Nothing about notes wants a
+   * timer, which is exactly why one would arrive later as a convenience: an
+   * autosave sweep, or a watcher on the file. Both are a thread woken on an
+   * idle machine for a prototype that is switched off.
    */
-  for (const wakes of [
-    "thread::spawn",
-    "spawn_blocking",
-    "tokio::time",
-    "interval(",
-    "Instant::now",
-  ]) {
-    if (!core.includes(wakes)) continue;
+  const QUIET = [CORE, "src-tauri/src/timers.rs", "src-tauri/src/notes.rs"];
 
-    fail(
-      CORE,
-      lineOf(core, core.indexOf(wakes)),
-      "`" +
-        wakes +
-        "` here, and the point of this module is that Windows owns the " +
-        "schedule and Sill owns no loop. Anything periodic belongs in the " +
-        "task, not in the process",
-    );
+  for (const file of QUIET) {
+    const text = readFileSync(file, "utf8");
+
+    for (const wakes of [
+      "thread::spawn",
+      "spawn_blocking",
+      "tokio::time",
+      "interval(",
+      "Instant::now",
+    ]) {
+      if (!text.includes(wakes)) continue;
+
+      fail(
+        file,
+        lineOf(text, text.indexOf(wakes)),
+        "`" +
+          wakes +
+          "` here, and the point of this file is that Windows owns the " +
+          "schedule and Sill owns no loop. Anything periodic belongs in the " +
+          "task, not in the process",
+      );
+    }
   }
 
   // A second way to run an action, which is the one thing an automation must
