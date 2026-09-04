@@ -2084,6 +2084,7 @@ pub fn run() {
             commands::extensions::extension_grants,
             commands::extensions::extension_resources,
             commands::extensions::revoke_extension_grant,
+            commands::extensions::pick_files,
             commands::store::store_browse,
             commands::store::store_close,
             commands::store::store_prepare,

@@ -4,7 +4,7 @@
  * `npm run gate:views` renders somebody else's extensions rather than only
  * fixtures, because a fixture agrees with the host by construction and cannot
  * say whether a command written by a stranger still works. Those extensions
- * live in `raycast/extensions`, which is far too big to vendor for three
+ * live in `raycast/extensions`, which is far too big to vendor for ten
  * directories and is gitignored here, so a fresh clone has nothing to draw and
  * the gate fails at its first line.
  *
@@ -23,12 +23,13 @@
  * cannot find, so a name that fell out of step here would turn a check into a
  * silent pass rather than into an error.
  *
- * Only the paths the gate spells out are taken. The two it reaches through a
- * shell variable are optional by its own design, and it says so when they are
- * absent, so they are fetched only when they are asked for by name:
+ * Every path the gate spells out is taken, and the gate spells out all ten:
+ * the count of real extensions it draws is what `P4-01` is done at, so none of
+ * them is optional any more and there is nothing left for it to skip. More can
+ * be fetched by name, for trying one out before it is written into the gate:
  *
  * ```text
- * node scripts/fetch-raycast-src.mjs kill-process hacker-news
+ * node scripts/fetch-raycast-src.mjs speedtest color-picker
  * ```
  *
  * ## Why the clone is not pinned to a commit

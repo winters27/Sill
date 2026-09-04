@@ -162,7 +162,9 @@ await new Promise((done, fail) => {
   );
   p.on("exit", (c) => (c === 0 ? done() : fail(new Error(`esbuild exited ${c}`))));
 });
-const { collectActions, shortcutKeys, isRunnable } = await import(pathToFileURL(actionsOut).href);
+const { collectActions, shortcutKeys, isRunnable, toastActions } = await import(
+  pathToFileURL(actionsOut).href
+);
 
 // The search field's rules, bundled the same way. What this reports about
 // `filtering` and about which rows survive a query is what the window would
@@ -291,6 +293,20 @@ const firstRender = new Map();
 let navigation = { depth: 1, pop: "" };
 
 /**
+ * The toast on screen, if there is one.
+ *
+ * Kept the way the window keeps it, buttons and all, because a toast is the
+ * only thing a command can put in front of somebody that leaves no mark on the
+ * tree. Its buttons go through `toastActions`, which is the window's own
+ * reader, so what this reports is what the chin would draw rather than a
+ * second opinion about the same payload.
+ *
+ * Null after `UI/hideToast`, which is how an extension takes its own message
+ * away and is the half a button that closes the toast is testing.
+ */
+let toast = null;
+
+/**
  * Mimics Rust's ApiLayer closely enough to exercise an extension.
  *
  * "Closely enough" is a hazard as well as a convenience, and it bit once: this
@@ -327,7 +343,25 @@ function serveApi(method, params) {
       return null;
     case "UI/showToast":
     case "UI/updateToast":
+      /*
+       * Filtered the way Rust filters it, because a button with no handler is
+       * one the window refuses to draw and asserting on the raw payload would
+       * count a button nobody can press.
+       */
+      toast = {
+        title: params.title ?? "",
+        message: params.message ?? "",
+        style: params.style ?? "",
+        actions: toastActions(
+          (Array.isArray(params.actions) ? params.actions : []).filter(
+            (one) => typeof one.handler === "string" && one.handler,
+          ),
+        ),
+      };
+      return null;
     case "UI/hideToast":
+      toast = null;
+      return null;
     case "UI/showHud":
     case "UI/setSearchText":
     case "UI/popToRoot":
@@ -609,6 +643,32 @@ if (journey.wanted) {
 }
 
 /**
+ * Presses a button on the toast, the way the chin does.
+ *
+ * Through `activate`, which is the same call typing and pressing an action
+ * use, because a toast button is an ordinary handler id and nothing about it
+ * being on a toast changes how it is run. A path of its own here would leave
+ * this passing while the window could not press the thing.
+ *
+ * What is recorded is the toast either side, since that is where the answer
+ * shows: Raycast hands the handler the live toast, so a button that rewrites
+ * its own message proves the handle it got was the one on screen.
+ */
+const pressed = {
+  wanted: args.includes("--press-toast"),
+  before: undefined,
+  after: undefined,
+  found: false,
+};
+
+if (pressed.wanted) {
+  pressed.before = toast?.title;
+  pressed.found = activate(toast?.actions?.[0]?.handler);
+  await settle(1000);
+  pressed.after = toast?.title;
+}
+
+/**
  * What this extension costs, when anybody asked.
  *
  * The cold figure is the run that has already happened above: this process
@@ -749,6 +809,20 @@ if (top && (top.tag === "List" || top.tag === "Grid")) {
   console.log(`  dropdown options: ${drawn.dropdown}`);
   console.log(`  detail pane: ${drawn.detail} (list asks for one: ${showsDetail(top)})`);
   console.log(`  EmptyView: ${drawn.empty}`);
+}
+
+if (toast || pressed.wanted) {
+  console.log("\nToast:");
+  console.log(`  on screen: ${toast ? JSON.stringify(toast.title) : "none"}`);
+  console.log(`  style: ${toast?.style ?? "-"}`);
+  for (const button of toast?.actions ?? []) {
+    const keys = button.shortcut ? `  [${shortcutKeys(button.shortcut).join(" ")}]` : "";
+    console.log(`  button: ${button.title}${keys}`);
+  }
+  if (pressed.wanted) {
+    console.log(`  pressed the first: ${pressed.found}`);
+    console.log(`  said ${JSON.stringify(pressed.before)} -> ${JSON.stringify(pressed.after)}`);
+  }
 }
 
 if (journey.wanted) {
@@ -909,6 +983,72 @@ if (args.includes("--expect-empty-view")) {
   check(drawn.empty, "the list declares its own words for being empty");
 }
 
+/*
+ * A field the root view was supposed to declare, and how many of it.
+ *
+ * `--expect-field Form.FilePicker=2`. Written as one flag with a count rather
+ * than as a pair, because the interesting failure is a form drawing one of a
+ * kind and dropping the rest, and two flags could each be right about a
+ * different thing.
+ *
+ * Exact rather than a floor. This is asserted against fixtures, where the
+ * number is the fixture's own and changing it is a decision somebody made.
+ */
+const expectField = flag("--expect-field");
+
+if (expectField !== undefined) {
+  const [tag, howMany] = expectField.split("=");
+  const found = top ? tree.elementChildren(top).filter((one) => one.tag === tag).length : 0;
+
+  check(
+    found === Number(howMany ?? 1),
+    `the view declares ${howMany ?? 1} <${tag}>, got ${found}`,
+  );
+}
+
+/*
+ * What the toast was supposed to carry, and what pressing it was supposed to
+ * do.
+ *
+ * Three separate claims because they fail separately. The buttons arriving is
+ * the wire; the press is the window reaching the extension's own code through
+ * the ordinary handler channel; the words changing is Raycast's contract that
+ * the handler is given the live toast, which is the half an extension uses to
+ * turn "could not reach the server" into "trying again" without drawing
+ * anything.
+ */
+const expectToastActions = flag("--expect-toast-actions");
+
+if (expectToastActions !== undefined) {
+  check(toast !== null, "the extension put a toast on screen");
+  check(
+    (toast?.actions.length ?? 0) === Number(expectToastActions),
+    `the toast carries ${expectToastActions} button(s), got ${toast?.actions.length ?? 0}`,
+  );
+  check(
+    (toast?.actions ?? []).every((one) => one.handler),
+    "every button on it is one the window can press",
+  );
+}
+
+const expectToastSaid = flag("--expect-toast-said");
+
+if (pressed.wanted) {
+  check(pressed.found, "the toast offers a button the window can press");
+}
+
+if (expectToastSaid !== undefined) {
+  check(
+    pressed.after === expectToastSaid,
+    `the toast says ${JSON.stringify(expectToastSaid)} after the press, got ` +
+      JSON.stringify(pressed.after),
+  );
+  check(
+    pressed.before !== pressed.after,
+    `pressing changed the message, was ${JSON.stringify(pressed.before)}`,
+  );
+}
+
 if (expectPushed !== undefined) {
   check(journey.found, "the first row offers an Action.Push the window can run");
   check(
@@ -943,7 +1083,10 @@ if (
   flag("--expect-dropdown") !== undefined ||
   args.includes("--expect-detail") ||
   args.includes("--expect-empty-view") ||
-  expectFiltering !== undefined
+  expectFiltering !== undefined ||
+  expectToastActions !== undefined ||
+  expectToastSaid !== undefined ||
+  expectField !== undefined
 ) {
   check(gaps.size === 0, `no unimplemented API was needed, ${gaps.size} gap(s)`);
 }

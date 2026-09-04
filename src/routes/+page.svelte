@@ -44,7 +44,14 @@
   import { storeClose, type StoreRow } from "$lib/store";
   import WidgetBoard from "$lib/widgets/Board.svelte";
   import WidgetChin from "$lib/widgets/Chin.svelte";
-  import { actionFor, collectActions, isRunnable, type ActionEntry } from "$lib/exthost/actions";
+  import {
+    actionFor,
+    collectActions,
+    isRunnable,
+    toastActions,
+    type ActionEntry,
+    type ToastButton,
+  } from "$lib/exthost/actions";
   import { clipboardPanel, rowPanel } from "$lib/panel";
   import { clipboardEntry, clipboardMerge } from "$lib/clipboard";
   import {
@@ -137,8 +144,24 @@
 
   type UiEvent =
     | { kind: "render"; session: string; ops: Op[] }
-    | { kind: "showToast"; session: string; id: string; title: string; message: string; style: string }
-    | { kind: "updateToast"; session: string; id: string; title: string; message: string; style: string }
+    | {
+        kind: "showToast";
+        session: string;
+        id: string;
+        title: string;
+        message: string;
+        style: string;
+        actions: ToastButton[];
+      }
+    | {
+        kind: "updateToast";
+        session: string;
+        id: string;
+        title: string;
+        message: string;
+        style: string;
+        actions: ToastButton[];
+      }
     | { kind: "hideToast"; session: string; id: string }
     | { kind: "showHud"; session: string; text: string }
     | { kind: "setSearchText"; session: string; text: string }
@@ -502,7 +525,13 @@
     // emptying the row first would be a flicker on the way.
   }
   let version = $state(0);
-  let toast = $state<{ title: string; style: string } | null>(null);
+  /**
+   * The extension's toast, and the buttons it put on it.
+   *
+   * The buttons are `ActionEntry` values rather than a shape of their own, so
+   * pressing one and pressing a row in the action panel are the same call.
+   */
+  let toast = $state<{ title: string; style: string; actions: ActionEntry[] } | null>(null);
   let status = $state("");
 
   /**
@@ -2556,6 +2585,21 @@
       return;
     }
 
+    await runExtensionAction(action);
+  }
+
+  /**
+   * Runs one of a running command's actions, wherever it was pressed.
+   *
+   * The action panel is one place. A button on the extension's own toast is
+   * the other, and it comes through here rather than through a call of its
+   * own: a toast button is a callback the worker registered in the same
+   * registry every other callback uses, so the only thing that could differ is
+   * a mistake. The session check, the built-in fallback, the message for an
+   * action with nothing behind it and the wording when it throws are each
+   * written once.
+   */
+  async function runExtensionAction(action: ActionEntry) {
     if (!session) return;
 
     try {
@@ -3415,6 +3459,22 @@
     // somebody who has just selected part of what they typed means the
     // selection rather than the row.
     if (!isTyping(event) && !selecting) {
+      /*
+       * The toast's buttons first, because the toast is the thing in front.
+       *
+       * Raycast gives a toast action a chord and Sill draws it, and a drawn
+       * chord that does nothing is the bug `matchesShortcut` was written for.
+       * Ahead of the panel because a toast is a message about what just
+       * happened: while one is up with a Retry on Ctrl+R, Ctrl+R means retry
+       * that, not whatever the row underneath claims.
+       */
+      const onToast = toast ? actionFor(event, toast.actions) : -1;
+      if (onToast >= 0 && toast) {
+        event.preventDefault();
+        void runExtensionAction(toast.actions[onToast]);
+        return;
+      }
+
       const at = actionFor(event, shownActions);
       if (at >= 0) {
         event.preventDefault();
@@ -3609,13 +3669,20 @@
             break;
           case "showToast":
           case "updateToast":
-            toast = { title: payload.title, style: payload.style };
+            toast = {
+              title: payload.title,
+              style: payload.style,
+              actions: toastActions(payload.actions ?? []),
+            };
             break;
           case "hideToast":
             toast = null;
             break;
           case "showHud":
-            toast = { title: payload.text, style: "success" };
+            // A HUD is a line and never a button. Raycast's has no actions and
+            // an empty list here is what says so, rather than the last toast's
+            // buttons surviving under a new message.
+            toast = { title: payload.text, style: "success", actions: [] };
             break;
           case "setSearchText":
             query = payload.text;
@@ -4230,7 +4297,14 @@
       }}
     />
   {:else if view?.tag === "Form"}
-    <FormView bind:this={formView} {tree} node={view} {version} onsubmit={submitForm} />
+    <FormView
+      bind:this={formView}
+      {tree}
+      node={view}
+      {version}
+      session={session ?? ""}
+      onsubmit={submitForm}
+    />
   {:else if view?.tag === "Detail"}
     <!--
       Prose, drawn as prose.
@@ -4278,6 +4352,7 @@
       panelOpen = !panelOpen;
       panelSelected = 0;
     }}
+    ontoastaction={(action) => void runExtensionAction(action)}
   />
 </main>
 

@@ -259,7 +259,7 @@ above.
 | `Detail` | A markdown page, with an optional metadata panel beside it |
 | `Form` | A form. The fields it supports are in the component table below |
 | `Grid` | A grid of tiles, with sections, an empty view and a picker beside the search field |
-| `Icon` | Every name round-trips. The window draws the names it has a mark for and a lettered tile for the rest |
+| `Icon` | Every name round-trips. Which names have a mark is decided in `src-tauri/src/exthost/icons.rs` and nowhere else; anything with no mark gets a lettered tile |
 | `Image` | `Image.Mask` only |
 | `Keyboard` | `Keyboard.Shortcut.Common` only. A `cmd` modifier is drawn and matched as Ctrl |
 | `LaunchType` | The two launch kinds, for an entry point that branches on how it was started |
@@ -267,7 +267,7 @@ above.
 | `LocalStorage` | `getItem`, `setItem`, `removeItem`, `clear`, `allItems`. Cleared when the extension is uninstalled |
 | `PopToRootType` | The three values `showHUD` and `closeMainWindow` accept |
 | `Toast` | `Toast.Style` only |
-| `ToastHandle` | The live handle `showToast` returns. Assigning `title`, `message` or `style` updates the toast in place |
+| `ToastHandle` | The live handle `showToast` returns. Assigning `title`, `message` or `style` updates the toast in place, and a button's callback is handed this same handle |
 | `closeMainWindow` | Puts the launcher away. Asks to be allowed to dismiss the launcher, which is a permission of its own |
 | `confirmAlert` | A dialog with a primary and a dismiss button, both titled by the extension |
 | `environment` | Read from the launch payload, including `assetsPath` and `supportPath` |
@@ -278,7 +278,7 @@ above.
 | `open` | Opens a file or an address, optionally with a named application |
 | `popToRoot` | Leaves the command and returns to the root search |
 | `showHUD` | A short message across the launcher |
-| `showToast` | A toast. `primaryAction` and `secondaryAction` are accepted and not yet drawn |
+| `showToast` | A toast. `primaryAction` and `secondaryAction` are drawn as buttons beside it, with their chords, and pressing one runs the callback through the same activation an action panel row uses |
 | `useNavigation` | `push` and `pop` against the worker's own view stack |
 | `FormValidation` | `FormValidation.Required`, for `useForm` |
 | `createDeeplink` | Builds a `raycast://` link. Sill does not answer that scheme, so this is a string to hand somebody, not a link that works here |
@@ -356,7 +356,7 @@ does with it when it gets there.
 | `Form.Dropdown` | A picker |
 | `Form.Dropdown.Item` | One option |
 | `Form.Dropdown.Section` | Its options appear; the section's own title is not drawn |
-| `Form.FilePicker` | Not drawn. A form declaring one is missing that field |
+| `Form.FilePicker` | A button that opens Windows' own dialog, and the names of whatever was chosen. Nothing is read: the field's value is paths, and opening one still needs the filesystem permission |
 | `Form.LinkAccessory` | Not drawn |
 | `Form.PasswordField` | A field that hides what is typed |
 | `Form.Separator` | A rule between fields |
@@ -412,6 +412,30 @@ a name, a URL or data URI, `{ source, tintColor, mask }`, and
 One shape does not draw: a path relative to the extension's own assets. The
 window has no idea where an installed extension lives on disk, so those rows
 get the lettered tile rather than a broken image.
+
+A name is looked up in one table, `src-tauri/src/exthost/icons.rs`. Several
+names are one picture there, because they are: `Icon.Cog` and `Icon.Gear` are
+the same drawing, and so are `Icon.Warning` and `Icon.ExclamationMark`. A name
+that table does not carry draws the first letter of the name on a tile, which
+is what the root list already does for an application whose icon Windows will
+not produce.
+
+### Choosing a file
+
+`Form.FilePicker` draws a button. Pressing it opens the dialog Windows draws,
+somebody chooses in it, and the field's value becomes the paths they chose.
+
+**That is the whole of what a picker gives an extension**, and it is worth
+saying plainly, because a file picker looks like a way round the filesystem
+permission and is not. Nothing about the field reads a file, lists a folder or
+asks for a size. Choosing a folder yields the folder's own path and not its
+contents. Opening any of those paths afterwards is `fs` inside the worker,
+which is refused without the filesystem permission exactly as it would be for
+a path the extension typed out itself.
+
+So the field costs no permission to draw, and the dialog runs in Rust rather
+than in the window: the launcher window is deliberately not allowed to open
+one, because it is the window an extension draws into.
 
 ## Keeping this page honest
 

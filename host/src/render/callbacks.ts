@@ -34,6 +34,25 @@ export class CallbackManager {
     this.pendingRemoval.add(id);
   }
 
+  /**
+   * Drops an id now, for a caller that is not the reconciler.
+   *
+   * A toast's buttons are the case. They are registered here so a toast action
+   * is an ordinary handler id the UI activates the ordinary way, but they are
+   * not in any tree, so nothing ever detaches them and the deferred removal
+   * above never sees them. Left alone, an extension that shows a toast with a
+   * Retry button in a loop grows this map for as long as the command runs.
+   *
+   * Immediate rather than deferred, because the race deferral exists for
+   * cannot happen: there is one owner, the toast, and it releases these when
+   * the toast is replaced or hidden, which is after the UI has stopped drawing
+   * the buttons.
+   */
+  release(id: string): void {
+    this.callbacks.delete(id);
+    this.pendingRemoval.delete(id);
+  }
+
   /** Called once per commit, so anything still unclaimed is genuinely gone. */
   flushDeferredRemovals(): void {
     for (const id of this.pendingRemoval) this.callbacks.delete(id);

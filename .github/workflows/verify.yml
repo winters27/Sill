@@ -45,10 +45,10 @@ jobs:
       # directory rather than on anything about the code.
       - run: npm run build
 
-      # gate:views draws three real Raycast extensions rather than fixtures,
+      # gate:views draws ten real Raycast extensions rather than fixtures,
       # and they live in a tree that is gitignored here: it is somebody else's
-      # repository and far too big to vendor for three directories. So it is
-      # fetched, and only those three: a sparse blobless clone is 25 MB and
+      # repository and far too big to vendor for ten directories. So it is
+      # fetched, and only those ten: a sparse blobless clone is small and
       # four seconds against many gigabytes for the whole thing.
       #
       # Through the same script a person runs on a fresh clone, rather than

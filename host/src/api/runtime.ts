@@ -15,12 +15,26 @@ export const Toast = {
   } as const,
 };
 
+/** A button on a toast: what it says, what runs it, and its chord. */
+export interface ToastAction {
+  title?: string;
+  shortcut?: unknown;
+  onAction?: (toast: ToastHandle) => void;
+}
+
 export interface ToastOptions {
   title: string;
   message?: string;
   style?: string;
-  primaryAction?: unknown;
-  secondaryAction?: unknown;
+  primaryAction?: ToastAction;
+  secondaryAction?: ToastAction;
+}
+
+/** One button as the window receives it: a title, a chord, and a handler id. */
+interface OnTheWire {
+  title: string;
+  shortcut?: unknown;
+  handler: string;
 }
 
 /**
@@ -32,12 +46,27 @@ export class ToastHandle {
   private _title: string;
   private _message: string | undefined;
   private _style: string;
+  private readonly _primary: ToastAction | undefined;
+  private readonly _secondary: ToastAction | undefined;
+
+  /**
+   * The handler ids the window is currently holding for this toast's buttons.
+   *
+   * Kept so they can be given back. These are registered in the same registry
+   * every other callback uses, which is what makes a toast button an ordinary
+   * activation rather than a channel of its own, but nothing in a tree owns
+   * them, so the reconciler's deferred removal never reaches them. Releasing
+   * them here is the only thing that does.
+   */
+  private minted: string[] = [];
 
   constructor(options: ToastOptions) {
     this.id = `toast-${++toastSeq}`;
     this._title = options.title;
     this._message = options.message;
     this._style = options.style ?? Toast.Style.Success;
+    this._primary = options.primaryAction;
+    this._secondary = options.secondaryAction;
   }
 
   get title(): string {
@@ -70,10 +99,12 @@ export class ToastHandle {
       title: this._title,
       message: this._message ?? "",
       style: this._style,
+      actions: this.buttons(),
     });
   }
 
   async hide(): Promise<void> {
+    this.releaseButtons();
     await getBridge().request("UI/hideToast", { id: this.id });
   }
 
@@ -83,7 +114,49 @@ export class ToastHandle {
       title: this._title,
       message: this._message ?? "",
       style: this._style,
+      actions: this.buttons(),
     });
+  }
+
+  /**
+   * The buttons, as ids the window can activate.
+   *
+   * Minted afresh on every send and the previous set given back first, because
+   * an update is the same toast redrawn: the window is about to forget the ids
+   * it was holding, and keeping them alive so it could not use them is a leak
+   * with nothing on the other end of it.
+   *
+   * Raycast calls the handler with the toast itself, which is what lets a Retry
+   * button set `toast.style = Failure` and change the message it is sitting on.
+   * That is done here rather than by the window, which has no toast object and
+   * should not learn about one.
+   */
+  private buttons(): OnTheWire[] {
+    this.releaseButtons();
+
+    const out: OnTheWire[] = [];
+
+    for (const [action, fallback] of [
+      [this._primary, "Retry"],
+      [this._secondary, "Cancel"],
+    ] as const) {
+      if (!action?.onAction) continue;
+
+      const handler = getBridge().renderer.callbacks.register(() => {
+        action.onAction?.(this);
+        return null;
+      });
+
+      this.minted.push(handler);
+      out.push({ title: action.title ?? fallback, shortcut: action.shortcut, handler });
+    }
+
+    return out;
+  }
+
+  private releaseButtons(): void {
+    for (const handler of this.minted) getBridge().renderer.callbacks.release(handler);
+    this.minted = [];
   }
 }
 

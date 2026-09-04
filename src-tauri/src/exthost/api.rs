@@ -35,6 +35,16 @@ pub enum UiEvent {
         title: String,
         message: String,
         style: String,
+        /// The toast's buttons, each `{title, shortcut, handler}`.
+        ///
+        /// Carried rather than interpreted. A toast action is an ordinary
+        /// callback the worker registered in the ordinary registry, so what
+        /// arrives here is the handler id the window activates through
+        /// `activate_handler` like every other action in a command. Nothing in
+        /// Rust decides what one of them does, which is the whole point: a
+        /// second way to run an extension's code would be a second thing to
+        /// get the permissions right in.
+        actions: Value,
     },
     UpdateToast {
         session: String,
@@ -42,6 +52,7 @@ pub enum UiEvent {
         title: String,
         message: String,
         style: String,
+        actions: Value,
     },
     HideToast {
         session: String,
@@ -99,6 +110,36 @@ pub enum UiEvent {
         session: String,
         reason: String,
     },
+}
+
+/// A toast's buttons, kept only if each one can actually be pressed.
+///
+/// A button with no handler is a button that does nothing, and drawing one is
+/// worse than drawing none: somebody presses it, the toast stays, and there is
+/// no way to tell whether the extension is slow or the button is dead. The
+/// window's own rule for an action with no callback is the same one, and this
+/// is where a toast's buttons meet it.
+///
+/// Anything that is not an array is no buttons rather than an error. This
+/// arrives from a worker running somebody else's code, and a malformed field
+/// should cost the buttons, not the message.
+fn toast_actions(params: &Value) -> Value {
+    let kept: Vec<Value> = params
+        .get("actions")
+        .and_then(Value::as_array)
+        .map(|all| {
+            all.iter()
+                .filter(|one| {
+                    one.get("handler")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| !id.is_empty())
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Value::Array(kept)
 }
 
 pub struct ApiLayer {
@@ -246,6 +287,7 @@ impl ApiLayer {
                     title: string("title"),
                     message: string("message"),
                     style: string("style"),
+                    actions: toast_actions(params),
                 });
                 Ok(Value::Null)
             }
@@ -257,6 +299,7 @@ impl ApiLayer {
                     title: string("title"),
                     message: string("message"),
                     style: string("style"),
+                    actions: toast_actions(params),
                 });
                 Ok(Value::Null)
             }
@@ -545,6 +588,60 @@ fn alert_from(options: &Value) -> Alert {
             .and_then(Value::as_str)
             .map(|style| style.eq_ignore_ascii_case("destructive"))
             .unwrap_or(false),
+    }
+}
+
+#[cfg(test)]
+mod toast_buttons {
+    use super::toast_actions;
+    use serde_json::json;
+
+    /// A toast with no buttons is the ordinary case and must stay quiet.
+    #[test]
+    fn a_toast_without_buttons_carries_an_empty_list() {
+        assert_eq!(toast_actions(&json!({ "title": "Done" })), json!([]));
+        assert_eq!(toast_actions(&json!({ "actions": null })), json!([]));
+        // Not an array, which is a worker sending something malformed. The
+        // message still gets through; only the buttons are lost.
+        assert_eq!(toast_actions(&json!({ "actions": "Retry" })), json!([]));
+    }
+
+    /// A button the window could not press is not drawn.
+    ///
+    /// The extension declared `primaryAction` without an `onAction`, so no id
+    /// was minted for it. Drawing it would put a button on screen that does
+    /// nothing when pressed and says nothing about why.
+    #[test]
+    fn a_button_with_nothing_behind_it_is_dropped() {
+        let both = json!({
+            "actions": [
+                { "title": "Retry", "handler": "h4" },
+                { "title": "Ignore" },
+                { "title": "Later", "handler": "" },
+            ]
+        });
+
+        assert_eq!(
+            toast_actions(&both),
+            json!([{ "title": "Retry", "handler": "h4" }]),
+        );
+    }
+
+    /// The chord travels with the button, because the window draws it.
+    #[test]
+    fn a_buttons_shortcut_is_carried_through_untouched() {
+        let one = json!({
+            "actions": [{
+                "title": "Retry",
+                "handler": "h9",
+                "shortcut": { "modifiers": ["cmd"], "key": "r" },
+            }]
+        });
+
+        assert_eq!(
+            toast_actions(&one)[0]["shortcut"],
+            json!({ "modifiers": ["cmd"], "key": "r" }),
+        );
     }
 }
 

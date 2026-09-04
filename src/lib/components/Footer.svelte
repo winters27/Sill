@@ -11,13 +11,21 @@
    */
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import WidgetChin from "$lib/widgets/Chin.svelte";
+  import { shortcutKeys, type ActionEntry } from "$lib/exthost/actions";
   import type { Mode } from "$lib/modes";
   import type { Preferences } from "$lib/settings";
 
   interface Props {
     mode: Mode;
-    /** An extension's toast, which takes the line while it is up. */
-    toast: { title: string; style: string } | null;
+    /**
+     * An extension's toast, which takes the line while it is up.
+     *
+     * `actions` are the buttons it put on itself. They are already
+     * `ActionEntry` values because pressing one is the same thing as pressing
+     * a row in the action panel, and this reports the press rather than
+     * deciding what it means, exactly as every other control here does.
+     */
+    toast: { title: string; style: string; actions: ActionEntry[] } | null;
     /** What the launcher itself last had to say. */
     status: string;
     prefs: Preferences | null;
@@ -31,6 +39,8 @@
     onrun: () => void;
     /** The other half, which is the action chord. */
     onactions: () => void;
+    /** A button on the toast was pressed. */
+    ontoastaction: (action: ActionEntry) => void;
   }
 
   let {
@@ -43,6 +53,7 @@
     onbuiltin,
     onrun,
     onactions,
+    ontoastaction,
   }: Props = $props();
 </script>
 
@@ -57,6 +68,35 @@
   <LauncherMenu {onbuiltin} />
   {#if toast}
     <span class="toast" data-style={toast.style}>{toast.title}</span>
+    <!--
+      The buttons the extension put on its own message.
+
+      Beside the words rather than under them, because the toast is one line in
+      a chin that has no room for a second. `onmousedown` is prevented for the
+      reason the pill's are: the search field must keep document focus, and a
+      plain button takes it.
+
+      Keyed by the handler id, which is the one thing about a toast button that
+      is unique and does not change while it is on screen. Keying on the title
+      would blank the row the moment an extension offered two buttons that said
+      the same word.
+    -->
+    {#each toast.actions as action (action.handler)}
+      <button
+        type="button"
+        class="toast-action"
+        tabindex="-1"
+        onmousedown={(e) => e.preventDefault()}
+        onclick={() => ontoastaction(action)}
+      >
+        {action.title}
+        {#if action.shortcut}
+          {#each shortcutKeys(action.shortcut) as key (key)}
+            <span class="sill-key">{key}</span>
+          {/each}
+        {/if}
+      </button>
+    {/each}
   {:else if status}
     <span class="toast">{status}</span>
   {/if}
@@ -195,6 +235,39 @@
 
   .spacer {
     flex: 1;
+  }
+
+  /*
+   * A toast's own button, which is the quietest control in the chin.
+   *
+   * No border. A bordered chip is the shape this project has refused before,
+   * and this sits next to a coloured line of text where an outline would read
+   * as a second message rather than as something to press. The fill arrives on
+   * hover, which is the same thing the pill's segments do.
+   */
+  .toast-action {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex: none;
+    height: var(--control-height);
+    padding: 0 var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-meta);
+    white-space: nowrap;
+    cursor: default;
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
+  }
+
+  .toast-action:hover {
+    background-color: var(--fill-2);
+    color: var(--text-1);
   }
 
   .toast[data-style="success"] {

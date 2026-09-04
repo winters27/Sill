@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { actionFor, matchesShortcut, type Keystroke } from "./actions";
+import {
+  actionFor,
+  isRunnable,
+  matchesShortcut,
+  toastActions,
+  type Keystroke,
+} from "./actions";
 import type { ActionEntry } from "./actions";
 
 const press = (
@@ -205,5 +211,63 @@ describe("a shortcut a registry action ships with", () => {
     // silent change from "one of them" to "all of them".
     expect(typeof at).toBe("number");
     expect(contested.filter((a) => matchesShortcut(press("C", { ctrlKey: true, shiftKey: true }), a.shortcut!)).length).toBe(2);
+  });
+});
+
+/**
+ * A toast's buttons, once the window has read them.
+ *
+ * `toastActions` is the whole of the difference between "the extension put a
+ * button on its message" and "the window can run it", so it is worth checking
+ * without a window: everything after this call is code that already runs an
+ * action, and the only way a toast button could be special is if this handed
+ * back something an action is not.
+ */
+describe("a toast's buttons become ordinary actions", () => {
+  const button = (title: string, handler: string, shortcut?: unknown) => ({
+    title,
+    handler,
+    shortcut,
+  });
+
+  it("is runnable, because it always carries a handler", () => {
+    const [retry] = toastActions([button("Try Again", "h7")]);
+
+    expect(retry.handler).toBe("h7");
+    expect(isRunnable(retry)).toBe(true);
+  });
+
+  /**
+   * The ids key an `{#each}`, and a duplicate key blanks the whole list rather
+   * than drawing twice. A toast is in no tree, so it has no node to take an id
+   * from, and borrowing a positive number is how a button and a row end up
+   * with one key.
+   */
+  it("takes ids no node in the tree can have", () => {
+    const both = toastActions([button("Try Again", "h7"), button("Give Up", "h8")]);
+
+    expect(both.map((one) => one.id)).toEqual([-1, -2]);
+    expect(new Set(both.map((one) => one.id)).size).toBe(2);
+  });
+
+  /**
+   * The chord is drawn beside the button, and a drawn chord that does nothing
+   * is the bug `matchesShortcut` exists for. Reading it here is what lets the
+   * same `actionFor` the panel uses find it.
+   */
+  it("keeps a chord the window can both draw and match", () => {
+    const buttons = toastActions([
+      button("Try Again", "h7", { modifiers: ["cmd"], key: "r" }),
+      button("Give Up", "h8"),
+    ]);
+
+    expect(buttons[0].shortcut).toEqual({ modifiers: ["cmd"], key: "r" });
+    expect(buttons[1].shortcut).toBeUndefined();
+    expect(actionFor(press("r", { ctrlKey: true }), buttons)).toBe(0);
+  });
+
+  /** Nothing declared is no buttons, rather than one with an empty title. */
+  it("draws nothing when the toast offered nothing", () => {
+    expect(toastActions([])).toEqual([]);
   });
 });

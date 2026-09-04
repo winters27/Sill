@@ -234,6 +234,98 @@ pub(crate) fn revoke_extension_grant(
     grants.revoke(&extension, &capability);
 }
 
+/**
+The file picker behind `Form.FilePicker`, which is Windows' own.
+
+## Why this is in Rust and not three lines of `@tauri-apps/plugin-dialog`
+
+The launcher window is not on `capabilities/file-picker.json`. Two windows are,
+`ask` and `settings`, and the main one is deliberately not: a window that can
+open a dialog is a window that can be talked into opening one, and the main
+window is the one an extension draws into. So the frontend cannot call the
+plugin here even if somebody wanted it to, and this is the door instead.
+
+## What it hands back, and what it does not
+
+**Paths, and only the paths the dialog returned.** Nothing here reads a file,
+lists a folder or asks for so much as a size, and `verify:source` refuses this
+function if it grows a filesystem call. That is the whole of the answer to
+"could an extension use a picker to look inside a folder nobody granted it":
+picking a folder yields the folder's own path, its contents are not looked at,
+and reading anything at that path afterwards is `fs` inside the worker, which
+`patch-require.ts` refuses without `fileRead` exactly as it did before.
+
+## Why no permission is charged for opening it
+
+Every other door into somebody's disk is charged for because the extension
+chooses what it touches. This one it does not: Windows draws the dialog, the
+person reads a real file name in it and presses Open, and what comes back is
+that one answer. Charging `fileRead` to draw the field would also be a promise
+Sill does not keep, because the grant would let the extension read the whole
+disk while the field only ever produces what was chosen.
+
+The session is checked, though, and looked up rather than believed. An id that
+does not belong to a running command opens nothing, so this is not a way for
+anything else in the window to make dialogs appear.
+
+## Why the launcher stops dismissing while it is up
+
+The main window closes when it loses focus, and a dialog takes focus. Without
+this the picker would appear, the launcher would vanish behind it, and pressing
+Open would answer a form that had already been closed. The setting is put back
+whatever happens, including when the dialog is dismissed with nothing chosen.
+*/
+#[tauri::command]
+pub(crate) async fn pick_files(
+    app: tauri::AppHandle,
+    state: State<'_, HostState>,
+    session: String,
+    directories: bool,
+    multiple: bool,
+) -> Result<Vec<String>, String> {
+    use tauri::Manager;
+    use tauri_plugin_dialog::DialogExt;
+
+    if crate::host::extension_of(&state, &session).await.is_none() {
+        return Err("that picker does not belong to a running extension".to_string());
+    }
+
+    // Absent in a test harness, and its absence is not a reason to refuse: the
+    // window that would have been dismissed is not there either.
+    let blur = app.try_state::<crate::DismissOnBlur>();
+    if let Some(blur) = &blur {
+        blur.set(false);
+    }
+
+    let dialog = app.dialog().file().set_title(if directories {
+        "Choose a folder"
+    } else {
+        "Choose a file"
+    });
+
+    let chosen = match (directories, multiple) {
+        (true, true) => dialog.blocking_pick_folders(),
+        (true, false) => dialog.blocking_pick_folder().map(|one| vec![one]),
+        (false, true) => dialog.blocking_pick_files(),
+        (false, false) => dialog.blocking_pick_file().map(|one| vec![one]),
+    };
+
+    if let Some(blur) = &blur {
+        blur.set(true);
+    }
+
+    // Nothing chosen is an empty list rather than an error. Somebody opened the
+    // dialog and changed their mind, which is an ordinary thing to do, and a
+    // form field that reported it as a failure would be a form that says
+    // something went wrong every time somebody looks and decides not to.
+    Ok(chosen
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|one| one.into_path().ok())
+        .map(|one| one.to_string_lossy().into_owned())
+        .collect())
+}
+
 #[cfg(test)]
 mod what_they_cost {
     use super::gather_costs;
