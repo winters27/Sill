@@ -3085,6 +3085,60 @@ fn saving_the_ranking_history_leaves_nothing_half_written_behind() {
 
 /// A window competing on merit, not on which list it was appended to.
 ///
+/// Naming a kind of thing finds the things of that kind.
+///
+/// Brandon typed "game" expecting his games, and got the emoji called "video
+/// game" above all seven of them. Both are true matches: the emoji has that
+/// word in its name, and the games carry it as their category. The ranker put
+/// the emoji first because a category match was `Elsewhere`, the class meaning
+/// "these letters are in there somewhere", which is the weakest thing it has.
+///
+/// Naming a kind exactly is not that. It is the ordinary way to ask for a kind
+/// of thing, and it deserves to beat a coincidence of spelling.
+#[test]
+fn naming_a_category_exactly_finds_the_things_in_it() {
+    let mut corpus: Vec<CommandRecord> = vec![
+        command("app:enshrouded", "Enshrouded", "Game"),
+        command("app:apex", "Apex Legends", "Game"),
+        // The emoji, whose own name really does contain the word.
+        command("emoji:videogame", "video game", "Activities"),
+    ];
+
+    // Something the word only appears inside, which must stay weak.
+    corpus.push(command("app:gamebar", "Xbox Game Bar", "Application"));
+
+    let results = search(&corpus, "game", &Frecency::default(), NOW, 20);
+    let strong: Vec<&str> = results
+        .iter()
+        .filter(|hit| crate::registry::is_strong(hit.class))
+        .map(|hit| hit.command.title.as_str())
+        .collect();
+
+    assert!(
+        strong.contains(&"Enshrouded") && strong.contains(&"Apex Legends"),
+        "a game is not a strong answer to \"game\": {strong:?}"
+    );
+}
+
+/// A category the word merely appears inside stays weak.
+///
+/// The other half of the rule, and the reason it is an exact comparison: "app"
+/// inside "Application" is a coincidence of spelling rather than somebody
+/// naming a kind, and treating it as one would make three letters promote a
+/// hundred and fifty rows.
+#[test]
+fn a_category_the_word_is_only_part_of_stays_weak() {
+    let corpus = vec![command("app:one", "Something", "Application")];
+    let results = search(&corpus, "app", &Frecency::default(), NOW, 20);
+
+    assert!(
+        results
+            .iter()
+            .all(|hit| !crate::registry::is_strong(hit.class)),
+        "a partial category match was treated as naming the kind"
+    );
+}
+
 /// Windows used to come back from a command of their own and be appended after
 /// the index results had already been capped at `SEARCH_LIMIT`. On a short
 /// query the cap fills with weak matches, so a window whose title was an exact

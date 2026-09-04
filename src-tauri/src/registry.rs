@@ -2919,6 +2919,30 @@ fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass
         return Some((MatchClass::KeywordExact, Vec::new()));
     }
 
+    /*
+     * The category, named exactly.
+     *
+     * "game" is the word for a kind of thing, and typing it is how somebody
+     * asks for that kind. Answering it as `Elsewhere`, which is what a
+     * category match used to be, put every installed game below anything that
+     * merely had the letters in its name: searching "game" offered the emoji
+     * called "video game" first, because that is a whole word of its title,
+     * and the seven games underneath it were the weakest class the ranker
+     * has.
+     *
+     * Exactly, not partly. A category that merely contains the letters is
+     * still `Elsewhere` below, because "app" appearing inside "Application"
+     * is a coincidence of spelling rather than somebody naming a kind.
+     */
+    if command
+        .extension_title
+        .chars()
+        .map(lower_one)
+        .eq(needle.iter().copied())
+    {
+        return Some((MatchClass::KeywordExact, Vec::new()));
+    }
+
     if matches_another_field(needle, &command.extension_title)
         || command
             .keywords
