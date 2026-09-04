@@ -352,6 +352,44 @@ pub fn pins(home: &std::path::Path) -> std::collections::HashMap<String, Origin>
         .collect()
 }
 
+/// What one name is installed as, whichever of its two names it is.
+///
+/// **An extension has two names and nothing makes them agree.** The catalogue
+/// is keyed by a store slug, and the directory an extension installs into is
+/// named by its own `package.json`. [`Origin::listing`] exists to record the
+/// join, and until this function existed nothing consumed it: removing an
+/// extension from the store view handed the slug straight to a function that
+/// takes a directory name. Where the two differ that removes nothing, reports
+/// "was not installed", and leaves the bundles, the index entry and every
+/// permission behind. Where they differ *and something else is installed under
+/// the slug*, it removes the wrong extension.
+///
+/// The directory is tried first, because that is what the settings panel and
+/// the index already speak and an exact hit is not a guess. The slug is the
+/// fallback, and it is looked up by reading the origins rather than by
+/// assuming, which is what makes this a fact rather than a coincidence.
+///
+/// `None` means nothing installed answers to that name, which is a real answer:
+/// removing something already gone is the end state somebody asked for.
+pub fn installed_as(home: &std::path::Path, name: &str) -> Option<String> {
+    if home.join(name).is_dir() {
+        return Some(name.to_string());
+    }
+
+    let entries = std::fs::read_dir(home).ok()?;
+
+    entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        // An install builds into `.<name>.installing` beside its destination
+        // and that directory holds a complete origin while it exists, so it
+        // answers to the slug too. Removing it would take out a build in
+        // progress. Same reasoning as `pins`.
+        .filter(|directory| !directory.starts_with('.'))
+        .find(|directory| origin_of(home, directory).is_some_and(|origin| origin.listing == name))
+}
+
 /// Writes one, making the directory if it is not there yet.
 pub fn write_origin(
     home: &std::path::Path,
@@ -1128,6 +1166,93 @@ mod tests {
 
         assert_eq!(out.rows.len(), SHOWN);
         assert_eq!(out.matched, SHOWN + 40);
+    }
+
+    /// The store row and the directory are two names for one extension.
+    ///
+    /// The catalogue calls it `translate`; its `package.json` calls it
+    /// `google-translate`, and that is the directory. Removing it from the
+    /// store view handed the slug to a function that takes a directory name,
+    /// so it removed nothing and said "was not installed" while the bundles,
+    /// the index entry and every permission stayed exactly where they were.
+    #[test]
+    fn a_store_slug_resolves_to_the_directory_the_manifest_named() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let home = dir.path();
+
+        let origin = Origin::store("translate", "extensions/google-translate", "sha", vec![], 0);
+        write_origin(home, "google-translate", &origin).expect("writes");
+
+        assert_eq!(
+            installed_as(home, "translate").as_deref(),
+            Some("google-translate"),
+            "the slug found nothing, so removing it would have removed nothing",
+        );
+    }
+
+    /// The name the settings panel and the index already speak.
+    #[test]
+    fn a_directory_name_answers_for_itself() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let home = dir.path();
+
+        write_origin(home, "uuid-generator", &Origin::folder(home, 0)).expect("writes");
+
+        assert_eq!(
+            installed_as(home, "uuid-generator").as_deref(),
+            Some("uuid-generator"),
+        );
+    }
+
+    /// An exact directory is never given up for somebody else's slug.
+    ///
+    /// Both of these answer to `translate`: one is a directory with that name,
+    /// the other recorded it as the store row it came from. Resolving to the
+    /// second would remove an extension the person never pointed at, which is
+    /// worse than removing nothing.
+    #[test]
+    fn the_directory_wins_over_another_extensions_slug() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let home = dir.path();
+
+        write_origin(home, "translate", &Origin::folder(home, 0)).expect("writes");
+        write_origin(
+            home,
+            "google-translate",
+            &Origin::store("translate", "extensions/google-translate", "sha", vec![], 0),
+        )
+        .expect("writes");
+
+        assert_eq!(
+            installed_as(home, "translate").as_deref(),
+            Some("translate")
+        );
+    }
+
+    /// A build in progress is not an installed extension.
+    #[test]
+    fn a_half_built_install_is_not_resolved_to() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let home = dir.path();
+
+        write_origin(
+            home,
+            ".google-translate.installing",
+            &Origin::store("translate", "extensions/google-translate", "sha", vec![], 0),
+        )
+        .expect("writes");
+
+        assert_eq!(installed_as(home, "translate"), None);
+    }
+
+    #[test]
+    fn nothing_installed_under_that_name_is_an_answer_rather_than_a_guess() {
+        let dir = tempfile::tempdir().expect("temp dir");
+
+        assert_eq!(installed_as(dir.path(), "never-installed"), None);
+        // The directory does not exist at all, which is a machine with no
+        // extensions on it.
+        assert_eq!(installed_as(&dir.path().join("gone"), "anything"), None);
     }
 
     #[test]

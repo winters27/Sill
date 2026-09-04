@@ -45,8 +45,21 @@ pub const NEEDED: &[(&str, &[Capability])] = &[
     ("UI/showHud", &[Capability::Ui]),
     ("UI/confirmAlert", &[Capability::Ui]),
     ("UI/setSearchText", &[Capability::Ui]),
+    // Leaving the command and going back to Sill's root list. The extension
+    // ending its own screen, which is `Ui` for the reason `UI/render` is: the
+    // only thing it puts away is the thing it drew.
     ("UI/popToRoot", &[Capability::Ui]),
-    ("UI/closeMainWindow", &[Capability::Ui]),
+    // Taking the window off the screen, which is not drawing in it.
+    //
+    // This was `Ui`, and `Ui` is the one capability nothing has to be granted,
+    // so an extension dismissed the launcher because it was allowed to paint a
+    // toast in it. Those are different favours: one leaves the person where
+    // they were, and the other ends what they were doing and hands the
+    // keyboard back to whatever was behind. It is also the second half of
+    // copy-then-hide-then-paste, which types into a window Sill was never
+    // shown, and a command calling it on every render is a launcher that
+    // cannot be kept open.
+    ("UI/closeMainWindow", &[Capability::LauncherDismiss]),
     // Somebody else's text, taken without them doing anything.
     ("UI/getSelectedText", &[Capability::SelectionRead]),
     // The clipboard. Reading is its own permission from writing, because the
@@ -189,6 +202,14 @@ mod tests {
 /// Only [`Capability::Ui`] is free, because it is Sill's own surface and an
 /// extension drawing a toast in the window it was opened in has reached
 /// nothing. Everything else is asked about once and then remembered.
+///
+/// **[`Capability::LauncherDismiss`] is deliberately not free**, and it was,
+/// under the name `Ui`. Drawing in a window and making that window go away
+/// arrived at the gate as the same word, so the one capability nothing has to
+/// be granted was also a way to dismiss the launcher out from under somebody.
+/// Written as one exception rather than a list of what must be asked about,
+/// because a list of exceptions is the shape that silently swallows the next
+/// capability somebody adds.
 pub fn needs_granting(capability: &Capability) -> bool {
     !matches!(capability, Capability::Ui)
 }
@@ -212,6 +233,7 @@ pub fn plainly(capability: &Capability) -> &'static str {
         Capability::SystemControl => "change this machine's settings",
         Capability::WindowControl => "move and close other programs' windows",
         Capability::Ui => "draw in Sill's own window",
+        Capability::LauncherDismiss => "close Sill's window while you are using it",
     }
 }
 
@@ -265,9 +287,47 @@ mod granting {
             Capability::Network,
             Capability::SystemControl,
             Capability::WindowControl,
+            Capability::LauncherDismiss,
         ] {
             assert!(needs_granting(&capability), "{capability:?} is free");
         }
+    }
+
+    /// Drawing in the window and taking the window away are not one word.
+    ///
+    /// `UI/closeMainWindow` needed `Ui`, and `Ui` is the free one, so every
+    /// extension could dismiss the launcher because every extension is allowed
+    /// to draw a toast. The pair below is the whole of the fix: what paints
+    /// stays free, and what ends what somebody was doing has to be granted.
+    #[test]
+    fn drawing_in_the_window_does_not_buy_closing_it() {
+        let drawing = needed("UI/showToast").expect("showToast has a row");
+        let closing = needed("UI/closeMainWindow").expect("closeMainWindow has a row");
+
+        assert_eq!(drawing, &[Capability::Ui]);
+        assert!(
+            !closing.contains(&Capability::Ui),
+            "closing the launcher is back on the capability that is free",
+        );
+        assert_eq!(closing, &[Capability::LauncherDismiss]);
+
+        for capability in closing {
+            assert!(
+                needs_granting(capability),
+                "{capability:?} closes the launcher and is handed over unasked",
+            );
+        }
+    }
+
+    /// What an extension puts away of its own is still its own.
+    ///
+    /// `popToRoot` leaves the command and goes back to Sill's list, which is
+    /// the extension ending the screen it drew. Making that ask would be a card
+    /// about an extension closing itself, and every such question makes the
+    /// real ones cheaper.
+    #[test]
+    fn leaving_its_own_screen_is_not_dismissing_the_launcher() {
+        assert_eq!(needed("UI/popToRoot"), Some(&[Capability::Ui][..]));
     }
 
     /// The bar for an extension is at least as high as the bar for Sill's own

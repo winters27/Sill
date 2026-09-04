@@ -85,6 +85,43 @@ const GATED: Record<string, { needs: string[]; plainly: string }> = {
   inspector: { needs: ["processLaunch"], plainly: "start other programs" },
 };
 
+/**
+ * What this worker is allowed to reach, right now.
+ *
+ * **A `Set` built once at launch was the bug.** The gates below closed over
+ * the array that arrived with the command, so taking a permission away in
+ * Settings reached the file on disk, reached the next launch, and reached
+ * nothing at all in the worker already running: an extension somebody had just
+ * revoked went on reading the disk and reaching the network until it was
+ * unloaded. A permission that can be revoked and does not take effect is worse
+ * than one that cannot, because the person believes they have taken it away.
+ *
+ * So the gates hold this object and ask it per call, and Rust replaces its
+ * contents whenever what the extension holds changes. That costs one property
+ * read on a path that was already a set lookup.
+ *
+ * An object owned by `workerMain` and handed to the gates rather than a module
+ * variable they both reach for. One worker runs one command, so the difference
+ * never shows up at runtime, and it shows up immediately in a test: this can be
+ * made, driven and thrown away, which a module global cannot.
+ */
+export class Held {
+  private granted: Set<string>;
+
+  constructor(granted: readonly string[] = []) {
+    this.granted = new Set(granted);
+  }
+
+  has(need: string): boolean {
+    return this.granted.has(need);
+  }
+
+  /** What the extension holds now, replacing what it held before. */
+  replace(granted: readonly string[]): void {
+    this.granted = new Set(granted);
+  }
+}
+
 /** What a module id asks for, if anything. */
 function gateOf(id: string): { needs: string[]; plainly: string } | undefined {
   const bare = id.startsWith("node:") ? id.slice(5) : id;
@@ -121,7 +158,7 @@ function gateOf(id: string): { needs: string[]; plainly: string } | undefined {
  * of the caller's choosing. All three now reach the same gate, because the
  * gate moved to `_load` where every one of them ends up.
  */
-export function patchRequire(granted: readonly string[] = []): void {
+export function patchRequire(held: Held): void {
   const overrides: Record<string, () => unknown> = {
     react: () => React,
     "react/jsx-runtime": () => jsxRuntime,
@@ -131,15 +168,15 @@ export function patchRequire(granted: readonly string[] = []): void {
     "@raycast/utils": () => raycastUtils,
   };
 
-  const held = new Set(granted);
-
   /**
    * Throws unless the extension holds what this module needs.
    *
    * Checked before the module is resolved, so a refused one is never even
    * loaded. Node caches a module the first time it is required, and a check
    * written after resolution would leave it in that cache for whatever asks
-   * next.
+   * next. That is also what makes a revoke bite a worker that has already
+   * required the module once: the cached copy is still handed out by
+   * `_load`, and `_load` asks this first.
    */
   const refuseUnlessAllowed = (id: string) => {
     const gate = gateOf(id);
@@ -201,20 +238,26 @@ export function patchRequire(granted: readonly string[] = []): void {
 }
 
 /**
- * Refuses the network to a worker that was not granted it.
+ * Puts the network behind the same permission the module gate uses.
  *
  * `patchRequire` gates `require("http")` and its neighbours, and would have
  * been a fig leaf on its own: `fetch` is a global in modern Node, so an
  * extension could reach the network without requiring anything at all. The
  * module gate stopped the older way of doing it and left the current one open.
  *
- * Replaced rather than deleted, so an extension that tries gets the same
+ * Wrapped rather than deleted, so an extension that tries gets the same
  * sentence naming the permission that a refused `require` gets, instead of
  * "fetch is not a function" from somewhere in a bundled dependency.
+ *
+ * **The wrappers go on whether or not the network is granted**, and that is
+ * the whole of what makes revoking mean anything here. This used to return
+ * early for a worker that had the permission, which left the real `fetch` in
+ * place for the life of the command: taking the network away in Settings
+ * reached the next launch and never the extension that was busy using it. The
+ * cost of always wrapping is one set lookup per request, against a call that
+ * opens a socket.
  */
-export function gateGlobals(granted: readonly string[] = []): void {
-  if (granted.includes("network")) return;
-
+export function gateGlobals(held: Held): void {
   const why = (what: string) =>
     new Error(
       `sill: this extension is not allowed to open network connections, so ${what} is unavailable. ` +
@@ -232,22 +275,34 @@ export function gateGlobals(granted: readonly string[] = []): void {
    * an unhandled throw from module scope instead. The constructors are the
    * other way round, since `new WebSocket(...)` can only fail by throwing.
    */
-  if ("fetch" in globals) {
+  const realFetch = globals.fetch;
+  if (typeof realFetch === "function") {
+    const call = realFetch as (...args: unknown[]) => Promise<unknown>;
+
     Object.defineProperty(globals, "fetch", {
       configurable: true,
       writable: true,
-      value: () => Promise.reject(why("fetch")),
+      value: (...args: unknown[]): Promise<unknown> =>
+        held.has("network") ? call.apply(globals, args) : Promise.reject(why("fetch")),
     });
   }
 
   for (const name of ["WebSocket", "XMLHttpRequest", "EventSource"]) {
-    if (!(name in globals)) continue;
+    const real = globals[name];
+    if (typeof real !== "function") continue;
+
+    const Real = real as new (...args: unknown[]) => object;
 
     Object.defineProperty(globals, name, {
       configurable: true,
       writable: true,
-      value: function refused(): never {
-        throw why(name);
+      // Constructed through the real one rather than subclassing it, so an
+      // extension that is allowed the network gets the genuine object with
+      // its own prototype, not a wrapper that fails `instanceof` somewhere
+      // deep inside a dependency.
+      value: function gated(...args: unknown[]): object {
+        if (!held.has("network")) throw why(name);
+        return Reflect.construct(Real, args, Real);
       },
     });
   }

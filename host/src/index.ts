@@ -211,6 +211,7 @@ class ExtensionHost {
     this.rpc.handle("Manager/ready", (p) => this.markReady(String(p.session_id)));
     this.rpc.handle("Manager/unload", (p) => this.unload(String(p.session_id)));
     this.rpc.handle("Manager/messageExtension", (p) => this.toExtension(p));
+    this.rpc.handle("Manager/setCapabilities", (p) => this.setCapabilities(p));
 
     process.stdin.on("data", (chunk: Buffer) => {
       for (const frame of this.decoder.push(chunk)) {
@@ -425,6 +426,32 @@ class ExtensionHost {
     const session = this.sessions.get(String(params.session_id));
     if (!session) return false;
     session.control.emit("Lifecycle/message", { payload: String(params.payload) });
+    return true;
+  }
+
+  /**
+   * Tells a running command what it is allowed to reach now.
+   *
+   * Capabilities used to arrive once, in `Lifecycle/launch`, and never again.
+   * That made revoking a half-measure: Settings wrote the file, the next
+   * launch honoured it, and the worker the person was looking at went on using
+   * the permission they had just taken away until something unloaded it.
+   *
+   * On the control channel rather than the extension's own, because this is
+   * the manager telling the worker about itself and no extension code is
+   * entitled to see it, let alone answer it.
+   *
+   * `false` for a session that is gone, like every other call here. A revoke
+   * arriving a moment after a command closed is not a failure; there is simply
+   * nothing left to tell.
+   */
+  private setCapabilities(params: RpcParams): boolean {
+    const session = this.sessions.get(String(params.session_id));
+    if (!session) return false;
+
+    session.control.emit("Lifecycle/capabilities", {
+      capabilities: Array.isArray(params.capabilities) ? params.capabilities : [],
+    });
     return true;
   }
 
