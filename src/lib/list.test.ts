@@ -71,6 +71,20 @@ describe("what a row is filed under", () => {
   });
 
   /**
+   * The media row, which carries the player in the field the fallback reads.
+   *
+   * Worth its own case because the fallback would look right. A now-playing
+   * row puts the player's name in `extensionTitle`, so a missing heading would
+   * file it under "Spotify" rather than under anything wrong-looking, and
+   * nobody would notice until they wondered why the heading changed with the
+   * track.
+   */
+  test("what is playing is filed under Media and not under the player", () => {
+    const playing = { ...command("media"), extensionTitle: "Spotify" };
+    expect(groupOf(playing)).toBe("Media");
+  });
+
+  /**
    * A mode nobody named falls back to where the row came from.
    *
    * True, where "Applications" was not: an extension command that named a

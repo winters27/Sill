@@ -37,6 +37,7 @@ pub mod lazy_windows;
 pub mod live;
 pub mod lnk;
 pub mod log;
+pub mod media;
 pub mod meter;
 pub mod navigation;
 pub mod object;
@@ -1270,6 +1271,18 @@ fn manage_before_windows(app: &tauri::App) {
     ));
     app.manage(state::Fresh::<Vec<processes::Process>>::new(
         processes::FRESH_FOR,
+    ));
+    /*
+     * What is playing, which is read only when somebody asks about it.
+     *
+     * Managed unconditionally like the four above, and for the reason the
+     * comment under `CatalogState` gives: Tauri resolves a command's state
+     * before the body can read a preference and decide, so a state managed on
+     * a condition is a state some command cannot be called at all. Empty costs
+     * a mutex holding a `None`.
+     */
+    app.manage(state::Fresh::<Option<media::NowPlaying>>::new(
+        media::FRESH_FOR,
     ));
 
     /*

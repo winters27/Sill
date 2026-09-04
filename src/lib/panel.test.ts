@@ -146,6 +146,7 @@ describe("which rows are worth naming", () => {
       "conversation",
       "past-conversation",
       "store-listing",
+      "media",
     ] as const) {
       expect(namable(row({ mode })), `${mode} should not be namable`).toBe(false);
     }

@@ -84,6 +84,13 @@ pub enum ObjectKind {
     /// for and a row's identity stops meaning anything when the program goes
     /// quiet.
     AudioSession,
+    /// Whatever is playing right now, as one row.
+    ///
+    /// Not in the index, like a window and an audio session, and one step
+    /// further out than either: there is no list of these to enumerate. There
+    /// is one, or there is none, and which one it is belongs to Windows rather
+    /// than to Sill.
+    NowPlaying,
     /// A running program.
     ///
     /// Like a window and an audio session: enumerated the moment it is asked
@@ -145,6 +152,7 @@ impl ObjectKind {
         Self::Search,
         Self::Url,
         Self::AudioSession,
+        Self::NowPlaying,
         Self::Process,
         Self::Workspace,
         Self::Script,
@@ -188,6 +196,7 @@ impl ObjectKind {
             Self::Search => "web search",
             Self::Url => "web page",
             Self::AudioSession => "program's volume",
+            Self::NowPlaying => "what is playing",
             Self::Process => "running program",
             Self::Workspace => "saved arrangement",
             Self::Conversation => "conversation",
@@ -234,6 +243,9 @@ impl ObjectKind {
             "emoji" => Self::Emoji,
             "window" => Self::Window,
             "audio-session" => Self::AudioSession,
+            // What is playing, which is a row the search builds when somebody
+            // asks for it and never anything the index holds.
+            "media" => Self::NowPlaying,
             "process" => Self::Process,
             "workspace" => Self::Workspace,
             // Two modes, one kind. One is the conversation offered at the top
@@ -505,17 +517,18 @@ mod tests {
                 ObjectKind::Search => 15,
                 ObjectKind::Url => 16,
                 ObjectKind::AudioSession => 17,
-                ObjectKind::Process => 18,
-                ObjectKind::Workspace => 19,
-                ObjectKind::Script => 20,
-                ObjectKind::Conversation => 21,
-                ObjectKind::StoreListing => 22,
+                ObjectKind::NowPlaying => 18,
+                ObjectKind::Process => 19,
+                ObjectKind::Workspace => 20,
+                ObjectKind::Script => 21,
+                ObjectKind::Conversation => 22,
+                ObjectKind::StoreListing => 23,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            23,
+            24,
             "a kind was added or removed without `ALL` being told",
         );
 

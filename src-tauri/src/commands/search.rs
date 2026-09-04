@@ -147,6 +147,40 @@ pub(crate) async fn search_commands(
     splice_suggestions(&mut results, inline);
 
     /*
+     * What is playing, when the query is one of the words that asks for it.
+     *
+     * `media::matched` holds the gate and is handed the reading rather than
+     * taking it: the machine is not asked anything unless the query was
+     * exactly one of nine words. So a keystroke that is not one of them costs
+     * a trim and a lookup in a list of nine, and the WinRT call that fetches a
+     * session manager and a track title never happens. That is the whole of
+     * this item's "costs nothing when not matched", and `media`'s own tests
+     * prove it by counting the readings a hundred non-matching queries take.
+     *
+     * Spliced rather than put at the top. "play" is a word somebody types on
+     * the way to Play Store, and this is the same placement the emoji
+     * suggestions use: below anything that is a strong match for what was
+     * typed, above everything that merely contains the letters. With nothing
+     * else matching at all, which is what "pause" usually looks like, that is
+     * the top.
+     *
+     * Nothing playing answers `None`, and `splice_suggestions` draws nothing
+     * for an empty list. A machine with no media session gets no row rather
+     * than an empty one.
+     */
+    let playing = crate::media::matched(&query, || {
+        crate::media::now(&app.state::<crate::state::Fresh<Option<crate::media::NowPlaying>>>())
+    });
+
+    splice_suggestions(
+        &mut results,
+        playing
+            .iter()
+            .map(registry::now_playing_record)
+            .collect::<Vec<_>>(),
+    );
+
+    /*
      * Above everything, because when a query IS a sum, or a request for a
      * UUID, the answer is the only thing wanted.
      *

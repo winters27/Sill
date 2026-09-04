@@ -979,6 +979,84 @@ fn quit_is_what_enter_does_to_a_process_and_force_quit_is_never() {
     );
 }
 
+/// Enter on the media row stops the noise, and Next is behind it.
+///
+/// Both halves matter. Enter is the key somebody presses without looking, and
+/// on a row that appeared because they typed "pause" the thing they meant by
+/// it is pausing. Skipping a track from the same key would be the launcher
+/// answering a question nobody asked, and it is not undoable: the track that
+/// was playing does not come back by pressing it again.
+#[test]
+fn enter_on_what_is_playing_pauses_it_and_never_skips_it() {
+    let registry = builtins();
+
+    let primary = registry
+        .primary(ObjectKind::NowPlaying)
+        .expect("the media row has something bound to Enter");
+
+    assert_eq!(
+        primary.id(),
+        "sill.media.playPause",
+        "Enter on the media row runs {} rather than play or pause",
+        primary.id()
+    );
+
+    let drawn = registry.describe(ObjectKind::NowPlaying, &Default::default());
+
+    let offered: Vec<&str> = drawn.iter().map(|action| action.id).collect();
+
+    let play = offered
+        .iter()
+        .position(|id| *id == "sill.media.playPause")
+        .expect("Play or Pause is offered on the media row");
+    let next = offered
+        .iter()
+        .position(|id| *id == "sill.media.next")
+        .expect("Next Track is offered on the media row");
+
+    assert_eq!(
+        play, 0,
+        "the panel does not open on Play or Pause: {offered:?}"
+    );
+    assert_eq!(
+        next, 1,
+        "something unrelated is drawn between the pair: {offered:?}"
+    );
+    assert!(
+        !drawn[next].primary,
+        "Next Track claims Enter as well, and the panel's first entry decides \
+         which of the two actually runs"
+    );
+}
+
+/// The two media actions reach what is playing and nothing else.
+///
+/// Neither takes a target: both act on whatever Windows says the current
+/// session is. So a kind that reached one of them would be a row somebody
+/// selected for an unrelated reason, with Enter or a panel entry pausing their
+/// music.
+#[test]
+fn nothing_but_what_is_playing_can_be_played_or_skipped() {
+    let registry = builtins();
+
+    for id in ["sill.media.playPause", "sill.media.next"] {
+        let action = registry.get(id).expect("the action is registered");
+
+        for kind in ObjectKind::ALL {
+            if *kind == ObjectKind::NowPlaying {
+                assert!(action.accepts(*kind), "{id} refuses the row it is for");
+                continue;
+            }
+
+            assert!(
+                !action.accepts(*kind),
+                "{id} accepts {kind:?}, so selecting one offers to change what \
+                 is playing"
+            );
+        }
+    }
+}
+
 /// Ending a program is offered on a process and on nothing else.
 ///
 /// Both actions parse their target as a process id, so a kind that reached

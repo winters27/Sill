@@ -1156,6 +1156,44 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Every action the window names by hand is an action that exists.
+ *
+ * Thirteen places in the window reach an action by its id rather than through
+ * the panel: Enter on a window, on a process, on a program's volume, on a
+ * calculator answer, on what is playing. Each of those is a string written in
+ * TypeScript that has to match a string written in Rust, with nothing making
+ * them match. Rename one in `actions/mod.rs` and the window still compiles,
+ * still passes `svelte-check`, and answers "no such action" the first time
+ * somebody presses the key.
+ *
+ * Two lists that must agree with nothing making them agree is a shape this
+ * project has paid for before. This is the thing that makes them agree.
+ */
+{
+  const PAGE = "src/routes/+page.svelte";
+  const ACTIONS = "src-tauri/src/actions/mod.rs";
+  const text = readFileSync(PAGE, "utf8");
+  const rust = readFileSync(ACTIONS, "utf8");
+
+  // Every id an action declares. They are literals in `fn id`, so the whole
+  // file is scanned for the shape rather than the function parsed.
+  const declared = new Set(
+    Array.from(rust.matchAll(/"(sill\.[A-Za-z0-9.]+)"/g), (m) => m[1]),
+  );
+
+  for (const found of text.matchAll(/runObjectAction\("(sill\.[A-Za-z0-9.]+)"/g)) {
+    if (declared.has(found[1])) continue;
+
+    fail(
+      PAGE,
+      lineOf(text, found.index),
+      `the window runs "${found[1]}" and no action in ${ACTIONS} declares ` +
+        "that id, so pressing the key it is behind answers \"no such action\"",
+    );
+  }
+}
+
+/*
  * The launcher window does not decide what Ctrl+K means.
  *
  * `navigation.rs` resolves every movement chord, presets and overrides
