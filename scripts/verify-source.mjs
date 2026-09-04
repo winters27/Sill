@@ -1442,9 +1442,11 @@ for (const file of sources("src-tauri/src")) {
       // An escape means the spacing was arranged on purpose.
       if (m[1].includes("\u005C")) continue;
 
-      // Spaces run up to a colon to line a reading up in a column, which is
-      // how every `key    : value` diagnostic in here is written.
-      const aligned = /\S {3,}[:|]/;
+      // Spaces around a colon line a reading up in a column, which is how
+      // every `key    : value` and `key:    value` diagnostic in here is
+      // written. Both sides, because the run sits before the colon when the
+      // keys are padded and after it when the values are.
+      const aligned = /\S {3,}[:|]|[:|] {3,}\S/;
 
       // Three, not two: two spaces after a full stop is a writing style,
       // while three is indentation that leaked in.

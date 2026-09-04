@@ -716,6 +716,18 @@ pub(crate) async fn keyboard_reference(
     Ok(crate::keysheet::reference(&summon, &moving, &acting))
 }
 
+/// The terminal profiles this machine offers.
+///
+/// Asked for when the list is opened, not on a keystroke: it reads a settings
+/// file and runs `wsl.exe`, and neither is work to do because somebody typed a
+/// letter.
+#[tauri::command]
+pub(crate) async fn terminal_profiles() -> Vec<crate::terminals::Profile> {
+    tokio::task::spawn_blocking(crate::terminals::available)
+        .await
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

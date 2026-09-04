@@ -68,6 +68,7 @@ pub mod summon;
 pub mod synthetic;
 pub mod system;
 pub mod taps;
+pub mod terminals;
 pub mod text;
 pub mod timing;
 pub mod tts;
@@ -1700,6 +1701,7 @@ pub fn run() {
             commands::settings::navigation_keys,
             commands::settings::action_shortcuts,
             commands::settings::keyboard_reference,
+            commands::settings::terminal_profiles,
             commands::settings::emoji_tones,
             commands::search::list_monitors,
             commands::search::open_path,

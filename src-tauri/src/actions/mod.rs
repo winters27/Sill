@@ -1358,38 +1358,62 @@ impl Action for TerminalHere {
         &[Capability::ProcessLaunch]
     }
 
-    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
         let here = folder_of(&object.target)?;
+
+        /*
+         * A profile, if one was asked for.
+         *
+         * Through `ActionCtx` rather than read from the field, so a key bound
+         * to this and the model can both name a profile. An unknown name is
+         * not refused here: `wt` says so itself, and a list of profiles read a
+         * moment ago can be out of date by the time somebody presses Enter.
+         */
+        let wanted = ctx.argument().map(str::trim).filter(|one| !one.is_empty());
 
         // Whichever terminal the machine has, best first. `wt` is the one
         // people who have it want; `powershell` is on every Windows; `cmd` is
-        // the one that cannot be missing.
-        let opened = ["wt.exe", "powershell.exe", "cmd.exe"]
-            .into_iter()
+        // the one that cannot be missing. Only `wt` knows what a profile is,
+        // so naming one and not having it is worth saying rather than quietly
+        // opening the wrong shell.
+        let programs: &[&str] = if wanted.is_some() {
+            &["wt.exe"]
+        } else {
+            &["wt.exe", "powershell.exe", "cmd.exe"]
+        };
+
+        let opened = programs
+            .iter()
             .find_map(|program| {
                 let mut command = std::process::Command::new(program);
 
                 // Each wants the starting folder said differently, and the
                 // difference is not cosmetic: passing the wrong one silently
                 // opens in the home folder.
-                match program {
-                    "wt.exe" => command.arg("-d").arg(&here),
-                    other => {
-                        command.current_dir(&here);
-                        let _ = other;
-                        &mut command
+                match *program {
+                    "wt.exe" => {
+                        command.args(crate::terminals::wt_arguments(wanted, &here));
                     }
-                };
+                    _ => {
+                        command.current_dir(&here);
+                    }
+                }
 
-                command.spawn().ok().map(|_| program)
+                command.spawn().ok().map(|_| *program)
             })
-            .ok_or_else(|| "No terminal on this machine would start.".to_string())?;
+            .ok_or_else(|| match wanted {
+                Some(profile) => format!(
+                    "Windows Terminal would not start, so the {profile} profile \
+                     could not be opened."
+                ),
+                None => "No terminal on this machine would start.".to_string(),
+            })?;
 
         let _ = opened;
-        Ok(Outcome::done(format!(
-            "Opened a terminal in {}",
-            name_of(&here)
-        )))
+        Ok(Outcome::done(match wanted {
+            Some(profile) => format!("Opened {profile} in {}", name_of(&here)),
+            None => format!("Opened a terminal in {}", name_of(&here)),
+        }))
     }
 }
 
