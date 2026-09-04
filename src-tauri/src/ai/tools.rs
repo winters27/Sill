@@ -410,6 +410,10 @@ async fn ask(app: &AppHandle, title: &str, subject: &str, touches: &str) -> Opti
             title: title.to_string(),
             subject: subject.to_string(),
             touches: touches.to_string(),
+            // Reading a file outside the home folder is not one of the two
+            // capabilities the Hello gate covers, so nothing stronger than
+            // this card was ever on offer and there is nothing to explain.
+            instead: None,
         },
     );
 
@@ -689,6 +693,153 @@ fn what_can_be_done(app: &AppHandle, target: &str, kind: &str) -> Value {
     json!({ "kind": object.kind, "found": actions.len(), "actions": actions })
 }
 
+/// Whether the person wants Windows Hello in front of the heavy two.
+///
+/// Read at the moment it matters rather than kept anywhere. Settings change
+/// while Sill is running, and a gate consulting a copy taken at startup is a
+/// gate somebody turned off an hour ago and a gate somebody turned on an hour
+/// ago, in whichever direction is worse.
+///
+/// **No settings is a yes.** It is a state Sill should not be in, and the other
+/// default would make an unreachable preferences file a way round the prompt.
+async fn hello_wanted(app: &AppHandle) -> bool {
+    let Some(prefs) = app.try_state::<crate::state::PrefsState>() else {
+        return true;
+    };
+
+    // Held for one field read and let go. The turn below waits up to ninety
+    // seconds, and holding the settings lock across that would stop anything
+    // else in Sill reading them for as long as a dialog is on screen.
+    let wanted = prefs.inner.lock().await.ai.hello_for_heavy_actions;
+
+    wanted
+}
+
+/// The window the Hello prompt stands in front of.
+///
+/// `IUserConsentVerifierInterop` wants an `HWND` and a launcher is usually not
+/// on screen when a model is working, so a hidden one of Sill's own is used
+/// first: it is a valid handle whether or not anything is drawn in it, and it
+/// belongs to this process. The foreground window is the fallback for the MCP
+/// case, where the caller may have opened nothing of Sill's at all.
+///
+/// Zero if there is somehow neither, which Windows refuses, and a refusal is
+/// the right way for this to fail.
+#[cfg(windows)]
+fn standing_in_front_of(app: &AppHandle) -> isize {
+    for label in super::approval::SURFACES {
+        if let Some(handle) = app
+            .get_webview_window(label)
+            .and_then(|window| window.hwnd().ok())
+        {
+            return handle.0 as isize;
+        }
+    }
+
+    // SAFETY: no arguments, no out parameters, and a null return is handled.
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize }
+}
+
+#[cfg(not(windows))]
+fn standing_in_front_of(_app: &AppHandle) -> isize {
+    0
+}
+
+/**
+Asks for a face or a fingerprint, and answers with the refusal when it does not
+get one.
+
+`None` means go ahead, the same shape [`ask`] uses.
+
+**Where the wait happens.** `crate::hello::verify` blocks for as long as the
+dialog is up, so it runs on a blocking thread rather than on the worker
+carrying the model's turn: the launcher's event loop is never involved, and
+neither is the async runtime's pool. It also happens strictly before
+`ActionRegistry::perform`, so a refusal is an action that never started rather
+than one taken back, which matters because half the things worth asking about
+have an undo that is a polite fiction.
+
+Every answer that is not `Verified` refuses, **including Windows failing to
+ask at all**. Availability already said this machine could do it, so trouble
+here is Hello declining rather than Hello being absent, and the fallback for
+being absent was decided one function earlier in [`super::acting::gate`].
+*/
+async fn prove_somebody_is_there(
+    app: &AppHandle,
+    title: &str,
+    subject: &str,
+    touches: &str,
+) -> Option<Value> {
+    let message = super::acting::hello_message(title, subject, touches);
+    let window = standing_in_front_of(app);
+
+    let answered = tauri::async_runtime::spawn_blocking(move || {
+        crate::hello::verify(window, &message, crate::hello::PATIENCE)
+    })
+    .await;
+
+    /*
+     * What one approval covers: this action, on this thing, once.
+     *
+     * Nothing is remembered. There is no grant, no window of a few minutes and
+     * no "allow for this session", so an attacker who talks somebody through
+     * one fingerprint has bought exactly one run of exactly the action that was
+     * described on the prompt. Running the same script twice is running it
+     * twice, which is its own harm and its own question.
+     *
+     * The only gap between the yes and the doing is the `perform` below, which
+     * is the next statement, so there is no interval in which a second caller
+     * could spend somebody else's answer.
+     *
+     * And it is written down. The approval goes to the log here and the action
+     * itself lands in Activity through `perform`, so "what did I agree to" has
+     * an answer that outlives the dialog.
+     */
+    match answered {
+        Ok(crate::hello::Verdict::Verified) => {
+            crate::log::write(&format!("[hello] {title} on {subject}: verified"));
+            None
+        }
+        Ok(crate::hello::Verdict::Refused) => {
+            crate::log::write(&format!("[hello] {title} on {subject}: refused"));
+            Some(json!({
+                "done": false,
+                "refused": true,
+                "note": format!(
+                    "Windows Hello did not confirm them for {title}, so nothing was done. \
+                     Do not try it again."
+                ),
+            }))
+        }
+        Ok(crate::hello::Verdict::Unanswered) => {
+            crate::log::write(&format!("[hello] {title} on {subject}: nobody answered"));
+            Some(json!({
+                "done": false,
+                "refused": true,
+                "note": format!(
+                    "Nobody answered the Windows Hello prompt for {title}, so nothing was done."
+                ),
+            }))
+        }
+        Ok(crate::hello::Verdict::Trouble(why)) => {
+            crate::log::write(&format!("[hello] {title} on {subject}: {why}"));
+            Some(json!({
+                "done": false,
+                "refused": true,
+                "note": format!("Windows Hello could not confirm them for {title}, so nothing was done."),
+            }))
+        }
+        Err(err) => {
+            crate::log::write(&format!("[hello] {title} on {subject}: {err}"));
+            Some(json!({
+                "done": false,
+                "refused": true,
+                "note": format!("Windows Hello could not confirm them for {title}, so nothing was done."),
+            }))
+        }
+    }
+}
+
 /// Runs one, stopping to ask when it changes something.
 ///
 /// The answer says what happened either way, including when somebody said no.
@@ -736,38 +887,86 @@ async fn run_action(
         });
     }
 
-    if super::acting::needs_asking(capabilities) {
-        let pending = app.state::<super::approval::Pending>();
-        let id = pending.next_id();
+    /*
+     * Windows is asked about the reader only when the answer could change
+     * anything.
+     *
+     * `CheckAvailabilityAsync` is a WinRT round trip, and every capability
+     * outside the heavy two ends at a card whatever it says. Asking anyway
+     * would buy a call per window move for an answer nothing reads, and the
+     * two questions are read off one list in `acting` so they cannot drift.
+     */
+    let machine = if super::acting::wants_a_person(capabilities) && hello_wanted(app).await {
+        // Blocking, on a thread that is allowed to block. The turn's own
+        // worker stays free, which matters more on the branch below where the
+        // wait is up to ninety seconds.
+        Some(
+            tauri::async_runtime::spawn_blocking(crate::hello::available)
+                .await
+                // Not `None`, which here means the person switched the gate
+                // off. A task that failed to run leaves the machine unknown,
+                // and the card says so rather than saying nothing.
+                .unwrap_or(crate::hello::Availability::Unknown),
+        )
+    } else {
+        None
+    };
 
-        // Raised rather than emitted. Over MCP the caller may be something
-        // with no window of its own, and a card nobody can see is a refusal
-        // ninety seconds later rather than a decision.
-        super::approval::raise(
-            app,
-            super::approval::Asking {
-                id: id.clone(),
-                title: title.to_string(),
-                subject: object.title.clone(),
-                touches: super::acting::what_it_touches(capabilities).to_string(),
-            },
-        );
+    let touches = super::acting::what_it_touches(capabilities);
 
-        match pending.wait(&id).await {
-            super::approval::Answer::Allowed => {}
-            super::approval::Answer::Refused => {
-                return json!({
-                    "done": false,
-                    "refused": true,
-                    "note": format!("They said no to {title}. Do not try it again."),
-                })
+    match super::acting::gate(capabilities, machine) {
+        super::acting::Gate::Straight => {}
+
+        // The card, either because nothing stronger was ever on offer or
+        // because this machine cannot run it. `instead` carries the second
+        // case, so the person is not shown the weaker gate as if it were the
+        // one they turned on.
+        decided @ (super::acting::Gate::Card | super::acting::Gate::CardInstead(_)) => {
+            let instead = match decided {
+                super::acting::Gate::CardInstead(had) => had.why().map(str::to_string),
+                _ => None,
+            };
+
+            let pending = app.state::<super::approval::Pending>();
+            let id = pending.next_id();
+
+            // Raised rather than emitted. Over MCP the caller may be something
+            // with no window of its own, and a card nobody can see is a refusal
+            // ninety seconds later rather than a decision.
+            super::approval::raise(
+                app,
+                super::approval::Asking {
+                    id: id.clone(),
+                    title: title.to_string(),
+                    subject: object.title.clone(),
+                    touches: touches.to_string(),
+                    instead,
+                },
+            );
+
+            match pending.wait(&id).await {
+                super::approval::Answer::Allowed => {}
+                super::approval::Answer::Refused => {
+                    return json!({
+                        "done": false,
+                        "refused": true,
+                        "note": format!("They said no to {title}. Do not try it again."),
+                    })
+                }
+                super::approval::Answer::Unanswered => {
+                    return json!({
+                        "done": false,
+                        "refused": true,
+                        "note": format!("Nobody answered about {title}, so nothing was done."),
+                    })
+                }
             }
-            super::approval::Answer::Unanswered => {
-                return json!({
-                    "done": false,
-                    "refused": true,
-                    "note": format!("Nobody answered about {title}, so nothing was done."),
-                })
+        }
+
+        super::acting::Gate::Hello => {
+            if let Some(refused) = prove_somebody_is_there(app, title, &object.title, touches).await
+            {
+                return refused;
             }
         }
     }

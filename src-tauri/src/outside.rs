@@ -134,6 +134,11 @@ async fn run(app: &AppHandle, ask: Ask) {
                 // have never opened reads exactly like their own.
                 subject: shown(&ask.target),
                 touches: asked_by(ask.trust, capabilities),
+                // The Windows Hello gate covers what a model asks for. A
+                // clicked link is a different caller with its own trust
+                // levels above, so nothing stronger was withheld here and
+                // there is nothing to explain on the card.
+                instead: None,
             },
         );
 

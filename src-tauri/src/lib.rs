@@ -25,6 +25,7 @@ pub mod exthost;
 pub mod files;
 pub mod files_ops;
 pub mod games;
+pub mod hello;
 pub mod hooks;
 pub mod host;
 pub mod host_bridge;
@@ -1995,6 +1996,7 @@ pub fn run() {
             commands::search::system_states,
             commands::search::summon_painted,
             commands::ai::ai_ready,
+            commands::ai::ai_hello,
             commands::ai::ai_ask,
             commands::ai::ai_follow_up,
             commands::ai::ai_new,

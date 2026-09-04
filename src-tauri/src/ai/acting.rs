@@ -31,6 +31,137 @@ pub fn needs_asking(capabilities: &[Capability]) -> bool {
         .any(|capability| touching(capability).is_some())
 }
 
+/// What stands between the model and the action.
+///
+/// Three answers rather than a boolean, because the third one is the whole of
+/// this decision: a machine that cannot check a person still has a person at
+/// it, and the honest thing is the card plus a sentence saying the stronger
+/// gate was not available. See [`gate`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gate {
+    /// Nothing. The action reads, and the worst it costs is a turn.
+    Straight,
+    /// A card in Sill's own window, answered by a keypress.
+    Card,
+    /// The same card, and the reason it is not Windows Hello.
+    ///
+    /// Drawn identically except for one extra line, because the person still
+    /// has to decide and the decision has not changed. What has changed is how
+    /// much the answer proves, and that is worth one sentence rather than
+    /// silence.
+    CardInstead(crate::hello::Availability),
+    /// Windows Hello, **instead of** the card rather than after it.
+    ///
+    /// One prompt, not two. The card's three lines fit in Hello's message, its
+    /// Allow is a fingerprint and its Refuse is Cancel, so a second dialog
+    /// asking the same question would only be a thing to click through. It is
+    /// also the better surface over MCP, where Sill may have no window on
+    /// screen at all: a system credential prompt is visible by construction,
+    /// which is the problem [`super::approval::raise`] has to open a window to
+    /// solve.
+    Hello,
+}
+
+/**
+Whether a keypress is enough, or whether a person has to be there.
+
+**The card proves a key was pressed. It does not prove who pressed it.**
+`SendInput` is one call away for anything running as the same account, Sill
+itself declares [`Capability::InputInjection`] because it makes keystrokes, and
+a prompt-injected model that can reach any program that types has an Allow
+button it can press for itself. Windows Hello is the one answer in the box that
+no software path can manufacture.
+
+**Two capabilities, not all six that stop to ask.** Running a command and
+writing a file are the two that change the machine in ways nothing takes back:
+a shell is every other capability at once, and a file written over is a file
+that was there. Moving a window is undoable and asking for a fingerprint before
+each one is how a prompt stops being read, which is the way this kind of gate
+actually fails.
+
+`hello` is `None` when Windows was never asked, which is what the setting being
+off means. Passing the availability in rather than reading it here is what
+makes this a function over values: every case below is reachable in a test on a
+machine with no reader, including the ones this machine cannot produce.
+*/
+pub fn gate(capabilities: &[Capability], hello: Option<crate::hello::Availability>) -> Gate {
+    if !needs_asking(capabilities) {
+        return Gate::Straight;
+    }
+
+    if !wants_a_person(capabilities) {
+        return Gate::Card;
+    }
+
+    match hello {
+        // Not asked, so nothing was promised and there is nothing to explain.
+        None => Gate::Card,
+        Some(had) if had.ready() => Gate::Hello,
+
+        /*
+         * The third answer, and the one this item turns on.
+         *
+         * Failing open would run the action, which makes the setting theatre.
+         * Failing closed would mean the AI panel does not work at all on a
+         * machine with no enrolled Hello credential, with nothing on screen
+         * saying why, and that is most machines: this one included, where
+         * Windows answers `DeviceNotPresent`.
+         *
+         * So it degrades to the strongest gate the machine actually has, and
+         * says so. The card is not nothing. It is the protection that existed
+         * before this item and it is still a person deciding; what it cannot
+         * do is prove which person, and the line on the card is what stops
+         * somebody believing otherwise.
+         */
+        Some(had) => Gate::CardInstead(had),
+    }
+}
+
+/// Whether any of these is heavy enough to want a person rather than a key.
+///
+/// Public because the one caller has to know whether to ask Windows about the
+/// reader at all, and asking on every window move would be a WinRT call bought
+/// for an answer nothing reads. One function rather than a list repeated at
+/// the call site, so the two cannot drift.
+pub fn wants_a_person(capabilities: &[Capability]) -> bool {
+    capabilities.iter().any(heavy)
+}
+
+/// Whether one capability is one of the two.
+///
+/// **Exhaustive on purpose, with no `_` arm**, for the reason [`touching`]
+/// is: a capability added later must make the compiler ask whether a keypress
+/// is enough for it, rather than being answered `false` by a default nobody
+/// revisits.
+fn heavy(capability: &Capability) -> bool {
+    match capability {
+        Capability::ShellExecution | Capability::FileWrite => true,
+
+        Capability::ClipboardRead
+        | Capability::ClipboardWrite
+        | Capability::FileRead
+        | Capability::ProcessLaunch
+        | Capability::InputInjection
+        | Capability::Network
+        | Capability::Ui
+        | Capability::LauncherDismiss
+        | Capability::SystemControl
+        | Capability::SelectionRead
+        | Capability::WindowControl => false,
+    }
+}
+
+/// The one line Windows Hello shows above the fingerprint reader.
+///
+/// The card's three fields in a sentence, because the system prompt has room
+/// for one and somebody holding their finger over a sensor is deciding on it.
+/// It names the caller as well, which the card does not have to: the card is
+/// drawn inside a conversation somebody is looking at, and this arrives on top
+/// of whatever they were doing instead.
+pub fn hello_message(title: &str, subject: &str, touches: &str) -> String {
+    format!("{title}: {subject}. Sill's AI asked for this, and it {touches}.")
+}
+
 /// What the card says the action is about to do.
 ///
 /// The capability in the words somebody reading a prompt would use. It is the
@@ -245,6 +376,181 @@ mod tests {
                 let said = what_it_touches(&[capability]);
                 assert_ne!(said, "reads something", "{capability:?} has no words");
             }
+        }
+    }
+
+    /// The whole of the Windows Hello decision, as a function over values.
+    ///
+    /// Every case here is reachable on a machine with no reader, which is what
+    /// the availability being a parameter rather than a call buys. This machine
+    /// answers `DeviceNotPresent`, so without these fixtures four of the five
+    /// arms below could never be exercised at all.
+    mod what_needs_a_person {
+        use super::*;
+        use crate::hello::Availability;
+
+        /// A read runs, whatever the machine can prove.
+        #[test]
+        fn reading_never_reaches_the_gate() {
+            for machine in [
+                None,
+                Some(Availability::Ready),
+                Some(Availability::NoDevice),
+            ] {
+                assert_eq!(gate(&[Capability::FileRead], machine), Gate::Straight);
+                assert_eq!(gate(&[], machine), Gate::Straight);
+            }
+        }
+
+        /// The two the item names, and only those two.
+        #[test]
+        fn running_something_and_writing_a_file_want_a_person() {
+            assert_eq!(
+                gate(&[Capability::ShellExecution], Some(Availability::Ready)),
+                Gate::Hello
+            );
+            assert_eq!(
+                gate(&[Capability::FileWrite], Some(Availability::Ready)),
+                Gate::Hello
+            );
+        }
+
+        /// Everything else that stops still stops, and still stops at a card.
+        ///
+        /// The line this draws is the reason the feature is bearable: a
+        /// fingerprint before every window move is a prompt somebody turns off.
+        #[test]
+        fn the_lighter_ones_are_still_only_a_card() {
+            for lighter in [
+                Capability::ProcessLaunch,
+                Capability::InputInjection,
+                Capability::SystemControl,
+                Capability::WindowControl,
+                Capability::Network,
+                Capability::SelectionRead,
+            ] {
+                assert_eq!(
+                    gate(&[lighter], Some(Availability::Ready)),
+                    Gate::Card,
+                    "{lighter:?} asked for a fingerprint"
+                );
+            }
+        }
+
+        /// One heavy capability in a set is enough. An action that reads a file
+        /// and then writes it is an action that writes a file.
+        #[test]
+        fn one_heavy_capability_is_enough() {
+            assert_eq!(
+                gate(
+                    &[Capability::FileRead, Capability::FileWrite],
+                    Some(Availability::Ready)
+                ),
+                Gate::Hello
+            );
+        }
+
+        /**
+        The answer this item turns on, and the case this machine is in.
+
+        Not open, which would run a shell command on nothing but a model's
+        say-so. Not closed, which would break the AI panel outright on every
+        machine with no enrolled Hello credential, silently. The card, which is
+        a person deciding, plus the reason it could not be more than that.
+        */
+        #[test]
+        fn a_machine_without_hello_falls_back_to_the_card_and_says_why() {
+            for missing in [
+                Availability::NoDevice,
+                Availability::NotSetUp,
+                Availability::Blocked,
+                Availability::Busy,
+                Availability::Unknown,
+            ] {
+                let decided = gate(&[Capability::ShellExecution], Some(missing));
+
+                assert_eq!(
+                    decided,
+                    Gate::CardInstead(missing),
+                    "{missing:?} did not fall back"
+                );
+                assert_ne!(decided, Gate::Straight, "{missing:?} failed open");
+                assert!(
+                    matches!(decided, Gate::CardInstead(had) if had.why().is_some()),
+                    "{missing:?} fell back without saying why",
+                );
+            }
+        }
+
+        /// The setting being off is a plain card with nothing to explain.
+        ///
+        /// Told apart from the fallback deliberately: a card apologising for a
+        /// reader on a machine where nobody asked for one is noise, and the
+        /// difference between "we could not" and "you said not to" is the
+        /// difference between a bug report and a preference.
+        #[test]
+        fn turning_it_off_is_not_the_same_as_not_having_it() {
+            assert_eq!(gate(&[Capability::ShellExecution], None), Gate::Card);
+            assert_ne!(
+                gate(&[Capability::ShellExecution], None),
+                gate(&[Capability::ShellExecution], Some(Availability::NoDevice)),
+            );
+        }
+
+        /// What the call site asks before spending a WinRT call, read off the
+        /// same list the gate reads.
+        #[test]
+        fn only_the_heavy_two_make_it_worth_asking_windows() {
+            assert!(wants_a_person(&[Capability::ShellExecution]));
+            assert!(wants_a_person(&[Capability::FileWrite]));
+            assert!(!wants_a_person(&[Capability::WindowControl]));
+            assert!(!wants_a_person(&[Capability::FileRead]));
+            assert!(!wants_a_person(&[]));
+        }
+
+        /// Whatever the gate would do, the call site must have asked Windows.
+        ///
+        /// The two are separate functions because one of them decides whether
+        /// to spend a call, and this is what stops them drifting: a capability
+        /// promoted to heavy without `wants_a_person` agreeing would be an
+        /// action that silently never reaches Hello.
+        #[test]
+        fn the_two_agree_on_every_capability() {
+            for capability in [
+                Capability::ClipboardRead,
+                Capability::ClipboardWrite,
+                Capability::FileRead,
+                Capability::FileWrite,
+                Capability::ProcessLaunch,
+                Capability::InputInjection,
+                Capability::Network,
+                Capability::Ui,
+                Capability::LauncherDismiss,
+                Capability::SystemControl,
+                Capability::ShellExecution,
+                Capability::SelectionRead,
+                Capability::WindowControl,
+            ] {
+                let one = [capability];
+                let reaches_hello = gate(&one, Some(Availability::Ready)) == Gate::Hello;
+
+                assert_eq!(
+                    reaches_hello,
+                    wants_a_person(&one),
+                    "{capability:?}: the gate and the call site disagree",
+                );
+            }
+        }
+
+        /// The sentence somebody reads with their finger over the sensor.
+        #[test]
+        fn the_hello_prompt_names_the_action_the_thing_and_the_harm() {
+            let said = hello_message("Run", "deploy.ps1", "runs a command on this machine");
+
+            assert!(said.contains("Run"), "{said}");
+            assert!(said.contains("deploy.ps1"), "{said}");
+            assert!(said.contains("runs a command on this machine"), "{said}");
+            assert!(said.contains("Sill"), "nothing says who is asking: {said}");
         }
     }
 

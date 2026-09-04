@@ -1726,6 +1726,73 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * Nothing a model asks for reaches an action without going past the gate.
+ *
+ * `ai/tools.rs` is the one door the AI panel and every MCP client come
+ * through, and `acting::gate` is what decides whether a keypress is enough or
+ * whether Windows Hello has to say a person is there. The threat is not a
+ * mischievous model: it is a web page, a document or an extension's output
+ * telling the model to run something, and the gate is where the person rather
+ * than the text authorises it.
+ *
+ * Three things are checked. There must be exactly ONE `perform` in the file,
+ * because a second is a second path and the whole design is that there is not
+ * one. `acting::gate` must appear before it, because a gate consulted
+ * afterwards is not a gate. And the `Gate::Hello` arm and the call it makes
+ * must both sit between the two, because an arm that decides Hello is needed
+ * and then falls through to the run is the gate being deleted while its
+ * decision function still passes all of its own tests.
+ *
+ * Written as a rule rather than left to the tests for the reason the
+ * `outside.rs` check above is: an `ActionCtx` holds a concrete `AppHandle`, so
+ * nothing in a test can run an action body, and the sequence of calls in this
+ * function is checkable only by reading it. This reads it.
+ */
+{
+  const DOOR = "src-tauri/src/ai/tools.rs";
+  const text = readFileSync(DOOR, "utf8");
+
+  const performs = [...text.matchAll(/\.perform\(/g)];
+  const gate = text.indexOf("acting::gate(");
+
+  if (performs.length !== 1) {
+    fail(
+      DOOR,
+      performs[1] ? lineOf(text, performs[1].index) : null,
+      `this file runs an action in ${performs.length} places and must run it in ` +
+        "one. A second route from a model to the registry is a second place to " +
+        "remember the gate",
+    );
+  }
+
+  for (const found of performs) {
+    if (gate !== -1 && gate < found.index) continue;
+
+    fail(
+      DOOR,
+      lineOf(text, found.index),
+      "this runs an action with no `acting::gate` above it, so a model that " +
+        "read an instruction in somebody else's document reaches whatever it named",
+    );
+  }
+
+  if (gate !== -1 && performs[0]) {
+    const between = text.slice(gate, performs[0].index);
+
+    for (const wanted of ["Gate::Hello", "prove_somebody_is_there("]) {
+      if (between.includes(wanted)) continue;
+
+      fail(
+        DOOR,
+        lineOf(text, gate),
+        `no \`${wanted}\` between the gate and the run, so running a command ` +
+          "or writing a file never asks Windows Hello and nothing else notices",
+      );
+    }
+  }
+}
+
+/*
  * The high contrast fallback, still in place.
  *
  * Windows high contrast replaces every colour the page chose and DELETES

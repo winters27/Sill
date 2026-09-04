@@ -567,6 +567,15 @@ export interface AiAsking {
   subject: string;
   /** What it touches, in words somebody deciding would use. */
   touches: string;
+  /**
+   * Why this is a keypress rather than Windows Hello, when it should have been.
+   *
+   * Absent on every card that was never meant to be more than a card. Present
+   * only when the Hello gate is switched on and this machine cannot run it, so
+   * that a weaker answer is never mistaken for the stronger one somebody
+   * turned on.
+   */
+  instead?: string;
 }
 
 /**
