@@ -223,7 +223,7 @@ const DECORATIVE = {
    * nobody needs reminding of, so the reminder is deliberately at the edge of
    * being noticed.
    */
-  "src/routes/+page.svelte": [".escape"],
+  "src/lib/components/Footer.svelte": [".escape"],
 
   /*
    * The pin on a widget tile, which is a glyph rather than words. It is
