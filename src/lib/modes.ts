@@ -39,6 +39,7 @@ export const MODES = [
   "emoji",
   "appVolume",
   "processes",
+  "controls",
   "widgets",
   "namingWorkspace",
   "output",
@@ -131,6 +132,19 @@ const behaviour: Record<Mode, Behaviour> = {
    * leave no way to reach it at all.
    */
   processes: { rows: "commands", searches: true, shows: "results", escape: false, actions: true },
+  /**
+   * The buttons of the window you were in, with Enter pressing one.
+   *
+   * `searches: true` because every keystroke asks Rust again, and it asks
+   * again on purpose: the window is somebody else's and it is free to have
+   * redrawn itself between two letters. A list narrowed in the page would go
+   * on offering a button that is no longer there.
+   *
+   * Deliberately no action panel. There is exactly one thing to do to a
+   * button, and the registry offers exactly that one thing; a panel here would
+   * be a menu with a single entry that Enter already runs.
+   */
+  controls: { rows: "commands", searches: true, shows: "results", escape: false, actions: false },
   /**
    * Deliberately no action panel.
    *

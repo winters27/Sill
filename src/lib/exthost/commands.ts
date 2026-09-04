@@ -105,6 +105,16 @@ export interface RankedCommand {
     /** One running program, while it is running. */
     | "process"
     /**
+     * One button, checkbox, menu item or tab of the window you were just in.
+     *
+     * Read through UI Automation when the view is opened, with nothing kept
+     * afterwards, so like a tab it is pressed through the action registry
+     * rather than launched by id. Its entrypoint is a description of where the
+     * control was rather than a hold on it, and Rust reads the window again
+     * before it presses anything.
+     */
+    | "control"
+    /**
      * What is playing, as one row with play, pause and next on it.
      *
      * Not an index entry and never more than one: the search builds it when
@@ -271,6 +281,16 @@ export interface LaunchedCommand {
     /** One running program, while it is running. */
     | "process"
     /**
+     * One button, checkbox, menu item or tab of the window you were just in.
+     *
+     * Read through UI Automation when the view is opened, with nothing kept
+     * afterwards, so like a tab it is pressed through the action registry
+     * rather than launched by id. Its entrypoint is a description of where the
+     * control was rather than a hold on it, and Rust reads the window again
+     * before it presses anything.
+     */
+    | "control"
+    /**
      * A switch belonging to Windows.
      *
      * Missing here for as long as these have existed, which made a Windows
@@ -340,6 +360,25 @@ export function searchAppVolume(query: string): Promise<RankedCommand[]> {
  */
 export function searchProcesses(query: string): Promise<RankedCommand[]> {
   return invoke<RankedCommand[]>("search_processes", { query });
+}
+
+/**
+ * The buttons of the window you were in before Sill opened.
+ *
+ * Its own call for a stronger version of the reason the process list has one:
+ * this walks another program's control tree across the process boundary, and
+ * against a Firefox-family browser the first such read switches that browser's
+ * accessibility engine on for the life of the process. Running it on every
+ * keystroke of the root list would be the launcher interrogating whatever is
+ * behind it while somebody looks for a calculator.
+ *
+ * **Which window is not a parameter.** Rust already records the window the
+ * launcher took the foreground from, so that it can hand focus back on
+ * dismissal, and that is the window this reads. There is no honest way for
+ * this page to name a window it is sitting on top of.
+ */
+export function searchControls(query: string): Promise<RankedCommand[]> {
+  return invoke<RankedCommand[]>("search_controls", { query });
 }
 
 /**

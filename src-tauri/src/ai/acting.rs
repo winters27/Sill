@@ -135,7 +135,21 @@ pub fn wants_a_person(capabilities: &[Capability]) -> bool {
 /// revisits.
 fn heavy(capability: &Capability) -> bool {
     match capability {
-        Capability::ShellExecution | Capability::FileWrite => true,
+        /*
+         * Pressing a control is heavy, and it is the one that had to be
+         * argued rather than assumed.
+         *
+         * A shell runs anything and a file write changes the disk. This runs
+         * one named control, which sounds smaller until the control is Delete
+         * or Send or Confirm, and unlike the other two it happens inside a
+         * program that has no idea a person was not the one who clicked. No
+         * undo descriptor can describe taking it back.
+         *
+         * It costs the person nothing. This gate is only ever reached from the
+         * model; somebody pressing Enter on a row they have read is already
+         * the person Hello exists to prove.
+         */
+        Capability::ShellExecution | Capability::FileWrite | Capability::ControlInvoke => true,
 
         Capability::ClipboardRead
         | Capability::ClipboardWrite
@@ -196,6 +210,7 @@ fn touching(capability: &Capability) -> Option<&'static str> {
         Capability::InputInjection => Some("types into whatever is in front"),
         Capability::SystemControl => Some("changes this machine"),
         Capability::WindowControl => Some("moves or closes a window"),
+        Capability::ControlInvoke => Some("presses a control in another program's window"),
         Capability::Network => Some("sends something over the network"),
         Capability::SelectionRead => Some("reads what you have selected"),
         Capability::ShellExecution => Some("runs a command on this machine"),

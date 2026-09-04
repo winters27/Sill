@@ -694,6 +694,40 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "manager",
             ],
         ),
+        /*
+         * The buttons of the window somebody was just in.
+         *
+         * Behind a row of its own for a stronger version of the reason
+         * Processes is: reading a window's controls crosses into another
+         * program's process, and against a Firefox-family browser the first
+         * such read switches that browser's accessibility engine on for good.
+         * On every keystroke of the root list that would be a launcher
+         * interrogating whatever is behind it. See `controls.rs`.
+         *
+         * Wearing the shell's keyboard mark, because what this is for is
+         * reaching a button without a mouse, and the row that says so at a
+         * glance is a keyboard.
+         */
+        builtin_wearing(
+            "controls",
+            &keyboard_icon(),
+            "Press On Screen",
+            "Find a button in the window you were in and press it",
+            &[
+                "control",
+                "button",
+                "press",
+                "click",
+                "checkbox",
+                "menu",
+                "toolbar",
+                "tab",
+                "keyboard",
+                "mouseless",
+                "accessibility",
+                "ui",
+            ],
+        ),
         // Wearing the shell's padlock rather than a settings gear, for the
         // reason the switches do: what it changes is whether the machine is
         // being recorded, not a preference about how Sill looks.
@@ -1162,6 +1196,15 @@ fn task_manager_icon() -> String {
 /// nothing failing to compile.
 pub const PRIVATE_MODE: &str = "private-mode";
 
+/// The shell's on-screen keyboard, which the control list wears.
+///
+/// `imageres.dll,88` is what Windows uses for its own keyboard, and a keyboard
+/// is what this row is about: reaching a button without a mouse.
+fn keyboard_icon() -> String {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    format!(r"{root}\System32\imageres.dll,88")
+}
+
 /// The shell's padlock, which two rows wear.
 fn padlock_icon() -> String {
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
@@ -1298,6 +1341,46 @@ pub fn process_record(process: &crate::processes::Process) -> CommandRecord {
         ],
         // The program's own mark, the rule every other row follows.
         icon: process.path.clone(),
+        toggle: None,
+        panel: None,
+        preferences: serde_json::Value::Null,
+        manifest: None,
+    }
+}
+
+/// One control of a window somebody is looking at, shaped as a row.
+///
+/// `program` is the window's own application, so the row wears that program's
+/// mark rather than Sill's: pressing a button in Character Map is Sill handing
+/// the press to Character Map, and a launcher's gear on the row would say the
+/// wrong thing about whose button it is. The same rule a tab row follows.
+///
+/// The subtitle is what kind of control it is. There is nothing else honest to
+/// put there: a control has a name and a kind and no address, no size and no
+/// description, and inventing a subtitle from the name would be a row that
+/// repeats itself.
+pub fn control_record(
+    control: &crate::controls::Control,
+    app: &str,
+    program: Option<&str>,
+) -> CommandRecord {
+    CommandRecord {
+        // The window and the provider's own identifier, which together are
+        // what the control is. Both stop meaning anything the moment the
+        // window closes, which is exactly as long as the row is worth having.
+        id: format!("control:{}:{}", control.window, control.key),
+        extension: "control".to_string(),
+        // The program whose window it is, because "Close" on its own says
+        // nothing about which window is about to close.
+        extension_title: app.to_string(),
+        command: control.name.clone(),
+        title: control.name.clone(),
+        subtitle: control.kind.said().to_string(),
+        description: String::new(),
+        mode: "control".to_string(),
+        entrypoint: control.spotted().to_entrypoint(),
+        keywords: Vec::new(),
+        icon: program.map(str::to_string),
         toggle: None,
         panel: None,
         preferences: serde_json::Value::Null,

@@ -89,6 +89,21 @@ pub enum Capability {
     /// application's windows is a different thing to ask for and the two must
     /// not be grantable together by accident.
     WindowControl,
+    /// Presses a button, a checkbox or a menu item inside somebody else's
+    /// window.
+    ///
+    /// Separate from [`Self::WindowControl`], which moves a window about, and
+    /// separate from [`Self::InputInjection`], which is what this is carefully
+    /// not: nothing is typed and no key is synthesised, so this cannot land in
+    /// the wrong program the way a keystroke can. What it can do instead is
+    /// exactly one thing in exactly one named element, and that thing is
+    /// whatever clicking it would have done.
+    ///
+    /// Its own capability because the blast radius is not a window's geometry.
+    /// A control is Delete, or Send, or Confirm, and the program on the other
+    /// side does not know a person was not there. Somebody agreeing that Sill
+    /// may tile their windows has not agreed to this.
+    ControlInvoke,
 }
 
 /// How to take an action back.

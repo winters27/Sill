@@ -1218,6 +1218,7 @@ mod tests {
                     Capability::SystemControl,
                     Capability::InputInjection,
                     Capability::WindowControl,
+                    Capability::ControlInvoke,
                     Capability::Network,
                     Capability::SelectionRead,
                     Capability::ClipboardRead,

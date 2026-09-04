@@ -122,6 +122,14 @@ const HEADINGS: Record<string, string> = {
    * already open would be indistinguishable until you pressed Enter.
    */
   "browser-tab": "Open Tabs",
+  /*
+   * The buttons of the window you were in.
+   *
+   * Its own heading and never under "Open Windows", which is where you go
+   * rather than what you press. These rows do not switch to anything: choosing
+   * one presses it where it is.
+   */
+  control: "On Screen",
   websearch: "Web Search",
   emoji: "Emoji",
   "audio-session": "Playing Now",

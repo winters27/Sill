@@ -2185,6 +2185,127 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * Pressing a control reaches nothing of Sill's, and costs nothing at rest.
+ *
+ * `P8-04`'s pressing half has two claims a test cannot make on this machine,
+ * and both fail silently.
+ *
+ * The first is that Sill never presses its own buttons. The launcher's window
+ * is on screen while somebody is choosing a row, so without a refusal the view
+ * would offer Sill's own controls, and anything holding `ControlInvoke` would
+ * be able to press them. `controls::is_ours` is the rule and it has a unit
+ * test; what no unit test can hold is that both ways in still consult it,
+ * because doing so needs a real window of this process and the library's test
+ * binary has none. Deleting the call fails nothing at all.
+ *
+ * The second is the cost claim. Nothing in this module runs until somebody
+ * opens the view, which is what makes its idle cost zero rather than nearly,
+ * and it is one thread away from being false with nothing failing: a
+ * background walk that works is a background walk that passes.
+ *
+ * The list is generous on purpose. It is not there to catch a clever evasion,
+ * it is there to make somebody reaching for one of these reread the paragraph
+ * at the top of that file about why there is nothing resident.
+ */
+{
+  const CORE = "src-tauri/src/controls.rs";
+  const DOOR = "src-tauri/src/commands/search.rs";
+
+  const core = readFileSync(CORE, "utf8");
+  const door = readFileSync(DOOR, "utf8");
+
+  for (const wakes of [
+    "thread::spawn",
+    "tokio::time",
+    "interval(",
+    "OnceLock",
+    "OnceCell",
+    "Lazy<",
+    "static mut",
+  ]) {
+    if (!core.includes(wakes)) continue;
+
+    fail(
+      CORE,
+      lineOf(core, core.indexOf(wakes)),
+      "`" +
+        wakes +
+        "` here, and the point of this module is that nothing exists between " +
+        "two questions and nothing at all runs until somebody opens the view",
+    );
+  }
+
+  /*
+   * Both ways into another program's window refuse Sill's own.
+   *
+   * Scoped to the enclosing `pub fn` rather than searched file-wide, which is
+   * the shape `may_schedule` had to be given after sabotage: a file-wide
+   * `includes` passes as long as ONE function still checks, and the one that
+   * stopped checking is the one that matters.
+   */
+  const doors = [...core.matchAll(/\n    pub fn (read|press)\(/g)];
+
+  for (const found of doors) {
+    const next = core.indexOf("\n    /", found.index + 1);
+    const body = core.slice(found.index, next === -1 ? core.length : next);
+
+    if (body.includes("refuse_our_own(")) continue;
+
+    fail(
+      CORE,
+      lineOf(core, found.index),
+      "`" +
+        found[1] +
+        "` reaches into a window without `refuse_our_own`, so the launcher " +
+        "can read and press its own buttons",
+    );
+  }
+
+  if (doors.length !== 2) {
+    fail(
+      CORE,
+      null,
+      "this rule expects a `read` and a `press` and found " +
+        doors.length +
+        ", so it is guarding something that has moved",
+    );
+  }
+
+  // The command is held to being called. A registered command is not evidence
+  // that anything invokes it: a dead one on this project held the only
+  // extension timing there was and read exactly like a working feature.
+  if (!readFileSync("src/lib/exthost/commands.ts", "utf8").includes('"search_controls"')) {
+    fail(
+      DOOR,
+      lineOf(door, door.indexOf("search_controls")),
+      "`search_controls` is registered and the frontend never invokes it, so " +
+        "nothing proves it is reachable and nothing would fail if it stopped " +
+        "working",
+    );
+  }
+
+  /*
+   * The window read is the one the launcher took the foreground from.
+   *
+   * Not a parameter, deliberately: a handle passed in from the page is a
+   * window the page could get wrong, and there is no honest way for a
+   * launcher's own field to name a window it is sitting on top of. Taking one
+   * would compile and would look right.
+   */
+  const boundary = door.lastIndexOf("#[tauri::command]", door.indexOf("search_controls"));
+  const command = door.slice(boundary, door.indexOf("controls::read", boundary));
+
+  if (!command.includes("previous_foreground()")) {
+    fail(
+      DOOR,
+      lineOf(door, door.indexOf("search_controls")),
+      "the control search names its own window instead of reading whichever " +
+        "one the launcher took the foreground from",
+    );
+  }
+}
+
+/*
  * The high contrast fallback, still in place.
  *
  * Windows high contrast replaces every colour the page chose and DELETES

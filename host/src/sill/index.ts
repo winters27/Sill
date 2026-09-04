@@ -67,6 +67,7 @@ export type SillObjectKind =
   | "audioSession"
   | "nowPlaying"
   | "process"
+  | "screenControl"
   | "workspace"
   | "conversation"
   | "storeListing"
@@ -124,7 +125,8 @@ export type SillCapability =
   | "systemControl"
   | "shellExecution"
   | "selectionRead"
-  | "windowControl";
+  | "windowControl"
+  | "controlInvoke";
 
 /**
  * The thing this command was run on, or `undefined`.

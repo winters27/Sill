@@ -129,6 +129,17 @@ describe("what each mode behaves like", () => {
       // and nothing it could do to one, so Ctrl+K here would open a panel
       // about nothing on somebody's first minute with the application.
       welcome: "the rows are offers rather than objects",
+      /*
+       * There is exactly one thing to do to a button, and Enter already does
+       * it. A panel here would be a menu of one entry, and naming a control is
+       * refused too, because its id holds a window handle and one provider's
+       * identifier for a button that stops existing when the window redraws.
+       *
+       * "Exactly one" is not left as an opinion. `tests/actions.rs` asserts
+       * that the registry offers a screen control one action and no more, so
+       * adding a second fails there and points back at this line.
+       */
+      controls: "one action, which Enter already runs",
     };
 
     for (const mode of MODES) {
