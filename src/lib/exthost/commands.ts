@@ -30,6 +30,23 @@ export interface RankedCommand {
     | "exe"
     | "setting"
     | "file"
+    /**
+     * A folder, told apart from a file.
+     *
+     * Only a selection produces one. A file search answers with both under
+     * `file`, because there the question was "where is X"; a folder somebody
+     * highlighted in Explorer is a folder, and the action panel offers
+     * different things to the two.
+     */
+    | "folder"
+    /**
+     * Text a universal key captured, as a row.
+     *
+     * Not from the index and not on disk: it is the paragraph that was
+     * highlighted when the key was pressed, carried on the row so the action
+     * panel can transform it, read it aloud or look it up.
+     */
+    | "text"
     | "builtin"
     | "answer"
     | "snippet"

@@ -48,6 +48,7 @@ export const MODES = [
   "keys",
   "destination",
   "welcome",
+  "selection",
 ] as const;
 
 export type Mode = (typeof MODES)[number];
@@ -139,6 +140,21 @@ const behaviour: Record<Mode, Behaviour> = {
    * of the answers is not a feature.
    */
   destination: { rows: "commands", searches: true, shows: "results", escape: false, actions: false },
+
+  /**
+   * Whatever was selected when a universal key was pressed.
+   *
+   * Rows and an action panel, and neither of the two things the root list
+   * does: typing does not re-search, because the list is the selection and
+   * narrowing it against the index would replace the answer with an unrelated
+   * one, and Escape is the ordinary way back rather than a branch of its own.
+   *
+   * `actions: true` is the entire point of the mode. The launcher was summoned
+   * to open the action panel on something already highlighted, and a view
+   * without one would have been a list of files somebody has to press Enter on
+   * to find out what happens.
+   */
+  selection: { rows: "commands", searches: false, shows: "results", escape: false, actions: true },
 
   // Filters rows already in hand, so it counts its own and does not re-search.
   clipboard: { rows: "own", searches: false, shows: "own", escape: true, actions: false },

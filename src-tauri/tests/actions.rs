@@ -61,6 +61,29 @@ fn everything_the_index_can_hold_still_has_something_bound_to_enter() {
 /// under a stable id that accepts the kind is the whole of what both of them
 /// require, and this is the half of that a test can hold: `ActionCtx` carries
 /// a concrete `AppHandle`, so no action body can be run from here.
+/// The two ids a binding can carry that are not actions belong to nothing.
+///
+/// `bindings::fire` reads both before it asks the registry anything, so an
+/// action registered under either name would be permanently unreachable from a
+/// key while looking perfectly ordinary in the panel, in Settings and to the
+/// model. `PANEL` is the newer and the likelier: "sill.actions" is exactly what
+/// somebody would call an action that listed actions.
+///
+/// Here rather than beside them in `bindings.rs` because reaching
+/// `builtins()` from the library's own test binary retains the dialog plugin
+/// and kills the whole run. See the header of this file.
+#[test]
+fn neither_sentinel_is_the_id_of_a_real_action() {
+    let ids = builtins().ids();
+
+    for sentinel in [sill_lib::bindings::PANEL, sill_lib::bindings::PRIMARY] {
+        assert!(
+            !ids.contains(&sentinel),
+            "{sentinel} is a registered action, so no key can ever run it",
+        );
+    }
+}
+
 #[test]
 fn running_a_script_is_reachable_by_its_id() {
     let registry = builtins();

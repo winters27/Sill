@@ -20,6 +20,7 @@ pub mod complete;
 pub mod dictation;
 pub mod emoji;
 pub mod everything_ipc;
+pub mod explorer;
 pub mod extension_install;
 pub mod exthost;
 pub mod files;
