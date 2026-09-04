@@ -54,14 +54,63 @@ public class Key {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
   public static string Text(IntPtr h){ var b=new StringBuilder(256); GetWindowText(h,b,256); return b.ToString(); }
-  public static void AltSpace(){
-    keybd_event(0x12,0,0,UIntPtr.Zero); keybd_event(0x20,0,0,UIntPtr.Zero);
-    keybd_event(0x20,0,2,UIntPtr.Zero); keybd_event(0x12,0,2,UIntPtr.Zero);
+  public static void Chord(byte[] mods, byte key){
+    foreach (var m in mods) keybd_event(m,0,0,UIntPtr.Zero);
+    keybd_event(key,0,0,UIntPtr.Zero);
+    keybd_event(key,0,2,UIntPtr.Zero);
+    for (int i = mods.Length - 1; i >= 0; i--) keybd_event(mods[i],0,2,UIntPtr.Zero);
   }
 }
 "@
 
 function Front { [Key]::Text([Key]::GetForegroundWindow()) }
+
+<#
+The summon key this machine actually uses.
+
+Read from the preferences file rather than written down here. This script
+pressed a hardcoded Alt+Space for as long as it has existed, and the summon
+key on the machine it was written on is `Ctrl+Alt+F9`. So every press went
+somewhere else, the launcher never came to the front, and the numbers it
+printed were whatever the log already held from an earlier run. A benchmark
+that cannot press the button it is timing reports the past.
+
+Refuses a chord it cannot express rather than pressing part of one. Sending
+the wrong keys is worse here than measuring nothing: they land in whatever is
+in front, which is somebody's own window.
+#>
+function Get-SummonChord {
+    $file = Join-Path $env:APPDATA 'app.winters.sill\preferences.json'
+    if (-not (Test-Path $file)) { throw "no preferences at $file, so the summon key is unknown" }
+
+    $chord = (Get-Content $file -Raw | ConvertFrom-Json).hotkey.summon
+    if (-not $chord) { throw 'no summon key is set, so there is nothing to press' }
+
+    $mods = @()
+    $key = $null
+
+    foreach ($part in $chord.Split('+')) {
+        switch ($part.Trim().ToLower()) {
+            'ctrl'    { $mods += [byte]0x11; continue }
+            'control' { $mods += [byte]0x11; continue }
+            'alt'     { $mods += [byte]0x12; continue }
+            'shift'   { $mods += [byte]0x10; continue }
+            'super'   { $mods += [byte]0x5B; continue }
+            'win'     { $mods += [byte]0x5B; continue }
+            'space'   { $key = [byte]0x20; continue }
+            default {
+                $one = $part.Trim()
+                if ($one -match '^[A-Za-z]$') { $key = [byte][char]$one.ToUpper() }
+                elseif ($one -match '^[0-9]$') { $key = [byte][char]$one }
+                elseif ($one -match '^[Ff]([1-9]|1[0-9]|2[0-4])$') { $key = [byte](0x70 + [int]$Matches[1] - 1) }
+                else { throw "this script cannot press '$chord': it does not know the key '$one'" }
+            }
+        }
+    }
+
+    if ($null -eq $key) { throw "this script cannot press '$chord': it names only modifiers" }
+    @{ Chord = $chord; Mods = [byte[]]$mods; Key = $key }
+}
 
 $log = Join-Path $env:APPDATA 'app.winters.sill\sill.log'
 $exe = (Resolve-Path $Exe).Path
@@ -80,12 +129,25 @@ Write-Host "starting $exe"
 Start-Process $exe -WindowStyle Hidden
 Start-Sleep -Seconds 10
 
+$summon = Get-SummonChord
+Write-Host "pressing $($summon.Chord), read from your preferences"
+
 for ($i = 1; $i -le $Times; $i++) {
-    [Key]::AltSpace()
+    [Key]::Chord($summon.Mods, $summon.Key)
     Start-Sleep -Milliseconds 1200
-    if ((Front) -ne 'Sill') { Write-Host "  press $i did not reach the launcher (front '$(Front)')" }
+
+    # Stops rather than warns, and stops on the first one.
+    #
+    # If the launcher did not come to the front then the chord went to
+    # whatever did, and pressing it another nineteen times types into
+    # somebody's own window. One press is a bounded mistake; a loop is not.
+    if ((Front) -ne 'Sill') {
+        throw "press $i did not reach the launcher: '$($summon.Chord)' went to '$(Front)' instead. " +
+              'Nothing was measured. Check the key is registered before running this again.'
+    }
+
     # Away again, so the next press is a summon rather than a dismissal.
-    [Key]::AltSpace()
+    [Key]::Chord($summon.Mods, $summon.Key)
     Start-Sleep -Milliseconds 900
 }
 
