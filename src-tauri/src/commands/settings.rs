@@ -8,7 +8,7 @@ use crate::{
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::state::PrefsState;
-use crate::{clipboard, preferences, settings_index, snippets, summon};
+use crate::{clipboard, preferences, preferences_transfer, settings_index, snippets, summon};
 
 /// The one report about pictures that would not convert.
 const LOCK_TROUBLE: &str = "clipboard-lock";
@@ -1047,4 +1047,226 @@ pub(crate) async fn emoji_tones() -> Vec<ToneChoice> {
 pub(crate) struct ToneChoice {
     pub id: crate::emoji::Tone,
     pub swatch: String,
+}
+
+/// What an import of a settings file did, in the words the window shows.
+///
+/// An IPC shape rather than a domain one, because it gathers three separate
+/// answers that never travel together anywhere else: what happened to the
+/// preferences, and what happened to the snippet and quicklink stores when the
+/// file turned out to be a `.rayconfig` carrying those instead.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Imported {
+    /// What the file turned out to be, said the way somebody would say it.
+    pub read_as: String,
+    /// The settings sections the file had something to say about.
+    pub sections: Vec<String>,
+    /// Credentials the file did not carry, so the ones already here were kept.
+    pub kept_keys: usize,
+    pub snippets: Option<snippets::transfer::Summary>,
+    pub quicklinks: Option<crate::quicklinks::transfer::Summary>,
+}
+
+/// Writes every setting to a file, with every credential left out.
+///
+/// The dialog runs in Rust rather than in the window, which is why nothing in
+/// `capabilities/file-picker.json` grants a save: a window that could choose
+/// where to write is a window that could be talked into writing somewhere.
+#[tauri::command]
+pub(crate) async fn export_preferences(
+    app: AppHandle,
+    state: State<'_, PrefsState>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let text = {
+        let prefs = state.inner.lock().await;
+        preferences_transfer::to_json(&prefs)?
+    };
+
+    let chosen = app
+        .dialog()
+        .file()
+        .set_title("Export settings")
+        .set_file_name("sill-settings.json")
+        .add_filter("Settings", &["json"])
+        .blocking_save_file();
+
+    // Nothing chosen is not a failure. Somebody opened the dialog and changed
+    // their mind, which is an ordinary thing to do and needs no message.
+    let Some(target) = chosen else {
+        return Ok(None);
+    };
+
+    let path = target
+        .into_path()
+        .map_err(|err| format!("that location cannot be written to: {err}"))?;
+
+    std::fs::write(&path, text).map_err(|err| format!("could not write that file: {err}"))?;
+
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Reads a settings file of any kind Sill understands, over what is here now.
+///
+/// **Every way this can fail leaves the settings exactly as they were.** The
+/// file is read, folded and turned into a whole `Preferences` before anything
+/// is saved, so a truncated file, a file from a newer build and a file that is
+/// not settings at all all end at a message with nothing written. Saving then
+/// goes through `set_preferences`, so an imported hotkey is rebound and an
+/// imported source list is rescanned, exactly as if it had been typed.
+#[tauri::command]
+pub(crate) async fn import_preferences(
+    app: AppHandle,
+    state: State<'_, PrefsState>,
+) -> Result<Option<Imported>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let chosen = app
+        .dialog()
+        .file()
+        .set_title("Import settings")
+        .add_filter("Settings a launcher wrote", &["json", "rayconfig", "zip"])
+        .blocking_pick_file();
+
+    let Some(source) = chosen else {
+        return Ok(None);
+    };
+
+    let path = source
+        .into_path()
+        .map_err(|err| format!("that file cannot be read: {err}"))?;
+
+    let bytes = std::fs::read(&path).map_err(|err| format!("could not read that file: {err}"))?;
+
+    let (patch, read_as) = match preferences_transfer::kind(&bytes) {
+        // Its own return rather than a patch, because what a Raycast export
+        // has that Sill can use are snippets and quicklinks, which live in
+        // their own stores and not in the preferences.
+        preferences_transfer::Kind::Archive => return from_rayconfig(&app, &bytes).map(Some),
+        preferences_transfer::Kind::PowerToysRun => (
+            power_toys(&path, &bytes)?,
+            "PowerToys Run's settings".to_string(),
+        ),
+        preferences_transfer::Kind::Json => (
+            preferences_transfer::from_json(&String::from_utf8_lossy(&bytes))?,
+            "a Sill settings file".to_string(),
+        ),
+    };
+
+    let previous = state.inner.lock().await.clone();
+    let (next, summary) = preferences_transfer::apply(&previous, &patch)?;
+
+    // Through the ordinary save, so everything a settings change has to do
+    // happens: the hotkey is rebound, the tray appears, the index is told what
+    // changed and every window hears about it. A second write path here would
+    // be a second place to forget one of those.
+    set_preferences(app, state, next).await?;
+
+    Ok(Some(Imported {
+        read_as,
+        sections: summary.sections,
+        kept_keys: summary.kept_keys,
+        ..Imported::default()
+    }))
+}
+
+/// PowerToys Run's settings together with the plugin files beside them.
+///
+/// The plugin folders sit next to the settings file that was chosen, so they
+/// are found rather than asked for: nobody should have to pick four files to
+/// import one launcher. A plugin that has never run has no file, which is
+/// ordinary and reads as "PowerToys said nothing about that".
+fn power_toys(path: &std::path::Path, bytes: &[u8]) -> Result<serde_json::Value, String> {
+    let beside = |plugin: &str, file: &str| {
+        path.parent()
+            .map(|folder| folder.join("Plugins").join(plugin).join(file))
+            .and_then(|found| std::fs::read_to_string(found).ok())
+    };
+
+    let programs = beside("Microsoft.Plugin.Program", "ProgramPluginSettings.json");
+    let folders = beside("Microsoft.Plugin.Folder", "FolderSettings.json");
+
+    preferences_transfer::from_power_toys(&preferences_transfer::PowerToys {
+        settings: &String::from_utf8_lossy(bytes),
+        programs: programs.as_deref(),
+        folders: folders.as_deref(),
+    })
+}
+
+/// The snippets and quicklinks out of a `.rayconfig`, folded into the stores.
+///
+/// Additive, through the same `merge` an ordinary snippet or quicklink import
+/// uses, so importing the same archive twice does not leave two of everything
+/// and nothing already here is lost. Nothing about the preferences: see
+/// `preferences_transfer::RayConfig` for why that half is deliberately empty.
+fn from_rayconfig(app: &AppHandle, bytes: &[u8]) -> Result<Imported, String> {
+    let found = preferences_transfer::from_rayconfig(bytes)?;
+
+    let mut done = Imported {
+        read_as: "a Raycast export".to_string(),
+        ..Imported::default()
+    };
+
+    if !found.snippets.is_empty() {
+        let file = snippets::store::path(app);
+        let (merged, summary) = snippets::transfer::merge(
+            &snippets::store::load(&file),
+            found.snippets,
+            crate::state::now_seconds(),
+        );
+
+        snippets::store::save(&file, &merged).map_err(|err| err.to_string())?;
+        crate::reload_snippets(app);
+        done.snippets = Some(summary);
+    }
+
+    if !found.quicklinks.is_empty() {
+        let file = crate::quicklinks::store::path(&crate::quicklinks::store::data_dir(app));
+        let (merged, summary) = crate::quicklinks::transfer::merge(
+            &crate::quicklinks::store::load(&file),
+            found.quicklinks,
+            crate::state::now_seconds(),
+        );
+
+        crate::quicklinks::store::save(&file, &merged).map_err(|err| err.to_string())?;
+        crate::reload_quicklinks(app);
+        done.quicklinks = Some(summary);
+    }
+
+    Ok(done)
+}
+
+/// Puts one settings panel back to what it shipped with.
+///
+/// One panel, and the sections it owns are named in
+/// `preferences_transfer::PANELS` rather than assigned here, so a reset cannot
+/// reach the panel next to it. Saved through `set_preferences` for the reason
+/// an import is: everything a settings change has to do still has to happen.
+#[tauri::command]
+pub(crate) async fn reset_panel(
+    app: AppHandle,
+    state: State<'_, PrefsState>,
+    panel: String,
+) -> Result<(), String> {
+    let next = {
+        let prefs = state.inner.lock().await;
+        preferences_transfer::reset(&prefs, &panel)?
+    };
+
+    set_preferences(app, state, next).await
+}
+
+/// The panels that have something of their own to reset.
+///
+/// Asked of Rust rather than listed in the window, so the button appears
+/// exactly where `reset_panel` would do something. A panel with nothing to
+/// reset showing a Reset button is a promise the backend then refuses.
+#[tauri::command]
+pub(crate) async fn resettable_panels() -> Vec<&'static str> {
+    preferences_transfer::PANELS
+        .iter()
+        .map(|panel| panel.id)
+        .collect()
 }

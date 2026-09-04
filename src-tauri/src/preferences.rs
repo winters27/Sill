@@ -456,7 +456,7 @@ pub struct Sources {
 /// are not secret: `shortcutKey`, `finishKey`, `cancelKey`. Matching on the
 /// word would have encrypted three keyboard settings and left the credential
 /// alone the day someone renamed it.
-const SEALED: &[&[&str]] = &[
+pub(crate) const SEALED: &[&[&str]] = &[
     &["dictation", "provider", "apiKey"],
     // Every provider in the list, which is what the star is for: a person can
     // have a key for each of half a dozen services and there is no fixed path
@@ -470,7 +470,7 @@ const SEALED: &[&[&str]] = &[
 ];
 
 /// The step in a path that means "every element of this array".
-const EACH: &str = "*";
+pub(crate) const EACH: &str = "*";
 
 /// Follows a path into a document, yielding every place it leads.
 ///
@@ -478,7 +478,16 @@ const EACH: &str = "*";
 /// an array. It used to return a single slot, which was enough while the only
 /// secret lived at a fixed depth; a list of providers with a key each has no
 /// fixed path, and missing one would write that key to the file in plain text.
-fn at<'a>(root: &'a mut serde_json::Value, path: &[&str]) -> Vec<&'a mut serde_json::Value> {
+///
+/// Reachable from `preferences_transfer` rather than private here, so that
+/// taking credentials out of an export and putting them back after an import
+/// walk to exactly the same places as sealing and unsealing. A second walker
+/// there would be a second list of what counts as a secret, and the day the
+/// two disagreed the export would be the one carrying a key.
+pub(crate) fn at<'a>(
+    root: &'a mut serde_json::Value,
+    path: &[&str],
+) -> Vec<&'a mut serde_json::Value> {
     let Some((step, rest)) = path.split_first() else {
         return vec![root];
     };
@@ -534,7 +543,7 @@ fn seal_secrets(document: &mut serde_json::Value) {
 /// A value with no marker is one an older build wrote in plain text. It is
 /// passed through so the user does not lose a working setup on upgrade, and
 /// the next save seals it.
-fn unseal_secrets(document: &mut serde_json::Value) {
+pub(crate) fn unseal_secrets(document: &mut serde_json::Value) {
     for path in SEALED {
         for slot in at(document, path) {
             let Some(stored) = slot.as_str() else {
@@ -986,7 +995,7 @@ pub fn path(data_dir: &Path) -> PathBuf {
 /// variants: the credentials in the document are sealed on the way out and
 /// unsealed on the way in, and both happen to the `Value` rather than to the
 /// struct so that a key never exists in plain text on disk.
-const SCHEMA: crate::json_store::Schema = crate::json_store::Schema {
+pub(crate) const SCHEMA: crate::json_store::Schema = crate::json_store::Schema {
     version: 1,
     shape: crate::json_store::Shape::Beside,
     layout: crate::json_store::Layout::Readable,

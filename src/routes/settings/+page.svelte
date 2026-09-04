@@ -49,6 +49,10 @@
     rebuildIndex,
     listOwnSettings,
     setPreferences,
+    exportPreferences,
+    importPreferences,
+    resetPanel,
+    resettablePanels,
     type Backdrop,
     type SettingEntry,
     type InterfaceFont,
@@ -521,6 +525,114 @@
     }
   }
 
+  /** The panels Rust says have something of their own to put back. */
+  let resettable = $state<string[]>([]);
+  /** Which panel is a click away from being reset, or none. */
+  let confirmingReset = $state<PanelId | null>(null);
+
+  /*
+   * Leaving a panel disarms its Reset button.
+   *
+   * There are four places `active` is assigned, and an armed button left over
+   * from a panel somebody has since walked away from is one stray click from
+   * resetting settings they were not even looking at. Written as an effect on
+   * `active` rather than as a line in each of the four, because the fourth one
+   * added later is exactly the one that would not get it.
+   */
+  $effect(() => {
+    void active;
+    confirmingReset = null;
+  });
+  /** What the last export or import did, said where the buttons are. */
+  let transfer = $state("");
+  let transferring = $state(false);
+
+  /**
+   * Writes every setting to a file, and says where it went.
+   *
+   * The sentence about credentials is here rather than only in the file,
+   * because somebody about to send this to a colleague deserves to know what
+   * is in it before they choose where to put it.
+   */
+  async function sendOut() {
+    transfer = "";
+    transferring = true;
+
+    try {
+      const where = await exportPreferences();
+      if (where) transfer = `Written to ${where}. No API keys or tokens are in it.`;
+    } catch (err) {
+      transfer = `${err}`;
+    } finally {
+      transferring = false;
+    }
+  }
+
+  /**
+   * Reads a settings file over what is here, and says exactly what changed.
+   *
+   * Named rather than counted, because "12 settings changed" is a number
+   * nobody can check and "appearance, hotkey, sources" is one they can go and
+   * look at. Nothing is reassigned here: the save emits
+   * `sill://preferences-changed` and the listener above adopts it, which is
+   * the same path a change made in the launcher takes.
+   */
+  async function bringIn() {
+    transfer = "";
+    transferring = true;
+
+    try {
+      const done = await importPreferences();
+      if (!done) return;
+
+      const said: string[] = [];
+
+      if (done.sections.length) said.push(`read ${done.sections.join(", ")}`);
+      if (done.snippets) said.push(`${done.snippets.added} snippets added`);
+      if (done.quicklinks) said.push(`${done.quicklinks.added} quicklinks added`);
+      if (done.keptKeys) {
+        said.push(
+          `${done.keptKeys} ${done.keptKeys === 1 ? "key was" : "keys were"} not in the file, ` +
+            "so the ones already here were kept",
+        );
+      }
+
+      transfer = said.length
+        ? `From ${done.readAs}: ${said.join("; ")}.`
+        : `Nothing in ${done.readAs} that Sill could use.`;
+
+      conflicts = await hotkeyConflicts();
+    } catch (err) {
+      transfer = `${err}`;
+    } finally {
+      transferring = false;
+    }
+  }
+
+  /**
+   * Puts the open panel back to what it shipped with.
+   *
+   * Two clicks, because there is no undo and the second click is the whole of
+   * the warning. Which sections go back is Rust's decision, so this cannot
+   * quietly reset the panel next to it.
+   */
+  async function putBack(panel: PanelId) {
+    if (confirmingReset !== panel) {
+      confirmingReset = panel;
+      return;
+    }
+
+    confirmingReset = null;
+
+    try {
+      await resetPanel(panel);
+      status = "Put back to the defaults";
+      setTimeout(() => (status = ""), 1600);
+    } catch (err) {
+      status = `Could not reset: ${err}`;
+    }
+  }
+
   async function rebuild() {
     rebuilding = true;
     status = "Rescanning";
@@ -631,6 +743,7 @@
         timings = await getTimings();
         browsers = await browserProfiles();
         engines = await searchEngines();
+        resettable = await resettablePanels();
       } catch (err) {
         status = `Could not load settings: ${err}`;
       }
@@ -740,6 +853,23 @@
           <p>{panel.blurb}</p>
         </div>
         {#if status}<span class="status">{status}</span>{/if}
+        <!--
+          In the header rather than as a row at the foot of each panel, because
+          it is about the whole panel and not one setting in it, and because a
+          row would have to be repeated in eighteen branches with eighteen
+          chances to name the wrong panel.
+
+          Drawn only where Rust says there is something to put back, so the
+          button never makes a promise `reset_panel` would then refuse. Two
+          clicks: there is no undo, and the second click is the whole warning.
+        -->
+        {#if resettable.includes(panel.id)}
+          <Button
+            label={confirmingReset === panel.id ? "Reset, and lose these" : "Reset"}
+            tone="danger"
+            onclick={() => void putBack(panel.id)}
+          />
+        {/if}
       </header>
 
       <!--
@@ -1695,6 +1825,39 @@
                 />
               {/snippet}
             </Row>
+          </Section>
+
+          <!--
+            In Advanced rather than in a panel of its own, because it is about
+            the settings as a whole and the sidebar rule is that a thing with
+            no settings of its own folds into its parent.
+          -->
+          <Section
+            label="Settings file"
+            description="A copy to keep, to move to another machine, or to arrive with from another launcher."
+          >
+            <Row
+              title="Export settings"
+              description="Every setting in one file. No API keys and no tokens: they are locked to this Windows account, so a copy of one would both leak and not work."
+            >
+              {#snippet control()}
+                <Button label="Export" busy={transferring} onclick={() => void sendOut()} />
+              {/snippet}
+            </Row>
+
+            <Row
+              title="Import settings"
+              description="A Sill export, a preferences.json, PowerToys Run's settings, or a Raycast .rayconfig. Anything the file does not mention keeps what it has."
+            >
+              {#snippet control()}
+                <Button label="Import" busy={transferring} onclick={() => void bringIn()} />
+              {/snippet}
+            </Row>
+
+            {#if transfer}
+              <!-- not a setting: what the last export or import did, not a control -->
+              <Row title="Last transfer" description={transfer} />
+            {/if}
           </Section>
 
           <Section
