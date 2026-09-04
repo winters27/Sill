@@ -78,7 +78,7 @@ fn the_steam_library_on_this_machine_reads() {
 
     assert!(
         with_art * 2 > found.len(),
-        "only {with_art} of {} games found a logo, which is what looking in          one of the two places Steam uses looks like",
+        "only {with_art} of {} games found a logo, which is what looking in only one of the two places Steam uses looks like",
         found.len()
     );
 
