@@ -215,6 +215,10 @@ const UNNAMABLE = new Set([
   "browser-tab",
   "audio-session",
   "process",
+  // A control, for a shorter-lived version of a window's reason: its id holds
+  // a window handle and the provider's own identifier for one button, and both
+  // stop meaning anything when that window redraws itself.
+  "control",
   // One row for whatever is playing, built by the search and gone the moment
   // the music stops. Its id is fixed, so a name given to it would survive and
   // point at nothing, which is worse than not offering one.

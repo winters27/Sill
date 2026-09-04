@@ -1952,3 +1952,79 @@ fn nothing_contributed_can_take_enter_even_if_it_claims_it() {
         "the action was dropped rather than merely denied Enter"
     );
 }
+
+/**
+A control on somebody's screen has exactly one thing that can be done to it.
+
+Held here because the window's mode table names `controls` as a view with no
+action panel, and the reason it gives is this number. A second action arriving
+for this kind would make that excuse false, and nothing about adding one would
+fail: the panel simply would not open on a row that now had two things to
+offer. This is what makes the two agree.
+
+The other half of the same pairing is that Enter is bound at all. A view whose
+only way of acting is Enter is a view where a missing primary is a row that
+does nothing, silently.
+*/
+#[test]
+fn a_control_has_one_thing_that_can_be_done_to_it_and_enter_does_it() {
+    let registry = builtins();
+    let offered = registry.for_kind(ObjectKind::ScreenControl);
+
+    assert_eq!(
+        offered.iter().map(|a| a.id()).collect::<Vec<_>>(),
+        vec!["sill.control.press"],
+        "the control view has no action panel because there is one action; \
+         see the `controls` entry in src/lib/modes.test.ts"
+    );
+
+    assert_eq!(
+        registry
+            .primary(ObjectKind::ScreenControl)
+            .map(|a| a.id().to_string()),
+        Some("sill.control.press".to_string()),
+        "nothing is bound to Enter in the one view where Enter is the only way \
+         to act"
+    );
+}
+
+/**
+Pressing a control is its own capability, and specifically not two others.
+
+`InputInjection` is the wrong word for it, and the difference is the whole
+safety argument: nothing here is synthesised, so nothing can arrive in a
+program that was not named. `WindowControl` is the wrong word for the opposite
+reason, that it understates. Somebody agreeing that Sill may tile their windows
+has not agreed that it may press Send.
+
+Declared wrong, neither mistake fails anything on its own. Three separate gates
+read the capability rather than the name: the one that decides whether the
+model stops to ask, the one that decides whether it asks for a face, and the
+one that decides whether a scheduled trigger may name it at all.
+*/
+#[test]
+fn pressing_a_control_is_its_own_capability() {
+    let registry = builtins();
+
+    let press = registry
+        .get("sill.control.press")
+        .expect("pressing a control is registered");
+
+    assert_eq!(press.capabilities(), &[Capability::ControlInvoke]);
+
+    assert!(
+        sill_lib::ai::acting::needs_asking(press.capabilities()),
+        "the model can press a button in somebody else's window without asking"
+    );
+
+    assert!(
+        sill_lib::ai::acting::wants_a_person(press.capabilities()),
+        "pressing a button is not heavy enough to want a person, so the model \
+         reaches it behind the same card as copying a path"
+    );
+
+    assert!(
+        sill_lib::automation::may_schedule("sill.control.press", press.capabilities()).is_err(),
+        "a scheduled trigger can press a button while nobody is at the machine"
+    );
+}

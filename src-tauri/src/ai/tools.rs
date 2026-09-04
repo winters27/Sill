@@ -18,6 +18,40 @@
 //! launcher is uniquely able to answer about the machine it is running on:
 //! what is installed, what is open, what was copied, what is on screen, what
 //! is in a folder. Anything a model can work out for itself is not here.
+//!
+//! ## The one that was asked for and refused
+//!
+//! `P8-04` asked for a third clause beside browser tabs and pressing a
+//! control: **the focused control's text, as context for the model.** UI
+//! Automation makes it easy. It is not built, and this is the place somebody
+//! would add it, so the reasons live here rather than in a document.
+//!
+//! **The consented paths already exist and this one has no consent in it.**
+//! [`read_selection`] reads what somebody highlighted, and highlighting is the
+//! act of choosing; [`read_screen`] reads what is on the glass, and everything
+//! on the glass is already visible to whoever is at the machine. The focused
+//! control is neither. It is read without anybody doing anything, it is the
+//! one control in the session most likely to hold a password or a note
+//! somebody is part way through, and a value can be much longer than what is
+//! on screen: `ValuePattern` hands back the whole field, including the part
+//! scrolled out of view.
+//!
+//! **The obvious guard does not hold.** `IsPassword` exists, and it is set by
+//! whoever wrote the provider. Chromium, Electron, Qt and Java applications
+//! set it inconsistently or not at all, which means the guard fails open
+//! exactly where the risk is highest: a password manager in a browser, a
+//! records system in Electron. A guard that works on Notepad and not on the
+//! things worth guarding is worse than none, because it reads like protection.
+//!
+//! **Private mode would not have saved it either.** `P8-08`'s compile-enforced
+//! token is the right shape for a capability like this, and it is off by
+//! default, which is correct for what it does and wrong as the only thing
+//! standing between a model and a password field. The failure is silent and it
+//! is somebody else's data.
+//!
+//! What is lost is real: "summarise what I am typing" is a genuine thing to
+//! want. It is available by highlighting it first, which costs one keystroke
+//! and is the consent this would have removed.
 
 use std::path::{Path, PathBuf};
 

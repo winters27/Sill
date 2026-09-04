@@ -307,7 +307,8 @@ The kinds, which are also the words `actionOn` takes: `application`, `file`,
 `folder`, `extensionCommand`, `systemSetting`, `setting`, `builtin`,
 `systemControl`, `snippet`, `quicklink`, `script`, `answer`, `clipboardEntry`,
 `text`, `emoji`, `window`, `browserTab`, `search`, `url`, `audioSession`,
-`nowPlaying`, `process`, `workspace`, `conversation`, `storeListing`.
+`nowPlaying`, `process`, `screenControl`, `workspace`, `conversation`,
+`storeListing`, `terminalProfile`.
 
 The names are checked against Rust's own by `npm run verify:source`, in both
 directions, for the reason the coverage tables exist: a kind spelled two ways

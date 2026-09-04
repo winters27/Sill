@@ -81,6 +81,7 @@
     aiTranscript,
     searchAppVolume,
     searchProcesses,
+    searchControls,
     searchDestinations,
     summonPainted,
     reportPainted,
@@ -1150,6 +1151,25 @@
       return;
     }
 
+    /*
+     * The buttons of the window you were in, asked for again every keystroke.
+     *
+     * Deliberately not narrowed here. The list belongs to somebody else's
+     * window and that window is free to redraw itself between two letters, so
+     * filtering a list taken once would go on offering a button that has gone.
+     */
+    if (mode === "controls") {
+      try {
+        const found = await searchControls(current);
+        if (id !== searchId) return;
+
+        show(found, current);
+      } catch (err) {
+        if (id === searchId) status = `${err}`;
+      }
+      return;
+    }
+
     if (mode === "emoji") {
       try {
         const found = await searchEmoji(current);
@@ -1338,6 +1358,17 @@
     if (id === "sill:processes") {
       void recordUse(id, typed);
       mode = "processes";
+      selected = 0;
+      query = "";
+      return true;
+    }
+
+    // Its own view for the same reason, and one more: nothing is read out of
+    // anybody's window until this row is chosen, which is what makes the
+    // feature cost nothing until it is asked for.
+    if (id === "sill:controls") {
+      void recordUse(id, typed);
+      mode = "controls";
       selected = 0;
       query = "";
       return true;
@@ -1823,6 +1854,33 @@
         const outcome = await runObjectAction("sill.process.quit", asTarget(process));
         status = outcome.message;
         await refreshRoot();
+      } catch (err) {
+        status = `${err}`;
+      }
+      return;
+    }
+
+    /*
+     * Enter presses the control, and then the launcher gets out of the way.
+     *
+     * Unlike the process list, which stays up because the answer to "did it
+     * close" is the row itself. The answer here is in the window behind, and
+     * dismissing hands focus back to exactly that window, because it is the
+     * one the launcher took the foreground from and the one this just pressed
+     * a button in.
+     *
+     * A refusal keeps the launcher up and says so. "Save is not in that window
+     * any more" is a sentence somebody has to be able to read, and dismissing
+     * on it would leave them looking at an unchanged window with no idea why.
+     */
+    if (mode === "controls") {
+      const control = commands[selected];
+      if (!control) return;
+
+      try {
+        const outcome = await runObjectAction("sill.control.press", asTarget(control));
+        status = outcome.message;
+        await dismiss();
       } catch (err) {
         status = `${err}`;
       }

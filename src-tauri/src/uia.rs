@@ -340,6 +340,19 @@ const TABS_PER_WINDOW: usize = 300;
 #[cfg(windows)]
 pub use windows_impl::{activate, read};
 
+/// The plumbing, for the other thing in this codebase that talks to UI
+/// Automation.
+///
+/// [`crate::controls`] presses a named control in somebody else's window, and
+/// it needs exactly these four: an apartment that will not hang, an element's
+/// name, an element's kind, and the provider's own identifier for it. Written
+/// again over there they would be a second answer to "which apartment" and a
+/// second answer to "what is a thing's identity", which is the shape rule 22
+/// exists to stop. The rules in the note at the top of this file are the rules
+/// over there too, and sharing the code is what keeps that true.
+#[cfg(windows)]
+pub(crate) use windows_impl::{control_type, name_of, runtime_id, with_com};
+
 #[cfg(all(windows, test))]
 pub(crate) use windows_impl::{cost, dump};
 
@@ -396,7 +409,9 @@ mod windows_impl {
     /// `RPC_E_CHANGED_MODE` means somebody already put this thread in an
     /// apartment. That is fine to work in and must not be torn down here,
     /// which is what the flag carries.
-    fn with_com<T>(work: impl FnOnce() -> windows::core::Result<T>) -> windows::core::Result<T> {
+    pub(crate) fn with_com<T>(
+        work: impl FnOnce() -> windows::core::Result<T>,
+    ) -> windows::core::Result<T> {
         // SAFETY: initialised and uninitialised on the same thread around the
         // whole call, and every interface is released by its own Drop before
         // the uninitialise below.
@@ -417,7 +432,7 @@ mod windows_impl {
     /// From what the walk already asked for where there is one, and from the
     /// element itself otherwise, so this reads correctly whether or not it was
     /// handed an element that came out of a cached walk.
-    fn name_of(element: &IUIAutomationElement) -> String {
+    pub(crate) fn name_of(element: &IUIAutomationElement) -> String {
         // SAFETY: reads one property from a live element.
         unsafe {
             element
@@ -440,7 +455,7 @@ mod windows_impl {
     /// assigned by whoever provides the element, it does not change while that
     /// element lives, and it is not reused by a later one. It means nothing
     /// outside this desktop session and is never persisted.
-    fn runtime_id(element: &IUIAutomationElement) -> Option<String> {
+    pub(crate) fn runtime_id(element: &IUIAutomationElement) -> Option<String> {
         // SAFETY: the array comes from the call above, is read only between
         // the bounds it reports for the one dimension a runtime identifier
         // has, and is destroyed on every way out including the early ones.
@@ -467,7 +482,7 @@ mod windows_impl {
     }
 
     /// What kind of control an element is. See [`name_of`] on the two reads.
-    fn control_type(element: &IUIAutomationElement) -> i32 {
+    pub(crate) fn control_type(element: &IUIAutomationElement) -> i32 {
         // SAFETY: reads one property from a live element.
         unsafe {
             element

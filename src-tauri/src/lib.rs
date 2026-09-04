@@ -18,6 +18,7 @@ pub mod catalog;
 pub mod clipboard;
 pub mod commands;
 pub mod complete;
+pub mod controls;
 pub mod desktops;
 pub mod dialog;
 pub mod dictation;
@@ -2142,6 +2143,7 @@ pub fn run() {
             commands::search::timings,
             commands::search::search_app_volume,
             commands::search::search_processes,
+            commands::search::search_controls,
             commands::launch::search_destinations,
             commands::search::search_emoji,
             commands::search::file_search_missing,

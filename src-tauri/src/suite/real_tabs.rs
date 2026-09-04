@@ -288,6 +288,15 @@ fn switching_to_a_tab_brings_that_tab_to_the_front() {
 /// and comes back. Everything either side of that is checked by fixtures; the
 /// crossing itself is only ever checked here and in the fixture that pairs the
 /// writer with the reader.
+///
+/// > [!WARNING]
+/// > **"The tab in front" is a question with one answer per window.** This
+/// > read every open browser window into one list and then asked which tab in
+/// > that list was active, which is the first window's answer whatever window
+/// > was just switched in. With one browser open it passes; with two it fails
+/// > against a working implementation, which is what happened when this was
+/// > run against two Edge windows. Every read-back below names the window the
+/// > tab belongs to.
 #[test]
 #[ignore]
 #[cfg(windows)]
@@ -303,10 +312,21 @@ fn a_row_built_the_way_the_window_builds_one_still_switches() {
 
     let tabs = crate::uia::read(&open);
 
-    let Some(was) = tabs.iter().find(|tab| tab.active).cloned() else {
+    // One per window, because each window has a tab in front of its own and
+    // putting "the" one back would leave every other window switched.
+    let was: Vec<crate::uia::Tab> = open
+        .iter()
+        .filter_map(|one| {
+            tabs.iter()
+                .find(|tab| tab.window == one.window && tab.active)
+                .cloned()
+        })
+        .collect();
+
+    if was.is_empty() {
         println!("nothing is in front, so there is nothing to put back");
         return;
-    };
+    }
 
     // The query every tab matches, so the ranking is exercised without this
     // probe needing to know what anybody has open.
@@ -319,6 +339,7 @@ fn a_row_built_the_way_the_window_builds_one_still_switches() {
     for tab in ranked {
         let title = tab.title.clone();
         let key = tab.key.clone();
+        let window = tab.window;
         let row = crate::commands::search::TabRow::from(tab);
 
         let want = crate::uia::Where::parse(row.entrypoint())
@@ -327,20 +348,29 @@ fn a_row_built_the_way_the_window_builds_one_still_switches() {
         crate::uia::activate(&want)
             .unwrap_or_else(|err| panic!("the row for {title:?} would not switch: {err}"));
 
-        let now = crate::uia::read(&open);
+        // This tab's own window and no other. See the warning above.
+        let mine: Vec<crate::uia::Open> = open
+            .iter()
+            .filter(|one| one.window == window)
+            .cloned()
+            .collect();
+
+        let now = crate::uia::read(&mine);
         let front = now.iter().find(|other| other.active);
 
         assert_eq!(
             front.map(|other| other.key.as_str()),
             Some(key.as_str()),
-            "the row for {title:?} brought {:?} to the front",
+            "the row for {title:?} brought {:?} to the front of window {window:#x}",
             front.map(|other| &other.title)
         );
 
         println!("the row for {title:?} switched to it");
     }
 
-    let _ = crate::uia::activate(&was.located());
+    for tab in &was {
+        let _ = crate::uia::activate(&tab.located());
+    }
 }
 
 /// What reading a Firefox window costs inside Firefox.
@@ -353,10 +383,21 @@ fn a_row_built_the_way_the_window_builds_one_still_switches() {
 ///
 /// Run it against a browser that has not been read yet in its current run, or
 /// the before and after are the same number for the boring reason.
+///
+/// **`SILL_TABS=chromium` stops it**, and it has to. This is the one probe here
+/// that names a family rather than reading [`wanted`], which is right for a
+/// test about Firefox and wrong the moment somebody runs the whole file:
+/// `cargo test --lib real_tabs` with the variable set to `chromium` reached a
+/// Firefox anyway, which is exactly the thing the variable exists to prevent.
 #[test]
 #[ignore]
 #[cfg(windows)]
 fn what_reading_a_firefox_costs_that_firefox() {
+    if wanted() == [Family::Chromium] {
+        println!("SILL_TABS says Chromium only, and reading a Firefox is not free");
+        return;
+    }
+
     let windows = crate::windowing::list();
     let mut open = crate::uia::browser_windows(&windows, &[Family::Firefox]);
     only_this_window(&mut open);

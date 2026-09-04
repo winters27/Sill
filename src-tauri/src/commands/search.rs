@@ -644,6 +644,100 @@ pub(crate) async fn search_processes(
     Ok(results.into_iter().map(Into::into).collect())
 }
 
+/// The pressable controls of the window somebody was in, matching a query.
+///
+/// **Not part of the root list, for the same reason the process list is not,
+/// only more so.** Reading a window's controls walks another program's tree
+/// across the process boundary; done on every keystroke against whatever
+/// happened to be in front, the launcher would be interrogating the window
+/// behind it while somebody searches for a calculator. Against a
+/// Firefox-family browser the first such read switches that browser's
+/// accessibility engine on for the life of the process, which is a cost
+/// nobody asked for. So it sits behind a row of its own and costs exactly
+/// nothing until somebody opens it.
+///
+/// **Which window is not a parameter**, and that is deliberate. The window is
+/// whichever one the launcher took the foreground from, which Sill already
+/// records to hand focus back on dismissal. Passing a handle in from the
+/// frontend would make the window somebody's controls are read from a value
+/// the window layer could get wrong, and there is no honest way for a
+/// launcher's own field to name a window it is not in front of.
+///
+/// The refusing is `controls::read`'s, not this list's: a hotkey and the
+/// action registry reach the same code without passing through a search.
+#[tauri::command]
+pub(crate) async fn search_controls(
+    state: State<'_, RegistryState>,
+    timings: State<'_, crate::timing::Timings>,
+    query: String,
+) -> Result<Vec<registry::SearchResult>, String> {
+    let _timing = timings.inner().timing("controls");
+
+    let Some(window) = crate::summon::previous_foreground() else {
+        return Err("nothing was in front when Sill opened".to_string());
+    };
+
+    // Cross-process COM calls that block, so never on an async worker. The
+    // same rule the tab read follows and for the same reason.
+    let (controls, about) = tokio::task::spawn_blocking(move || {
+        (
+            crate::controls::read(window),
+            crate::windowing::find(window),
+        )
+    })
+    .await
+    .map_err(|err| format!("reading that window failed: {err}"))?;
+
+    let controls = controls?;
+
+    let Some(about) = about else {
+        return Err("that window closed while it was being read".to_string());
+    };
+
+    let records: Vec<registry::CommandRecord> = controls
+        .iter()
+        .map(|control| {
+            registry::control_record(
+                control,
+                &about.app,
+                (!about.app_path.is_empty()).then_some(about.app_path.as_str()),
+            )
+        })
+        .collect();
+
+    // An empty query is every control, in the order the window has them, which
+    // is roughly the order somebody looking at it would read them in. Ranking
+    // an empty query would replace that with an alphabet.
+    if query.trim().is_empty() {
+        return Ok(records
+            .into_iter()
+            .map(registry::SearchResult::from_record)
+            .collect());
+    }
+
+    let ranking = state.ranking();
+
+    let results = registry::search_excluding(
+        records.iter(),
+        &query,
+        &ranking.frecency,
+        // A control is not in the index, so nothing can have been given a name
+        // for one: an alias points at a command id that survives a restart,
+        // and this one does not survive the window being redrawn.
+        &registry::Aliases::default(),
+        now_seconds(),
+        registry::SEARCH_LIMIT,
+        // What a window offers is a fact rather than a preference. Hiding a
+        // row here would mean not being able to press the one button somebody
+        // opened this to reach.
+        registry::Excluded::none(),
+        // Not the root list, so nothing is pinned to the top of it.
+        &[],
+    );
+
+    Ok(results.into_iter().map(Into::into).collect())
+}
+
 /// The open windows matching a query.
 ///
 /// Separate from `search_commands` for the reason file search is separate: it

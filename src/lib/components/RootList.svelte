@@ -352,6 +352,10 @@
       // called what its page is called, and the same page can be open in two.
       case "browser-tab":
         return command.extensionTitle;
+      // The program whose window it is. The row's title is what the button
+      // says, and "Close" on its own does not say what is about to close.
+      case "control":
+        return command.extensionTitle;
       case "audio-session":
         return "App Volume";
       // The player, when Windows gave a name that is one. The row's own title

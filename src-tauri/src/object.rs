@@ -136,6 +136,15 @@ pub enum ObjectKind {
     /// system. Not in the index either: the list is Terminal's settings file
     /// and the registry's WSL keys, read when somebody asks for it.
     TerminalProfile,
+    /// One button, checkbox, menu item or tab of a window that is open now.
+    ///
+    /// The shortest-lived kind there is. A window is a handle that lasts until
+    /// it closes; a control inside one lasts until that window redraws itself,
+    /// and a program is free to rebuild its toolbar between somebody reading a
+    /// row and pressing Enter on it. So this carries the provider's own
+    /// identifier **and** the name it was read under, and refuses when either
+    /// has moved. See [`crate::controls`].
+    ScreenControl,
 }
 
 impl ObjectKind {
@@ -177,6 +186,7 @@ impl ObjectKind {
         Self::Conversation,
         Self::StoreListing,
         Self::TerminalProfile,
+        Self::ScreenControl,
     ];
 
     /**
@@ -222,6 +232,7 @@ impl ObjectKind {
             Self::Conversation => "conversation",
             Self::StoreListing => "extension in the store",
             Self::TerminalProfile => "terminal profile",
+            Self::ScreenControl => "control on screen",
         }
     }
 
@@ -261,6 +272,7 @@ impl ObjectKind {
             Self::Snippet => "snippet",
             Self::Quicklink => "quicklink",
             Self::TerminalProfile => "terminalProfile",
+            Self::ScreenControl => "screenControl",
             Self::Script => "script",
             Self::Answer => "answer",
             Self::ClipboardEntry => "clipboardEntry",
@@ -340,6 +352,10 @@ impl ObjectKind {
             // read out of Terminal's settings and the WSL registry keys when
             // a query asks for one.
             "terminal-profile" => Self::TerminalProfile,
+            // A control of a window somebody is looking at, read when they
+            // open the view that lists them and never held between two
+            // keystrokes. No index has one and none ever will.
+            "control" => Self::ScreenControl,
             _ => return None,
         })
     }
@@ -374,6 +390,10 @@ impl ObjectKind {
                 // Opening a terminal puts a terminal in front, which is the
                 // entire reason for pressing it.
                 | Self::TerminalProfile
+                // Pressing a control means watching what it did, and what it
+                // did is behind the launcher. Staying up would be sitting on
+                // top of the answer.
+                | Self::ScreenControl
         )
     }
 }
@@ -652,12 +672,13 @@ mod tests {
                 ObjectKind::Conversation => 23,
                 ObjectKind::StoreListing => 24,
                 ObjectKind::TerminalProfile => 25,
+                ObjectKind::ScreenControl => 26,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            26,
+            27,
             "a kind was added or removed without `ALL` being told",
         );
 

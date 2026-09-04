@@ -232,6 +232,7 @@ pub fn plainly(capability: &Capability) -> &'static str {
         Capability::Network => "send things over the network",
         Capability::SystemControl => "change this machine's settings",
         Capability::WindowControl => "move and close other programs' windows",
+        Capability::ControlInvoke => "press buttons inside other programs' windows",
         Capability::Ui => "draw in Sill's own window",
         Capability::LauncherDismiss => "close Sill's window while you are using it",
     }
@@ -287,6 +288,7 @@ mod granting {
             Capability::Network,
             Capability::SystemControl,
             Capability::WindowControl,
+            Capability::ControlInvoke,
             Capability::LauncherDismiss,
         ] {
             assert!(needs_granting(&capability), "{capability:?} is free");
@@ -342,6 +344,7 @@ mod granting {
             Capability::InputInjection,
             Capability::SystemControl,
             Capability::WindowControl,
+            Capability::ControlInvoke,
             Capability::Network,
             Capability::SelectionRead,
         ] {

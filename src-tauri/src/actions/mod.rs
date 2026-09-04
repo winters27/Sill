@@ -113,6 +113,7 @@ pub fn builtins() -> ActionRegistry {
         core.into_iter()
             .chain(transforms())
             .chain(std::iter::once(Box::new(SwitchToTab) as Box<dyn Action>))
+            .chain(std::iter::once(Box::new(PressControl) as Box<dyn Action>))
             .chain(window_actions())
             .collect(),
     )
@@ -2018,7 +2019,14 @@ impl Action for CopyName {
     fn accepts(&self, kind: ObjectKind) -> bool {
         // Everything has a name, including the things that have nothing else:
         // a builtin, an extension command, a setting.
-        !matches!(kind, ObjectKind::Answer)
+        //
+        // A control on somebody else's screen is the exception, and it is the
+        // only one besides an answer. Its "name" is the word printed on
+        // another program's button, and nobody opens a list of buttons in
+        // order to put the word "Save" on their clipboard. Offering it turns
+        // the one view whose whole point is that Enter presses the thing into
+        // a view with a menu on it.
+        !matches!(kind, ObjectKind::Answer | ObjectKind::ScreenControl)
     }
 
     fn capabilities(&self) -> &'static [Capability] {
@@ -2940,6 +2948,76 @@ impl Action for SwitchToTab {
 
         crate::uia::activate(&want)?;
         Ok(Outcome::done(format!("Switched to {}", object.title)))
+    }
+}
+
+/// Presses one control of a window somebody is looking at.
+///
+/// The only action a control has, and it is the whole of what one is for: a
+/// button exists to be pressed. There is deliberately nothing else. Copying a
+/// control's name would be a row offering to put the word "Save" on the
+/// clipboard, and anything that read a control's *contents* is the half of
+/// `P8-04` that was refused rather than built. See [`crate::controls`].
+struct PressControl;
+
+#[async_trait]
+impl Action for PressControl {
+    fn id(&self) -> &str {
+        "sill.control.press"
+    }
+
+    fn title(&self) -> &str {
+        "Press"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::ScreenControl
+    }
+
+    /// Its own capability, and the argument for that is in [`Capability`].
+    ///
+    /// Not `WindowControl`, which moves a window about, and not
+    /// `InputInjection`, which this is carefully not: nothing is typed and no
+    /// key is synthesised, so nothing here can arrive in a program that was
+    /// not named.
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ControlInvoke]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    /// Reads the window again rather than trusting what the row was built from.
+    ///
+    /// See `controls::pick`. The row carries a description of a control, not a
+    /// hold on one, and between the query and the Enter a program is free to
+    /// have rebuilt its toolbar. A control whose identifier or whose name has
+    /// moved is refused rather than pressed.
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let want = crate::controls::Spot::parse(&object.target)
+            .ok_or_else(|| format!("{} is not a control", object.title))?;
+
+        /*
+         * Blocking, and it crosses into another program's process twice: once
+         * to find the control again and once to press it. Never on an async
+         * worker, which is the same rule the tab read follows.
+         */
+        let pressed = tokio::task::spawn_blocking(move || crate::controls::press(&want))
+            .await
+            .map_err(|err| format!("pressing that control failed: {err}"))?;
+
+        pressed?;
+
+        /*
+         * Past tense and no undo, which is the honest answer.
+         *
+         * An `Undo` descriptor can put a file back or a window back. There is
+         * no descriptor that un-presses a button: the program on the other
+         * side has already done whatever it does, and offering to reverse it
+         * would be the polite fiction rule 16 exists to refuse.
+         */
+        Ok(Outcome::done(format!("Pressed {}", object.title)))
     }
 }
 
