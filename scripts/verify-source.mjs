@@ -2127,6 +2127,179 @@ if (tracked.status !== 0) {
   }
 }
 
+/*
+ * The extension coverage table says what it is a table of.
+ *
+ * `docs/extensions.md` tells an author which Raycast APIs Sill answers, which
+ * throw a reason of their own, and what the window does with every component
+ * tag. That is exactly the kind of page that is wrong within a week and gives
+ * the reader no way to tell: the module an extension receives is a proxy, so
+ * anything the host does not export throws at the moment it is touched, and a
+ * table that has drifted is a promise the runtime does not keep.
+ *
+ * So the rows are not maintained, they are held to the source. The names come
+ * out of the host's own exports and its component declarations, and both
+ * directions fail: an API added without a row, and a row left behind after the
+ * API went. The prose beside each name is a person's job and is not checked.
+ *
+ * Three sets, because the page makes three different claims:
+ *
+ * - **answered**, everything exported that does the thing it names;
+ * - **refused**, the few exported only to throw a reason of their own, which
+ *   is not the same as a gap and must not be listed as though it were;
+ * - **tags**, every component tag that reaches the window.
+ */
+{
+  const DOC = "docs/extensions.md";
+  const API = "host/src/api/index.ts";
+  const UTILS = "host/src/utils/index.ts";
+  const COMPONENTS = "host/src/api/components.ts";
+
+  /**
+   * What a module exports at runtime.
+   *
+   * Types are left out because they do not exist while the extension runs, and
+   * the proxy that throws only ever sees values. `export { type X }` and
+   * `export interface` are both skipped for that reason.
+   */
+  function exported(file) {
+    const text = readFileSync(file, "utf8");
+    const names = new Set();
+
+    for (const found of text.matchAll(/^export\s*\{([^}]*)\}/gm)) {
+      for (const entry of found[1].split(",")) {
+        const bit = entry.trim();
+        if (!bit || bit.startsWith("type ")) continue;
+        names.add((bit.split(/\s+as\s+/).pop() ?? bit).trim());
+      }
+    }
+
+    for (const found of text.matchAll(
+      /^export\s+(?:async\s+)?(?:const|function|class)\s+([A-Za-z_$][\w$]*)/gm,
+    )) {
+      names.add(found[1]);
+    }
+
+    return names;
+  }
+
+  /**
+   * The exports of `@raycast/utils` that exist to throw a reason.
+   *
+   * Sliced between one top-level declaration and the next, exported or not,
+   * because `notHere` itself is declared in the middle of them and a slice cut
+   * only at `export` swallows it into whichever function it follows. That
+   * mistake reported `runPowerShellScript` as refused, which is the opposite
+   * of true.
+   */
+  function refusedByName(file) {
+    const text = readFileSync(file, "utf8");
+    const declared = [
+      ...text.matchAll(
+        /^(export\s+)?(?:async\s+)?(?:const|function|class)\s+([A-Za-z_$][\w$]*)/gm,
+      ),
+    ];
+
+    const refused = new Set();
+
+    declared.forEach((one, index) => {
+      if (!one[1]) return;
+      const until = declared[index + 1]?.index ?? text.length;
+      if (/\bnotHere\(/.test(text.slice(one.index, until))) refused.add(one[2]);
+    });
+
+    return refused;
+  }
+
+  /** Every component tag the API layer can put on the wire. */
+  function componentTags(file) {
+    const text = readFileSync(file, "utf8");
+    const found = new Set([...text.matchAll(/host<AnyProps>\("([^"]+)"\)/g)].map((m) => m[1]));
+
+    // `Action.Push` is not built by `host`, because it does its own work, and
+    // it still reaches the window under its own tag. Read from the name it
+    // sets rather than written out here, so a second one added the same way
+    // arrives without anybody remembering this line.
+    for (const named of text.matchAll(/\bdisplayName = "([^"]+)"/g)) found.add(named[1]);
+
+    return found;
+  }
+
+  /** The backticked names in the first column of a marked region's table. */
+  function listed(text, region) {
+    const between = text.match(new RegExp(`<!-- ${region} -->([\\s\\S]*?)<!-- /${region} -->`));
+
+    if (!between) {
+      fail(DOC, null, `no \`${region}\` region, so nothing there is being checked`);
+      return undefined;
+    }
+
+    const names = new Set();
+    for (const row of between[1].split("\n")) {
+      const cell = row.match(/^\|\s*`([^`]+)`\s*\|/);
+      if (cell) names.add(cell[1]);
+    }
+    return names;
+  }
+
+  const doc = readFileSync(DOC, "utf8");
+
+  const refused = refusedByName(UTILS);
+  const answered = new Set(
+    [...exported(API), ...exported(UTILS)].filter((name) => !refused.has(name)),
+  );
+  const drawn = componentTags(COMPONENTS);
+
+  /*
+   * A parse that found nothing would agree with an empty page and pass every
+   * comparison below. These floors are far under the real counts and exist
+   * only to turn a broken regex into a failure rather than into a silent yes,
+   * which is the same treatment the grant-map rule above gets.
+   */
+  for (const [what, set, least] of [
+    ["answered", answered, 20],
+    ["refused", refused, 3],
+    ["tag", drawn, 30],
+  ]) {
+    if (set.size >= least) continue;
+    fail(
+      DOC,
+      null,
+      `only ${set.size} ${what} name(s) found in the host, so this is parsing ` +
+        "rather than checking",
+    );
+  }
+
+  for (const [region, expected, where] of [
+    ["coverage:answered", answered, `${API} and ${UTILS}`],
+    ["coverage:refused", refused, UTILS],
+    ["coverage:tags", drawn, COMPONENTS],
+  ]) {
+    const rows = listed(doc, region);
+    if (!rows) continue;
+
+    for (const name of expected) {
+      if (rows.has(name)) continue;
+      fail(
+        DOC,
+        null,
+        `\`${name}\` is in ${where} and has no row under \`${region}\`, so the ` +
+          "coverage table understates what an extension can reach",
+      );
+    }
+
+    for (const name of rows) {
+      if (expected.has(name)) continue;
+      fail(
+        DOC,
+        null,
+        `\`${name}\` has a row under \`${region}\` and is not in ${where}, so the ` +
+          "table promises something the host does not answer",
+      );
+    }
+  }
+}
+
 console.log(
   failures === 0 ? "source verification passed" : `\n${failures} problem(s) found`,
 );

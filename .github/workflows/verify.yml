@@ -51,33 +51,16 @@ jobs:
       # fetched, and only those three: a sparse blobless clone is 25 MB and
       # four seconds against many gigabytes for the whole thing.
       #
-      # Deliberately not pinned to a commit. The gate exists to answer whether
-      # the host still renders real extensions, and a frozen copy stops being
-      # able to answer that. The cost is that an upstream change can turn this
-      # red; pinning is one line here if it ever does.
-      #
-      # Their dependencies are installed, and that is not optional. The gate
-      # bundles five commands and one of them, uuid-generator's generateV7,
-      # imports uuid, typeid-js and ulidx. esbuild bundles what it is pointed
-      # at, so an unresolved import is a build failure rather than a warning.
-      # viewHistory builds without them, which is what made it look as though
-      # none of them were needed.
-      #
-      # `--ignore-scripts` because `@raycast/api` runs `bin/ray npm-post-install`
-      # after install, which is a shell line that does not survive cmd.exe.
-      # Nothing here needs whatever it does: these are bundled with esbuild and
-      # run against Sill's own API, never against Raycast's toolchain.
+      # Through the same script a person runs on a fresh clone, rather than
+      # through a copy of it written out here. The copy was the problem: which
+      # extensions the gate needs is stated in the gate itself, and two lists
+      # with nothing making them agree is how a gate quietly starts skipping
+      # the thing it was written to check. `scripts/fetch-raycast-src.mjs`
+      # reads the gate, and carries the reasoning that used to live in this
+      # comment: why the clone is deliberately unpinned, why the dependencies
+      # are not optional, and why the install ignores scripts.
       - name: Fetch the real extensions gate:views builds against
-        shell: bash
-        run: |
-          git clone --filter=blob:none --sparse --depth 1 \
-            https://github.com/raycast/extensions.git extensions/raycast-src
-          git -C extensions/raycast-src sparse-checkout set \
-            extensions/uuid-generator extensions/password-generator extensions/emoji
-          for extension in uuid-generator password-generator emoji; do
-            npm --prefix "extensions/raycast-src/extensions/$extension" ci \
-              --ignore-scripts
-          done
+        run: npm run extensions:fetch
 
       # Two Rust tests rank and read `extensions/build/index.json`, and neither
       # had ever run here. That directory is gitignored, and the only thing
