@@ -5,9 +5,9 @@
  * tests at all when it rendered a screen of blank space with every result
  * pushed off the bottom.
  */
-import { describe, expect, test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import type { RankedCommand } from "$lib/exthost/commands";
-import { groupOf, linesOf, scrollFor } from "$lib/list";
+import { groupOf, linesOf, onePerId, scrollFor } from "$lib/list";
 import { isRunnable, type ActionEntry } from "$lib/exthost/actions";
 import { afterLaunch, type Launched } from "$lib/modes";
 
@@ -403,5 +403,62 @@ describe("what leaves the launcher on screen", () => {
     expect(afterLaunch(launched({ mode: "aModeNobodyHasWrittenYet", session: "s9" }))).toBe(
       "view",
     );
+  });
+});
+
+describe("one row per id", () => {
+  const row = (id: string, title: string) =>
+    ({
+      id,
+      extension: "app",
+      extensionTitle: "Application",
+      title,
+      subtitle: "",
+      mode: "app",
+      entrypoint: "x",
+      icon: "",
+      matched: [],
+    }) as RankedCommand;
+
+  /**
+   * The failure this exists for is silent.
+   *
+   * A repeated key in the list's `{#each}` draws one row and says nothing, so
+   * a result somebody searched for is simply absent. Nobody reports that,
+   * because it looks like the thing not existing.
+   */
+  it("keeps the first of a repeated id and drops the rest", () => {
+    const kept = onePerId([
+      row("app:chrome", "Google Chrome"),
+      row("file:notes", "notes.md"),
+      row("app:chrome", "Chrome again, from another source"),
+    ]);
+
+    expect(kept.map((one) => one.id)).toEqual(["app:chrome", "file:notes"]);
+    expect(kept[0].title).toBe("Google Chrome");
+  });
+
+  /**
+   * The ranked list is first and the appended ones come below it, so the
+   * earlier row is the one that was ranked and the one to keep.
+   */
+  it("keeps the ranked row rather than the appended one", () => {
+    const kept = onePerId([row("file:a", "ranked"), row("file:a", "appended")]);
+    expect(kept[0].title).toBe("ranked");
+  });
+
+  /**
+   * Every keystroke on an ordinary machine goes through here with nothing
+   * repeated, so that path allocates nothing and hands back what it was
+   * given.
+   */
+  it("hands back the same array when nothing repeated", () => {
+    const rows = [row("a", "Alpha"), row("b", "Beta")];
+    expect(onePerId(rows)).toBe(rows);
+  });
+
+  it("copes with an empty list", () => {
+    const rows: RankedCommand[] = [];
+    expect(onePerId(rows)).toBe(rows);
   });
 });

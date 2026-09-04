@@ -3,6 +3,7 @@
   // command rather than waiting for the DOM.
   import { onMount, tick as rendered, untrack } from "svelte";
   import { beginCapture, captureScreen, lastImage, openMarkup } from "$lib/capture";
+  import { onePerId } from "$lib/list";
   import { openQuicklink } from "$lib/quicklinks";
   import { saveWorkspace } from "$lib/workspaces";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -372,6 +373,8 @@
     // can start a second stopwatch for the same keystroke.
     const began = typedAt;
     typedAt = null;
+
+    rows = onePerId(rows);
 
     selected = selectionAfter(
       { id: commands[selected]?.id, index: selected },

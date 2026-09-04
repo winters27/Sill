@@ -132,6 +132,38 @@ const HEADINGS: Record<string, string> = {
  * takes this path on purpose: Rust puts its collection in that field, because
  * both answer the same question.
  */
+/**
+ * One row per id, because two with the same id lose one of them.
+ *
+ * The list is keyed by `command.id`, and a repeated key does not throw and
+ * does not draw twice: **it draws one row and says nothing**. Measured
+ * against Svelte 5.56 in `RootList.svelte.test.ts`, on the first render and
+ * on an update. So the failure is a result somebody searched for quietly
+ * not being in the list, which is the kind of thing nobody reports because
+ * it looks like the thing not existing.
+ *
+ * Every list on screen is built here by concatenating what Rust ranked with
+ * files and browser pages that arrive later from another command, and Rust's
+ * own `one_per_id` cannot see across that seam. This is the seam.
+ *
+ * The first of a repeated id wins, because the earlier list is the ranked
+ * one and the later ones are appended below it deliberately. The original
+ * array is handed back untouched when nothing repeated, which is every
+ * keystroke on an ordinary machine.
+ */
+export function onePerId(rows: RankedCommand[]): RankedCommand[] {
+  const seen = new Set<string>();
+  const kept: RankedCommand[] = [];
+
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    kept.push(row);
+  }
+
+  return kept.length === rows.length ? rows : kept;
+}
+
 export function groupOf(command: RankedCommand): string {
   return HEADINGS[command.mode] ?? command.extensionTitle;
 }

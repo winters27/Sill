@@ -2447,6 +2447,54 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * Every list that reaches the screen has one row per id.
+ *
+ * A repeated key in the result list's `{#each}` does not throw and does not
+ * draw twice: it draws one row and says nothing. Measured against Svelte 5.56
+ * in `RootList.svelte.test.ts`, on the first render and on an update. So the
+ * failure is a result somebody searched for quietly not being in the list,
+ * which is the kind of thing nobody reports because it looks like the thing
+ * not existing.
+ *
+ * `show` is the one seam where the ranked list and the later files and
+ * browser pages are joined, and Rust's own `one_per_id` cannot see across it.
+ * `show` cannot be unit tested, so removing the call fails nothing, which is
+ * the same hole `after_recording` below is guarded against.
+ */
+{
+  const PAGE = "src/routes/+page.svelte";
+
+  if (existsSync(PAGE)) {
+    const text = readFileSync(PAGE, "utf8");
+    const at = text.indexOf("function show(rows:");
+
+    if (at < 0) {
+      fail(PAGE, null, "show is gone, and with it the one place every list is joined");
+    } else {
+      const opened = text.indexOf("{", at);
+      let depth = 0;
+      let end = opened;
+      for (let i = opened; i < text.length; i++) {
+        if (text[i] === "{") depth++;
+        else if (text[i] === "}" && --depth === 0) {
+          end = i;
+          break;
+        }
+      }
+
+      if (!text.slice(opened, end).includes("onePerId(")) {
+        fail(
+          PAGE,
+          lineOf(text, at),
+          "show does not put its rows through onePerId, so two sources naming " +
+            "the same row silently lose one of them and nothing says so",
+        );
+      }
+    }
+  }
+}
+
+/*
  * Every recorded copy is still followed by the housekeeping.
  *
  * The two bounds on the clipboard, retention and the row cap, run from the
