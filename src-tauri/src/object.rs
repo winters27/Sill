@@ -412,6 +412,8 @@ mod tests {
             maximized: false,
             rect: crate::windowing::Rect::new(0, 0, 100, 100),
             monitor: 0,
+            elsewhere: false,
+            desktop: None,
         };
         let b = crate::windowing::Window {
             id: 5678,
@@ -442,6 +444,8 @@ mod tests {
             maximized: false,
             rect: crate::windowing::Rect::new(0, 0, 10, 10),
             monitor: 0,
+            elsewhere: false,
+            desktop: None,
         };
 
         assert_eq!(Object::from_window(&nameless).title, "Steam");

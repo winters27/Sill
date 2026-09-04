@@ -7,6 +7,16 @@
 //! would mean a shell hook and a stream of events for a question nobody is
 //! asking most of the time, which rule 23 rules out.
 //!
+//! **The one thing here that is not Win32 is the cloaked windows.** A window
+//! on another virtual desktop looks exactly like a suspended store
+//! application from Win32's side, and telling them apart is a question for
+//! `desktops`, which is COM and costs about a millisecond for the whole batch.
+//! It is asked once per enumeration, only about the windows that are cloaked,
+//! and not at all on a machine where none are. Measured on 2026-09-03: a list
+//! of sixteen windows with one cloaked among them is 2.9 to 5.5 ms in a debug
+//! build, of which 1 to 2 ms is the desktop question, and asking about no
+//! cloaked windows at all is under a microsecond.
+//!
 //! The layout arithmetic is separate from the Win32 calls on purpose. Where a
 //! window should go is the part with judgement in it and the part that can be
 //! wrong; it is pure functions over rectangles, tested without a desktop.
@@ -85,6 +95,22 @@ pub struct Window {
     pub rect: Rect,
     /// Index into [`monitors`].
     pub monitor: usize,
+    /// Whether this window is on a virtual desktop other than the one on
+    /// screen.
+    ///
+    /// Such a window is cloaked, which is why the list did not have it at all
+    /// until `desktops` could tell the two kinds of cloaked window apart. It
+    /// is listed now, and this is what lets a row say so rather than offering
+    /// what looks like an ordinary window and then switching the whole desktop
+    /// out from under somebody.
+    pub elsewhere: bool,
+    /// Which desktop that is, as Task View numbers them.
+    ///
+    /// Only ever set when `elsewhere` is, and `None` even then on a Windows
+    /// build Sill may not read the desktop order from. The row says "on
+    /// another desktop" in that case, which is the useful half and the half
+    /// that needs nothing undocumented.
+    pub desktop: Option<usize>,
 }
 
 /// One display.
@@ -317,30 +343,37 @@ mod platform {
     ///   is a palette, not a document".
     /// - Its own root owner. Otherwise every modal dialog and every owned popup
     ///   appears as a peer of the window it belongs to.
-    /// - **Not cloaked.** This is the clause everyone forgets. A suspended
-    ///   store application leaves behind a window that is visible, titled,
-    ///   non-tool and its own owner, and is not on screen at all. Without this
-    ///   the list fills with ghosts, and worse, focusing one does nothing and
-    ///   looks like Sill is broken.
-    fn is_listable(hwnd: HWND) -> bool {
+    /// - **Cloaked, which is two different things.** This is the clause
+    ///   everyone forgets. A suspended store application leaves behind a
+    ///   window that is visible, titled, non-tool and its own owner, and is
+    ///   not on screen at all. Without this the list fills with ghosts, and
+    ///   worse, focusing one does nothing and looks like Sill is broken.
+    ///
+    ///   **A window on another virtual desktop is cloaked in exactly the same
+    ///   way**, and dropping it was throwing away a window somebody may well
+    ///   want: switching to it works, because Windows changes desktop to show
+    ///   it. So this returns which of the two it is rather than a yes or no,
+    ///   and `list` asks `desktops` about the cloaked ones only. See
+    ///   [`Listable`].
+    fn is_listable(hwnd: HWND) -> Listable {
         // SAFETY: every call takes a window handle and returns a value; the
         // handle came from EnumWindows and is checked by Windows itself.
         unsafe {
             if !IsWindowVisible(hwnd).as_bool() {
-                return false;
+                return Listable::No;
             }
 
             if GetWindowTextLengthW(hwnd) == 0 {
-                return false;
+                return Listable::No;
             }
 
             let extended = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
             if extended & WS_EX_TOOLWINDOW.0 != 0 {
-                return false;
+                return Listable::No;
             }
 
             if GetAncestor(hwnd, GA_ROOTOWNER) != hwnd {
-                return false;
+                return Listable::No;
             }
 
             let mut cloaked = 0u32;
@@ -354,11 +387,25 @@ mod platform {
             // An error means DWM has nothing to say about this window, which
             // is not the same as it being cloaked.
             if read.is_ok() && cloaked != 0 {
-                return false;
+                return Listable::Cloaked;
             }
 
-            true
+            Listable::Yes
         }
+    }
+
+    /// What the Alt-Tab rule made of a window.
+    ///
+    /// Three answers rather than two, because "cloaked" is the one that used
+    /// to be folded into "no" and is really "ask somebody else". Deciding it
+    /// here would mean a COM call for every window on the desktop on every
+    /// keystroke; deciding it in `list` means one call for the handful that
+    /// are cloaked, and none at all on a machine where nothing is.
+    #[derive(PartialEq, Eq)]
+    enum Listable {
+        Yes,
+        No,
+        Cloaked,
     }
 
     fn title_of(hwnd: HWND) -> String {
@@ -439,13 +486,29 @@ mod platform {
         }
     }
 
+    /// The two lists an enumeration fills: the windows on this desktop, and
+    /// the cloaked ones still to be asked about.
+    #[derive(Default)]
+    struct Seen {
+        here: Vec<isize>,
+        cloaked: Vec<isize>,
+    }
+
     unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        // SAFETY: the pointer is the Vec passed in by `list` below, which
+        // SAFETY: the pointer is the Seen passed in by `list` below, which
         // outlives the enumeration because EnumWindows is synchronous.
-        let found = unsafe { &mut *(lparam.0 as *mut Vec<isize>) };
-        if is_listable(hwnd) && !is_ours(hwnd) {
-            found.push(hwnd.0 as isize);
+        let found = unsafe { &mut *(lparam.0 as *mut Seen) };
+
+        if is_ours(hwnd) {
+            return BOOL(1);
         }
+
+        match is_listable(hwnd) {
+            Listable::Yes => found.here.push(hwnd.0 as isize),
+            Listable::Cloaked => found.cloaked.push(hwnd.0 as isize),
+            Listable::No => {}
+        }
+
         BOOL(1)
     }
 
@@ -470,29 +533,63 @@ mod platform {
     /// separate list to keep, no hook to install and nothing to persist, so
     /// the switcher gets Alt-Tab's ordering for free by not sorting.
     pub fn list() -> Vec<Window> {
-        let mut handles: Vec<isize> = Vec::new();
+        let mut seen = Seen::default();
 
         // SAFETY: the callback matches the required signature and the pointer
-        // points at a live Vec for the duration of this synchronous call.
+        // points at a live Seen for the duration of this synchronous call.
         unsafe {
-            let _ = EnumWindows(
-                Some(collect),
-                LPARAM(&mut handles as *mut Vec<isize> as isize),
-            );
+            let _ = EnumWindows(Some(collect), LPARAM(&mut seen as *mut Seen as isize));
         }
 
         let displays = monitors();
-        handles
+        let mut windows: Vec<Window> = seen
+            .here
             .into_iter()
-            .filter_map(|id| describe(id, &displays))
-            .collect()
+            .filter_map(|id| describe(id, &displays, None))
+            .collect();
+
+        /*
+         * The windows on other desktops go last, and that is not tidiness.
+         *
+         * The order of this list is the answer to "which window did I use
+         * last", because EnumWindows walks the Z-order. A window on a desktop
+         * that is not on screen is, by definition, not the one just used, so
+         * it belongs behind every window that is here. Interleaving them by
+         * Z-order would put a window from another desktop above the one the
+         * person was looking at a second ago.
+         */
+        windows.extend(
+            crate::desktops::elsewhere(&seen.cloaked)
+                .into_iter()
+                .filter_map(|(id, desktop)| describe(id, &displays, Some(desktop))),
+        );
+
+        windows
     }
 
     pub fn find(id: isize) -> Option<Window> {
-        describe(id, &monitors())
+        // Asked rather than assumed. `find` is what every window action reads
+        // its subject through, including one reached from a row that was built
+        // while the window was somewhere else.
+        //
+        // Only the flag, never the number: a number costs the whole ordered
+        // list, and nothing acting on a single window has ever needed one.
+        let elsewhere = crate::desktops::on_current(id) == Some(false);
+        describe(id, &monitors(), elsewhere.then_some(None))
     }
 
-    fn describe(id: isize, displays: &[Monitor]) -> Option<Window> {
+    /// Builds one window.
+    ///
+    /// `elsewhere` is `None` for a window on the desktop being looked at, and
+    /// `Some(number)` for one that is not, where the number is absent on a
+    /// Windows the desktop order may not be read from. Two levels of option
+    /// rather than a bool and a number, so the impossible fourth case, a
+    /// numbered desktop for a window that is right here, cannot be written.
+    fn describe(
+        id: isize,
+        displays: &[Monitor],
+        elsewhere: Option<Option<usize>>,
+    ) -> Option<Window> {
         let hwnd = hwnd_of(id);
 
         // SAFETY: handle-taking calls only. IsWindow is what makes the rest
@@ -527,6 +624,8 @@ mod platform {
                 maximized: placed && placement.showCmd == SW_SHOWMAXIMIZED.0 as u32,
                 rect,
                 monitor: nearest(rect, displays),
+                elsewhere: elsewhere.is_some(),
+                desktop: elsewhere.flatten(),
             })
         }
     }
@@ -592,7 +691,7 @@ mod platform {
     /// The display a window is on, for laying it out.
     pub fn monitor_of(id: isize) -> Option<Monitor> {
         let displays = monitors();
-        let window = describe(id, &displays)?;
+        let window = describe(id, &displays, None)?;
         displays.into_iter().nth(window.monitor)
     }
 
@@ -803,6 +902,26 @@ mod platform {
         find(hwnd.0 as isize)
     }
 
+    /// The window in front, whoever owns it.
+    ///
+    /// Unlike [`foreground`] this does not skip Sill's own window, and that
+    /// is the whole point of it: `desktops::here` needs a window that is
+    /// certainly on the virtual desktop being shown, and when the launcher is
+    /// open the launcher is that window. Skipping it would leave the one case
+    /// where a desktop action is most likely to be invoked with nothing to
+    /// read the current desktop off.
+    pub fn front() -> Option<isize> {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+        // SAFETY: returns a handle or null; nothing is dereferenced.
+        let hwnd = unsafe { GetForegroundWindow() };
+        if hwnd.0.is_null() {
+            return None;
+        }
+
+        Some(hwnd.0 as isize)
+    }
+
     /// Kept so the layout code can be read against what DWM reports.
     pub fn visible_frame(id: isize) -> Option<Rect> {
         frame(hwnd_of(id))
@@ -855,13 +974,16 @@ mod platform {
     pub fn foreground() -> Option<Window> {
         None
     }
+    pub fn front() -> Option<isize> {
+        None
+    }
     pub fn visible_frame(_id: isize) -> Option<Rect> {
         None
     }
 }
 
 pub use platform::{
-    close, cursor_monitor, find, focus, foreground, is_on_top, list, maximize, minimize,
+    close, cursor_monitor, find, focus, foreground, front, is_on_top, list, maximize, minimize,
     monitor_of, monitors, place, restore, set_on_top, visible_frame,
 };
 
@@ -900,6 +1022,30 @@ pub fn recent_records(
     windows.get(records)
 }
 
+/**
+What a window's row says underneath its title.
+
+**Where it is beats what state it is in.** A window on another desktop can
+also be minimized, and only one of those two facts changes what pressing Enter
+does to the screen: switching to a window on another desktop takes the whole
+desktop with it. Saying "minimized" and not saying "on desktop 2" would be
+telling somebody the smaller of the two things.
+
+Pure, and separate from [`records`], because it is the part that can be wrong
+and [`records`] needs a desktop to run at all.
+*/
+fn describes(window: &Window) -> String {
+    if window.elsewhere {
+        return format!("{}, {}", window.app, crate::desktops::label(window.desktop));
+    }
+
+    if window.minimized {
+        return format!("{}, minimized", window.app);
+    }
+
+    window.app.clone()
+}
+
 pub fn records() -> Vec<crate::registry::CommandRecord> {
     list()
         .into_iter()
@@ -916,11 +1062,11 @@ pub fn records() -> Vec<crate::registry::CommandRecord> {
                 extension_title: window.app.clone(),
                 command: title.clone(),
                 title,
-                subtitle: if window.minimized {
-                    format!("{}, minimized", window.app)
-                } else {
-                    window.app.clone()
-                },
+                // A window on another desktop says so, because switching to
+                // it changes the whole desktop rather than raising a window,
+                // and somebody about to press Enter should know that before
+                // they do rather than after.
+                subtitle: describes(&window),
                 description: String::new(),
                 mode: "window".to_string(),
                 // The handle, which is what every window action parses back.
@@ -1238,6 +1384,62 @@ mod tests {
             straddling.overlap(&right) > straddling.overlap(&left),
             "a window mostly on the right belongs to the right"
         );
+    }
+
+    fn open(app: &str) -> Window {
+        Window {
+            id: 1,
+            title: "a window".to_string(),
+            app: app.to_string(),
+            app_path: String::new(),
+            pid: 1,
+            minimized: false,
+            maximized: false,
+            rect: WORK,
+            monitor: 0,
+            elsewhere: false,
+            desktop: None,
+        }
+    }
+
+    #[test]
+    fn an_ordinary_window_says_only_what_program_it_is() {
+        assert_eq!(describes(&open("Notepad")), "Notepad");
+    }
+
+    #[test]
+    fn a_window_on_another_desktop_says_which_one() {
+        let mut window = open("Notepad");
+        window.elsewhere = true;
+        window.desktop = Some(2);
+        assert_eq!(describes(&window), "Notepad, on desktop 2");
+    }
+
+    #[test]
+    fn a_window_on_an_unnumbered_desktop_still_says_it_is_elsewhere() {
+        // Every Windows build outside `desktops::VERIFIED` takes this path, so
+        // it is the common case rather than the odd one.
+        let mut window = open("Notepad");
+        window.elsewhere = true;
+        assert_eq!(describes(&window), "Notepad, on another desktop");
+    }
+
+    #[test]
+    fn being_on_another_desktop_is_said_before_being_minimized() {
+        // Both are true of the same window often enough. Only one of them
+        // warns that pressing Enter is about to change the whole screen.
+        let mut window = open("Notepad");
+        window.elsewhere = true;
+        window.desktop = Some(3);
+        window.minimized = true;
+        assert_eq!(describes(&window), "Notepad, on desktop 3");
+    }
+
+    #[test]
+    fn a_minimized_window_here_still_says_so() {
+        let mut window = open("Notepad");
+        window.minimized = true;
+        assert_eq!(describes(&window), "Notepad, minimized");
     }
 
     #[test]
