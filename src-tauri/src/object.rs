@@ -14,12 +14,12 @@
 //! records how an entry was discovered, and this records what can be done
 //! with it.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::registry::CommandRecord;
 
 /// What kind of thing an action is being asked to act on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ObjectKind {
     /// An installed application, or a bare executable found on `%PATH%`.
@@ -213,6 +213,59 @@ impl ObjectKind {
         }
     }
 
+    /**
+    The kind an extension's manifest names, or nothing for a word Sill has
+    never heard of.
+
+    Through serde rather than a second match, deliberately. This is the same
+    string [`Object`] serialises as `kind`, so an extension declaring
+    `"extensionCommand"` and Sill sending `"extensionCommand"` to the worker
+    are one spelling with one definition. A hand-written table beside the
+    derive is two answers to the question "what is this kind called", and the
+    one that is wrong is whichever nobody looked at.
+
+    `None` rather than a default, for the reason [`Self::from_mode`] gives.
+    An unknown kind is refused at install with the word in it; a kind that
+    somehow reaches a built index is left inert rather than guessed at.
+    */
+    pub fn named(name: &str) -> Option<Self> {
+        serde_json::from_value(serde_json::Value::String(name.to_string())).ok()
+    }
+
+    /// What this kind is called on the wire and in a manifest.
+    ///
+    /// The other direction of [`Self::named`], and the test beside them holds
+    /// the two together over every kind in [`Self::ALL`].
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Application => "application",
+            Self::File => "file",
+            Self::Folder => "folder",
+            Self::ExtensionCommand => "extensionCommand",
+            Self::SystemSetting => "systemSetting",
+            Self::Setting => "setting",
+            Self::Builtin => "builtin",
+            Self::SystemControl => "systemControl",
+            Self::Snippet => "snippet",
+            Self::Quicklink => "quicklink",
+            Self::Script => "script",
+            Self::Answer => "answer",
+            Self::ClipboardEntry => "clipboardEntry",
+            Self::Text => "text",
+            Self::Emoji => "emoji",
+            Self::Window => "window",
+            Self::BrowserTab => "browserTab",
+            Self::Search => "search",
+            Self::Url => "url",
+            Self::AudioSession => "audioSession",
+            Self::NowPlaying => "nowPlaying",
+            Self::Process => "process",
+            Self::Workspace => "workspace",
+            Self::Conversation => "conversation",
+            Self::StoreListing => "storeListing",
+        }
+    }
+
     /// The kind behind an index entry's `mode`.
     ///
     /// `None` for a mode nothing knows about, which is a build newer than this
@@ -311,7 +364,7 @@ impl ObjectKind {
 /// today: a path, a panel name, a snippet id, a row id, a result. A payload
 /// enum would be inventing structure that nothing yet needs, and the shape of
 /// the structure that *is* eventually needed is not knowable from here.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Object {
     pub kind: ObjectKind,
@@ -367,6 +420,42 @@ impl Object {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The name a manifest writes and the name the wire carries are one name.
+    ///
+    /// Three spellings have to agree: what `name()` returns, what serde
+    /// serialises an [`Object`]'s kind as, and what `named()` reads back. They
+    /// are what an extension's manifest declares its action applies to, so a
+    /// disagreement is an extension whose action is silently never offered,
+    /// with nothing anywhere saying why.
+    #[test]
+    fn every_kind_is_spelled_one_way() {
+        for kind in ObjectKind::ALL {
+            let name = kind.name();
+
+            assert_eq!(
+                serde_json::to_value(kind).expect("a kind serialises"),
+                serde_json::Value::String(name.to_string()),
+                "{name} is not what serde calls this kind",
+            );
+
+            assert_eq!(
+                ObjectKind::named(name),
+                Some(*kind),
+                "{name} does not read back as the kind it names",
+            );
+        }
+    }
+
+    /// A word nobody has heard of is refused rather than guessed at.
+    #[test]
+    fn a_kind_sill_has_never_heard_of_is_not_a_kind() {
+        assert_eq!(ObjectKind::named("menuBarItem"), None);
+        assert_eq!(ObjectKind::named(""), None);
+        // The plain-English name, which is what somebody would try first and
+        // is deliberately not accepted: one spelling, not two.
+        assert_eq!(ObjectKind::named("extension command"), None);
+    }
 
     #[test]
     fn every_mode_the_index_can_hold_has_a_kind() {

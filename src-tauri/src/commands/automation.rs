@@ -39,8 +39,8 @@ pub struct Row {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Offer {
-    pub id: &'static str,
-    pub title: &'static str,
+    pub id: String,
+    pub title: String,
 }
 
 /**
@@ -75,7 +75,7 @@ pub(crate) async fn automations(app: AppHandle) -> Result<Vec<Row>, String> {
                 // is where somebody finds that out.
                 automation::may_schedule(&ask.action, found.capabilities())?;
 
-                Ok((found.title(), ask.target))
+                Ok((found.title().to_string(), ask.target))
             });
 
             match read {
@@ -83,7 +83,7 @@ pub(crate) async fn automations(app: AppHandle) -> Result<Vec<Row>, String> {
                     name: task.name,
                     enabled: task.enabled,
                     next: task.next,
-                    title: Some(title.to_string()),
+                    title: Some(title),
                     target: Some(target),
                     suspect: None,
                 },

@@ -48,6 +48,32 @@ export interface Bridge {
   environment: Environment;
   preferences: Record<string, unknown>;
   launchArguments: Record<string, unknown>;
+  /**
+   * The thing this command was run on, when it was run as an action.
+   *
+   * Absent for an ordinary launch. `@sill/api`'s `actionTarget` is the only
+   * reader; it is here rather than on `environment` because `environment` is
+   * Raycast's shape and an extension written for Raycast should not find an
+   * extra field in it.
+   */
+  on?: SillObject;
+  /**
+   * What this extension has been allowed to reach, live.
+   *
+   * The same array the module gate reads, not a copy of it: somebody revoking
+   * a permission in Settings reaches a running command, and an extension
+   * asking what it holds has to get the answer the gate would give.
+   */
+  capabilities: readonly string[];
+}
+
+/** One thing in Sill. Mirrors Rust's `Object`; see `../sill/index.ts`. */
+export interface SillObject {
+  kind: string;
+  id: string;
+  target: string;
+  title: string;
+  mode: string;
 }
 
 let current: Bridge | undefined;

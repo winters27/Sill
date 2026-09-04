@@ -14,6 +14,7 @@ import * as jsxDevRuntime from "react/jsx-dev-runtime";
 import ReactReconciler from "react-reconciler";
 import * as api from "../api";
 import * as utils from "../utils";
+import * as sill from "../sill";
 
 /** Keys a bundler probes for module interop. They must stay undefined. */
 const INTEROP_KEYS = new Set(["__esModule", "default", "then", "module.exports"]);
@@ -57,6 +58,16 @@ function throwingProxy(module: Record<string, unknown>): Record<string, unknown>
 
 const raycastApi = throwingProxy(api as Record<string, unknown>);
 const raycastUtils = throwingProxy(utils as unknown as Record<string, unknown>);
+
+/**
+ * Sill's own module, given the same treatment for the same reason.
+ *
+ * An extension written against a newer Sill and run on an older one asks for
+ * something that is not here, and the throw names it rather than letting an
+ * `undefined` surface three frames later as though the extension were broken.
+ * `apiVersion` is the number to branch on before it comes to that.
+ */
+const sillApi = throwingProxy(sill as unknown as Record<string, unknown>);
 
 /**
  * Node built-ins that hand an extension something outside its own process.
@@ -200,6 +211,18 @@ export class Held {
     return this.granted.has(need);
   }
 
+  /**
+   * Everything it holds, for `@sill/api` to report back to the extension.
+   *
+   * A new array each time rather than the set itself, so nothing an extension
+   * does to what it is handed can change what the gate reads. Asked at the
+   * moment the extension asks, so a revoke that has already landed is in the
+   * answer.
+   */
+  all(): string[] {
+    return [...this.granted];
+  }
+
   /** What the extension holds now, replacing what it held before. */
   replace(granted: readonly string[]): void {
     this.granted = new Set(granted);
@@ -317,6 +340,12 @@ export function patchRequire(held: Held): void {
     "react-reconciler": () => ReactReconciler,
     "@raycast/api": () => raycastApi,
     "@raycast/utils": () => raycastUtils,
+    // Sill's own, and the one specifier here that is not somebody else's
+    // package. Deliberately a separate module rather than extra exports on
+    // `@raycast/api`: an extension importing it is saying out loud that it
+    // will not run anywhere but here, and an extension that never imports it
+    // stays portable.
+    "@sill/api": () => sillApi,
   };
 
   /**

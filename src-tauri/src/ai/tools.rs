@@ -868,7 +868,7 @@ async fn run_action(
         let registry = app.state::<crate::action::ActionRegistry>();
         registry.get(action).map(|found| {
             (
-                found.title(),
+                found.title().to_string(),
                 found.capabilities(),
                 found.accepts(object.kind),
             )
@@ -964,7 +964,8 @@ async fn run_action(
         }
 
         super::acting::Gate::Hello => {
-            if let Some(refused) = prove_somebody_is_there(app, title, &object.title, touches).await
+            if let Some(refused) =
+                prove_somebody_is_there(app, &title, &object.title, touches).await
             {
                 return refused;
             }
@@ -994,7 +995,7 @@ async fn run_action(
         let Some(found) = registry.get(action) else {
             return json!({ "error": format!("Sill has no action called {action}.") });
         };
-        registry.perform(&ctx, found, &object).await
+        registry.perform(&ctx, found.as_ref(), &object).await
     };
 
     match outcome {

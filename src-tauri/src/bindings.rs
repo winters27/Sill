@@ -374,7 +374,7 @@ async fn fire(app: &AppHandle, binding: &Binding) {
                 // one. A key bound to "move this to the archive folder" is the
                 // whole reason `Binding` carries it.
                 &ActionCtx::answering(app.clone(), binding.argument.clone()),
-                action,
+                action.as_ref(),
                 object,
             )
             .await

@@ -2976,10 +2976,26 @@ if (tracked.status !== 0) {
     );
   }
 
+  // Sill's own module, held to the page the same way. It is smaller and newer
+  // than the Raycast surface, which is exactly when a table starts drifting:
+  // there is not yet enough of it for anybody to notice a missing row.
+  const SILL = "host/src/sill/index.ts";
+  const sillsOwn = exported(SILL);
+
+  if (sillsOwn.size < 3) {
+    fail(
+      SILL,
+      null,
+      `only ${sillsOwn.size} name(s) found in Sill's own API module, so this is ` +
+        "parsing rather than checking",
+    );
+  }
+
   for (const [region, expected, where] of [
     ["coverage:answered", answered, `${API} and ${UTILS}`],
     ["coverage:refused", refused, UTILS],
     ["coverage:tags", drawn, COMPONENTS],
+    ["coverage:sill", sillsOwn, SILL],
   ]) {
     const rows = listed(doc, region);
     if (!rows) continue;
@@ -3117,6 +3133,217 @@ if (tracked.status !== 0) {
           "it over, so the page promises a module an extension will be refused",
       );
     }
+  }
+}
+
+/*
+ * One spelling for a kind, and one for a capability, across three languages.
+ *
+ * An extension's manifest writes `"actionOn": ["file"]`, Rust reads that name
+ * back through `ObjectKind::named`, sends the object to the worker with the
+ * same name on it, and `@sill/api` types it as a union so an author's editor
+ * can complete it. Four places, one vocabulary. The failure if they drift is
+ * the worst kind there is here: an action that is simply never offered, with
+ * nothing anywhere saying why, because a name nobody knows is a name that gets
+ * skipped.
+ *
+ * `Capability` is the same story from the permission side. A name in the union
+ * that Rust does not serialise is an extension checking `holds("fileReading")`
+ * and getting a permanent false while holding the permission.
+ *
+ * Read out of Rust rather than out of the doc page, because Rust is where both
+ * enums live and a page is a third copy.
+ */
+{
+  const KINDS = "src-tauri/src/object.rs";
+  const CAPABILITIES = "src-tauri/src/action.rs";
+  const TYPES = "host/src/sill/index.ts";
+
+  const types = readFileSync(TYPES, "utf8");
+
+  /** A `export type X = "a" | "b";` union, as a set of its members. */
+  function union(name) {
+    const declared = types.match(new RegExp(`export type ${name} =([\\s\\S]*?);`))?.[1];
+    if (declared === undefined) {
+      fail(TYPES, null, `no \`${name}\` union, so nothing about it is being checked`);
+      return undefined;
+    }
+    return new Set([...declared.matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+  }
+
+  /**
+   * The names `ObjectKind::name` answers with.
+   *
+   * That function rather than the enum's variants, because it is the one that
+   * decides the spelling, and its own unit test holds it to what serde does.
+   */
+  const kindBody =
+    readFileSync(KINDS, "utf8").match(
+      /pub fn name\(self\) -> &'static str \{[\s\S]*?\n {8}\}/,
+    )?.[0] ?? "";
+  const kinds = new Set([...kindBody.matchAll(/=> "([^"]+)",/g)].map((m) => m[1]));
+
+  /**
+   * The capability names, camelCased the way `#[serde(rename_all)]` does.
+   *
+   * Read between the enum's own braces, so the `Undo` and `Outcome` types
+   * further down the same file cannot be swept in.
+   */
+  const capBody =
+    readFileSync(CAPABILITIES, "utf8").match(/pub enum Capability \{([\s\S]*?)\n\}/)?.[1] ?? "";
+  const capabilities = new Set(
+    [...capBody.matchAll(/^ {4}([A-Z][A-Za-z]*),$/gm)].map(
+      (m) => m[1].charAt(0).toLowerCase() + m[1].slice(1),
+    ),
+  );
+
+  // Floors, because an empty set agrees with an empty union.
+  for (const [what, set, least] of [
+    ["object kind", kinds, 20],
+    ["capability", capabilities, 10],
+  ]) {
+    if (set.size >= least) continue;
+    fail(
+      set === kinds ? KINDS : CAPABILITIES,
+      null,
+      `only ${set.size} ${what}(s) parsed out of Rust, so this is not checking`,
+    );
+  }
+
+  for (const [name, fromRust, where] of [
+    ["SillObjectKind", kinds, `${KINDS}'s ObjectKind::name`],
+    ["SillCapability", capabilities, `${CAPABILITIES}'s Capability`],
+  ]) {
+    const declared = union(name);
+    if (!declared) continue;
+
+    for (const one of fromRust) {
+      if (declared.has(one)) continue;
+      fail(
+        TYPES,
+        null,
+        `\`${one}\` is in ${where} and not in the \`${name}\` union, so an ` +
+          "extension author cannot name it and their editor will call it a mistake",
+      );
+    }
+
+    for (const one of declared) {
+      if (fromRust.has(one)) continue;
+      fail(
+        TYPES,
+        null,
+        `\`${name}\` offers \`${one}\` and ${where} has no such name, so it type ` +
+          "checks here and is never true at run time",
+      );
+    }
+  }
+}
+
+/*
+ * The thing an action was run on reaches the worker, all four hops of it.
+ *
+ * `Contributed::run` hands it to `open_extension_command`, which puts it on
+ * the `LoadOptions`, which Rust serialises as `on`, which the host reads and
+ * gives the worker as `sillObject`, which `@sill/api`'s `actionTarget` hands
+ * back. Break any one and every contributed action silently behaves as though
+ * it had been picked off the root list: `actionTarget()` is `undefined` and a
+ * well-written extension politely declines to do anything.
+ *
+ * A rule rather than a test because the harness that runs the view gate stands
+ * in for Rust and sends this field itself, so it agrees with a Rust that has
+ * stopped sending it. That is the exact failure `run-extension.mjs`'s own
+ * header warns about, where the gate ran green for months against a
+ * `Clipboard.copy` that no Rust arm answered.
+ */
+{
+  const hops = [
+    [
+      "src-tauri/src/actions/extension.rs",
+      /open_extension_command\(ctx, &record, &self\.title, Some\(object\)\)/,
+      "`Contributed::run` no longer hands over what it was run on",
+    ],
+    [
+      "src-tauri/src/actions/mod.rs",
+      /opts\.on = on\.cloned\(\);/,
+      "`open_extension_command` no longer puts it on the load options",
+    ],
+    [
+      "src-tauri/src/exthost/manager.rs",
+      /pub on: Option<crate::object::Object>,/,
+      "`LoadOptions` has no field to carry it",
+    ],
+    [
+      "host/src/index.ts",
+      /sillObject: \(opts\.on \?\? undefined\)/,
+      "the host does not read it off the load options",
+    ],
+    [
+      "host/src/worker/worker.ts",
+      /on: data\.sillObject,/,
+      "the worker does not put it on the bridge",
+    ],
+    [
+      "host/src/sill/index.ts",
+      /return getBridge\(\)\.on as SillObject \| undefined;/,
+      "`actionTarget` does not read it off the bridge",
+    ],
+  ];
+
+  for (const [file, expected, said] of hops) {
+    if (expected.test(readFileSync(file, "utf8"))) continue;
+    fail(
+      file,
+      null,
+      `${said}, so every action an extension contributes runs as though ` +
+        "somebody had picked it off the root list",
+    );
+  }
+}
+
+/*
+ * The index's commands and the actions extensions contribute are replaced
+ * together, in one place.
+ *
+ * They are one fact read twice: the index says which extension commands exist,
+ * and the action registry says which of them can be run on a file. Set one
+ * without the other and the panel offers to run a command out of an extension
+ * that has just been uninstalled, or fails to offer one that has just been
+ * installed until the next restart.
+ *
+ * This is the "two lists that must agree, with nothing making them agree"
+ * shape, and the thing that makes them agree is that there is one funnel.
+ */
+{
+  const LIB = "src-tauri/src/lib.rs";
+  const text = readFileSync(LIB, "utf8");
+
+  const funnel = text.match(/pub\(crate\) fn adopt_commands\([\s\S]*?\n\}/)?.[0];
+
+  if (funnel === undefined) {
+    fail(LIB, null, "`adopt_commands` is gone, so nothing is keeping the two lists in step");
+  } else if (!/\.contribute\(/.test(funnel)) {
+    fail(
+      LIB,
+      null,
+      "`adopt_commands` no longer tells the action registry what extensions " +
+        "contribute, so installing one adds no action until Sill is restarted",
+    );
+  }
+
+  for (const found of text.matchAll(/index\.commands = /g)) {
+    const inside =
+      funnel !== undefined &&
+      found.index >= text.indexOf(funnel) &&
+      found.index < text.indexOf(funnel) + funnel.length;
+
+    if (inside) continue;
+
+    fail(
+      LIB,
+      lineOf(text, found.index),
+      "the index's commands are replaced outside `adopt_commands`, so what " +
+        "extensions contribute to the action panel is not rebuilt with them",
+    );
   }
 }
 

@@ -80,6 +80,35 @@ pub struct ManifestCommand {
     /// broken rather than as Sill not having asked.
     #[serde(default)]
     pub arguments: Vec<Argument>,
+    /// What this command contributes to Sill beyond being a command.
+    ///
+    /// Sill's own key in somebody else's manifest, and the only one. Raycast
+    /// ignores what it does not know, so a manifest carrying this still builds
+    /// and installs there; an extension is not forked to work here.
+    #[serde(default)]
+    pub sill: Option<SillCommand>,
+}
+
+/// The Sill-only half of a command's declaration.
+///
+/// One field so far, and it is the whole of `P4-08`'s "an extension can
+/// contribute actions to existing kinds": a command that names kinds becomes a
+/// row in the action panel of everything of those kinds, and running it hands
+/// it the thing it was run on.
+///
+/// Under `sill` rather than at the top of the command, so what is Sill's and
+/// what is Raycast's can be told apart by looking, and so the next thing added
+/// here is one field rather than another word in somebody else's namespace.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SillCommand {
+    /// The kinds of thing this command can be run on, by name.
+    ///
+    /// `["file", "folder"]`. The names are [`crate::object::ObjectKind`]'s
+    /// own, which are the same strings Sill sends the worker, so what an
+    /// author writes here and what their code reads back are one vocabulary.
+    #[serde(default)]
+    pub action_on: Vec<String>,
 }
 
 /// One setting an extension declares.
@@ -236,6 +265,59 @@ pub fn why_not_runnable(mode: &str) -> Option<String> {
     })
 }
 
+/**
+Why this command cannot contribute the action it declared, or nothing.
+
+Two reasons, and both are the author's to fix rather than something to work
+around here.
+
+- **A kind Sill has never heard of.** The panel would simply never offer the
+  action, with nothing anywhere saying why, which is the failure this project
+  keeps paying for: a match over names with a silent default for the ones it
+  does not know.
+- **A `view` command.** An action is a verb somebody picks out of a panel and
+  a view is a screen they open, and the panel has nowhere to put a screen. The
+  window would be handed a session it is not watching, so the command would
+  render into nothing and sit there holding a worker. Said at install rather
+  than discovered by pressing it.
+
+`None` for a command that declares nothing, which is nearly all of them.
+*/
+pub fn why_not_an_action(command: &ManifestCommand) -> Option<String> {
+    let declared = command.sill.as_ref()?;
+    if declared.action_on.is_empty() {
+        return None;
+    }
+
+    if let Some(unknown) = declared
+        .action_on
+        .iter()
+        .find(|name| crate::object::ObjectKind::named(name).is_none())
+    {
+        return Some(format!(
+            "{} says it acts on \"{unknown}\", which is not a kind of thing Sill has. \
+             The kinds are: {}.",
+            command.name,
+            crate::object::ObjectKind::ALL
+                .iter()
+                .map(|kind| kind.name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    if command.mode != "no-view" {
+        return Some(format!(
+            "{} says it acts on something and is a \"{}\" command. Only a no-view \
+             command can be an action, because an action runs from the panel and \
+             there is nowhere in a panel to draw a screen.",
+            command.name, command.mode
+        ));
+    }
+
+    None
+}
+
 /// Every command in a manifest Sill would refuse, and why.
 ///
 /// Refused **at install**, which is the point. A command whose mode nothing
@@ -371,6 +453,11 @@ pub fn record_for(
                 .map(|it| it.name.clone())
                 .collect(),
             arguments: command.arguments.clone(),
+            acts_on: command
+                .sill
+                .as_ref()
+                .map(|declared| declared.action_on.clone())
+                .unwrap_or_default(),
         })),
     }
 }
@@ -522,6 +609,10 @@ pub fn esbuild_args(entry: &Path, outfile: &Path, aliases: &[(String, String)]) 
 
     for external in [
         "@raycast/api",
+        // Sill's own module, external for the same reason and one more: it
+        // reports what this worker was told at launch, so a bundled copy would
+        // be a second one holding nothing.
+        "@sill/api",
         "react",
         "react/jsx-runtime",
         "react/jsx-dev-runtime",
@@ -729,6 +820,16 @@ pub fn install_into_reporting(
     // can run was built, listed and then loaded as a view, so the first sign
     // of it was a window waiting for a tree that never arrives.
     if let Some(said) = nothing_left_to_install(&manifest) {
+        return Err(said);
+    }
+
+    // A broken contribution refuses the whole install rather than being
+    // dropped on the way past. The command it is on would still run perfectly
+    // well from the root list, so dropping it is tempting; what it costs is an
+    // author whose action never appears anywhere with nothing saying why, and
+    // that is precisely the silent-default shape this codebase keeps paying
+    // for. It also means an index can only ever hold kinds Sill knows.
+    if let Some(said) = manifest.commands.iter().find_map(why_not_an_action) {
         return Err(said);
     }
     let refused: Vec<String> = refused_commands(&manifest)
@@ -1117,7 +1218,7 @@ mod tests {
     fn the_host_supplied_modules_are_left_out_of_the_bundle() {
         let args = esbuild_args(Path::new("in.tsx"), Path::new("out.js"), &[]);
 
-        for external in ["@raycast/api", "react", "react/jsx-runtime"] {
+        for external in ["@raycast/api", "@sill/api", "react", "react/jsx-runtime"] {
             assert!(
                 args.contains(&format!("--external:{external}")),
                 "{external} must not be bundled, the host supplies it"
@@ -1803,6 +1904,144 @@ mod installs_to_disk {
         assert!(
             crate::store::pins(&home).is_empty(),
             "a directory that is still being built was listed as an install"
+        );
+    }
+}
+
+#[cfg(test)]
+mod contributed_actions {
+    use super::*;
+
+    fn manifest(json: &str) -> Manifest {
+        serde_json::from_str(json).expect("manifest parses")
+    }
+
+    /// One command declaring what it acts on.
+    fn declaring(mode: &str, on: &str) -> Manifest {
+        manifest(&format!(
+            r#"{{ "name": "demo", "commands": [
+                {{ "name": "do-it", "title": "Do It", "mode": "{mode}",
+                   "sill": {{ "actionOn": {on} }} }}
+            ] }}"#
+        ))
+    }
+
+    /// The whole of what an author writes, read back.
+    #[test]
+    fn a_command_can_say_what_it_acts_on() {
+        let parsed = declaring("no-view", r#"["file", "folder"]"#);
+
+        assert_eq!(why_not_an_action(&parsed.commands[0]), None);
+        assert_eq!(
+            parsed.commands[0]
+                .sill
+                .as_ref()
+                .map(|it| it.action_on.clone()),
+            Some(vec!["file".to_string(), "folder".to_string()]),
+        );
+    }
+
+    /// A manifest from before any of this reads exactly as it did.
+    #[test]
+    fn a_command_that_says_nothing_is_not_an_action_and_is_not_a_problem() {
+        let parsed =
+            manifest(r#"{ "name": "demo", "commands": [{ "name": "r", "mode": "view" }] }"#);
+
+        assert!(parsed.commands[0].sill.is_none());
+        assert_eq!(why_not_an_action(&parsed.commands[0]), None);
+    }
+
+    /// An empty list is a declaration of nothing, not a broken one.
+    #[test]
+    fn an_empty_list_is_not_a_refusal() {
+        assert_eq!(
+            why_not_an_action(&declaring("no-view", "[]").commands[0]),
+            None
+        );
+    }
+
+    /// The refusal names the word, because "invalid manifest" is not actionable.
+    #[test]
+    fn a_kind_sill_does_not_have_is_refused_and_named() {
+        let why = why_not_an_action(&declaring("no-view", r#"["file", "hologram"]"#).commands[0])
+            .expect("refused");
+
+        assert!(why.contains("hologram"), "it did not name the word: {why}");
+        assert!(why.contains("do-it"), "it did not name the command: {why}");
+        // And says what the words are, so the fix is in the message rather
+        // than in somebody else's source tree.
+        assert!(why.contains("file"), "it did not list the kinds: {why}");
+        assert!(why.contains("clipboardEntry"), "the list is partial: {why}");
+    }
+
+    /// A view command cannot be an action, and the reason is not "invalid".
+    #[test]
+    fn a_view_command_cannot_be_an_action() {
+        let why =
+            why_not_an_action(&declaring("view", r#"["file"]"#).commands[0]).expect("refused");
+
+        assert!(
+            why.contains("no-view"),
+            "it did not say what is allowed: {why}"
+        );
+        assert!(
+            why.contains("panel"),
+            "it did not say why a view cannot be one: {why}"
+        );
+    }
+
+    /// The declaration survives into the index, which is where actions are
+    /// built from. A record that drops it is an extension whose action exists
+    /// in its manifest and nowhere else.
+    #[test]
+    fn the_declaration_reaches_the_record() {
+        let parsed = declaring("no-view", r#"["file"]"#);
+        let record = record_for(
+            &parsed,
+            &parsed.commands[0],
+            Path::new("C:/ext/demo/do-it.js"),
+        );
+
+        assert_eq!(
+            record.manifest.expect("a command has a manifest").acts_on,
+            vec!["file".to_string()],
+        );
+    }
+
+    /// And a command that declares nothing leaves the field empty rather than
+    /// absent, so nothing downstream has to guess.
+    #[test]
+    fn a_command_that_declares_nothing_records_nothing() {
+        let parsed =
+            manifest(r#"{ "name": "demo", "commands": [{ "name": "r", "mode": "no-view" }] }"#);
+        let record = record_for(&parsed, &parsed.commands[0], Path::new("C:/ext/demo/r.js"));
+
+        assert!(record
+            .manifest
+            .expect("a command has a manifest")
+            .acts_on
+            .is_empty());
+    }
+
+    /// The extension this project ships against its own API, read for real.
+    ///
+    /// `host/test/extension/file-tools` is a real extension directory: the view
+    /// gate bundles its source and runs it, and this reads the same
+    /// `package.json` through the same parser an install uses. One file, both
+    /// halves, so what an author writes and what Sill offers cannot drift.
+    #[test]
+    fn the_extension_written_against_the_sill_api_declares_a_real_action() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("host/test/extension/file-tools/package.json");
+
+        let parsed = manifest(&std::fs::read_to_string(&path).expect("the fixture extension"));
+        let command = &parsed.commands[0];
+
+        assert_eq!(why_not_an_action(command), None, "the fixture is refused");
+        assert_eq!(
+            command.sill.as_ref().map(|it| it.action_on.clone()),
+            Some(vec!["file".to_string(), "folder".to_string()]),
         );
     }
 }

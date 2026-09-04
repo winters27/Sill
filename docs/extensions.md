@@ -52,10 +52,31 @@ The flags that matter most while writing:
 | `--assets <dir>` | Point `environment.assetsPath` at the extension's own assets |
 | `--seed key=json` | Pre-fill `LocalStorage`, so a history view has history |
 | `--type <text>` | Type into the search field and show what came back |
+| `--on '{"kind":"file","target":"C:/notes/todo.md"}'` | Run it as though somebody had picked it out of a file's action panel |
 
 Every call the command makes that Sill does not answer is printed as an
 explicit gap. That is the point of the runner: it tells you what your
 extension actually needs.
+
+### Watch mode
+
+The loop is one command. It bundles, runs, prints what came back, and does the
+whole thing again every time you save.
+
+```bash
+node scripts/build-extension.mjs <extension-dir> <command-name> --watch
+```
+
+Anything after a bare `--` goes to the run rather than to the build, which is
+where the permissions and the thing to act on go:
+
+```bash
+node scripts/build-extension.mjs my-extension search --watch -- --grant network
+```
+
+One run at a time. A save that lands while the previous run is still going
+ends it, because a watch that queues runs prints a stale answer after the edit
+that made it wrong. Ctrl+C stops both.
 
 To run the same end-to-end checks the project runs:
 
@@ -186,6 +207,118 @@ generated code defeats is the **description** rather than the gate: the store
 reads an extension's source to say what it appears to use, and it cannot see a
 module name assembled at runtime. An extension that assembles one is refused at
 runtime and says which permission it wanted.
+
+## Contributing an action to Sill's own rows
+
+Everything above is Raycast's API, and an extension written to it is a set of
+commands somebody opens. This part is Sill's own, and it is the other
+direction: a command that appears in the action panel of a file, a folder, a
+window or anything else Sill can act on, so somebody who has already found the
+thing can do your thing to it without leaving the row.
+
+Declare it on the command, under a `sill` key:
+
+```json
+{
+  "name": "copy-what-it-is",
+  "title": "Copy What It Is",
+  "mode": "no-view",
+  "sill": { "actionOn": ["file", "folder"] }
+}
+```
+
+Raycast ignores keys it does not know, so a manifest carrying this still builds
+and installs there. Nothing is forked to work here.
+
+Four things about that are decided by Sill rather than by you, and all four
+are refusals somebody could otherwise be surprised by.
+
+- **The mode must be `no-view`.** An action is a verb somebody picks out of a
+  panel; a view is a screen they open. There is nowhere in a panel to draw a
+  screen, so a `view` command declaring `actionOn` is refused at install with
+  that sentence.
+- **The kinds must be kinds Sill has.** They are the names in the table below.
+  One this build has never heard of is refused at install, by name, with the
+  full list; the alternative is an action that is silently never offered and
+  no way to find out why.
+- **Enter is not yours.** Enter on a file opens it, and that does not change.
+  Your action is drawn in the panel, below everything Sill itself offers.
+- **The id is Sill's**, `extension.<your-extension>.<your-command>`. Two
+  extensions with a command of the same name get different ids, and nobody can
+  claim one of Sill's own.
+
+Nothing here asks for a permission. Running your action starts your command,
+in a worker, with exactly the permissions your extension already had: it can
+do what you may do and no more, and somebody revoking one in Settings reaches
+it the same way it reaches everything else.
+
+An action cannot be put on a schedule either. Starting a program is one of the
+things `P8-02`'s triggers refuse outright, because a trigger fires with nobody
+there to be asked, and running somebody else's code unattended is squarely
+that.
+
+## The Sill API
+
+`@sill/api` is Sill's own module, beside the Raycast one. It is small on
+purpose: three things Sill already knows and your extension had no way to see.
+Importing it is you saying out loud that this command will not run anywhere
+else, so import it only in the commands that need it.
+
+```ts
+import { actionTarget, holds } from "@sill/api";
+
+export default async function main() {
+  const on = actionTarget();
+  if (!on) return;                       // opened from the root list
+  if (!holds("clipboardWrite")) return;  // say so in your own words
+  // ...
+}
+```
+
+<!-- coverage:sill -->
+
+| Name | What it is |
+| --- | --- |
+| `actionTarget` | What this command was run on, or `undefined`. Only ever a value when the command was reached through an action panel, so it is also how a command tells the two apart |
+| `capabilities` | Everything this extension has been allowed to reach, read at the moment you ask rather than captured at launch |
+| `holds` | Whether it holds one particular capability. A reading, not a request: the gate still refuses what you were not granted, whether or not you checked |
+| `apiVersion` | The version of this API the host implements. One number, because there is one publisher and the only useful question is whether what you were written against is here |
+
+<!-- /coverage:sill -->
+
+Everything above is a plain function, never a method, and that is deliberate:
+the published `@raycast/utils` hands a class method to `useSyncExternalStore`
+unbound, and every extension using `useCachedState` died on its first render
+until Sill worked around it. Destructure these and pass them anywhere.
+
+### What an object is
+
+`actionTarget()` gives you four strings and a kind.
+
+| Field | What it is |
+| --- | --- |
+| `kind` | What sort of thing it is, from the table below |
+| `id` | Its stable identity, the string Sill ranks and remembers it by |
+| `target` | The part to act on: a path for a file, a handle for a window, the text itself for a clipboard row |
+| `title` | What to call it in front of somebody |
+| `mode` | How Sill found it, when it came out of the index. Two modes can share a kind, so read `kind` unless you need the difference |
+
+The kinds, which are also the words `actionOn` takes: `application`, `file`,
+`folder`, `extensionCommand`, `systemSetting`, `setting`, `builtin`,
+`systemControl`, `snippet`, `quicklink`, `script`, `answer`, `clipboardEntry`,
+`text`, `emoji`, `window`, `browserTab`, `search`, `url`, `audioSession`,
+`nowPlaying`, `process`, `workspace`, `conversation`, `storeListing`.
+
+The names are checked against Rust's own by `npm run verify:source`, in both
+directions, for the reason the coverage tables exist: a kind spelled two ways
+is an action that is never offered and nothing anywhere saying so.
+
+### The limit of `actionOn`
+
+It is per **kind**, not per object. You can say "every file" and you cannot yet
+say "every `.png`", because Sill builds the panel once for the kind rather than
+once for the thing selected. Filter inside your command and say why when you
+decline.
 
 ## What your extension costs, and where somebody sees it
 

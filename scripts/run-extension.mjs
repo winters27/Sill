@@ -61,6 +61,36 @@ const granted =
 const assetsArg = args.indexOf("--assets");
 const assetsPath = assetsArg === -1 ? "" : resolve(args[assetsArg + 1] ?? "");
 
+/**
+ * The thing this command was run on, when it is being run as an action.
+ *
+ * `--on '{"kind":"file","target":"C:/notes/todo.md"}'`. JSON rather than a
+ * pair of flags because a Windows path has a colon in it and every shorthand
+ * that seemed readable turned out to be ambiguous with one.
+ *
+ * `id`, `title` and `mode` are filled in when they are left out, because Rust
+ * always sends all five and an extension reading `on.title` should not see an
+ * `undefined` that only this harness can produce. What cannot be defaulted is
+ * `kind`, which is the whole point of the flag.
+ */
+const onArg = args.indexOf("--on");
+const actedOn = onArg === -1 ? undefined : describeTarget(JSON.parse(args[onArg + 1] ?? "{}"));
+
+function describeTarget(given) {
+  if (!given.kind || !given.target) {
+    console.error('--on needs at least {"kind":"file","target":"..."}');
+    process.exit(1);
+  }
+
+  return {
+    kind: given.kind,
+    id: given.id ?? `${given.kind}:${given.target}`,
+    target: given.target,
+    title: given.title ?? given.target.split(/[/\\]/).pop() ?? given.target,
+    mode: given.mode ?? given.kind,
+  };
+}
+
 /** Pre-populated LocalStorage, so a history view has history to show. */
 const seeds = new Map();
 for (let i = 0; i < args.length; i++) {
@@ -307,6 +337,15 @@ let navigation = { depth: 1, pop: "" };
 let toast = null;
 
 /**
+ * The last thing the command flashed across the launcher.
+ *
+ * Counted before this existed and never read, so a command whose whole result
+ * is a HUD ("Copied the path of todo.md") could only be checked as far as
+ * "something was shown". The text is the result for a `no-view` command.
+ */
+let hud = null;
+
+/**
  * Mimics Rust's ApiLayer closely enough to exercise an extension.
  *
  * "Closely enough" is a hazard as well as a convenience, and it bit once: this
@@ -363,6 +402,8 @@ function serveApi(method, params) {
       toast = null;
       return null;
     case "UI/showHud":
+      hud = String(params.text ?? params.title ?? "");
+      return null;
     case "UI/setSearchText":
     case "UI/popToRoot":
     case "UI/closeMainWindow":
@@ -571,6 +612,9 @@ send({
       arguments: {},
       launch_type: "User",
       capabilities: granted,
+      // Absent unless `--on` was given, exactly as Rust leaves it out for a
+      // command somebody picked off the root list.
+      ...(actedOn ? { on: actedOn } : {}),
     },
   },
 });
@@ -811,6 +855,10 @@ if (top && (top.tag === "List" || top.tag === "Grid")) {
   console.log(`  EmptyView: ${drawn.empty}`);
 }
 
+if (hud !== null) {
+  console.log(`\nHUD: ${JSON.stringify(hud)}`);
+}
+
 if (toast || pressed.wanted) {
   console.log("\nToast:");
   console.log(`  on screen: ${toast ? JSON.stringify(toast.title) : "none"}`);
@@ -1028,6 +1076,29 @@ if (expectToastActions !== undefined) {
   check(
     (toast?.actions ?? []).every((one) => one.handler),
     "every button on it is one the window can press",
+  );
+}
+
+/**
+ * What the command flashed across the launcher, in full.
+ *
+ * The result of a `no-view` command is usually a HUD and nothing else, so this
+ * is the only way to assert one did the right thing rather than merely
+ * something. Exact, because the words are the extension's own.
+ */
+const expectHud = flag("--expect-hud");
+
+if (expectHud !== undefined) {
+  check(hud === expectHud, `the HUD says ${JSON.stringify(expectHud)}, got ${JSON.stringify(hud)}`);
+}
+
+/** The same for a toast, for the commands that report failure with one. */
+const expectToastTitle = flag("--expect-toast-title");
+
+if (expectToastTitle !== undefined) {
+  check(
+    toast?.title === expectToastTitle,
+    `the toast says ${JSON.stringify(expectToastTitle)}, got ${JSON.stringify(toast?.title ?? null)}`,
   );
 }
 

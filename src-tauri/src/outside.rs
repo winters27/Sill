@@ -92,7 +92,7 @@ async fn run(app: &AppHandle, ask: Ask) {
         let registry = app.state::<ActionRegistry>();
         registry
             .get(&ask.action)
-            .map(|found| (found.title(), found.capabilities()))
+            .map(|found| (found.title().to_string(), found.capabilities()))
     };
 
     let Some((title, capabilities)) = found else {
@@ -167,7 +167,7 @@ async fn run(app: &AppHandle, ask: Ask) {
         let Some(found) = registry.get(&ask.action) else {
             return refuse(app, format!("Sill has no action called {}.", ask.action));
         };
-        registry.perform(&ctx, found, &object).await
+        registry.perform(&ctx, found.as_ref(), &object).await
     };
 
     match outcome {

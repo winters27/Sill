@@ -1,0 +1,23 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "file-tools",
+  "title": "File Tools",
+  "description": "Small things to do to a file, contributed to Sill's own action panel.",
+  "icon": "command-icon.png",
+  "author": "sill",
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "copy-what-it-is",
+      "title": "Copy What It Is",
+      "description": "Puts the kind and the path of the selected thing on the clipboard.",
+      "mode": "no-view",
+      "sill": {
+        "actionOn": ["file", "folder"]
+      }
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.104.0"
+  }
+}

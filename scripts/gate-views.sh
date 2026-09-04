@@ -226,6 +226,52 @@ node scripts/run-extension.mjs extensions/build/emoji/emoji.js emoji \
   --type tada --expect-filtering extension --expect-heard
 drew emoji
 
+# Sill's own API, and the only extension here that is Sill's own.
+#
+# `host/test/extension/file-tools` is a real extension directory rather than a
+# pre-bundled fixture, and that is the point: its `package.json` is what
+# `extension_install.rs` parses into a contributed action and what
+# `tests/actions.rs` reads, and its source is what runs here. One file on disk,
+# read by both halves, so the manifest an author writes and the action Sill
+# offers cannot drift apart.
+#
+# Three runs, because the three answers fail separately and the two refusals
+# are the ones worth having.
+echo
+echo "--- @sill/api: an extension run on a file (Sill's own extension) ---"
+node scripts/build-extension.mjs host/test/extension/file-tools copy-what-it-is > /dev/null
+node scripts/run-extension.mjs extensions/build/file-tools/copy-what-it-is.js file-tools \
+  --no-view --grant clipboardWrite --on '{"kind":"file","target":"C:/notes/todo.md"}' \
+  --expect-hud "Copied the file todo.md (sill api 1)" | tee /tmp/sill-on-file.log
+grep -q "Clipboard/copy x1" /tmp/sill-on-file.log \
+  && echo "ok   it copied what it was run on, once" \
+  || { echo "FAIL nothing was copied"; exit 1; }
+
+# The same command with nothing to act on, which is what somebody picking it
+# off the root list gets. `actionTarget()` has to be absent rather than an
+# object full of empty strings, or every contributed command would act on
+# whatever an empty path means.
+echo
+echo "--- @sill/api: the same command run on nothing ---"
+node scripts/run-extension.mjs extensions/build/file-tools/copy-what-it-is.js file-tools \
+  --no-view --grant clipboardWrite \
+  --expect-toast-title "Nothing to copy" | tee /tmp/sill-on-nothing.log
+grep -q "Clipboard/copy" /tmp/sill-on-nothing.log \
+  && { echo "FAIL it copied something with nothing to act on"; exit 1; } \
+  || echo "ok   it copied nothing"
+
+# And with something to act on but nothing granted. This is the half that says
+# `capabilities()` reads the same list the module gate reads: the extension is
+# refusing itself, in its own words, before `Clipboard` would have thrown.
+echo
+echo "--- @sill/api: the same command with the permission withheld ---"
+node scripts/run-extension.mjs extensions/build/file-tools/copy-what-it-is.js file-tools \
+  --no-view --on '{"kind":"folder","target":"C:/notes"}' \
+  --expect-toast-title "Not allowed to write the clipboard" | tee /tmp/sill-on-ungranted.log
+grep -q "Clipboard/copy" /tmp/sill-on-ungranted.log \
+  && { echo "FAIL an ungranted extension reached the clipboard"; exit 1; } \
+  || echo "ok   it asked for nothing it had not been allowed"
+
 # How many of somebody else's extensions this actually drew.
 #
 # The checklist item is a number, so the gate says the number. Counting the
