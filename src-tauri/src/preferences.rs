@@ -22,6 +22,14 @@ pub struct General {
     pub open_at_login: bool,
     /// Keep an icon in the notification area.
     pub show_in_tray: bool,
+    /// Write the per-keystroke and per-summon lines to the log as well.
+    ///
+    /// For somebody chasing a fault, and off the rest of the time: those lines
+    /// run on every search and every extension load, and a log full of them
+    /// rotates past the hour that was actually wanted. **It only ever adds**;
+    /// see `log.rs` on why there is no setting in the other direction.
+    #[serde(default)]
+    pub detailed_log: bool,
 }
 
 impl Default for General {
@@ -33,6 +41,9 @@ impl Default for General {
             // On by default, because it is the only visible sign that a
             // launcher with no taskbar entry is running at all.
             show_in_tray: true,
+            // Off, because it is the setting somebody turns on for an
+            // afternoon and forgets, and what it costs is the log.
+            detailed_log: false,
         }
     }
 }

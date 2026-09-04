@@ -35,8 +35,11 @@ pub(crate) async fn search_commands(
     state: State<'_, RegistryState>,
     prefs: State<'_, PrefsState>,
     emoji: State<'_, crate::emoji::Emoji>,
+    timings: State<'_, crate::timing::Timings>,
     query: String,
 ) -> Result<Vec<registry::SearchResult>, String> {
+    let _timing = timings.inner().timing("commands");
+
     let (excluded, hidden, pinned, tone) = {
         let prefs = prefs.inner.lock().await;
         (
@@ -282,8 +285,11 @@ pub(crate) fn timings(timings: State<'_, crate::timing::Timings>) -> crate::timi
 pub(crate) async fn search_app_volume(
     app: AppHandle,
     state: State<'_, RegistryState>,
+    timings: State<'_, crate::timing::Timings>,
     query: String,
 ) -> Result<Vec<registry::SearchResult>, String> {
+    let _timing = timings.inner().timing("app volume");
+
     // Blocking: a COM apartment and an enumeration of the audio engine. The
     // handle is cloned in rather than a `State` borrowed, because the reading
     // happens on a thread that outlives this call.
@@ -358,8 +364,11 @@ pub(crate) async fn search_app_volume(
 pub(crate) async fn search_processes(
     app: AppHandle,
     state: State<'_, RegistryState>,
+    timings: State<'_, crate::timing::Timings>,
     query: String,
 ) -> Result<Vec<registry::SearchResult>, String> {
+    let _timing = timings.inner().timing("processes");
+
     // Blocking: an enumeration of every process on the machine. The handle is
     // cloned in rather than a `State` borrowed, because the reading happens on
     // a thread that outlives this call.
@@ -420,8 +429,11 @@ pub(crate) async fn search_processes(
 #[tauri::command]
 pub(crate) async fn search_windows(
     state: State<'_, RegistryState>,
+    timings: State<'_, crate::timing::Timings>,
     query: String,
 ) -> Result<Vec<registry::SearchResult>, String> {
+    let _timing = timings.inner().timing("windows");
+
     // Blocking: enumeration is synchronous Win32 and touches every top-level
     // window on the desktop.
     let records = tokio::task::spawn_blocking(windowing::records)
@@ -477,6 +489,7 @@ pub(crate) async fn search_emoji(
     state: State<'_, RegistryState>,
     prefs: State<'_, PrefsState>,
     emoji: State<'_, crate::emoji::Emoji>,
+    timings: State<'_, crate::timing::Timings>,
     query: String,
     // Whether these are being offered beside results that were asked for.
     //
@@ -488,6 +501,8 @@ pub(crate) async fn search_emoji(
     // The picker itself passes nothing, because there the emoji ARE the list.
     inline: Option<bool>,
 ) -> Result<Vec<registry::SearchResult>, String> {
+    let _timing = timings.inner().timing("emoji");
+
     let tone = prefs.inner.lock().await.emoji.tone;
 
     // The same corpus the inline search uses, so the picker does not build a
@@ -759,6 +774,7 @@ pub(crate) async fn search_elsewhere(
     state: State<'_, PrefsState>,
     catalog: State<'_, CatalogState>,
     searching: State<'_, crate::state::Searching>,
+    timings: State<'_, crate::timing::Timings>,
     query: String,
 ) -> Result<Elsewhere, String> {
     let token = searching.begin();
@@ -775,9 +791,20 @@ pub(crate) async fn search_elsewhere(
 
     // Together rather than one after the other. Neither needs the other's
     // answer, and the browser search used to wait out the file search first.
+    //
+    // Timed one at a time rather than as a pair, which is the whole reason
+    // they are separately named here: they run at the same time, so a total
+    // for both would be whichever of them is slower and would never say which.
+    let clock = timings.inner();
     let (files, pages) = tokio::join!(
-        matching_files(&query, files_settings, catalog, &searching, token),
-        matching_pages(&query, browser_settings, scratch, &searching, token),
+        async {
+            let _timing = clock.timing("files");
+            matching_files(&query, files_settings, catalog, &searching, token).await
+        },
+        async {
+            let _timing = clock.timing("browser pages");
+            matching_pages(&query, browser_settings, scratch, &searching, token).await
+        },
     );
 
     Ok(Elsewhere {

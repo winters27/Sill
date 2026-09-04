@@ -789,6 +789,18 @@ pub const SETTINGS: &[Setting] = &[
         "Log",
         "diagnostics debug error output",
     ),
+    s(
+        "advanced",
+        "Advanced",
+        "Detailed logging",
+        "verbose debug level trace timings chase fault",
+    ),
+    s(
+        "advanced",
+        "Advanced",
+        "Export diagnostics",
+        "bundle report support send crash log troubleshoot",
+    ),
     // --------------------------------------------------------------- about
     s("about", "About", "Version", "build release licence credits"),
     s(

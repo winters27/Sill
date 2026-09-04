@@ -46,6 +46,7 @@
     hotkeyConflicts,
     openDataFolder,
     openLog,
+    exportDiagnostics,
     rebuildIndex,
     listOwnSettings,
     setPreferences,
@@ -393,6 +394,9 @@
   let filter = $state("");
   let clearing = $state(false);
   let rebuilding = $state(false);
+  let exporting = $state(false);
+  /** Where the last bundle was written, so the row can say rather than imply. */
+  let exported = $state("");
 
   const panel = $derived(PANELS.find((p) => p.id === active) ?? PANELS[0]);
 
@@ -518,6 +522,28 @@
       status = `Could not clear history: ${err}`;
     } finally {
       clearing = false;
+    }
+  }
+
+  /**
+   * Writes the bundle and says where it went.
+   *
+   * The path is kept on screen afterwards rather than shown for a moment and
+   * cleared: somebody who has just been asked for diagnostics needs to find
+   * the file again, possibly after reading it, and a message that has already
+   * faded is no help.
+   */
+  async function exportBundle() {
+    exporting = true;
+    try {
+      exported = await exportDiagnostics();
+      status = "Diagnostics written";
+      setTimeout(() => (status = ""), 1600);
+    } catch (err) {
+      exported = "";
+      status = `Could not write diagnostics: ${err}`;
+    } finally {
+      exporting = false;
     }
   }
 
@@ -1713,6 +1739,29 @@
             >
               {#snippet control()}
                 <Button label="Open log" onclick={() => void openLog()} />
+              {/snippet}
+            </Row>
+
+            <Row
+              title="Detailed logging"
+              description="Also writes what each search source and each extension cost, on every keystroke. Worth turning on while chasing a fault and worth turning off afterwards. It only ever adds: nothing here can stop a failure or a crash being written."
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.general.detailedLog}
+                  onchange={commit}
+                  label="Detailed logging"
+                />
+              {/snippet}
+            </Row>
+
+            <Row
+              title="Export diagnostics"
+              description={exported ||
+                "One file to send to somebody: the log, what is indexed, what each source cost, and anything not working. It leaves out your preferences, your keys, the clipboard and the file index, and it says so at the end so you can check before sending."}
+            >
+              {#snippet control()}
+                <Button label="Export" busy={exporting} onclick={exportBundle} />
               {/snippet}
             </Row>
           </Section>
