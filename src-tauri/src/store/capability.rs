@@ -25,10 +25,11 @@
 //! different things and never meeting.
 //!
 //! **There is still no sandbox**, and that is the part [`NOT_ENFORCED`] says
-//! out loud next to the list. What is granted is what the code appeared to
-//! reach, read by substring search over its own source, and a dependency can
-//! do anything the extension can. The permission layer decides what the host
-//! hands over; it does not confine a process.
+//! out loud next to the list. A permission granted is granted whole, a
+//! dependency does whatever the extension does because they share a worker,
+//! and starting another program puts what that program does outside all of
+//! this. The permission layer decides what the host hands over; it does not
+//! confine a process.
 //!
 //! What is real:
 //!
@@ -41,16 +42,28 @@
 //!   reads `exthost::permission::NEEDED` to be sure of it.
 //! - The loudest ones are deliberately withheld. Accepting the clipboard does
 //!   not accept typing into somebody else's window.
+//! - **A Node module nobody granted is refused whether or not this list
+//!   mentioned it.** `host/src/worker/patch-require.ts` hands over a named set
+//!   of built-ins, charges a permission for a second named set, and refuses
+//!   everything else, on every route to one: `require`, `Module._load`,
+//!   `module.createRequire`, `process.getBuiltinModule`, `process.binding` and
+//!   a dynamic `import()`.
 //!
-//! ## How it reads the code
+//! ## How it reads the code, and why that is only a description
 //!
 //! Substring search over the extension's own source, and that is a deliberate
 //! floor rather than an aspiration. A parser would answer the same question
 //! more precisely and would still be wrong the moment an extension builds a
 //! module name at runtime or a dependency does the work for it. So this
-//! **over-reports rather than under-reports**: a token in a comment counts, and
-//! the honest statement about depth is [`NOT_ENFORCED`] rather than a claim
-//! that the analysis is complete.
+//! **over-reports rather than under-reports**, and a token in a comment counts.
+//!
+//! **The scan describes; it does not decide.** What it finds is what the screen
+//! lists and therefore what agreeing grants, and that is the whole of its
+//! authority. It is not what the worker consults, and a capability it failed to
+//! notice is not thereby allowed: the gate is an allowlist, so the extension is
+//! refused at runtime with the permission named and Settings is where it is
+//! turned on. That is the difference between a scan that is a description and a
+//! scan that would have to be right.
 
 /// The vocabulary the host enforces in, aliased so this file's own
 /// `Capability` (a row on the screen) and the launcher's (a permission the
@@ -360,9 +373,11 @@ pub fn grantable() -> Vec<Permission> {
 /// that looks like a permission screen and enforces nothing is worse than no
 /// list, because it invites a trust nothing here has earned.
 pub const NOT_ENFORCED: &str = "Installing grants these, and Sill refuses them until you do. \
-    It is not a sandbox: an extension runs as a Node program with your account's access, this \
-    is what its own code appears to use, and a dependency it installs can do anything it does. \
-    Anything not listed is still asked for when it happens. Install what you would run.";
+    This list is what the code appears to use, read from its own source; the gate is what \
+    actually holds, and it refuses a Node module nobody granted whether or not this list \
+    mentioned it. It is still not a sandbox: a permission is granted whole, a dependency does \
+    whatever the extension does, and starting other programs puts what they do beyond Sill \
+    entirely. Anything not listed is still asked for when it happens. Install what you would run.";
 
 /// A capability the source appears to reach, and where it was seen.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -596,8 +611,26 @@ mod tests {
             }
         }
 
+        /*
+         * And the ones asked for by hand, which the `needs` tables never see.
+         *
+         * `fetch`, `WebSocket`, `process.kill` and `process.report.writeReport`
+         * are globals rather than modules, so each gate is a bare
+         * `held.has("...")` with the name written out. A typo there is the
+         * worst failure this pair can have: the extension is refused, the
+         * person grants the permission the message names, and it is refused
+         * again, because the string being asked for is not a permission that
+         * exists. Nothing else in either half would notice.
+         */
+        for piece in GATE.split("held.has(\"").skip(1) {
+            let name = piece.split('"').next().unwrap_or_default();
+            if !name.is_empty() && !asked.iter().any(|it| it == name) {
+                asked.push(name.to_string());
+            }
+        }
+
         assert!(
-            asked.len() >= 3,
+            asked.len() >= 4,
             "only found {asked:?} in the gate, so this test is parsing rather than checking"
         );
 

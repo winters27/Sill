@@ -373,6 +373,201 @@ try {
       `something (${sneakyReached.params.reason})`,
   );
 
+  /*
+   * Everything below drives one fixture twice, refused and then allowed, so
+   * this is written once. `where` is a path under `test/fixture`, `who` names
+   * the session in the log, and `holds` is what Rust would have granted.
+   */
+  const loadFixture = async (where, who, holds) => {
+    const loaded = await request("Manager/load", {
+      opts: {
+        mode: "View",
+        env: "Development",
+        entrypoint: resolve(root, "test/fixture", where),
+        extension_name: who,
+        command_name: "run",
+        is_raycast: true,
+        preferences: {},
+        arguments: {},
+        launch_type: "User",
+        capabilities: holds,
+      },
+    });
+
+    return loaded.result?.session_id;
+  };
+
+  /** What a fixture that throws at module load said on the way out. */
+  const crashOf = async (session, label) => {
+    const crash = await waitFor(
+      (m) => m.method === "Manager/extensionCrash" && m.params.session_id === session,
+      label,
+    );
+    return crash.params.reason;
+  };
+
+  // ---- under the module system rather than round it ----
+  //
+  // `process.binding` is the one that had been open the whole time: it is the
+  // C++ binding `fs` is written on, it never touches `Module`, and it is one
+  // deprecated call. Beside it, three built-ins nobody had named. A table of
+  // dangerous modules is a denylist, and every Node release adds to it; the
+  // gate now hands over a listed built-in and refuses the rest.
+  const dug = await crashOf(
+    await loadFixture("digs-into-node.js", "digger", []),
+    "an extension digging under the module system crashed",
+  );
+
+  assert(
+    /every way under was refused/.test(dug),
+    `nothing got under the gate (${dug})`,
+  );
+
+  const ways = [
+    "binding",
+    "linkedBinding",
+    "dlopen",
+    "kill",
+    "report",
+    "v8",
+    "sqlite",
+    "vm",
+    "registerHooks",
+  ];
+
+  for (const way of ways) {
+    assert(
+      new RegExp(`${way}: sill:`).test(dug),
+      `${way} was refused by Sill rather than failing for some other reason`,
+    );
+  }
+
+  assert(
+    /kill: sill: this extension is not allowed to start other programs/.test(dug),
+    "signalling somebody else's process names the permission it would need",
+  );
+
+  assert(
+    /v8: sill: "node:v8" is one of Node's own modules and Sill does not hand it/.test(dug),
+    "a built-in nobody listed is refused as not offered rather than as unpaid for",
+  );
+  assert(
+    /dlopen: sill: this extension tried to load a native addon/.test(dug),
+    "and a native addon is refused with a reason rather than a permission",
+  );
+
+  /*
+   * The same fixture with everything granted.
+   *
+   * Three of the nine go through, and which three is the point.
+   * `process.binding("fs")` is answered under the module it is the inside of,
+   * so granting `fs` grants it, and the same for signalling a process and
+   * writing a report. The other six are refused **however much is granted**,
+   * because a built-in nobody listed and a native addon are not permissions
+   * anybody can hold. A refusal only means something if the same call succeeds
+   * when it is allowed to, and six of these never do.
+   */
+  const dugAllowed = await crashOf(
+    await loadFixture("digs-into-node.js", "digger-allowed", [
+      "fileRead",
+      "fileWrite",
+      "processLaunch",
+    ]),
+    "the same fixture ran with everything granted",
+  );
+
+  const under = dugAllowed.match(/got under the gate through ([^\n]*)/)?.[1];
+
+  assert(
+    under === "binding, kill, report",
+    `the three that answer to a permission really do work when it is held, ` +
+      `and the six that answer to nothing still do not (${dugAllowed})`,
+  );
+
+  // ---- the other loader ----
+  //
+  // A dynamic `import()` resolves through the ESM loader and never through
+  // `Module._load`, so every gate on that side was beside the point for one
+  // line of ordinary code. `module.registerHooks` is the same-thread hook, so
+  // it can ask this worker's own permissions rather than a copy.
+  const importing = async (holds, who) => {
+    const session = await loadFixture("imports-dynamically.js", who, holds);
+    send({ jsonrpc: "2.0", id: 9500, method: "Manager/ready", params: { session_id: session } });
+
+    const drew = await waitFor(
+      (m) =>
+        m.method === "Manager/extensionMessage" &&
+        m.params.session_id === session &&
+        JSON.parse(m.params.payload).method === "UI/render" &&
+        !JSON.stringify(JSON.parse(m.params.payload).params.ops).includes("waiting"),
+      `${who} reported what its imports did`,
+    );
+
+    return JSON.stringify(JSON.parse(drew.params.payload).params.ops);
+  };
+
+  const refusedImports = await importing([], "no-import");
+
+  for (const shape of ["prefixed", "bare", "dataurl"]) {
+    assert(
+      refusedImports.includes(`${shape}-refused`),
+      `import() of ${shape} node:fs is refused when the permission is not held ` +
+        `(${refusedImports})`,
+    );
+  }
+
+  const allowedImports = await importing(["fileRead", "fileWrite"], "yes-import");
+
+  for (const shape of ["prefixed", "bare", "dataurl"]) {
+    assert(
+      allowedImports.includes(`${shape}-reached`),
+      `and reaches the disk once it is, so the refusal means something (${allowedImports})`,
+    );
+  }
+
+  // ---- code an extension writes itself ----
+  //
+  // `eval`, `new Function` and `WebAssembly` were written down as holes in the
+  // gate. They are not: none of them reaches a built-in, because `require` is
+  // not in scope for generated code and every global that is has a gate on it.
+  // What they defeat is the store's scan, which is a different claim and is
+  // now made separately.
+  const generated = await crashOf(
+    await loadFixture("builds-its-own-code.js", "generator", []),
+    "an extension generating its own code crashed",
+  );
+
+  assert(
+    /generated code reached nothing/.test(generated),
+    `nothing an extension can write for itself reaches a built-in (${generated})`,
+  );
+  assert(
+    /function-require: unavailable|function-require: nothing/.test(generated),
+    `\`require\` is not visible to a generated function at all (${generated})`,
+  );
+  assert(
+    /direct-eval-require: refused/.test(generated),
+    "a direct eval sees the module's own require, which is the gated one",
+  );
+  assert(
+    /function-getBuiltinModule: refused/.test(generated),
+    "and the global route out of generated code is wrapped",
+  );
+  assert(
+    /wasm-import: refused/.test(generated),
+    "WebAssembly reaches only what JavaScript hands it, and that is gated too",
+  );
+
+  const generatedAllowed = await crashOf(
+    await loadFixture("builds-its-own-code.js", "generator-allowed", ["fileRead", "fileWrite"]),
+    "the same fixture ran with the files permission",
+  );
+
+  assert(
+    /reached the disk through .*direct-eval-require/.test(generatedAllowed),
+    `the generated escapes really do work when allowed (${generatedAllowed})`,
+  );
+
   // ---- @raycast/utils ----
   //
   // The package the store is written against. Loading an extension that uses

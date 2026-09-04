@@ -96,31 +96,96 @@ else is a permission somebody agrees to when they install it and can take
 back in Settings, under Extensions. Taking one back reaches a command that is
 already running, not only the next launch.
 
-Node's own modules are gated on the way in, by the first part of the module
-name, so `node:fs/promises` and `fs` are the same request:
+**Node's own modules are an allowlist, not a blocklist.** A built-in is handed
+over if it is named free below, needs its permission if it is named gated, and
+is **refused otherwise, whatever anybody has granted**. That way round on
+purpose: a list of dangerous modules is a list every Node release adds a hole
+to, and this one had five holes in it before it was inverted.
 
-| Module | Permission it asks for |
+Gated by the first part of the name, so `node:fs/promises` and `fs` are the
+same request:
+
+<!-- coverage:gated -->
+
+| Module | What it asks to be allowed to do |
 | --- | --- |
-| `fs` | Reading and changing files, both together |
-| `child_process`, `worker_threads`, `inspector` | Starting other programs |
-| `net`, `tls`, `dgram` | Opening network connections |
-| `http`, `https`, `http2` | Making web requests |
+| `child_process` | start other programs |
+| `cluster` | start other programs |
+| `dgram` | open network connections |
+| `dns` | open network connections |
+| `fs` | read and change files directly |
+| `http` | make web requests |
+| `http2` | make web requests |
+| `https` | make web requests |
+| `inspector` | start other programs |
+| `net` | open network connections |
+| `tls` | open network connections |
+| `worker_threads` | start other programs |
+
+<!-- /coverage:gated -->
+
+These come free, because none of them reaches past the worker it runs in:
+
+<!-- coverage:free -->
+
+`assert`, `async_hooks`, `buffer`, `console`, `constants`, `crypto`,
+`diagnostics_channel`, `domain`, `events`, `module`, `os`, `path`,
+`perf_hooks`, `process`, `punycode`, `querystring`, `readline`, `stream`,
+`string_decoder`, `sys`, `timers`, `tty`, `url`, `util`, `zlib`.
+
+<!-- /coverage:free -->
+
+Everything else Node ships is refused, including `node:vm`, `node:v8`,
+`node:sqlite`, `node:wasi` and whatever the next release adds. No permission
+turns those on. If an extension genuinely needs one, that is a gap in Sill
+rather than a setting.
+
+Every route to a built-in meets the same answer: `require`, `Module._load`,
+`module.createRequire`, `process.getBuiltinModule`, `process.binding`, and a
+dynamic `import()` along with anything that import pulls in behind it.
+`process.dlopen`, which loads a native addon, is refused for everybody, because
+native code runs outside every permission there is and there is nothing to
+grant.
 
 `fetch`, `WebSocket`, `XMLHttpRequest` and `EventSource` are globals rather
-than modules, and they ask for the same network permission. A refusal names
-the permission and says where to grant it, rather than failing as though the
-extension were broken.
+than modules, and they ask for the same network permission. So do
+`process.kill`, which signals other programs, and `process.report.writeReport`,
+which writes a file wherever it is pointed. A refusal names the permission and
+says where to grant it, rather than failing as though the extension were
+broken.
+
+Extensions need **Node 22.15 or newer**. That is the release
+`module.registerHooks` arrived in, and without it a dynamic `import()` walks
+past all of the above, so a worker on an older Node refuses to run a command
+rather than running it with a hole in it.
 
 ### The honest limit of that
 
 This is a permission boundary. It is **not** a container for hostile code,
 and Sill's own interface says so rather than implying otherwise.
 
-`eval`, `new Function` and `WebAssembly` need no module at all, and a dynamic
-`import()` goes through a loader this does not sit on. An extension
-determined to get out can. What the gate gives you is that an ordinary
-extension cannot read your disk or reach the network without somebody having
-agreed to it, and that revoking works.
+What it holds: every route to a built-in listed above arrives at the same
+answer, so an extension cannot reach a file, a socket, another program, or a
+built-in nobody put on the list without somebody having agreed to it, and
+taking the agreement back reaches a command already on screen rather than only
+the next launch. That is a boundary an ordinary extension meets. It is not a
+guarantee against code that goes looking for a way round rather than asking.
+
+What it does not: a permission is granted whole, so `fileRead` is every file
+you can open rather than the extension's own. A dependency shares the worker
+and does whatever the extension does. Starting another program puts what that
+program does outside all of this. `process.env` is readable, and Sill's own
+environment is in it.
+
+`eval`, `new Function` and `WebAssembly` were listed here as ways out, and
+they are not, which is worth saying plainly because this page said otherwise
+until now. Generated code cannot see `require` at all, because `require` is a
+parameter of the module scope rather than a global; a direct `eval` sees the
+gated one; and every global route generated code does have is wrapped. What
+generated code defeats is the **description** rather than the gate: the store
+reads an extension's source to say what it appears to use, and it cannot see a
+module name assembled at runtime. An extension that assembles one is refused at
+runtime and says which permission it wanted.
 
 ## What happens when Sill does not cover something
 
