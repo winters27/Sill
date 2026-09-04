@@ -71,6 +71,7 @@
       installed: null,
       blocked: null,
       sourceUrl: "https://github.com/raycast/extensions/tree/aaaaaaa/extensions/demo",
+      native: false,
       ...over,
     };
   }

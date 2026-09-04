@@ -38,11 +38,106 @@ function describeError(err: unknown): string {
   return String(err);
 }
 
-/** Generous per-worker cap so one extension cannot exhaust system memory. */
-const WORKER_MAX_HEAP_MB = 1000;
+/**
+ * The most memory one command may hold before V8 stops it.
+ *
+ * A backstop, not a budget. It is the answer to "one extension has a leak and
+ * the machine is swapping", and nothing else: crossing it is not a policy
+ * decision Sill makes, it is V8 refusing to grow the heap and the thread
+ * ending where it stands. **Whatever the person was doing in that command is
+ * lost**, which is why this sits so far above anything real rather than
+ * anywhere near it.
+ *
+ * Measured before it was chosen, with `run-extension.mjs --measure` against
+ * the five real extensions the view gate draws. The heaviest is Emoji Search,
+ * which builds a list of 1,898 rows out of a bundled dataset and settles at
+ * 63 MB. Kill Process, which reads the whole process table, is 31 MB. Hacker
+ * News is 16 MB and the two generators are 11 MB each, which is close to what
+ * an empty worker costs.
+ *
+ * 512 MB is eight times the worst of those, so an extension reaching it has
+ * stopped doing arithmetic on the size of its own input.
+ *
+ * It was 1000 MB, which is a number nobody had measured against anything. Two
+ * commands at that were more memory than the whole launcher is allowed to be.
+ *
+ * Nothing warns before this. A cap that killed at one number and nagged at a
+ * lower one would be two policies, and the lower one would be the one people
+ * saw, on extensions that were working. What the panel does instead is say
+ * what each extension is using, and leave the reading to the reader.
+ *
+ * Overridable for the same reason the runaway budget is: proving that crossing
+ * it produces a sentence somebody can read should not mean allocating half a
+ * gigabyte on the machine running the tests. A test that needs that is a test
+ * nobody runs.
+ */
+const WORKER_MAX_HEAP_MB = Number(process.env.SILL_WORKER_HEAP_MB ?? 512);
+
+/** Whether V8 ended this worker because it would not fit. */
+function outOfMemory(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === "ERR_WORKER_OUT_OF_MEMORY";
+}
+
+/**
+ * What somebody is told when a command is stopped for using too much memory.
+ *
+ * Read as the second half of a sentence, because the launcher puts the
+ * command's own title in front of it: "Search Emoji stopped: it used more
+ * than...". Saying the name here as well would say it twice.
+ *
+ * No stack, no error code, no mention of V8 or of old generation sizes. The
+ * person reading this did not choose the runtime and cannot act on any of it.
+ * What they can act on is which extension it was and whether to keep it, so
+ * that is what it says.
+ *
+ * It is also written to this process's stderr, which Rust reads into Sill's
+ * log, because a `no-view` command has no screen for the launcher to put this
+ * on: a background command dying of memory would otherwise leave nothing
+ * anywhere. That is the host's own stderr and not a worker's, so it is the
+ * stream that is already drained rather than one of the two that are not.
+ */
+function ranOutOfMemory(session: Session): string {
+  process.stderr.write(
+    `${session.extension}/${session.command}: stopped after using more than ` +
+      `${WORKER_MAX_HEAP_MB} MB of memory\n`,
+  );
+
+  return (
+    `it used more than ${WORKER_MAX_HEAP_MB} MB of memory, so Sill stopped it. ` +
+    "That is far more than an extension needs, so it has most likely leaked " +
+    "rather than done something big. Nothing else in Sill was affected."
+  );
+}
 
 /** How long a worker gets to unmount cleanly before it is terminated. */
 const SHUTDOWN_GRACE_MS = 5000;
+
+/**
+ * How long a worker gets to say how much memory it is using.
+ *
+ * Short, because the answer is a property read on a thread that is nearly
+ * always asleep and comes back in under a millisecond. Anything approaching
+ * this deadline is a worker that is busy, and "busy" is the reading rather
+ * than something to wait out: a person who opened the panel is looking at it
+ * now, and a screen that stalls for a second per extension is worse than one
+ * that says an extension did not answer.
+ */
+const HEAP_ANSWER_MS = 250;
+
+/**
+ * How long the first reading of a session watches before it says anything.
+ *
+ * A share of a core is a rate and needs a window. Long enough that a worker
+ * doing real work registers, short enough that a settings panel does not
+ * visibly hesitate on its way in, and paid once per session rather than once
+ * per reading.
+ */
+const CORE_WINDOW_MS = 200;
+
+/** A delay that can never be the reason this process stays alive. */
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms).unref());
+}
 
 /**
  * How busy a worker has to be before it counts as running away.
@@ -179,6 +274,39 @@ interface Warm {
   output: ExtensionOutput;
 }
 
+/** What a worker says about its own memory, in bytes. */
+interface Heap {
+  used: number;
+  total: number;
+}
+
+/**
+ * What unloading a command answers with.
+ *
+ * `ok` is what it always was: whether there was anything there to unload. The
+ * memory figure rides along because this is the last moment anybody can ask
+ * for it, and it is the one reading that lets two extensions be compared
+ * after the fact.
+ *
+ * `null` for a worker that did not answer, which is the same meaning it has
+ * everywhere else here rather than a zero somebody would quote.
+ */
+interface Unloaded {
+  ok: boolean;
+  heap_bytes: number | null;
+}
+
+/** One worker's readings, as they go back to Rust. */
+interface Reading {
+  session_id: string;
+  /** Bytes in use, or null when the worker did not answer in time. */
+  heap_bytes: number | null;
+  heap_limit_bytes: number | null;
+  /** How much of one processor core it has used since the last reading. */
+  core_percent: number;
+  answering: boolean;
+}
+
 interface Session {
   id: string;
   worker: Worker;
@@ -190,6 +318,21 @@ interface Session {
   elu?: ReturnType<Worker["performance"]["eventLoopUtilization"]>;
   /** How long it has been pinned. Reset by a single quiet sample. */
   hotMs: number;
+  /**
+   * The same reading again, for whoever is asking rather than for the runaway
+   * watch.
+   *
+   * Two baselines rather than one, because they are read on different clocks
+   * and sharing would corrupt both. The watch adds a fixed `RUNAWAY_CHECK_MS`
+   * for every sample that comes back hot, so a reader moving the baseline
+   * between two of its ticks would have it credit five seconds of pinning to a
+   * window that was half a second long. Two objects cost two pointers and
+   * nothing else.
+   */
+  eluSeen?: ReturnType<Worker["performance"]["eventLoopUtilization"]>;
+  /** Who this is, so a message about it can say so in the person's words. */
+  extension: string;
+  command: string;
 }
 
 class ExtensionHost {
@@ -212,6 +355,7 @@ class ExtensionHost {
     this.rpc.handle("Manager/unload", (p) => this.unload(String(p.session_id)));
     this.rpc.handle("Manager/messageExtension", (p) => this.toExtension(p));
     this.rpc.handle("Manager/setCapabilities", (p) => this.setCapabilities(p));
+    this.rpc.handle("Manager/diagnostics", () => this.diagnostics());
 
     process.stdin.on("data", (chunk: Buffer) => {
       for (const frame of this.decoder.push(chunk)) {
@@ -318,6 +462,106 @@ class ExtensionHost {
     this.stopWatchingRunaways();
   }
 
+  /**
+   * What every loaded command is costing, right now.
+   *
+   * Asked, never watched. Everything a person would want here could be sampled
+   * on a timer into a tidy little history, and that timer would be a wakeup on
+   * a machine where nothing is happening, which is the one thing this whole
+   * project refuses to spend. Somebody opening the Extensions panel is a
+   * reason to look; nothing else is. Between two of those readings this costs
+   * exactly nothing.
+   *
+   * Nothing here starts a host either: Rust only asks a host that is already
+   * up, so opening the panel on a machine that has not run an extension today
+   * does not spawn Node to be told there is nothing to report.
+   */
+  private async diagnostics(): Promise<{ workers: Reading[] }> {
+    const workers = await Promise.all(
+      [...this.sessions.values()].map((session) => this.readingFor(session)),
+    );
+
+    return { workers };
+  }
+
+  /** One worker's reading: its share of a core from here, its heap from it. */
+  private async readingFor(session: Session): Promise<Reading> {
+    /*
+     * A share of a core is a rate, so it needs two readings and a gap.
+     *
+     * The first time anybody asks about a session there is no earlier reading
+     * to measure against, and the figure the platform hands back instead is
+     * cumulative since the worker started. **For a command somebody has just
+     * opened that is close to 100%**, because starting is the busiest thing a
+     * worker ever does, and a panel saying an extension is using a whole
+     * processor core the moment it appears would be wrong about every
+     * extension there is.
+     *
+     * So the first reading opens a window and waits it out. Every session is
+     * read at once, so this is one wait for the whole panel rather than one
+     * per extension, and it is paid only the first time each is looked at.
+     */
+    const opening = session.eluSeen === undefined;
+
+    if (opening) {
+      session.eluSeen = session.worker.performance.eventLoopUtilization();
+    }
+
+    const [heap] = await Promise.all([
+      this.askHeap(session),
+      opening ? pause(CORE_WINDOW_MS) : Promise.resolve(),
+    ]);
+
+    const current = session.worker.performance.eventLoopUtilization();
+    const since = session.worker.performance.eventLoopUtilization(current, session.eluSeen);
+    session.eluSeen = current;
+
+    return {
+      session_id: session.id,
+      heap_bytes: heap ? heap.used : null,
+      // What Sill asked for rather than what V8 reports back, which is the old
+      // generation plus the semi spaces and so reads about 40% higher. The cap
+      // is the number a worker is stopped at, and it is the only one worth
+      // putting next to the usage.
+      heap_limit_bytes: WORKER_MAX_HEAP_MB * 1024 * 1024,
+      // One decimal place. The difference between 0.4% and 0.7% of a core is
+      // not a difference anybody acts on, and the digits after it are noise.
+      core_percent: Math.round(since.utilization * 1000) / 10,
+      answering: heap !== null,
+    };
+  }
+
+  /**
+   * Asks one worker how much memory it is using, and gives up quickly.
+   *
+   * The deadline is the point rather than a precaution. **The worker most
+   * worth asking is the one that will not answer**: an extension stuck in a
+   * loop holds its own event loop, so the request sits in a queue that is
+   * never drained. Waiting on that would hang the panel on exactly the
+   * extension it exists to name.
+   *
+   * Not answering is itself a reading, and it is reported as one. The share
+   * of a core beside it comes from this thread and always arrives, so a
+   * worker that says nothing while pinning a core describes itself perfectly.
+   *
+   * A worker killed mid-question is the same answer by another route: the
+   * exit handler fails everything in flight, and that rejection lands here.
+   */
+  private askHeap(session: Session): Promise<Heap | null> {
+    let timer: NodeJS.Timeout | undefined;
+
+    const gaveUp = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), HEAP_ANSWER_MS);
+      // So a pending question can never be the reason the host stays alive.
+      timer.unref();
+    });
+
+    return Promise.race([
+      session.control.request<Heap>("Lifecycle/heap").catch(() => null),
+      gaveUp,
+    ]).finally(() => clearTimeout(timer));
+  }
+
   private async load(params: RpcParams): Promise<{ session_id: string }> {
     const opts = (params.opts ?? {}) as Record<string, unknown>;
     const sessionId = randomUUID();
@@ -332,6 +576,8 @@ class ExtensionHost {
       ready: false,
       queued: [],
       hotMs: 0,
+      extension: String(opts.extension_name ?? opts.extension_id ?? "an extension"),
+      command: String(opts.command_name ?? ""),
     };
     this.sessions.set(sessionId, session);
     this.watchForRunaways();
@@ -341,7 +587,7 @@ class ExtensionHost {
     worker.on("error", (err: Error) => {
       this.rpc.emit("Manager/extensionCrash", {
         session_id: sessionId,
-        reason: describeError(err),
+        reason: outOfMemory(err) ? ranOutOfMemory(session) : describeError(err),
       });
     });
 
@@ -352,6 +598,19 @@ class ExtensionHost {
           reason: `worker exited with code ${code}`,
         });
       }
+
+      /*
+       * Nothing is waiting on this worker any more, so nothing should be left
+       * waiting for it.
+       *
+       * A control request whose worker was terminated resolves never: the
+       * thread that was going to answer it does not exist. Held promises are
+       * a leak on their own, and they are worse than that here, because the
+       * caller most likely to be holding one is a diagnostics read on the
+       * extension that had just been killed for misbehaving.
+       */
+      session.control.rejectAllPending("the extension was stopped");
+
       this.sessions.delete(sessionId);
       this.stopWatchingRunaways();
     });
@@ -455,11 +714,29 @@ class ExtensionHost {
     return true;
   }
 
-  private async unload(sessionId: string): Promise<boolean> {
+  private async unload(sessionId: string): Promise<Unloaded> {
     const session = this.sessions.get(sessionId);
-    if (!session) return false;
+    if (!session) return { ok: false, heap_bytes: null };
 
-this.sessions.delete(sessionId);
+    /*
+     * What it was holding, asked on the way out.
+     *
+     * The last chance there is. Once this returns, the worker is gone and its
+     * memory is a number nobody can ever recover, and closing a command is by
+     * far the most common way one ends.
+     *
+     * This is the answer to a problem the live reading cannot solve. Only one
+     * command is usually loaded at a time, so a panel showing memory for what
+     * is running is a panel showing one figure, and one figure is not a
+     * comparison. Somebody who opens four extensions and then goes looking for
+     * the expensive one has closed three of them by the time they look.
+     *
+     * Not a timer, and not a sample: it rides a round trip that was already
+     * being made, on a path a person triggers by pressing Escape.
+     */
+    const heap = await this.askHeap(session);
+
+    this.sessions.delete(sessionId);
     this.stopWatchingRunaways();
 
     try {
@@ -472,7 +749,7 @@ this.sessions.delete(sessionId);
     }
 
     await session.worker.terminate();
-    return true;
+    return { ok: true, heap_bytes: heap ? heap.used : null };
   }
 
   private shutdownAll(): void {

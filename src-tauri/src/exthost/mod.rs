@@ -29,7 +29,7 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 pub use api::{ApiLayer, UiEvent};
 pub use bridge::{Alert, AppInfo, Bridge, Clip};
-pub use manager::{CommandEnv, CommandMode, LaunchType, LoadOptions, ManagerClient};
+pub use manager::{CommandEnv, CommandMode, LaunchType, LoadOptions, ManagerClient, Reading};
 pub use rpc::{Incoming, RpcError, RpcPeer};
 pub use storage::Storage;
 
@@ -37,6 +37,12 @@ pub use storage::Storage;
 struct Session {
     /// Scopes storage and names the extension in logs.
     extension: String,
+    /// Which of its commands this is, so a reading can say which one is heavy.
+    ///
+    /// An extension is not one program. "Emoji Search is using 47 MB" is only
+    /// half an answer when the extension also has a command that lists nothing,
+    /// and the half that is missing is the one somebody would act on.
+    command: String,
     /// The API-layer conversation with this extension.
     peer: RpcPeer,
     /// Whether anybody is looking at this, or it is off doing something.
@@ -268,6 +274,7 @@ impl ExtHost {
             session_id.clone(),
             Session {
                 extension: opts.extension_id.clone(),
+                command: opts.command_name.clone(),
                 peer: peer.clone(),
                 mode: opts.mode,
             },
@@ -356,18 +363,69 @@ impl ExtHost {
     not coming.
     */
     pub async fn unload(&self, session_id: &str) -> Result<bool, RpcError> {
-        self.sessions
+        let extension = self
+            .sessions
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(session_id);
+            .remove(session_id)
+            .map(|session| session.extension);
 
-        match tokio::time::timeout(ANSWER_WITHIN, self.manager.unload(session_id)).await {
-            Ok(answered) => answered,
-            Err(_) => {
-                crate::say!("the extension host did not answer an unload; giving up on it");
-                Err(RpcError::internal("the extension host stopped answering"))
-            }
+        let answered =
+            match tokio::time::timeout(ANSWER_WITHIN, self.manager.unload(session_id)).await {
+                Ok(answered) => answered?,
+                Err(_) => {
+                    crate::say!("the extension host did not answer an unload; giving up on it");
+                    return Err(RpcError::internal("the extension host stopped answering"));
+                }
+            };
+
+        /*
+         * What it was holding at the end, written down before it is gone.
+         *
+         * The host asks the worker on its way out and hands the answer back
+         * with the unload, so this costs nothing beyond a field on a reply
+         * that was already being made. It is the figure that makes the
+         * Extensions panel a comparison: a launcher has one command loaded at
+         * a time, and somebody hunting for the expensive extension has closed
+         * the other three by the time they come to look.
+         */
+        if let (Some(extension), Some(bytes)) = (extension, answered.heap_bytes) {
+            self.api.timings().held_on_closing(&extension, bytes);
         }
+
+        Ok(answered.ok)
+    }
+
+    /**
+    What every loaded command is costing, right now.
+
+    Asked of the host rather than sampled into a running total, and that is
+    the whole design. A per-worker heap figure can only come from inside the
+    worker, so a history of it would be a timer waking threads on a machine
+    where nobody is looking, which is the cost this launcher exists not to
+    pay. Somebody opening the Extensions panel is the reason to look.
+
+    An empty answer is an ordinary one: no commands loaded, or a host that
+    stopped answering. Neither is worth failing a panel over, and the panel
+    has something true to say in both cases.
+    */
+    pub async fn worker_readings(&self) -> Vec<Running> {
+        let readings = match tokio::time::timeout(ANSWER_WITHIN, self.manager.diagnostics()).await {
+            Ok(Ok(readings)) => readings,
+            Ok(Err(err)) => {
+                crate::say!("could not read what the extensions are costing: {err}");
+                return Vec::new();
+            }
+            Err(_) => {
+                crate::say!("the extension host did not answer a diagnostics read");
+                return Vec::new();
+            }
+        };
+
+        joined(
+            &self.sessions.lock().unwrap_or_else(|e| e.into_inner()),
+            readings,
+        )
     }
 
     /// How many commands are loaded right now.
@@ -458,6 +516,54 @@ impl ExtHost {
     }
 }
 
+/// One running command, and what it costs.
+///
+/// Names as well as numbers, because the numbers are useless on their own:
+/// the question this answers is "which one", and a session id is not an
+/// answer to that.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Running {
+    pub session: String,
+    pub extension: String,
+    pub command: String,
+    /// Bytes of heap, or nothing when the worker did not answer in time.
+    pub heap_bytes: Option<u64>,
+    pub heap_limit_bytes: u64,
+    /// How much of one processor core it used since the last reading.
+    pub core_percent: f64,
+    /// Whether it answered at all. A command in a loop cannot.
+    pub answering: bool,
+}
+
+/// Puts names to the host's readings, and drops the ones nobody has any more.
+///
+/// A free function over the map for the reason [`views_in`] is one, and with
+/// a second reason of its own: **a session can be killed between the question
+/// and the answer**, and revoking a permission does exactly that. A reading
+/// for a session Rust no longer holds is a row about a command that has gone,
+/// and drawing it would leave a dead extension on the panel until something
+/// else redrew it. So the map decides what exists and the readings only say
+/// what it costs.
+fn joined(sessions: &HashMap<String, Session>, readings: Vec<Reading>) -> Vec<Running> {
+    readings
+        .into_iter()
+        .filter_map(|reading| {
+            let session = sessions.get(&reading.session_id)?;
+
+            Some(Running {
+                session: reading.session_id,
+                extension: session.extension.clone(),
+                command: session.command.clone(),
+                heap_bytes: reading.heap_bytes,
+                heap_limit_bytes: reading.heap_limit_bytes,
+                core_percent: reading.core_percent,
+                answering: reading.answering,
+            })
+        })
+        .collect()
+}
+
 /// Which of these sessions are drawing something.
 ///
 /// A free function over the map rather than a method, so it can be asked about
@@ -497,6 +603,7 @@ mod letting_views_go {
         let (peer, _outbound, _incoming) = RpcPeer::new();
         Session {
             extension: "fixture".to_string(),
+            command: "only".to_string(),
             peer,
             mode,
         }
@@ -527,6 +634,7 @@ mod reaching_what_is_running {
         let (peer, _outbound, _incoming) = RpcPeer::new();
         Session {
             extension: extension.to_string(),
+            command: "only".to_string(),
             peer,
             mode,
         }
@@ -564,5 +672,61 @@ mod reaching_what_is_running {
         found.sort();
 
         assert_eq!(found, vec!["watching".to_string(), "working".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod what_is_running_costs {
+    use super::*;
+
+    fn session(extension: &str, command: &str) -> Session {
+        let (peer, _outbound, _incoming) = RpcPeer::new();
+        Session {
+            extension: extension.to_string(),
+            command: command.to_string(),
+            peer,
+            mode: CommandMode::View,
+        }
+    }
+
+    fn reading(id: &str) -> Reading {
+        Reading {
+            session_id: id.to_string(),
+            heap_bytes: Some(63 * 1024 * 1024),
+            heap_limit_bytes: 512 * 1024 * 1024,
+            core_percent: 10.0,
+            answering: true,
+        }
+    }
+
+    /// A number is only worth having with a name on it.
+    #[test]
+    fn a_reading_is_named_from_the_session_it_belongs_to() {
+        let mut sessions = HashMap::new();
+        sessions.insert("a".to_string(), session("emoji", "Search Emoji"));
+
+        let named = joined(&sessions, vec![reading("a")]);
+
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].extension, "emoji");
+        assert_eq!(named[0].command, "Search Emoji");
+        assert_eq!(named[0].heap_bytes, Some(63 * 1024 * 1024));
+    }
+
+    /// A command killed between the question and the answer leaves no row.
+    ///
+    /// Revoking a permission reaches a running worker and can end it, which
+    /// this project made true deliberately. So a reading can describe a
+    /// command that no longer exists by the time it arrives, and drawing that
+    /// would leave a dead extension on the panel reporting memory it is not
+    /// using until something else redrew the screen.
+    #[test]
+    fn a_command_that_has_gone_is_not_drawn() {
+        let sessions = HashMap::new();
+
+        assert!(
+            joined(&sessions, vec![reading("killed")]).is_empty(),
+            "a reading outlived its session and was drawn anyway"
+        );
     }
 }

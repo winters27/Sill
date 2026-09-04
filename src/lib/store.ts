@@ -45,7 +45,17 @@ export interface StoreRow {
   installed: InstalledState | null;
   /** Why it is not offered by default, when it is not. */
   blocked: string | null;
+  /** Empty when there is nowhere to send somebody to read the source. */
   sourceUrl: string;
+  /**
+   * Here because it is installed rather than because the index carries it.
+   *
+   * An extension built from a folder, or one the store has withdrawn since it
+   * was installed. Neither has a download count, an author or a description to
+   * draw, so the row says where it came from instead of saying "0 installs"
+   * about something nobody could have installed from a store it is not in.
+   */
+  native: boolean;
 }
 
 export interface StoreCategory {
@@ -242,6 +252,54 @@ export interface InstalledExtension {
  */
 export function installedExtensions(): Promise<InstalledExtension[]> {
   return invoke<InstalledExtension[]>("installed_extensions");
+}
+
+/** One of an extension's commands that is loaded right now. */
+export interface RunningCommand {
+  session: string;
+  extension: string;
+  command: string;
+  /** Bytes of memory it holds, or null when it did not answer in time. */
+  heapBytes: number | null;
+  /** The cap it would be stopped at, in bytes. */
+  heapLimitBytes: number;
+  /** How much of one processor core it used since the last reading. */
+  corePercent: number;
+  /** Whether it answered at all. A command stuck in a loop cannot. */
+  answering: boolean;
+}
+
+/** What one extension has cost to open, and what it is holding now. */
+export interface ExtensionCost {
+  extension: string;
+  /** Milliseconds to first screen when Sill had to start Node, if measured. */
+  coldMs: number | null;
+  coldOpens: number;
+  /** The same when it did not have to, if measured. */
+  warmMs: number | null;
+  warmOpens: number;
+  /**
+   * The most one of its commands was holding when it was closed, in bytes.
+   *
+   * Read on the way out rather than sampled, which is what makes the panel a
+   * comparison: a launcher has one command loaded at a time, so what is
+   * running is a single number, and somebody hunting for the expensive
+   * extension has closed the other three by the time they come to look.
+   */
+  heldBytes: number | null;
+  running: RunningCommand[];
+}
+
+/**
+ * What each extension costs, slowest to open first.
+ *
+ * Measured while Sill has been running and not kept between runs, so an
+ * extension nobody has opened this time is simply absent. Nothing is started
+ * to answer this: the live half is asked only of an extension runtime that is
+ * already up.
+ */
+export function extensionResources(): Promise<ExtensionCost[]> {
+  return invoke<ExtensionCost[]>("extension_resources");
 }
 
 /**

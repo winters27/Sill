@@ -44,7 +44,7 @@
 //! it is not running.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -63,6 +63,25 @@ const KEPT: usize = 20;
 /// this session. It exists because the key is a name that arrives from a
 /// manifest, and nothing that grows from a name may grow without end.
 const MOST_EXTENSIONS: usize = 64;
+
+/// Whether Node had to be started for this activation.
+///
+/// The two are different enough that reporting one as the other is a lie.
+/// Sill keeps the extension runtime up for five minutes after anything last
+/// used it, and a warm worker waiting for the next command; the first launch
+/// after that has gone pays for a process start, a thread and a module
+/// evaluation, and every launch afterwards pays for the last of the three.
+///
+/// Which one somebody gets is not a matter of luck. A person who opens an
+/// extension in the morning and again after lunch pays cold both times, and
+/// somebody working inside one pays warm all afternoon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    /// The extension runtime was not running and had to be started.
+    Cold,
+    /// It was already up, with a worker waiting.
+    Warm,
+}
 
 /// What one source or one extension has cost this session.
 ///
@@ -117,6 +136,61 @@ impl Adding {
     }
 }
 
+/// What one extension costs to open, told twice.
+///
+/// Both halves, or one, or neither. An extension opened once this run has a
+/// cold figure and no warm one, and saying nothing about the warm case is the
+/// honest answer: guessing it from the cold one would be inventing the number
+/// that matters most.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Opening {
+    /// The extension's id, as its manifest spells it.
+    pub name: String,
+    /// Openings that had to start the extension runtime first.
+    pub cold: Option<Cost>,
+    /// Openings that did not.
+    pub warm: Option<Cost>,
+    /**
+    The most memory any of its commands was holding when it was closed, in
+    bytes.
+
+    Read on the way out rather than sampled, because that is the last moment it
+    exists and because a timer watching an idle worker is the wakeup this
+    launcher refuses to spend. It is what makes the panel a comparison at all:
+    only one command is usually loaded, so a screen showing memory for what is
+    running shows one number, and somebody hunting for the expensive extension
+    has closed the other three by the time they come to look.
+
+    The largest seen rather than the last, because an extension whose list has
+    been narrowed to nothing is holding almost nothing at the moment it is
+    closed, and what it cost is what it cost.
+    */
+    pub held_bytes: Option<u64>,
+}
+
+impl Opening {
+    /// Whether anything at all is known about how long this takes to open.
+    pub fn timed(&self) -> bool {
+        self.cold.is_some() || self.warm.is_some()
+    }
+
+    /// The figure to compare two extensions by.
+    ///
+    /// The warm one, when there is one. Cold time is mostly Node starting,
+    /// which every extension pays equally and none of them causes; what one
+    /// extension does and another does not is the work it does once it is
+    /// running. An extension only ever opened cold is compared on that,
+    /// because the alternative is leaving it out of the comparison entirely.
+    pub fn typical_us(&self) -> u64 {
+        self.warm
+            .as_ref()
+            .or(self.cold.as_ref())
+            .map(Cost::average_us)
+            .unwrap_or(0)
+    }
+}
+
 /// One summon, from the hotkey to being able to type.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,8 +228,8 @@ pub struct Report {
     pub median_ms: Option<u128>,
     /// What each search source has cost, slowest first.
     pub sources: Vec<Cost>,
-    /// What each extension opened this session has cost, slowest first.
-    pub extensions: Vec<Cost>,
+    /// What each extension opened this run has cost, slowest first.
+    pub extensions: Vec<Opening>,
 }
 
 #[derive(Default)]
@@ -169,7 +243,54 @@ struct Inner {
     /// Keyed by a constant, so recording one allocates nothing.
     sources: BTreeMap<&'static str, Adding>,
     /// Keyed by an extension id, copied once the first time it is opened.
-    extensions: BTreeMap<String, Adding>,
+    extensions: BTreeMap<String, BothWays>,
+    /// Extensions somebody has pressed Enter on that have not drawn yet.
+    ///
+    /// Keyed by extension rather than by session, and that is deliberate. The
+    /// clock has to start before the launch does, because the first thing the
+    /// launch produces is the session id and the extension's first screen can
+    /// reach the window before the call that started it has returned. There is
+    /// no id to key by at the moment the clock starts, so the thing being
+    /// opened is the key.
+    ///
+    /// The cost of that choice: two commands of the same extension opened
+    /// within one activation of each other share an entry, and the second one
+    /// to start wins. That is a slightly wrong number in a case somebody has
+    /// to work at, against no number at all in the ordinary one.
+    ///
+    /// Bounded by the same limit as the map above, so a name arriving from a
+    /// manifest cannot grow this without end. An entry is taken when the
+    /// extension draws, so an opening that never draws leaves one behind until
+    /// that extension is opened again, which is what makes the bound matter.
+    opening: BTreeMap<String, (Instant, Start)>,
+}
+
+/// One extension's cost, kept apart by whether Node had to start.
+#[derive(Debug, Clone, Copy, Default)]
+struct BothWays {
+    cold: Adding,
+    warm: Adding,
+    /// The most any of its commands was holding when it was closed.
+    held_bytes: Option<u64>,
+}
+
+impl BothWays {
+    fn add(&mut self, took: Duration, start: Start) {
+        match start {
+            Start::Cold => self.cold.add(took),
+            Start::Warm => self.warm.add(took),
+        }
+    }
+
+    /// Nothing where nothing was measured, rather than a row of zeroes.
+    fn named(&self, name: &str) -> Opening {
+        Opening {
+            name: name.to_string(),
+            cold: (self.cold.count > 0).then(|| self.cold.named(name)),
+            warm: (self.warm.count > 0).then(|| self.warm.named(name)),
+            held_bytes: self.held_bytes,
+        }
+    }
 }
 
 /// The timings, held as managed state rather than in a static.
@@ -177,8 +298,21 @@ struct Inner {
 /// A static would be a fifth singleton in a codebase that has written down
 /// that it does not want them, for something that is per-application by
 /// nature.
+///
+/// A handle rather than the thing itself, so it can be handed to the extension
+/// API layer as well as being managed for the commands. **Both halves of an
+/// extension's opening are recorded in different places**: the launcher's
+/// action starts the clock, and the layer that hears the extension's first
+/// render stops it. Two `Timings` would mean the panel showed openings nobody
+/// had and the layer recorded openings nobody could see.
+///
+/// Cloning is what a handle is for and is not a second copy of anything. The
+/// alternative was managing an `Arc<Timings>` and changing eight command
+/// signatures to say so, which puts the wrapper in every reader's way to solve
+/// a problem one type can solve on its own.
+#[derive(Clone)]
 pub struct Timings {
-    inner: Mutex<Inner>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl Default for Timings {
@@ -190,7 +324,7 @@ impl Default for Timings {
 impl Timings {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(Inner::default()),
+            inner: Arc::new(Mutex::new(Inner::default())),
         }
     }
 
@@ -302,28 +436,94 @@ impl Timings {
         crate::detail!("{source} answered in {} us", took.as_micros());
     }
 
-    /// One extension was opened, and this is what it took.
+    /// Somebody pressed Enter on one of an extension's commands.
     ///
-    /// The 300 ms extension load is the number this project has spent the most
-    /// effort on, and until now the only way to see it was a stopwatch. Which
-    /// extension is slow is the useful half: "extensions are slow" is not
-    /// actionable and "this one takes 800 ms" is.
-    pub fn extension_took(&self, extension: &str, took: Duration) {
-        if let Ok(mut inner) = self.inner.lock() {
-            // Looked up before inserting, so a full map still counts the
-            // extensions already in it rather than going silent.
-            if let Some(adding) = inner.extensions.get_mut(extension) {
-                adding.add(took);
+    /// The clock starts here and not one step later. What follows before Node
+    /// is even asked is a manifest read, the extension's saved preferences and
+    /// a check that the required ones are filled in, and all of it is time
+    /// somebody spends looking at a launcher that has not moved. A measurement
+    /// that started after it would report a fast open on exactly the occasions
+    /// that felt slow.
+    pub fn opening_began(&self, extension: &str, start: Start) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+
+        // Looked up before inserting, so a full map still re-times the
+        // extensions already in it rather than going silent.
+        if inner.opening.contains_key(extension) || inner.opening.len() < MOST_EXTENSIONS {
+            inner
+                .opening
+                .insert(extension.to_string(), (Instant::now(), start));
+        }
+    }
+
+    /// One of an extension's commands was closed, holding this much.
+    ///
+    /// The largest is kept rather than the last. An extension whose list has
+    /// been narrowed to one row is holding almost nothing at the moment
+    /// somebody closes it, and reporting that would say the extension was
+    /// cheap because of how the person happened to leave it.
+    ///
+    /// An extension nobody has opened this run gets a row here, which is the
+    /// same bound as everything else on this type: the key comes from a
+    /// manifest, and nothing that grows from a name may grow without end.
+    pub fn held_on_closing(&self, extension: &str, bytes: u64) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+
+        let room = inner.extensions.len() < MOST_EXTENSIONS;
+
+        if let Some(both) = inner.extensions.get_mut(extension) {
+            both.held_bytes = Some(both.held_bytes.unwrap_or(0).max(bytes));
+        } else if room {
+            inner
+                .extensions
+                .entry(extension.to_string())
+                .or_default()
+                .held_bytes = Some(bytes);
+        }
+    }
+
+    /// The extension put something on screen, which is when the wait ends.
+    ///
+    /// **The first thing the person can see**, and nothing earlier. The
+    /// launch call returns as soon as the worker has been told to start, long
+    /// before the extension's module body has been evaluated or its first list
+    /// built, and for the heavy extensions that evaluation is most of the
+    /// wait. Timing to the call returning would have reported every extension
+    /// as costing about the same, which is the answer that made the question
+    /// worth asking.
+    ///
+    /// Called more than once per opening, because an extension re-renders. The
+    /// entry is taken by the first one, so the rest cost a lookup that misses.
+    pub fn opening_showed(&self, extension: &str) {
+        let recorded = {
+            let Ok(mut inner) = self.inner.lock() else {
+                return;
+            };
+
+            let Some((began, start)) = inner.opening.remove(extension) else {
+                return;
+            };
+
+            let took = began.elapsed();
+
+            if let Some(both) = inner.extensions.get_mut(extension) {
+                both.add(took, start);
             } else if inner.extensions.len() < MOST_EXTENSIONS {
                 inner
                     .extensions
                     .entry(extension.to_string())
                     .or_default()
-                    .add(took);
+                    .add(took, start);
             }
-        }
 
-        crate::detail!("{extension} loaded in {} ms", took.as_millis());
+            took
+        };
+
+        crate::detail!("{extension} was on screen in {} ms", recorded.as_millis());
     }
 
     pub fn report(&self) -> Report {
@@ -344,7 +544,13 @@ impl Timings {
             median_ms: median(&summons),
             summons,
             sources: worst_first(inner.sources.iter().map(|(name, add)| add.named(name))),
-            extensions: worst_first(inner.extensions.iter().map(|(name, add)| add.named(name))),
+            extensions: slowest_first(
+                inner
+                    .extensions
+                    .iter()
+                    .map(|(name, both)| both.named(name))
+                    .collect(),
+            ),
         }
     }
 }
@@ -378,6 +584,26 @@ fn worst_first(costs: impl Iterator<Item = Cost>) -> Vec<Cost> {
             .then_with(|| a.name.cmp(&b.name))
     });
     costs
+}
+
+/// Slowest to open first.
+///
+/// Time rather than memory, and one order rather than two, because a table has
+/// one. Time is the figure every measured extension has: memory is only known
+/// for one that has been closed or is running right now, so ordering by it
+/// would put half the rows in an order decided by whether somebody happened to
+/// press Escape. Which extension is expensive is said in words above the
+/// table, on whichever of the two it is actually expensive on.
+///
+/// Ties break on the name so two extensions that cost the same do not swap
+/// places between two readings.
+pub fn slowest_first(mut openings: Vec<Opening>) -> Vec<Opening> {
+    openings.sort_by(|a, b| {
+        b.typical_us()
+            .cmp(&a.typical_us())
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    openings
 }
 
 fn push(kept: &mut VecDeque<Summon>, one: Summon) {
@@ -615,13 +841,19 @@ mod tests {
         assert_eq!(named, ["files", "commands"]);
     }
 
+    /// One open, from Enter to the screen.
+    fn opened(timings: &Timings, extension: &str, start: Start) {
+        timings.opening_began(extension, start);
+        timings.opening_showed(extension);
+    }
+
     /// An extension's name arrives from a manifest, so the list is bounded.
     #[test]
     fn extensions_cannot_grow_the_list_without_end() {
         let timings = Timings::new();
 
         for at in 0..(MOST_EXTENSIONS + 20) {
-            timings.extension_took(&format!("extension-{at}"), Duration::from_millis(1));
+            opened(&timings, &format!("extension-{at}"), Start::Warm);
         }
 
         assert_eq!(timings.report().extensions.len(), MOST_EXTENSIONS);
@@ -637,23 +869,26 @@ mod tests {
         let timings = Timings::new();
 
         for at in 0..MOST_EXTENSIONS {
-            timings.extension_took(&format!("extension-{at}"), Duration::from_millis(1));
+            opened(&timings, &format!("extension-{at}"), Start::Warm);
         }
 
         // The one that does not fit.
-        timings.extension_took("one-too-many", Duration::from_millis(1));
+        opened(&timings, "one-too-many", Start::Warm);
         // And then one that is already in.
-        timings.extension_took("extension-0", Duration::from_millis(9));
+        opened(&timings, "extension-0", Start::Warm);
 
         let report = timings.report();
         let first = report
             .extensions
             .iter()
-            .find(|cost| cost.name == "extension-0")
+            .find(|opening| opening.name == "extension-0")
             .expect("extension-0 was recorded before the list filled");
 
-        assert_eq!(first.count, 2);
-        assert_eq!(first.slowest_us, 9_000);
+        assert_eq!(
+            first.warm.as_ref().expect("it was opened warm").count,
+            2,
+            "a full list stopped counting an extension already in it"
+        );
         assert!(report.extensions.iter().all(|c| c.name != "one-too-many"));
     }
 
@@ -664,5 +899,142 @@ mod tests {
 
         assert!(report.sources.is_empty());
         assert!(report.extensions.is_empty());
+    }
+
+    /// The two kinds of open are kept apart.
+    ///
+    /// Folding them together would average a Node process start with a thread
+    /// start, and the answer would describe neither. An extension only ever
+    /// opened one way says nothing about the other, rather than zero.
+    #[test]
+    fn a_cold_open_and_a_warm_one_are_different_numbers() {
+        let timings = Timings::new();
+
+        opened(&timings, "emoji", Start::Cold);
+        opened(&timings, "emoji", Start::Warm);
+        opened(&timings, "emoji", Start::Warm);
+        opened(&timings, "uuid-generator", Start::Warm);
+
+        let report = timings.report();
+        let emoji = report
+            .extensions
+            .iter()
+            .find(|it| it.name == "emoji")
+            .expect("emoji was opened");
+
+        assert_eq!(emoji.cold.as_ref().expect("opened cold once").count, 1);
+        assert_eq!(emoji.warm.as_ref().expect("opened warm twice").count, 2);
+
+        let uuid = report
+            .extensions
+            .iter()
+            .find(|it| it.name == "uuid-generator")
+            .expect("uuid-generator was opened");
+
+        assert!(
+            uuid.cold.is_none(),
+            "an extension never opened cold was given a cold figure anyway"
+        );
+    }
+
+    /// The most it ever held, not the last thing it held.
+    ///
+    /// A list narrowed to one row on the way out is an extension holding
+    /// almost nothing at the moment somebody closes it, and reporting that
+    /// would say the extension was cheap because of how the person happened to
+    /// leave it.
+    #[test]
+    fn the_memory_kept_is_the_worst_reading_not_the_latest() {
+        let timings = Timings::new();
+
+        timings.held_on_closing("emoji", 63 * 1024 * 1024);
+        timings.held_on_closing("emoji", 12 * 1024 * 1024);
+
+        let report = timings.report();
+        let emoji = report
+            .extensions
+            .iter()
+            .find(|it| it.name == "emoji")
+            .expect("closing an extension records it even if it was never timed");
+
+        assert_eq!(emoji.held_bytes, Some(63 * 1024 * 1024));
+        assert!(
+            !emoji.timed(),
+            "a closing reading is not an opening and must not read as one"
+        );
+    }
+
+    /// An open that never put anything on screen is not an open.
+    ///
+    /// The clock is started by pressing Enter and stopped by the extension
+    /// drawing. A command that dies while its modules load never draws, and
+    /// recording something for it would put a number on the panel that says
+    /// the extension works.
+    #[test]
+    fn an_extension_that_never_drew_is_not_measured() {
+        let timings = Timings::new();
+
+        timings.opening_began("never-draws", Start::Cold);
+
+        assert!(
+            timings.report().extensions.is_empty(),
+            "an extension that never drew was recorded as having opened"
+        );
+    }
+
+    /// The slowest one is named first, because that is the question.
+    ///
+    /// Compared on the warm figure, which is what one extension does and
+    /// another does not. Cold time is mostly Node starting, which every
+    /// extension pays equally and none of them causes, so ordering by it would
+    /// rank extensions by which one somebody happened to open first.
+    #[test]
+    fn the_expensive_one_is_named_first() {
+        let quick = Opening {
+            name: "uuid-generator".to_string(),
+            cold: None,
+            warm: Some(Cost {
+                name: "uuid-generator".to_string(),
+                count: 1,
+                total_us: 40_000,
+                slowest_us: 40_000,
+            }),
+            held_bytes: None,
+        };
+        let slow = Opening {
+            name: "emoji".to_string(),
+            // A cold figure that would win the comparison if cold counted.
+            cold: Some(Cost {
+                name: "emoji".to_string(),
+                count: 1,
+                total_us: 9_000_000,
+                slowest_us: 9_000_000,
+            }),
+            warm: Some(Cost {
+                name: "emoji".to_string(),
+                count: 1,
+                total_us: 900_000,
+                slowest_us: 900_000,
+            }),
+            held_bytes: None,
+        };
+        let unopened_warm = Opening {
+            name: "hacker-news".to_string(),
+            cold: Some(Cost {
+                name: "hacker-news".to_string(),
+                count: 1,
+                total_us: 300_000,
+                slowest_us: 300_000,
+            }),
+            warm: None,
+            held_bytes: None,
+        };
+
+        let order: Vec<String> = slowest_first(vec![quick, unopened_warm, slow])
+            .into_iter()
+            .map(|it| it.name)
+            .collect();
+
+        assert_eq!(order, ["emoji", "hacker-news", "uuid-generator"]);
     }
 }

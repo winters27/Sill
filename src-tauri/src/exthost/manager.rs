@@ -170,6 +170,38 @@ impl LoadOptions {
     }
 }
 
+/// What one running command is costing, as the host measured it.
+///
+/// Bytes rather than megabytes, and a share of a core rather than a name for
+/// how busy something is, because rounding and wording are the window's job
+/// and a number that has already been rounded cannot be un-rounded.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Reading {
+    pub session_id: String,
+    /// Bytes of heap in use, or nothing when the worker did not answer.
+    ///
+    /// **Not answering is a reading.** The command most worth asking about is
+    /// the one stuck in a loop, and a thread in a loop cannot answer anything,
+    /// so a question with no deadline would hang on exactly the extension this
+    /// exists to name.
+    pub heap_bytes: Option<u64>,
+    /// The cap a worker is stopped at, which is the host's own and not V8's.
+    pub heap_limit_bytes: u64,
+    /// How much of one processor core it used since the last time anybody
+    /// asked, as a percentage.
+    pub core_percent: f64,
+    pub answering: bool,
+}
+
+/// What unloading a command answered with.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Unloaded {
+    /// Whether there was anything there to unload.
+    pub ok: bool,
+    /// What it was holding at the end, when it was able to say.
+    pub heap_bytes: Option<u64>,
+}
+
 /// Client half of the Manager layer.
 #[derive(Clone)]
 pub struct ManagerClient {
@@ -211,12 +243,26 @@ impl ManagerClient {
         Ok(result.as_bool().unwrap_or(false))
     }
 
-    pub async fn unload(&self, session_id: &str) -> Result<bool, RpcError> {
+    /// Ends one command, and says what it was holding on the way out.
+    ///
+    /// The memory figure comes back with the unload rather than being asked
+    /// for separately, because this is the last moment it exists: the worker
+    /// is gone by the time this returns. It is also the only figure that lets
+    /// two extensions be compared after the fact, since a launcher usually has
+    /// one command loaded and one figure is not a comparison.
+    pub async fn unload(&self, session_id: &str) -> Result<Unloaded, RpcError> {
         let result = self
             .peer
             .request("Manager/unload", json!({ "session_id": session_id }))
             .await?;
-        Ok(result.as_bool().unwrap_or(false))
+
+        Ok(Unloaded {
+            ok: result
+                .get("ok")
+                .and_then(Value::as_bool)
+                .unwrap_or_default(),
+            heap_bytes: result.get("heap_bytes").and_then(Value::as_u64),
+        })
     }
 
     /// Tells one running command what it is allowed to reach now.
@@ -242,6 +288,23 @@ impl ManagerClient {
             )
             .await?;
         Ok(result.as_bool().unwrap_or(false))
+    }
+
+    /// What every loaded command is costing right now.
+    ///
+    /// One call for all of them rather than one per session, because the panel
+    /// asking this wants a comparison and a comparison of readings taken
+    /// seconds apart is not one.
+    pub async fn diagnostics(&self) -> Result<Vec<Reading>, RpcError> {
+        let result = self.peer.request("Manager/diagnostics", json!({})).await?;
+
+        let workers = result
+            .get("workers")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+
+        serde_json::from_value(workers)
+            .map_err(|err| RpcError::internal(format!("diagnostics were unreadable: {err}")))
     }
 
     /// Sends one API-layer message to a running extension.

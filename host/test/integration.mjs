@@ -180,7 +180,15 @@ try {
 
   // ---- unload ----
   const unloadRes = await request("Manager/unload", { session_id: sessionId });
-  assert(unloadRes.result === true, "unload succeeded");
+  assert(unloadRes.result?.ok === true, "unload succeeded");
+  // Asked on the way out, because this is the last moment it exists: the
+  // worker is gone by the time this reply is written. It is also the only
+  // reading that lets two extensions be compared after the fact, since a
+  // launcher has one command loaded at a time.
+  assert(
+    unloadRes.result?.heap_bytes > 1024 * 1024,
+    `and said what it was holding at the end (${Math.round((unloadRes.result?.heap_bytes ?? 0) / 1024 / 1024)} MB)`,
+  );
 
   // ---- what the extension itself says ----
   //

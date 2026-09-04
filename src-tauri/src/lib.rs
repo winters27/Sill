@@ -1480,6 +1480,11 @@ pub fn run() {
                     host_bridge::SillBridge::new(handle.clone()),
                     Arc::new(storage),
                     grants,
+                    // The same one the commands report from, taken rather than
+                    // made: two of these would mean the panel showed openings
+                    // nobody had and the extension layer recorded openings
+                    // nobody could see.
+                    app.state::<timing::Timings>().inner().clone(),
                 )),
                 host_js: Arc::new(host_js(&handle)),
                 last_used: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
@@ -1860,11 +1865,11 @@ pub fn run() {
             commands::launch::actions_for,
             commands::launch::run_action,
             commands::launch::undo_action,
-            commands::extensions::load_extension,
             commands::extensions::activate_handler,
             commands::extensions::unload_extension,
             commands::extensions::install_extension,
             commands::extensions::extension_grants,
+            commands::extensions::extension_resources,
             commands::extensions::revoke_extension_grant,
             commands::store::store_browse,
             commands::store::store_close,

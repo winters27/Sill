@@ -210,7 +210,27 @@ const { accessoriesOf, detailOf, dropdownOf, emptyViewOf, iconOf, showsDetail } 
   pathToFileURL(presentOut).href
 );
 
+/**
+ * Whether to say what this extension costs as well as what it draws.
+ *
+ * Off by default, because it opens the command a second time and asks the host
+ * for a reading, which is a second or two nobody watching a view gate wants.
+ * Turned on, it answers the two questions the Extensions panel answers, from
+ * the same host and the same protocol the application uses:
+ *
+ *   how long from asking for it to seeing it, cold and warm
+ *   how much memory the worker is holding once it has settled
+ *
+ * Cold and warm are genuinely different runs rather than one run reported
+ * twice. Cold is this process starting Node, the host bundle evaluating, a
+ * worker thread being created and the extension's own modules loading. Warm is
+ * the same command opened again in the host that is already up, against the
+ * spare worker that was spun up when the first one was claimed.
+ */
+const measuring = args.includes("--measure");
+
 // ---- host process ----
+const startedHostAt = performance.now();
 const child = spawn(process.execPath, [hostJs], { stdio: ["pipe", "pipe", "pipe"] });
 
 /**
@@ -241,6 +261,31 @@ const gaps = new Set();
 const tree = new ViewTree();
 let session;
 let buf = Buffer.alloc(0);
+
+/**
+ * Manager replies this script is waiting for, keyed by the id it asked with.
+ *
+ * The load is answered by hand above because it arrives before anything else
+ * exists. Everything else goes through here, so asking the host a question and
+ * reading the answer is one shape rather than a special case per question.
+ */
+const waiting = new Map();
+
+/** Asks the host something and waits for the answer. */
+function ask(id, method, params = {}) {
+  const answer = new Promise((resolve) => waiting.set(id, resolve));
+  send({ jsonrpc: "2.0", id, method, params });
+  return answer;
+}
+
+/**
+ * When each session first put something on screen.
+ *
+ * The first render and nothing earlier, which is the same moment Sill's own
+ * measurement ends. An extension reading its saved settings has not appeared
+ * yet, and counting that as arrival would report the slow ones as fast.
+ */
+const firstRender = new Map();
 
 /** The last thing the command said about its own view stack. */
 let navigation = { depth: 1, pop: "" };
@@ -314,6 +359,12 @@ child.stdout.on("data", (chunk) => {
 
     if (msg.id === 1) session = msg.result?.session_id;
 
+    const waiter = waiting.get(msg.id);
+    if (waiter) {
+      waiting.delete(msg.id);
+      waiter(msg.result);
+    }
+
     if (msg.method === "Manager/extensionCrash") {
       console.error(`\nCRASH: ${msg.params.reason}\n`);
       continue;
@@ -323,6 +374,10 @@ child.stdout.on("data", (chunk) => {
 
     const call = JSON.parse(msg.params.payload);
     if (!call.method) continue;
+
+    if (call.method === "UI/render" && !firstRender.has(msg.params.session_id)) {
+      firstRender.set(msg.params.session_id, performance.now());
+    }
 
     calls.push(call.method);
 
@@ -553,6 +608,60 @@ if (journey.wanted) {
   journey.poppedTo = tree.top()?.tag;
 }
 
+/**
+ * What this extension costs, when anybody asked.
+ *
+ * The cold figure is the run that has already happened above: this process
+ * started Node, the host evaluated, a worker was created and the extension
+ * loaded into it. The warm figure opens the same command again in the same
+ * host, which is what somebody gets when they close a command and open it
+ * again, or open a second extension while the first is still resident.
+ *
+ * The memory reading is taken of the warm session, through `Manager/
+ * diagnostics`, which is the same call the Extensions panel makes. It is asked
+ * once, here, and never sampled: a timer taking readings of an idle worker is
+ * the wakeup this whole project refuses to spend.
+ */
+const cost = { coldMs: undefined, warmMs: undefined, reading: undefined };
+
+if (measuring) {
+  cost.coldMs = firstRender.has(session)
+    ? Math.round(firstRender.get(session) - startedHostAt)
+    : undefined;
+
+  await ask(3, "Manager/unload", { session_id: session });
+
+  const warmFrom = performance.now();
+  const again = await ask(4, "Manager/load", {
+    opts: {
+      mode: modeArg,
+      env: "Development",
+      entrypoint,
+      extension_name: extensionName,
+      extension_id: extensionName,
+      command_name: "cmd",
+      is_raycast: true,
+      assets_path: assetsPath,
+      preferences: manifestPreferences(),
+      arguments: {},
+      launch_type: "User",
+      capabilities: granted,
+    },
+  });
+
+  await ask(5, "Manager/ready", { session_id: again.session_id });
+  await settle(2500);
+
+  cost.warmMs = firstRender.has(again.session_id)
+    ? Math.round(firstRender.get(again.session_id) - warmFrom)
+    : undefined;
+
+  const diagnostics = await ask(6, "Manager/diagnostics");
+  cost.reading = (diagnostics?.workers ?? []).find(
+    (one) => one.session_id === again.session_id,
+  );
+}
+
 child.kill();
 
 // ---- report ----
@@ -650,6 +759,21 @@ if (journey.wanted) {
   if (lazyFor !== undefined) {
     console.log(`  target mounted before it was pushed: ${journey.eager}`);
   }
+}
+
+if (measuring) {
+  const ms = (value) => (value === undefined ? "never drew" : `${value} ms`);
+  const mb = (bytes) =>
+    bytes === undefined || bytes === null
+      ? "did not answer"
+      : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+  console.log("\nWhat it costs:");
+  console.log(`  cold, with Node to start: ${ms(cost.coldMs)}`);
+  console.log(`  warm, host already up:    ${ms(cost.warmMs)}`);
+  console.log(`  heap once settled:        ${mb(cost.reading?.heap_bytes)}`);
+  console.log(`  of a limit of:            ${mb(cost.reading?.heap_limit_bytes)}`);
+  console.log(`  share of one core since:  ${cost.reading?.core_percent ?? "?"}%`);
 }
 
 if (gaps.size) {

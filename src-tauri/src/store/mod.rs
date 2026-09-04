@@ -112,6 +112,25 @@ pub struct Listing {
     #[serde(default)]
     pub icon: String,
     pub commands: Vec<ListedCommand>,
+    /**
+    Not from Raycast's index: this one is only here because it is installed.
+
+    Two extensions have this. One built from a folder on this machine, which
+    Raycast has never heard of and never will. And one installed from the store
+    that has since been withdrawn from it.
+
+    **Both were invisible.** Browsing ran over the catalogue and nothing else,
+    so an extension the index does not carry did not appear under Installed,
+    could not be found by typing its name, and could not be removed from the
+    one screen whose job is removing extensions. It was still in the launcher
+    the whole time.
+
+    Defaulted rather than required, so a catalogue cached by an earlier build
+    still reads back: everything in that file came from the index, which is
+    exactly what `false` means.
+    */
+    #[serde(default)]
+    pub native: bool,
 }
 
 /// One command an extension contributes.
@@ -166,6 +185,14 @@ impl Listing {
     /// first is a silence. Both are hidden by the one switch, and the row says
     /// which it is rather than making them look alike.
     pub fn blocked(&self) -> Option<String> {
+        // It is installed and Sill runs it, which is stronger evidence than
+        // anything a manifest could have declared. Reading the field would
+        // hide half of these behind the compatibility switch and label the
+        // rest as unrunnable, on this machine, where they run.
+        if self.native {
+            return None;
+        }
+
         if !self.declares_windows() {
             return Some("Does not say it runs on Windows".to_string());
         }
@@ -176,13 +203,53 @@ impl Listing {
     }
 
     /// Where a person can read this exact revision for themselves.
+    ///
+    /// Empty when there is nowhere to send them. An extension built from a
+    /// folder on this machine has no folder in Raycast's repository, and an
+    /// address assembled from the parts anyway is a link to a 404 presented as
+    /// the source of something they have installed.
     pub fn source_url(&self) -> String {
+        if self.folder.is_empty() {
+            return String::new();
+        }
+
         format!(
             "https://github.com/{}/tree/{}/{}",
             source::REPO,
             self.revision,
             self.folder
         )
+    }
+
+    /// A listing for something that is installed here and nowhere in the index.
+    ///
+    /// Built from what the install itself recorded, which is all there is:
+    /// there is no catalogue entry to read a description, an author, a
+    /// category or a download count from, and inventing any of them would be
+    /// putting made-up facts on a row beside real ones.
+    pub fn of_installed(
+        name: &str,
+        title: &str,
+        revision: &str,
+        commands: Vec<ListedCommand>,
+    ) -> Self {
+        Self {
+            name: name.to_string(),
+            // No folder in a repository this was never in. `source_url` reads
+            // that as "nowhere to link to" rather than assembling an address.
+            folder: String::new(),
+            title: title.to_string(),
+            description: String::new(),
+            author: String::new(),
+            categories: Vec::new(),
+            // Not "it does not run on Windows". It is running on this one.
+            platforms: vec!["Windows".to_string()],
+            revision: revision.to_string(),
+            downloads: 0,
+            icon: String::new(),
+            commands,
+            native: true,
+        }
     }
 }
 
@@ -462,7 +529,13 @@ pub struct Row {
     pub installed: Option<Installed>,
     /// Why it will not work here, when it will not.
     pub blocked: Option<String>,
+    /// Empty when there is nowhere to send somebody to read the source.
     pub source_url: String,
+    /// Here because it is installed rather than because the index carries it.
+    ///
+    /// The window needs this to stop saying "0 installs" about an extension
+    /// nobody could have installed from a store it is not in.
+    pub native: bool,
 }
 
 /// A command on a row, with the one thing the listing does not say.
@@ -529,6 +602,7 @@ pub struct Query {
 /// the two megabytes this ran over.
 pub fn browse(
     listings: &[Listing],
+    native: &[Listing],
     installed: impl Fn(&str) -> Option<Origin>,
     query: &Query,
     fetched_at: i64,
@@ -555,7 +629,20 @@ pub fn browse(
         Option<Installed>,
     )> = Vec::new();
 
-    for listing in listings {
+    /*
+     * The catalogue, and then whatever is installed that it does not carry.
+     *
+     * Chained rather than handled separately, so an extension built from a
+     * folder is searched, ranked, narrowed by the Installed tab and drawn by
+     * exactly the same code as everything else. A second pass for these would
+     * be a second store, and the two would agree about matching until the day
+     * one of them learned something.
+     *
+     * They are not counted into the category list above, because they carry no
+     * categories: a folder install has no catalogue entry to take them from,
+     * and putting them under a category nobody assigned would be an invention.
+     */
+    for listing in listings.iter().chain(native) {
         let origin = installed(&listing.name);
         let state = origin.as_ref().map(|origin| Installed {
             revision: origin.revision.clone(),
@@ -644,6 +731,7 @@ pub fn browse(
                 .collect(),
             blocked: listing.blocked(),
             source_url: listing.source_url(),
+            native: listing.native,
             installed: state,
         })
         .collect();
@@ -845,6 +933,7 @@ mod tests {
                 description: String::new(),
                 mode: "view".to_string(),
             }],
+            native: false,
         }
     }
 
@@ -880,6 +969,7 @@ mod tests {
 
         let out = browse(
             &[quiet.clone()],
+            &[],
             nothing,
             &Query {
                 hide_blocked: true,
@@ -890,7 +980,7 @@ mod tests {
         assert!(out.rows.is_empty());
         assert_eq!(out.hidden, 1, "and the switch can say how many");
 
-        let shown = browse(&[quiet], nothing, &Query::default(), 0);
+        let shown = browse(&[quiet], &[], nothing, &Query::default(), 0);
         assert_eq!(shown.rows.len(), 1, "turning it off brings them back");
     }
 
@@ -917,6 +1007,86 @@ mod tests {
         assert!(bar.blocked().is_none());
     }
 
+    /// An extension Raycast's index does not carry is still on this machine.
+    ///
+    /// Built from a folder, or installed from the store and withdrawn from it
+    /// since. Browsing ran over the catalogue and nothing else, so it was
+    /// **absent from the Installed tab of the screen whose job is managing
+    /// installed extensions**, unfindable by name, and unremovable there, while
+    /// running perfectly well in the launcher.
+    #[test]
+    fn something_installed_here_appears_even_though_the_index_has_never_heard_of_it() {
+        let mine = Listing::of_installed(
+            "my-notes",
+            "My Notes",
+            "",
+            vec![ListedCommand {
+                name: "open".to_string(),
+                title: "Open Notes".to_string(),
+                description: String::new(),
+                mode: "view".to_string(),
+            }],
+        );
+
+        let here = |name: &str| {
+            (name == "my-notes").then(|| Origin::folder(std::path::Path::new(r"C:\notes"), 0))
+        };
+
+        let out = browse(
+            &[listing("other", "Other", 5)],
+            std::slice::from_ref(&mine),
+            here,
+            &Query {
+                installed_only: true,
+                ..Default::default()
+            },
+            0,
+        );
+
+        assert_eq!(
+            out.rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            ["my-notes"],
+            "an installed extension the catalogue does not carry was left out of Installed"
+        );
+        assert!(out.rows[0].native, "the window has no way to tell it apart");
+        assert!(
+            out.rows[0].installed.is_some(),
+            "so nothing there would offer to remove it"
+        );
+    }
+
+    /// It is not held back by the compatibility switch either.
+    ///
+    /// A folder install declares whatever its author declared, which for
+    /// something written before Raycast shipped for Windows is nothing. Reading
+    /// that field would hide an extension that is installed and running, on
+    /// this machine, behind a switch about whether it runs on this machine.
+    #[test]
+    fn one_that_is_already_running_here_is_not_hidden_as_incompatible() {
+        let mine = Listing::of_installed("my-notes", "My Notes", "", Vec::new());
+
+        assert!(mine.blocked().is_none());
+        assert_eq!(
+            mine.source_url(),
+            "",
+            "an address assembled for a repository it was never in is a link to a 404"
+        );
+
+        let out = browse(
+            &[],
+            std::slice::from_ref(&mine),
+            |_| None,
+            &Query {
+                hide_blocked: true,
+                ..Default::default()
+            },
+            0,
+        );
+
+        assert_eq!(out.rows.len(), 1);
+        assert_eq!(out.hidden, 0);
+    }
+
     #[test]
     fn an_empty_query_orders_by_how_many_people_have_it() {
         let listings = vec![
@@ -925,7 +1095,7 @@ mod tests {
             listing("some", "Some", 500),
         ];
 
-        let out = browse(&listings, nothing, &Query::default(), 0);
+        let out = browse(&listings, &[], nothing, &Query::default(), 0);
         let order: Vec<&str> = out.rows.iter().map(|r| r.name.as_str()).collect();
 
         assert_eq!(order, ["many", "some", "few"]);
@@ -938,7 +1108,7 @@ mod tests {
         let mut listings = vec![listing("a", "A", 1), listing("b", "B", 1)];
         listings[1].categories = vec!["Media".to_string(), "Productivity".to_string()];
 
-        let out = browse(&listings, nothing, &Query::default(), 0);
+        let out = browse(&listings, &[], nothing, &Query::default(), 0);
 
         assert_eq!(
             out.categories,
@@ -964,6 +1134,7 @@ mod tests {
 
         let out = browse(
             &listings,
+            &[],
             nothing,
             &Query {
                 category: Some("Media".to_string()),
@@ -986,6 +1157,7 @@ mod tests {
 
         let out = browse(
             &listings,
+            &[],
             nothing,
             &Query {
                 hide_blocked: true,
@@ -1007,7 +1179,7 @@ mod tests {
                 .then(|| Origin::store("here", "extensions/here", "old-sha", Vec::new(), 0))
         };
 
-        let out = browse(&listings, pinned, &Query::default(), 0);
+        let out = browse(&listings, &[], pinned, &Query::default(), 0);
         let installed = out.rows[0].installed.as_ref().expect("it is installed");
 
         assert_eq!(installed.revision, "old-sha");
@@ -1021,7 +1193,7 @@ mod tests {
         let listings = vec![listing("here", "Here", 1)];
         let pinned = |_: &str| Some(Origin::folder(std::path::Path::new("C:/mine"), 0));
 
-        let out = browse(&listings, pinned, &Query::default(), 0);
+        let out = browse(&listings, &[], pinned, &Query::default(), 0);
 
         assert!(!out.rows[0].installed.as_ref().unwrap().outdated);
         assert_eq!(out.updates, 0);
@@ -1050,6 +1222,7 @@ mod tests {
 
         let out = browse(
             &listings,
+            &[],
             pinned,
             &Query {
                 updates_only: true,
@@ -1070,6 +1243,7 @@ mod tests {
         for query in ["translate", "google-tr", "peculiar"] {
             let out = browse(
                 &listings,
+                &[],
                 nothing,
                 &Query {
                     text: query.to_string(),
@@ -1082,6 +1256,7 @@ mod tests {
 
         let out = browse(
             &listings,
+            &[],
             nothing,
             &Query {
                 text: "nothing like it".to_string(),
@@ -1103,6 +1278,7 @@ mod tests {
 
         let out = browse(
             &[named, described],
+            &[],
             nothing,
             &Query {
                 text: "translates".to_string(),
@@ -1130,6 +1306,7 @@ mod tests {
 
         let out = browse(
             &[by_words, by_name],
+            &[],
             nothing,
             &Query {
                 text: "timer".to_string(),
@@ -1162,7 +1339,7 @@ mod tests {
             .map(|n| listing(&format!("ext{n}"), &format!("Ext {n}"), n as u64))
             .collect();
 
-        let out = browse(&listings, nothing, &Query::default(), 0);
+        let out = browse(&listings, &[], nothing, &Query::default(), 0);
 
         assert_eq!(out.rows.len(), SHOWN);
         assert_eq!(out.matched, SHOWN + 40);

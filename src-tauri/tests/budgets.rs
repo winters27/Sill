@@ -301,6 +301,7 @@ mod the_store {
                         mode: "view".to_string(),
                     })
                     .collect(),
+                native: false,
             })
             .collect();
 
@@ -319,7 +320,7 @@ mod the_store {
         };
 
         let at = Instant::now();
-        let out = store::browse(&catalog.listings, |_| None, &query, NOW);
+        let out = store::browse(&catalog.listings, &[], |_| None, &query, NOW);
         std::hint::black_box(&out);
         at.elapsed().as_micros()
     }

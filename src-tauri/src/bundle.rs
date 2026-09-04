@@ -293,7 +293,7 @@ pub fn assemble(parts: &Parts) -> String {
     }
 
     costs(&mut out, "Search sources", &parts.timings.sources);
-    costs(&mut out, "Extensions opened", &parts.timings.extensions);
+    openings(&mut out, &parts.timings.extensions);
 
     section(&mut out, "Not working");
     if parts.troubles.is_empty() {
@@ -366,6 +366,35 @@ fn costs(out: &mut String, name: &str, costs: &[crate::timing::Cost]) {
             cost.average_us(),
             cost.slowest_us,
         );
+    }
+}
+
+/// What each extension took to get on screen, cold and warm on their own lines.
+///
+/// Both, always, because they are different measurements and a bundle that
+/// folded them together would be reporting an average of a process start and a
+/// thread start. A half nobody paid for this run is left out rather than
+/// printed as zero.
+fn openings(out: &mut String, openings: &[crate::timing::Opening]) {
+    let _ = writeln!(out, "  Extensions opened");
+
+    if openings.is_empty() {
+        let _ = writeln!(out, "    nothing measured this session");
+        return;
+    }
+
+    for opening in openings {
+        for (how, cost) in [("cold", &opening.cold), ("warm", &opening.warm)] {
+            let Some(cost) = cost else { continue };
+            let _ = writeln!(
+                out,
+                "    {:<32}{how:>6}{:>6} opens{:>12} ms average{:>12} ms worst",
+                opening.name,
+                cost.count,
+                cost.average_us() / 1_000,
+                cost.slowest_us / 1_000,
+            );
+        }
     }
 }
 

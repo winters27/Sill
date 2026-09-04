@@ -33,7 +33,7 @@ The shape of this process follows from that.
 | `src/utils/` | The module it gets for `@raycast/utils` |
 | `src/render/` | The React reconciler, the node tree, and the handler registry |
 | `src/worker/` | Worker startup, the module gate and the network gate |
-| `test/` | Smoke, integration and runaway tests, plus the fixtures they drive |
+| `test/` | Smoke, integration, runaway and resource tests, plus the fixtures they drive |
 
 ## The wire
 
@@ -71,7 +71,15 @@ Two things about that are load-bearing.
 
 ## Where the limits are
 
-- **Heap.** Each worker is capped, so one extension cannot take the machine.
+- **Heap.** Each worker is capped at 512 MB, so one extension cannot take the
+  machine. It is a backstop and not a budget: crossing it is V8 refusing to
+  grow the heap and the thread ending where it stands, so whatever the person
+  was doing in that command is lost. That is why it sits eight times above the
+  heaviest real extension measured (Emoji Search, 63 MB) rather than anywhere
+  near it, and why nothing warns at a lower line. When it does fire, what
+  reaches the window is a sentence naming the command and the limit rather
+  than a stack trace, and the host writes the same thing to its own stderr so
+  a `no-view` command dying of memory leaves a mark somewhere.
 - **Runaway.** Event loop utilisation is watched rather than processor time.
   A real extension is almost entirely idle, waking to render and to answer;
   a thread that never yields is a loop, and it is stopped.
@@ -81,6 +89,25 @@ Two things about that are load-bearing.
   streams and forwarded, bounded per command and per line. They used to be
   discarded, which made them invisible and, because nothing drained the
   stream, an unbounded buffer as well.
+- **Diagnostics.** `Manager/diagnostics` answers with what every loaded
+  command is holding and its share of a processor core. **Asked, never
+  watched**: sampling on a timer would be a wakeup on a machine where nothing
+  is happening, which is the one thing this project refuses to spend, so
+  somebody opening the Extensions panel is the only reason to look. The memory
+  figure comes from inside the worker over the control channel, because there
+  is no way to read one worker's heap from the thread that made it; it is not
+  a stream, deliberately, since both of a worker's streams are already
+  diverted and drained by hand. A worker stuck in a loop cannot answer, which
+  is reported as not answering rather than waited out, and the share of a core
+  beside it is measured from outside and arrives regardless. `Manager/unload`
+  takes the same reading on the way out, which is the last moment it exists.
+
+## Where the numbers come from
+
+`scripts/run-extension.mjs --measure` opens a command twice against a real
+host, cold and then warm, and asks for a reading. The figures for the five
+real extensions the view gate draws are in
+[docs/budgets.md](../docs/budgets.md).
 
 ## Building and testing
 
@@ -96,6 +123,6 @@ is not negotiable and a second copy resolved from somewhere else breaks hooks
 in ways that are miserable to diagnose.
 
 `npm --prefix host test` runs the type check, a smoke render, the integration
-tests and the runaway test. From the repository root, `npm run gate:views`
-goes further and renders real extensions end to end; see
+tests, the runaway test and the resource test. From the repository root,
+`npm run gate:views` goes further and renders real extensions end to end; see
 [docs/extensions.md](../docs/extensions.md) for how to fetch those.
