@@ -448,6 +448,51 @@ pub fn stamp_database(connection: &rusqlite::Connection, version: u32) -> rusqli
     connection.pragma_update(None, "user_version", version)
 }
 
+/**
+One unreadable value, rather than the whole file.
+
+**This has happened twice on a real machine.** A saved `"rightControl"` named
+a modifier the enum no longer has, and the entire preferences file was moved
+aside over it: every other setting, and every sealed key, gone. What the person
+reports is that their settings reverted, and nothing on screen connects that to
+one word in one field.
+
+The shape of the danger is that **every enum in a settings file is a promise
+about a closed set that a future build may reopen.** Rename a variant, drop
+one, or read a file a newer build wrote, and serde refuses the document rather
+than the field. A file is worth more than any one value in it.
+
+So an enum field written with this takes its default when the saved value is
+not one this build knows, and says so in the log rather than silently. That is
+the right trade for a setting with a safe fallback: a theme going back to the
+default is visible and recoverable, and losing every sealed key is not.
+
+**Not for everything.** A field where a wrong value would be worse than no file
+should refuse instead, which is why this is opt-in per field rather than
+applied to the whole document.
+*/
+pub fn forgiving<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: DeserializeOwned + Default,
+{
+    let value = Value::deserialize(deserializer)?;
+    let shown = value.to_string();
+
+    match serde_json::from_value::<T>(value) {
+        Ok(known) => Ok(known),
+        Err(why) => {
+            // Said rather than swallowed. A setting that quietly reverts is a
+            // bug report nobody can act on.
+            crate::say!(
+                "{shown} is not a value this build knows ({why}), so that one \
+                 setting went back to its default"
+            );
+            Ok(T::default())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

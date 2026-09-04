@@ -121,11 +121,12 @@ impl Default for Hotkey {
 /// Rust only holds the choice. The palettes themselves are `[data-theme]`
 /// blocks in `theme.css`, because a colour is presentation and a preference is
 /// state, exactly as `InterfaceFont` already splits.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum Theme {
     /// Neutral near-black with a desaturated blue-grey accent. The default,
     /// and the palette Sill shares with StreamNook.
+    #[default]
     WintersGlass,
     /// The same restraint with a faint iridescent wash across the window.
     /// The only theme that paints anything beyond a flat tint.
@@ -151,7 +152,7 @@ pub enum Theme {
 /// greyscale coverage, because blending against pixels it cannot see has no
 /// correct answer. So the question is not which face is best hinted, it is
 /// which one holds up once the display's subpixels are no longer available.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum InterfaceFont {
     /// Satoshi, bundled. The default.
@@ -159,6 +160,7 @@ pub enum InterfaceFont {
     /// Even stems and enough weight at 13px that it does not go anaemic
     /// under greyscale coverage, which is the condition it is actually
     /// rendered in here.
+    #[default]
     Satoshi,
     /// Inter, bundled. Drawn for displays where hinting no longer decides
     /// anything, which is not this one.
@@ -169,11 +171,12 @@ pub enum InterfaceFont {
 }
 
 /// Which desktop backdrop the window uses.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Backdrop {
     /// Windows acrylic. Adds a luminosity layer of its own, so it always
     /// lightens somewhat however dark the tint.
+    #[default]
     Acrylic,
     /// The older composition blur. No luminosity layer, so the tint given is
     /// the tint that shows.
@@ -188,13 +191,14 @@ pub enum Backdrop {
 /// somebody works. The window used to be centred once at startup and never
 /// moved again, so it always came up on the primary monitor however far away
 /// that was, and a display change could leave it off every screen entirely.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum SummonOn {
     /// The screen the mouse is on. The default, and what most launchers do:
     /// the pointer is the cheapest available guess at where somebody is
     /// looking, and it is right whenever they reached for the keyboard from
     /// whatever they were just clicking.
+    #[default]
     Cursor,
     /// The screen holding the window that had focus.
     ///
@@ -209,8 +213,10 @@ pub enum SummonOn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Appearance {
+    #[serde(default, deserialize_with = "crate::json_store::forgiving")]
     pub backdrop: Backdrop,
     /// Which palette everything is drawn in.
+    #[serde(default, deserialize_with = "crate::json_store::forgiving")]
     pub theme: Theme,
     /// How strongly a theme's chroma wash is painted, 0 to 2.
     ///
@@ -220,6 +226,7 @@ pub struct Appearance {
     /// three coloured blobs.
     pub chroma_strength: f32,
     /// Which face everything is set in.
+    #[serde(default, deserialize_with = "crate::json_store::forgiving")]
     pub font: InterfaceFont,
     /// 0 is fully solid, 1 is pure tint over the desktop blur.
     pub glass_strength: f32,
@@ -230,6 +237,7 @@ pub struct Appearance {
     /// Launcher width in pixels.
     pub window_width: u32,
     /// Which screen it comes up on.
+    #[serde(default, deserialize_with = "crate::json_store::forgiving")]
     pub summon_on: SummonOn,
 }
 
@@ -275,6 +283,7 @@ pub struct Taps {
     /// Off by default, and for the same reason snippet expansion is: a
     /// launcher that installs a keyboard hook without being asked is not one
     /// anybody asked for.
+    #[serde(default, deserialize_with = "crate::json_store::forgiving")]
     pub modifier: Option<crate::taps::Modifier>,
     /// How long the second tap has to arrive.
     pub window_ms: u64,
@@ -757,10 +766,11 @@ impl Default for WebSearch {
 }
 
 /// What a screenshot does once it has been taken.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum AfterCapture {
     /// Straight to the clipboard, which is the fast path.
+    #[default]
     Copy,
     /// Straight into the editor, for anybody who marks up most of what they
     /// take. It reaches the clipboard from there.
@@ -827,6 +837,7 @@ impl Default for Scripts {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Screenshot {
+    #[serde(default, deserialize_with = "crate::json_store::forgiving")]
     pub after: AfterCapture,
     /// Whether clicking a window in the picker captures that window.
     ///
@@ -1671,6 +1682,61 @@ mod sealed_paths {
     /// take over, so somebody who hand-edited one line loses every other
     /// setting and every sealed key. This happened while testing something
     /// else, to a real preferences file.
+    /// The enum's own default and the one the struct uses are the same.
+    ///
+    /// Two places now say what a theme is when nothing says otherwise: the
+    /// `#[default]` variant, which is what a file naming an unknown theme
+    /// falls back to, and `Appearance::default()`, which is what a fresh
+    /// install gets. Nothing makes them agree, so this does. If they drift,
+    /// somebody with a bad value in their file gets a different theme from
+    /// somebody with no file at all, for no reason either of them could see.
+    #[test]
+    fn what_an_unknown_value_falls_back_to_is_what_a_fresh_install_gets() {
+        let fresh = Appearance::default();
+
+        assert_eq!(Backdrop::default(), fresh.backdrop);
+        assert_eq!(Theme::default(), fresh.theme);
+        assert_eq!(InterfaceFont::default(), fresh.font);
+        assert_eq!(SummonOn::default(), fresh.summon_on);
+        assert_eq!(AfterCapture::default(), Screenshot::default().after);
+        assert_eq!(
+            Option::<crate::taps::Modifier>::default(),
+            Taps::default().modifier
+        );
+    }
+
+    /// One unreadable value must not cost every other setting.
+    ///
+    /// This really happened, twice, to a real file: a saved `"rightControl"`
+    /// named a modifier the enum does not have, and the whole preferences
+    /// file was moved aside over it. Everything else in it went too, sealed
+    /// keys included.
+    #[test]
+    fn one_unknown_value_does_not_cost_every_other_setting() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("preferences.json");
+
+        std::fs::write(
+            &path,
+            r#"{
+                "hotkey": { "summon": "Alt+Space" },
+                "taps": { "modifier": "rightControl", "windowMs": 400 }
+            }"#,
+        )
+        .expect("write");
+
+        let prefs = Preferences::load(&path);
+
+        assert_eq!(
+            prefs.hotkey.summon, "Alt+Space",
+            "one unreadable modifier threw away the whole file"
+        );
+        assert!(
+            !path.with_extension("json.broken").exists(),
+            "the file was moved aside over one value"
+        );
+    }
+
     #[test]
     fn preferences_saved_with_a_byte_order_mark_still_read() {
         let dir = tempfile::tempdir().expect("temp dir");
