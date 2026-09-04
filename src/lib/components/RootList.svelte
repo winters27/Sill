@@ -3,7 +3,7 @@
   import { LISTBOX, optionId } from "$lib/results";
   import { groupOf, linesOf, scrollFor, type Line } from "$lib/list";
   import Instead from "./Instead.svelte";
-  import { noMatch, standing } from "$lib/instead";
+  import { rootEmpty, standing } from "$lib/instead";
   import LaunchIcon from "./LaunchIcon.svelte";
   import SettingsIcon, { type IconName } from "./SettingsIcon.svelte";
 
@@ -47,6 +47,15 @@
      * shown, so nobody could discover it.
      */
     numeric?: boolean;
+    /**
+     * Whether Sill is still reading this machine for the first time.
+     *
+     * Only used for what an empty list says. An empty list while the first
+     * scan is running and an empty list because a word matched nothing look
+     * the same and mean opposite things, and the wrong one of the two lands on
+     * somebody in their first minute with Sill.
+     */
+    building?: boolean;
   }
 
   let {
@@ -58,7 +67,11 @@
     asking = "",
     query = "",
     numeric = false,
+    building = false,
   }: Props = $props();
+
+  /** What the list says with nothing in it, which depends on why. */
+  const nothing = $derived(rootEmpty(query, building));
 
 
 
@@ -574,10 +587,12 @@
     {/if}
   {/each}
 
+  <!-- `loading` is the first scan, so a list that is empty because Sill has not
+       finished looking gets the loading tone rather than the empty one. -->
   <Instead
-    tone={standing({ failed: false, loading: false, count: commands.length })}
-    headline={noMatch(query)}
-    hint="Try fewer letters, or a word from further along the name."
+    tone={standing({ failed: false, loading: building, count: commands.length })}
+    headline={nothing.headline}
+    hint={nothing.hint}
   />
 </div>
 

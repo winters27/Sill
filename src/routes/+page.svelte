@@ -20,6 +20,7 @@
   import AiChat, { type Shown } from "$lib/components/AiChat.svelte";
   import ScriptOutput, { type Ran } from "$lib/components/ScriptOutput.svelte";
   import KeySheet from "$lib/components/KeySheet.svelte";
+  import Welcome from "$lib/components/Welcome.svelte";
   import { isBrowsing, selectionAfter } from "$lib/results";
   import { askedForTheKeys, deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import { asUrl, isPath, isUrl } from "$lib/typed";
@@ -88,6 +89,11 @@
     searchEmoji,
     fileSearchMissing,
     startFileSearch,
+    startEverything,
+    indexBuilding,
+    welcome as askWelcome,
+    // Aliased: `Welcome` is the component that draws this, imported above.
+    type Welcome as Greeting,
     type FileSearchMissing,
     recordUse,
     queryHistory,
@@ -438,6 +444,27 @@
    * changed without the launcher hearing about it.
    */
   let fileSearchGap = $state<FileSearchMissing | null>(null);
+
+  /**
+   * What the welcome says, on the one start that has one.
+   *
+   * Every sentence of it is built in Rust from what the machine answered, and
+   * the key one is what registering the summon key returned rather than what
+   * the settings file asks for. Held so it can be asked again: the rows offer
+   * to fix the things the paragraphs above them describe, and coming back from
+   * Settings with a working key should not leave the page still saying it is
+   * taken.
+   */
+  let greeting = $state<Greeting | null>(null);
+
+  /**
+   * Whether Sill has finished reading this machine for the first time.
+   *
+   * Only decides what an empty root list says. Asked on mount and again when
+   * Rust announces a new index, which is twice a session rather than anything
+   * that repeats.
+   */
+  let building = $state(false);
   let searchInput = $state<HTMLInputElement | null>(null);
   let formView = $state<ReturnType<typeof FormView> | null>(null);
   let panelOpen = $state(false);
@@ -693,6 +720,7 @@
         if (mode === "clipboard") return clipboardCount;
         if (mode === "conversations") return conversationRows.length;
         if (mode === "store") return storeCount;
+        if (mode === "welcome") return greeting?.steps.length ?? 0;
         return 0;
 
       default:
@@ -1370,7 +1398,77 @@
     }
   }
 
+  /**
+   * The welcome, put on screen when Rust says one is owed.
+   *
+   * Asked twice on purpose, and `commands.ts` says why: this window exists
+   * before the code that registers the summon key, so a question asked on
+   * mount can land before the one answer the welcome exists to get right. Rust
+   * answers "not yet" then, and hands the welcome to whichever of the two
+   * questions arrives after the key has been asked for.
+   */
+  async function offerWelcome() {
+    const said = await askWelcome();
+    if (!said) return;
+
+    greeting = said;
+    mode = "welcome";
+    selected = 0;
+    query = "";
+  }
+
+  /**
+   * What one row of the welcome does.
+   *
+   * Every branch is something the launcher already does another way. A welcome
+   * is a shortcut to behaviour that exists, never a place where new behaviour
+   * hides: an action only this page can reach is one no key could bind and no
+   * other surface could offer.
+   */
+  async function runWelcomeStep(index: number) {
+    const step = greeting?.steps[index];
+    if (!step) return;
+
+    switch (step.does) {
+      case "chooseKey":
+        await openSettings("shortcuts");
+        return;
+
+      case "chooseFolders":
+        await openSettings("files");
+        return;
+
+      case "startEverything":
+        try {
+          status = await startEverything();
+          // Asked again rather than assumed. Starting a program is a request
+          // and not a result, so the row stays until the answer changes.
+          greeting = (await askWelcome(true)) ?? greeting;
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+
+      case "showKeys":
+        mode = "keys";
+        selected = 0;
+        return;
+
+      case "finish":
+        mode = "root";
+        selected = 0;
+        query = "";
+        await refreshRoot();
+        return;
+    }
+  }
+
   async function openSelected() {
+    if (mode === "welcome") {
+      await runWelcomeStep(selected);
+      return;
+    }
+
     if (mode === "conversations") {
       const row = conversationRows[selected];
       if (row) await resumeConversation(row.entrypoint, row.title);
@@ -3350,6 +3448,7 @@
     let shown: UnlistenFn | undefined;
     let switcher: UnlistenFn | undefined;
     let indexed: UnlistenFn | undefined;
+    let welcomed: UnlistenFn | undefined;
     let changed: UnlistenFn | undefined;
     let ran: UnlistenFn | undefined;
     let said: UnlistenFn | undefined;
@@ -3489,7 +3588,16 @@
       // on its own, so without this the user stares at the shorter first
       // list until they happen to type.
       indexed = await listen<number>("sill://registry-updated", () => {
+        // What an empty list means changes when this lands, so it is re-asked
+        // here rather than left at whatever it was on mount.
+        void indexBuilding().then((yes) => (building = yes));
         if (mode === "root") void refreshRoot();
+      });
+
+      // Rust puts the launcher up on a first run and says what it opened it
+      // for. Not the only way this arrives: see `offerWelcome`.
+      welcomed = await listen("sill://welcome", () => {
+        void offerWelcome();
       });
 
 
@@ -3557,6 +3665,21 @@
         // between two uses of the launcher, and the alternative to asking here
         // is asking on every keystroke.
         void fileSearchMissing().then((why) => (fileSearchGap = why));
+
+        /*
+         * The welcome, asked again if one is on screen.
+         *
+         * Its rows send somebody to Settings to change the very things the
+         * paragraphs above them describe, and this is the moment they come
+         * back. Without it the page goes on saying the summon key is taken
+         * after they have chosen one that is not, which is the same kind of
+         * stale claim the whole item is about.
+         */
+        if (mode === "welcome") {
+          void askWelcome(true).then((said) => {
+            if (said) greeting = said;
+          });
+        }
 
         // Asked for explicitly, because the launcher is not where you were
         // when you left: reopening on a half-finished command is only right
@@ -3692,8 +3815,14 @@
       navKeys = await navigationChords();
       past = await queryHistory();
       void refreshWhoAnswers();
+      building = await indexBuilding();
       await refreshRoot();
       searchInput?.focus();
+
+      // Last, because it is the only thing here that changes what is on
+      // screen, and because on all but one start in the life of a machine it
+      // does nothing at all.
+      await offerWelcome();
     })();
 
     return () => {
@@ -3707,6 +3836,7 @@
       finishedScript?.();
       switcher?.();
       indexed?.();
+      welcomed?.();
       changed?.();
       ran?.();
       said?.();
@@ -3825,6 +3955,22 @@
       <KeySheet />
     </div>
 
+  {:else if mode === "welcome" && greeting}
+    <!-- The first summon on a machine Sill has not run on. Every sentence
+         comes from Rust, built from what registering the summon key actually
+         answered rather than from the key the settings file asks for. -->
+    <div class="listing">
+      <Welcome
+        said={greeting}
+        {selected}
+        onselect={(i) => (selected = i)}
+        onrun={(i) => {
+          selected = i;
+          void openSelected();
+        }}
+      />
+    </div>
+
   {:else if mode === "store"}
     <!-- The launcher's own field is the store's search box, the same way it
          is the clipboard's filter. A view with a second search field would be
@@ -3870,6 +4016,7 @@
         {selected}
         {live}
         {query}
+        {building}
         numeric={prefs?.navigation.numeric ?? false}
         asking={`${mode}:${query}`}
         onselect={(i) => (selected = i)}

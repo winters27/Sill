@@ -76,6 +76,41 @@ export interface EmptyWords {
 }
 
 /**
+ * What the root list says when it has nothing in it.
+ *
+ * Two different silences that look identical on screen. Sill reads every
+ * shortcut, every uninstall entry and every executable on `PATH` before the
+ * root list has anything in it, and on a first run that is the second or so
+ * somebody spends typing their first word. Until this existed the answer to
+ * that word was "No results for chrome. Try fewer letters, or a word from
+ * further along the name", which is a claim about their machine made before
+ * Sill had looked at it, and it arrives in the first minute of using the
+ * application, which is the worst possible minute to be told there is nothing
+ * here.
+ *
+ * `building` comes from Rust, because whether the first scan has landed is a
+ * fact about the index and the index lives there. The window cannot tell an
+ * index that is empty from one that has not been read.
+ *
+ * The word typed is deliberately not named while the scan is running. It
+ * matched nothing yet, and saying so would be the same wrong claim in a
+ * politer voice.
+ */
+export function rootEmpty(query: string, building: boolean): EmptyWords {
+  if (building) {
+    return {
+      headline: "Still reading what is installed",
+      hint: "Sill is going through this machine for the first time. It happens once, and results appear as they are found.",
+    };
+  }
+
+  return {
+    headline: noMatch(query),
+    hint: "Try fewer letters, or a word from further along the name.",
+  };
+}
+
+/**
  * What a list an extension rendered says when it has no rows in it.
  *
  * Three sentences again, and the middle one is the reason this exists.

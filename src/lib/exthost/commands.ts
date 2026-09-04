@@ -373,6 +373,82 @@ export function keyboardReference(): Promise<KeySection[]> {
   return invoke<KeySection[]>("keyboard_reference");
 }
 
+/** A block of prose on the welcome: the line to read and the one under it. */
+export type Said = { headline: string; body: string };
+
+/** What choosing a row on the welcome does. */
+export type WelcomeDoes =
+  | "chooseKey"
+  | "chooseFolders"
+  | "startEverything"
+  | "showKeys"
+  | "finish";
+
+/** One row of the welcome. */
+export type WelcomeStep = {
+  id: string;
+  title: string;
+  subtitle: string;
+  does: WelcomeDoes;
+};
+
+/** Everything the welcome says, assembled in Rust. */
+export type Welcome = {
+  opening: Said;
+  summonTaken: boolean;
+  tray: Said;
+  steps: WelcomeStep[];
+};
+
+/**
+ * What to say on a first run, or nothing.
+ *
+ * ## Why the window writes none of this
+ *
+ * The first line of a welcome names the key that opens Sill, and the settings
+ * file is the wrong place to read it from: it holds the key that was asked
+ * for, not the one Windows agreed to. Those two have disagreed on the machine
+ * this was written on at every start for weeks. Rust reads what registration
+ * answered and hands back sentences; nothing here composes one.
+ *
+ * ## Two ways of asking, and why both exist
+ *
+ * `again: false` is the question that puts a welcome on screen, and Rust
+ * answers it at most once. `null` from it can also mean "the summon key has
+ * not been registered yet", because this window exists before the code that
+ * registers it. So it is asked on mount **and** when Rust says the launcher
+ * was opened for this, and exactly one of those two lands after the answer
+ * exists.
+ *
+ * `again: true` refreshes a welcome that is already up, which is what stops it
+ * saying a key is taken after somebody has changed it.
+ *
+ * Reported rather than silent. A first run that quietly shows nothing is a
+ * first run nobody can tell went wrong.
+ */
+export function welcome(again = false): Promise<Welcome | null> {
+  return invoke<Welcome | null>("welcome", { again }).catch(
+    orElse("launcher", "work out what to show you on a first run", null, "shortcuts"),
+  );
+}
+
+/** Starts the whole-drive indexer that is on this machine already. */
+export function startEverything(): Promise<string> {
+  return invoke<string>("start_everything");
+}
+
+/**
+ * Whether Sill has finished its first look at what is installed.
+ *
+ * What an empty root list means depends on it: still reading, or genuinely no
+ * match for the word typed. Silent, and false when it fails, because false is
+ * the ordinary answer and the cost of the fallback is one wrong sentence over
+ * an empty list rather than a claim about somebody's machine.
+ */
+export function indexBuilding(): Promise<boolean> {
+  return invoke<boolean>("index_building").catch(silently(false));
+}
+
 export function completePath(typed: string): Promise<string | null> {
   return invoke<string | null>("complete_path", { typed }).catch(silently(null));
 }

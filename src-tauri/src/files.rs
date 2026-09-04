@@ -135,7 +135,7 @@ fn verdict(
 /// the remedy offered then is an install that the package manager will decline
 /// as already present. That is a worse answer than the truth and a better one
 /// than silence.
-fn installed() -> bool {
+pub(crate) fn installed() -> bool {
     [
         r"C:\Program Files\Everything\Everything.exe",
         r"C:\Program Files (x86)\Everything\Everything.exe",

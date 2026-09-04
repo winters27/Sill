@@ -2093,23 +2093,34 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
- * The keyboard reference does not write a chord down.
+ * The two pages that name keys do not write a chord down.
  *
- * Every key on that page comes from `keyboard_reference`, which assembles it
- * from the movement preset, the action shortcuts and the summon key. A chord
- * typed into the component is a promise nothing keeps: it survives the key
- * being rebound, and the person reading it has no way to tell it is stale.
+ * Every key on the reference comes from `keyboard_reference`, and every
+ * sentence on the welcome comes from `welcome`, both assembled in Rust from
+ * the keys that are actually bound. A chord typed into either component is a
+ * promise nothing keeps: it survives the key being rebound, and the person
+ * reading it has no way to tell it is stale.
+ *
+ * The welcome is the worse of the two, and it is why this rule grew a second
+ * file. It is read once, before anybody knows enough to doubt it, and the key
+ * it names has been **refused at every start on this machine for weeks**. A
+ * hand-typed "Press Alt+Space" there is a first sentence that is false for
+ * whoever most needs it to be true.
  *
  * This project has been bitten four times by a hand-kept list quietly
  * disagreeing with the thing it describes, which is why the rule is a build
  * failure rather than a note.
  */
 {
-  const SHEET = "src/lib/components/KeySheet.svelte";
+  const PAGES = [
+    ["src/lib/components/KeySheet.svelte", "keyboard_reference"],
+    ["src/lib/components/Welcome.svelte", "welcome"],
+  ];
   const CHORD = /"(?:Ctrl|Alt|Shift|Cmd|Meta|Super)\+[A-Za-z0-9+]+"/g;
 
-  if (existsSync(SHEET)) {
-    const text = readFileSync(SHEET, "utf8");
+  for (const [sheet, from] of PAGES) {
+    if (!existsSync(sheet)) continue;
+    const text = readFileSync(sheet, "utf8");
 
     text.split("\n").forEach((line, at) => {
       // A comment may name a chord as an example; only code counts.
@@ -2117,13 +2128,114 @@ for (const file of sources("src-tauri/src")) {
 
       for (const found of line.matchAll(CHORD)) {
         fail(
-          SHEET,
+          sheet,
           at + 1,
-          `${found[0]} is written here rather than read from keyboard_reference, ` +
+          `${found[0]} is written here rather than read from ${from}, ` +
             "so it goes on saying so after the key is rebound",
         );
       }
     });
+  }
+}
+
+/*
+ * The welcome reads what registration answered, not what was configured.
+ *
+ * This is the whole point of `P5-08`. `preferences.hotkey.summon` is the key
+ * that was **asked for**; `HotkeyConflicts` holds what Windows **gave**, and
+ * the two have disagreed on this machine at every start for weeks. A `welcome`
+ * command that built its sentences from preferences alone would compile, pass
+ * every test that does not run it, and open somebody's first minute with Sill
+ * by telling them to press a key that does nothing.
+ *
+ * Nothing else can catch it. The command needs an `AppHandle` so no unit test
+ * reaches it, and the module it calls is pure and would go on passing its own
+ * tests while being handed a `summon_taken` that is always false.
+ */
+{
+  const WHERE = "src-tauri/src/commands/settings.rs";
+
+  if (existsSync(WHERE)) {
+    const text = readFileSync(WHERE, "utf8");
+    const at = text.indexOf("pub(crate) async fn welcome(");
+
+    if (at < 0) {
+      fail(WHERE, null, "the welcome command is gone, and with it the first run");
+    } else {
+      // To the closing brace of the function, counting from its own body.
+      const opened = text.indexOf("{", at);
+      let depth = 0;
+      let end = opened;
+      for (let i = opened; i < text.length; i++) {
+        if (text[i] === "{") depth++;
+        else if (text[i] === "}" && --depth === 0) {
+          end = i;
+          break;
+        }
+      }
+
+      if (!text.slice(opened, end).includes("HotkeyConflicts")) {
+        fail(
+          WHERE,
+          lineOf(text, at),
+          "the welcome is built without reading HotkeyConflicts, so it says " +
+            "the key in the settings file opens Sill whether or not Windows " +
+            "ever gave it to us",
+        );
+      }
+    }
+  }
+}
+
+/*
+ * A refused summon key opens the panel that actually holds that key.
+ *
+ * With the summon key taken there is no launcher to read a message in, so
+ * `P1-11` opens the settings window instead. It opened `general`, which held
+ * the row when that was written and stopped holding it when `P5-06` moved
+ * every hotkey under Shortcuts. The window went on opening, on the wrong
+ * panel, showing everything except the one control it was opened for, and
+ * nothing anywhere said so.
+ *
+ * The settings catalogue already records which panel every row is in, so the
+ * two are checked against each other rather than both being trusted.
+ */
+{
+  const WHERE = "src-tauri/src/lib.rs";
+  const CATALOGUE = "src-tauri/src/settings_index.rs";
+
+  if (existsSync(WHERE) && existsSync(CATALOGUE)) {
+    const named = /const SUMMON_SECTION: &str = "([^"]+)";/.exec(readFileSync(WHERE, "utf8"));
+
+    if (!named) {
+      fail(
+        WHERE,
+        null,
+        "SUMMON_SECTION is gone, so nothing says which panel a refused summon " +
+          "key should open",
+      );
+    } else {
+      /*
+       * The entry for the row itself, as `s(panel, name, title, keywords)`.
+       * Matched on the title rather than on position, because the catalogue is
+       * ordered by panel and an entry moving is not the failure being caught.
+       */
+      const entry = new RegExp(
+        String.raw`s\(\s*"([^"]+)",\s*"[^"]*",\s*"Summon hotkey"`,
+      ).exec(readFileSync(CATALOGUE, "utf8"));
+
+      if (!entry) {
+        fail(CATALOGUE, null, 'the catalogue has no "Summon hotkey" row to open');
+      } else if (entry[1] !== named[1]) {
+        fail(
+          WHERE,
+          null,
+          `a refused summon key opens the ${named[1]} panel and the row that ` +
+            `sets it is in ${entry[1]}, so the window opens on everything ` +
+            "except the one control it was opened for",
+        );
+      }
+    }
   }
 }
 

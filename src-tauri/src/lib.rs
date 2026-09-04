@@ -82,6 +82,7 @@ pub mod tts;
 pub mod utilities;
 pub mod weather;
 pub mod websearch;
+pub mod welcome;
 pub mod windowing;
 
 use std::path::PathBuf;
@@ -134,6 +135,16 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
     let workspaces = profiles_store::path(&handle);
 
     tauri::async_runtime::spawn(async move {
+        /*
+         * Held for the whole of the first build, and put down however it ends.
+         *
+         * What the launcher draws over an empty list depends on it: "still
+         * reading what is installed" while this is up, "no results for that
+         * word" once it is down. Two of the paths below give up early, so it
+         * is a guard rather than a store at the end.
+         */
+        let building = state::FirstScan::hold(state.first_scan.clone());
+
         /*
          * Both files are read here rather than before the spawn.
          *
@@ -226,6 +237,11 @@ fn load_registry(app: &tauri::App, handle: &AppHandle) {
         }
 
         println!("[sill] indexed {total} entries");
+
+        // Before the announcement, not after it. The window asks again when
+        // it hears this, and an answer of "still reading" to a question asked
+        // because the reading finished would be the wrong one by a frame.
+        drop(building);
 
         /*
          * The window has already drawn its list by now.
@@ -1003,6 +1019,88 @@ impl HotkeyConflicts {
     }
 }
 
+/// Whether Sill has ever run here, and whether that can be answered yet.
+///
+/// ## The fact, and where it comes from
+///
+/// A first run is a start with no settings file. That is the fact itself
+/// rather than a flag about it: nothing has to be written to make it true, it
+/// stops being true the moment anything saves, and it is right on a machine
+/// Sill has been uninstalled from and put back on. A `welcomed: true` field
+/// would be a second thing that could be wrong on its own.
+///
+/// ## Why the answer is withheld for a moment
+///
+/// Tauri creates the launcher's window **before** `setup` runs, so the page is
+/// already loading while the summon key is still being registered. The one
+/// sentence the welcome exists to get right is what that registration
+/// answered, and answering the window early would mean answering it "the key
+/// is fine" because nothing had asked for it yet. So `asked` is set once the
+/// key has been offered to Windows, and until then this says nothing at all.
+/// The window asks on mount and again when Rust tells it the launcher was
+/// opened for this, and exactly one of those two lands after the key.
+pub struct FirstRun {
+    /// The welcome is owed and has not been handed over.
+    ///
+    /// Taken rather than read, so a summon after the welcome has been shown
+    /// does not put it back on screen over whatever somebody is doing.
+    owed: std::sync::atomic::AtomicBool,
+    /// The summon key has been registered and the outcome recorded.
+    asked: std::sync::atomic::AtomicBool,
+    /// There was no settings file, so writing one is what records that Sill
+    /// has now been set up here.
+    unwritten: bool,
+}
+
+impl FirstRun {
+    /// `unwritten` is deliberately not `owed`.
+    ///
+    /// Forcing the welcome with `SILL_FIRST_RUN` on a machine that already has
+    /// settings must not write over them, and a settings file that is already
+    /// there is already the record that Sill has been set up here.
+    fn new(owed: bool, unwritten: bool) -> Self {
+        Self {
+            owed: std::sync::atomic::AtomicBool::new(owed),
+            asked: std::sync::atomic::AtomicBool::new(false),
+            unwritten,
+        }
+    }
+
+    /// Says the summon key has been offered to Windows and answered.
+    fn key_was_asked_for(&self) {
+        self.asked.store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Whether a welcome is owed, without taking it.
+    ///
+    /// For the startup path, which decides what else to do about a refused key
+    /// but is not the thing that hands the welcome over.
+    fn owed(&self) -> bool {
+        self.owed.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Whether a welcome is owed, and takes it if one is.
+    ///
+    /// False while the summon key has not been asked for: not "no welcome",
+    /// but "not yet", and the window asks again when Rust says the launcher
+    /// was opened for this.
+    ///
+    /// Taken rather than read, so the welcome is handed over once. The window
+    /// asks on mount and on the event, and only one of those two should put a
+    /// welcome on screen.
+    pub(crate) fn take(&self) -> bool {
+        use std::sync::atomic::Ordering;
+
+        self.asked.load(Ordering::Acquire) && self.owed.swap(false, Ordering::AcqRel)
+    }
+
+    /// Whether the registration outcome is known, which is what makes the
+    /// welcome answerable at all.
+    pub(crate) fn answerable(&self) -> bool {
+        self.asked.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
 /// Whether clicking away dismisses the launcher, asked at the moment it does.
 ///
 /// Its own flag rather than a read of the preferences, because the answer is
@@ -1022,6 +1120,16 @@ impl DismissOnBlur {
     }
 }
 
+/// The settings panel holding the row that sets the summon key.
+///
+/// It used to be `general`, which was right when `P1-11` wrote it and stopped
+/// being right when `P5-06` moved every hotkey under Shortcuts. The window
+/// went on opening a panel that no longer had the row, so the one control this
+/// exists to put in front of somebody was not on the screen it opened.
+/// `verify-source` reads the settings catalogue and refuses a section here
+/// that does not hold that row.
+const SUMMON_SECTION: &str = "shortcuts";
+
 /// Says out loud that the summon key never took.
 ///
 /// Everything else about a refused key is visible in the settings window, in
@@ -1034,7 +1142,11 @@ impl DismissOnBlur {
 /// So the settings window is opened, once, at the section holding that row.
 /// Heavy-handed for an ordinary setting, and right for this one: the
 /// alternative is an application that starts and then cannot be reached.
-fn report_summon_trouble(app: &AppHandle, summon: &str) {
+///
+/// **Except on a first run**, where the welcome is about to say the same thing
+/// with more room and the fix on it. `welcome::also_open_settings` holds that
+/// rule and a test says so.
+fn report_summon_trouble(app: &AppHandle, summon: &str, first_run: bool) {
     let taken = app
         .try_state::<HotkeyConflicts>()
         .map(|conflicts| conflicts.all().iter().any(|key| key == summon))
@@ -1061,12 +1173,16 @@ fn report_summon_trouble(app: &AppHandle, summon: &str) {
             "{summon} is taken by another application, so there is no way to summon Sill. \
              Choose a different combination."
         ),
-        Some("general"),
+        Some(SUMMON_SECTION),
     );
+
+    if !welcome::also_open_settings(true, first_run) {
+        return;
+    }
 
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = commands::settings::open_settings(handle, Some("general".to_string())).await;
+        let _ = commands::settings::open_settings(handle, Some(SUMMON_SECTION.to_string())).await;
     });
 }
 
@@ -1258,6 +1374,29 @@ fn manage_before_windows(app: &tauri::App) {
     // reading them later would mean applying a default and then immediately
     // replacing it.
     let prefs_path = preferences::path(&data_dir);
+
+    /*
+     * Whether Sill has run here, asked before the file is read.
+     *
+     * `Preferences::load` puts an unreadable file aside and can leave one
+     * behind it, so this is the last moment the question has a clean answer.
+     *
+     * `SILL_FIRST_RUN` forces it, which is how the welcome is looked at again
+     * without throwing away somebody's settings to do it. It does not make the
+     * file absent, so nothing is written and nothing is lost.
+     */
+    let fresh = !prefs_path.exists();
+    let forced = std::env::var_os("SILL_FIRST_RUN").is_some();
+
+    // Said out loud, like `SILL_NO_AUTOHIDE` below. A welcome appearing on a
+    // machine that has been set up for months is alarming without a line
+    // saying it was asked for.
+    if forced && !fresh {
+        println!("[sill] SILL_FIRST_RUN set: showing the welcome without writing anything");
+    }
+
+    app.manage(FirstRun::new(fresh || forced, fresh));
+
     let prefs = preferences::Preferences::load(&prefs_path);
 
     // Straight away, so a session started to reproduce a fault is detailed
@@ -1421,6 +1560,10 @@ pub fn run() {
             recording: Arc::new(std::sync::Mutex::new(())),
             scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             rescan: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // True until the first scan lands. The window exists before the
+            // hook that starts that scan, so the honest answer to an early
+            // question is "still reading" rather than "nothing here".
+            first_scan: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         })
         .setup(|app| {
             let handle = app.handle().clone();
@@ -1519,7 +1662,41 @@ pub fn run() {
             autohide_tray_menu(&handle);
             apply_autostart(&handle, prefs.general.open_at_login);
             watch_focus(&handle, prefs.hotkey.dismiss_on_blur);
-            report_summon_trouble(&handle, &prefs.hotkey.summon);
+
+            /*
+             * The summon key has now been offered to Windows and answered.
+             *
+             * Said before anything reads the answer, and said whatever the
+             * answer was: the welcome is unanswerable until this point and the
+             * window may already have asked, so the flag is what releases it.
+             */
+            let first_run = {
+                let first = app.state::<FirstRun>();
+                first.key_was_asked_for();
+                first.owed()
+            };
+
+            report_summon_trouble(&handle, &prefs.hotkey.summon, first_run);
+
+            if first_run {
+                /*
+                 * The settings file, written once.
+                 *
+                 * Its absence is what says this is a first run, so writing it
+                 * is what stops the welcome being every run. Only when there
+                 * was not one: `SILL_FIRST_RUN` shows the welcome again on a
+                 * machine that already has settings, and that must not put
+                 * them through a save.
+                 */
+                if app.state::<FirstRun>().unwritten {
+                    let state = app.state::<PrefsState>();
+                    if let Err(err) = prefs.save(&state.path) {
+                        crate::say!("could not write the first settings file: {err}");
+                    }
+                }
+
+                summon::show_welcome(&handle);
+            }
 
             // Read on every summon, from a synchronous path, so it is kept as
             // an atomic rather than behind the preferences lock.
@@ -1837,6 +2014,8 @@ pub fn run() {
             commands::search::list_drives,
             commands::search::index_folder,
             commands::search::start_file_search,
+            commands::search::start_everything,
+            commands::search::index_building,
             commands::settings::hotkey_conflicts,
             commands::settings::status_troubles,
             commands::settings::note_unreadable,
@@ -1850,6 +2029,7 @@ pub fn run() {
             commands::settings::navigation_keys,
             commands::settings::action_shortcuts,
             commands::settings::keyboard_reference,
+            commands::settings::welcome,
             commands::settings::terminal_profiles,
             commands::settings::emoji_tones,
             commands::search::list_monitors,
@@ -1968,7 +2148,59 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{DismissOnBlur, HotkeyConflicts};
+    use super::{DismissOnBlur, FirstRun, HotkeyConflicts};
+
+    /**
+    The welcome is not answered before the summon key has been asked for.
+
+    This is the ordering the whole first run turns on. Tauri creates the
+    launcher's window **before** the `setup` hook that registers the key, so
+    the page can ask what to show while nothing has yet asked Windows for
+    anything. Answering then would answer "the key is fine", which on this
+    machine is false and has been at every start for weeks.
+
+    So the page asks twice, on mount and again when Rust says the launcher was
+    opened for this, and this is the flag that decides which of the two gets an
+    answer.
+    */
+    #[test]
+    fn nothing_is_owed_until_the_summon_key_has_been_asked_for() {
+        let first = FirstRun::new(true, true);
+
+        assert!(
+            !first.answerable(),
+            "answerable before the key was asked for"
+        );
+        assert!(!first.take(), "the welcome was handed over before the key");
+
+        first.key_was_asked_for();
+
+        assert!(first.answerable());
+        assert!(first.take(), "the welcome was lost by asking too early");
+    }
+
+    /// And it is handed over once.
+    ///
+    /// Both the mount question and the event ask, and a welcome that came back
+    /// on the second would appear over whatever somebody had started doing.
+    #[test]
+    fn the_welcome_is_handed_over_exactly_once() {
+        let first = FirstRun::new(true, true);
+        first.key_was_asked_for();
+
+        assert!(first.take());
+        assert!(!first.take(), "the welcome came back a second time");
+    }
+
+    /// A start that is not a first run owes nothing, whenever it is asked.
+    #[test]
+    fn a_start_that_is_not_a_first_run_owes_nothing() {
+        let first = FirstRun::new(false, false);
+        first.key_was_asked_for();
+
+        assert!(first.answerable());
+        assert!(!first.take());
+    }
 
     /// A key that binds after being refused stops being reported.
     ///

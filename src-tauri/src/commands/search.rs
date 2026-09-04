@@ -968,6 +968,33 @@ pub(crate) async fn file_search_missing(
     ))
 }
 
+/// Whether Sill has finished looking at what is installed for the first time.
+///
+/// Asked on mount and again when Rust says the index changed, which is two
+/// calls per session rather than anything that repeats. What it decides is one
+/// sentence: an empty root list while this is true is "still reading what is
+/// installed", and an empty root list once it is false is "no results for that
+/// word". They look the same on screen and mean opposite things, and the wrong
+/// one on a first run tells somebody there is nothing here.
+#[tauri::command]
+pub(crate) fn index_building(registry: State<'_, RegistryState>) -> bool {
+    registry
+        .first_scan
+        .load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Starts the whole-drive indexer that is already on this machine.
+///
+/// Its own command rather than a branch of `start_file_search`, which answers
+/// the question "what is stopping file search from answering" and rightly says
+/// nothing at all when Sill's own index is working. This is the other case:
+/// file search answers, and there is still a program sitting closed that would
+/// see the rest of the machine.
+#[tauri::command]
+pub(crate) async fn start_everything() -> Result<String, String> {
+    files::start().map(|()| "Starting whole drive search.".to_string())
+}
+
 /// Whether the index is being rebuilt right now.
 fn busy(catalog: &CatalogState) -> bool {
     catalog.building.load(std::sync::atomic::Ordering::Acquire)
@@ -979,10 +1006,8 @@ fn busy(catalog: &CatalogState) -> bool {
 /// row does the right thing. Which of the two it is was already decided by
 /// [`files::missing`], and asking again here keeps the decision in one place.
 ///
-/// The install runs in a console window somebody can see. A package manager
-/// asks about agreements and can fail on a network, and a launcher that
-/// swallowed all of that and reported nothing would be worse than one that
-/// shows the same output a person would have seen typing it themselves.
+/// Nothing here installs anything. It used to, and the row that ran it said
+/// something else entirely while it did; see the `Absent` arm below.
 #[tauri::command]
 pub(crate) async fn start_file_search(
     state: State<'_, PrefsState>,

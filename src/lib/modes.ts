@@ -47,6 +47,7 @@ export const MODES = [
   "conversations",
   "keys",
   "destination",
+  "welcome",
 ] as const;
 
 export type Mode = (typeof MODES)[number];
@@ -161,6 +162,23 @@ const behaviour: Record<Mode, Behaviour> = {
    * search, which Escape is for.
    */
   keys: { rows: "none", searches: false, shows: "own", escape: true, actions: false },
+  /**
+   * The first summon on a machine Sill has not run on before.
+   *
+   * Rows rather than a page of prose, unlike the reference above it, because
+   * every line on it is something to do: choose a key that is free, pick the
+   * folders to search, start the whole-drive indexer. A welcome that only
+   * describes leaves the reader to go and find each of those.
+   *
+   * `escape: false` on purpose. Escape here means "I have read it, let me
+   * search", which is exactly what the general branch of `goBack` already
+   * does, so the welcome needs no branch of its own to be leaveable. The
+   * reference above takes its own Escape because it dismisses instead.
+   *
+   * `searches: false`: typing is not a filter over five rows, and re-running
+   * the index search behind them would answer a question nobody asked.
+   */
+  welcome: { rows: "own", searches: false, shows: "own", escape: false, actions: false },
   /**
    * The extension store, with actions on the listing under the cursor.
    *
