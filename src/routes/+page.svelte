@@ -6,7 +6,8 @@
   import { openQuicklink } from "$lib/quicklinks";
   import { saveWorkspace } from "$lib/workspaces";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { whenVisible } from "$lib/visible";
+  import { whenHidden, whenVisible } from "$lib/visible";
+  import { Latency, aroundPaint, type Painted } from "$lib/latency";
   import { forgetUnreadable } from "$lib/status";
   import ListView from "$lib/components/ListView.svelte";
   import GridView from "$lib/components/GridView.svelte";
@@ -71,6 +72,7 @@
     searchProcesses,
     searchDestinations,
     summonPainted,
+    reportPainted,
     systemStates,
     searchCommands,
     unloadExtension,
@@ -299,7 +301,70 @@
    * is looking at moves. **A new source that awaits between two `show` calls
    * puts a step back**, which is the thing to watch for.
    */
+  /**
+   * What the window took to draw, kept until the launcher is put away.
+   *
+   * See `$lib/latency` for what is being timed and what it deliberately
+   * leaves out. The short version: Rust knows when it answered and not when
+   * the answer reached a screen, and the screen is the half somebody waited
+   * for.
+   */
+  const drawn = new Latency();
+
+  /**
+   * When the keystroke now being answered was typed, if one is outstanding.
+   *
+   * Cleared by the first `show` that follows it, so the debounced second page
+   * of results is not recorded as another keystroke: it arrives later on
+   * purpose and only ever appends below what is already readable.
+   *
+   * Not `$state`. Nothing on screen depends on it, and making it reactive
+   * would invalidate everything that reads it on every letter.
+   */
+  let typedAt: number | null = null;
+
+  /**
+   * The extension whose first view has not arrived yet, and when Enter was
+   * pressed on it.
+   *
+   * Carries the session rather than only the time. An extension that fails to
+   * load, or one that runs and exits without drawing, would otherwise leave a
+   * stopwatch running for the next render to stop, and that render belongs to
+   * something else entirely.
+   */
+  let launchedAt: { at: number; session: string } | null = null;
+
+  /**
+   * Stops a stopwatch around the frame that draws the answer.
+   *
+   * Scheduled rather than read here, because this runs before Svelte has
+   * written anything to the document. See `aroundPaint`: the first frame is
+   * "everything needed is in the document and the frame that draws it has
+   * begun" and the one after it is "the pixels are out".
+   *
+   * Given one name, only the second is recorded, which is the honest single
+   * number because it includes the paint. Given two, both are, which is what
+   * the keystroke budget wants: there the difference between them is the
+   * display's refresh interval and the budget is one frame.
+   */
+  function stopClock(began: number, answered: Painted, presented?: Painted) {
+    const since = () => (performance.now() - began) * 1000;
+
+    aroundPaint(
+      requestAnimationFrame,
+      () => {
+        if (presented) drawn.record(answered, since());
+      },
+      () => drawn.record(presented ?? answered, since()),
+    );
+  }
+
   function show(rows: RankedCommand[], forQuery: string) {
+    // Before the rows are handed over, so nothing between here and the frame
+    // can start a second stopwatch for the same keystroke.
+    const began = typedAt;
+    typedAt = null;
+
     selected = selectionAfter(
       { id: commands[selected]?.id, index: selected },
       rows,
@@ -308,6 +373,8 @@
 
     commands = rows;
     showing = forQuery;
+
+    if (began !== null) stopClock(began, "keystrokeAnswered", "keystrokePresented");
   }
 
   /**
@@ -1877,6 +1944,15 @@
 
       try {
         status = `opening ${command.title}`;
+        /*
+         * From here, because from here is what somebody waited through.
+         *
+         * `extension_took` in Rust stops when the host hands back a session,
+         * which is before anything is on screen. Between the two are a worker
+         * starting, a bundle being evaluated and a first render arriving, and
+         * that gap is most of what "extensions are slow" has ever meant.
+         */
+        const askedAt = performance.now();
         // The query goes with it, so Sill learns the user's own shorthand
         // for this rather than only that they opened it.
         const launched = await launchCommand(command.id, query);
@@ -1951,6 +2027,7 @@
         // that never went through `goBack`.
         nav = NOT_NAVIGATED;
         session = launched.session;
+        launchedAt = { at: askedAt, session: launched.session };
         running = { title: launched.title, extensionTitle: launched.extensionTitle };
         mode = "command";
         selected = 0;
@@ -3352,6 +3429,7 @@
     let indexed: UnlistenFn | undefined;
     let changed: UnlistenFn | undefined;
     let ran: UnlistenFn | undefined;
+    let hidden: (() => void) | undefined;
     let said: UnlistenFn | undefined;
     let using: UnlistenFn | undefined;
     let wants: UnlistenFn | undefined;
@@ -3380,6 +3458,14 @@
             tree.apply(payload.ops);
             version++;
             status = "";
+
+            // The first render of this command, and only the first: an
+            // extension re-renders on every keystroke it handles, and those
+            // are not somebody waiting for it to open.
+            if (launchedAt?.session === payload.session) {
+              stopClock(launchedAt.at, "extensionFirstRender");
+              launchedAt = null;
+            }
             break;
           case "showToast":
           case "updateToast":
@@ -3516,6 +3602,25 @@
           code: event.payload.code,
           ended: event.payload.ended,
         };
+      });
+
+      /*
+       * What the window timed, handed to Rust on the way out.
+       *
+       * Here rather than as each reading is taken, because a keystroke is
+       * allowed one search and one delayed page and a third call would be the
+       * measuring making the thing worse. By the time the launcher is being
+       * put away nobody is waiting, and this is one call carrying everything
+       * that visit measured.
+       *
+       * Failing silently on purpose. A diagnostic that puts an error on
+       * screen while somebody is dismissing the launcher has cost them more
+       * than it will ever tell anybody.
+       */
+      hidden = whenHidden(() => {
+        for (const { what, tookUs } of drawn.flush()) {
+          void reportPainted(what, tookUs).catch(() => {});
+        }
       });
 
       // Through `whenVisible` rather than a `listen` of its own, because an
@@ -3704,6 +3809,7 @@
       stopTicking();
       unlisten?.();
       shown?.();
+      hidden?.();
       finishedScript?.();
       switcher?.();
       indexed?.();
@@ -3725,6 +3831,7 @@
     {mode}
     bind:query
     bind:field={searchInput}
+    ontyped={() => (typedAt = performance.now())}
     {selected}
     {browsing}
     awaitingTitle={awaiting?.title}

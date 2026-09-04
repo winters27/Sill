@@ -8,9 +8,43 @@ Every number was taken on one machine (Windows 11, 16 cores, 32 GB) against a
 release build. They are a baseline to notice changes from, not a specification
 anybody else's machine has to meet.
 
-## Enforced
+## Where each of these runs
 
-These fail a build or a device run when they are exceeded.
+A budget nobody enforces is a number that was true once. A gate that measures
+the wrong thing fails builds for no reason until somebody deletes it, and then
+teaches everybody to ignore red on the way out. So the first question is not
+what the thresholds are; it is where each one can honestly be taken.
+
+There are three answers, and every row below is in one of them.
+
+| Where | What belongs there | Why |
+| --- | --- | --- |
+| **Every push, on a shared agent** | counts, ratios, sizes, and structural facts | A hosted runner is a borrowed virtual machine with no display, no graphics hardware and neighbours competing for its cores. It cannot tell you what a frame costs. It can tell you perfectly well whether a number is zero, whether one thing grew faster than another, and whether a rule the code has to follow is still being followed. |
+| **A nightly run on a machine set aside for it** | milliseconds and megabytes of a running launcher | These need a real window, a real display and an idle machine. None of them may be a required check, because a required check that depends on what else the machine was doing is a check that goes red for reasons nobody can act on. |
+| **Not automated at all** | anything that means driving the launcher for minutes on somebody's desk | Some measurements cost more than they are worth to take. Where one of these can be answered from inside the process instead, it is, and the row says so. |
+
+**The third category is not a cop-out and it was learned rather than
+predicted.** Measuring memory after five hundred summons means opening and
+closing the launcher for several minutes. Written as a script and run on a
+working machine, it left ten launchers on somebody's desktop, because a toggle
+that does not land leaves a process behind and the loop does not notice. What
+the row was really asking is whether the state a summon leaves behind is
+bounded, and that can be asked of the structures directly, with no window at
+all, on every push. See `five_hundred_summons_leave_nothing_behind` in
+`timing.rs`.
+
+The same reasoning rules out driving the launcher with synthetic keys on a
+machine somebody is using. A global hotkey cannot be aimed: pressing Sill's
+summon key from a script sent it to whatever was in front, which was a browser,
+which changed the tab somebody was reading. The keystroke measurement therefore
+does not press anything. The launcher times itself while it is genuinely being
+used and writes the readings to its log, and `measure-keystroke.ps1` reads
+them.
+
+## Enforced on every push
+
+These fail `npm run verify`, and therefore the build, and they hold on a shared
+agent as well as they hold here.
 
 | What | Measured | Budget | Checked by |
 | --- | --- | --- | --- |
@@ -20,6 +54,8 @@ These fail a build or a device run when they are exceeded.
 | Rust core, at rest, nothing changing | 0 ms per 30 s | 500 ms per 30 s | `scripts/device-tests.ps1` |
 | Clipboard write-ahead log | 0 after a checkpoint | at most 2 MB | `tests/clipboard_merge.rs` |
 | Reading last run's file index | 24 to 77 ms | under 500 ms | `scripts/device-tests.ps1` |
+| What a summon leaves behind, over 500 of them | nothing; the ring and the two headings stay their own size | no growth | `timing.rs`, `five_hundred_summons_leave_nothing_behind` |
+| A repeating timer in the window that calls into Rust | 2, both accounted for | 0 unaccounted | `scripts/verify-source.mjs` |
 
 The ranking budgets are measured against a corpus deliberately worse than a
 real index: every title is built from the same sixteen words, so a query
@@ -27,6 +63,35 @@ matches nearly everything and the ranker does the most work it can. A real
 index of the same size answers in a fraction of it. The budget is there to
 catch a change in *kind*, where something that ran in microseconds starts
 running in milliseconds because it grew a clone per candidate.
+
+### The one behavioural gate, and why it is the strongest one here
+
+**Network at rest has to be zero.** Unlike every other row, that is a claim
+about what the product does rather than a number to stay under: there is no
+acceptable amount of traffic from a window that has been put away. Either it is
+quiet or the claim is false.
+
+It was false. A weather widget pinned to the chin asked a service for a reading
+every ten minutes for as long as the application was running, because
+`setInterval` in `onMount` runs until the component is destroyed and hiding a
+window destroys nothing. Six calls an hour on behalf of a window nobody could
+see. The fix was `pollWhileVisible`.
+
+Because the answer is a count and the count is zero, a shared agent can hold it
+as well as any machine can, and it is checked in the shape that would have
+caught the original: **a repeating timer in the window that calls into Rust has
+to go through `pollWhileVisible`, or say in one place why being hidden stops
+it.** Two do the second, and both entries carry their reasoning. A new widget
+that polls with a bare `setInterval` fails the build.
+
+Two things it deliberately does not do. It does not try to recognise a
+`setTimeout` that reschedules itself, because that needs following the code and
+a rule that guessed would be red for reasons nobody could act on; the clock
+widget is exactly that shape and reaches Rust for nothing, so there is nothing
+to catch. And it does not check the Rust side, where nearly every `sleep` is a
+one-shot wait for something to settle and telling those from a poller needs the
+call graph. What answers for Rust is the count taken on a real machine by
+`scripts/measure-network.ps1`.
 
 ### A small machine ranks as fast as a large one
 
@@ -50,6 +115,41 @@ of the four. A dual-core laptop answers a keystroke in the time this machine
 does. What a shared build agent has less of is single-core speed and exclusive
 use of it, which is why the budget is multiplied there and the measurement is
 printed on every run instead.
+
+## Enforced on a machine set aside for it
+
+Run by `scripts/nightly.ps1`, which refuses a debug build. **None of these is a
+required check**, deliberately: they depend on the display, the graphics driver
+and what else the machine is doing, and a merge gate that depends on those is a
+gate people learn to ignore.
+
+| What | Measured | Budget | Checked by |
+| --- | --- | --- | --- |
+| Keystroke to the frame that draws the answer | not yet on a release build | 16 ms | `scripts/measure-keystroke.ps1` |
+| Keystroke to the frame after that, when the pixels are certainly out | not yet on a release build | one refresh more | `scripts/measure-keystroke.ps1` |
+| Extension activation, Enter to its first view | not yet on a release build | 300 ms warm, 1,200 ms cold | `scripts/measure-keystroke.ps1` reads it; the app records it |
+| Network calls at rest, widgets pinned, 25 min | 0 in a 3 min and a 12 min watch on a debug build | 0 | `scripts/measure-network.ps1` |
+| Cold start to the hotkey answering | 465 ms best, 505 mean | 4,000 ms | `scripts/measure-summon.ps1` |
+| Summon, hotkey to being able to type | 25 ms median | 250 ms | `scripts/measure-summon.ps1` |
+| Rust core, idle, home folder indexed | 22.4 MB private | 40 MB | `scripts/device-tests.ps1` |
+
+**The keystroke budget is one frame at sixty hertz**, and that number is not
+headroom over a measurement. It is the deadline the work has: an answer that
+misses the frame it was typed in is a frame somebody spends looking at the old
+list. A threshold set just above today's figure is a threshold that gets raised
+the first time it fails, which is the failure mode this whole document exists
+to avoid.
+
+**Two numbers rather than one, because either alone misleads.** `answered` stops
+when the rows are in the document and the frame that draws them has begun;
+`presented` stops at the start of the next frame, which is the first moment the
+pixels are certainly out. Reporting only the first would be a keystroke-to-paint
+figure with the paint left out. Reporting only the second charges Sill for the
+display's refresh interval and makes an instant answer look like a sixteen
+millisecond one. Neither includes anything before the field heard about the
+key: the keyboard, its driver, Windows and WebView2's input plumbing are
+invisible from inside the page, and no figure here should be read as though
+they were not.
 
 ## Measured, not yet enforced
 
@@ -76,6 +176,9 @@ outside the code.
 | File search, one query | 3 to 10 ms |
 | Extension host, resident with nothing loaded | 0, it is not started until an extension is |
 | Rust core while a home folder is being written to | 3.4 s of processor per 30 s, about a tenth of one core |
+| Keystroke to the frame that draws it, **debug build behind a dev server** | 215 ms median, 298 ms worst, over 9 keystrokes |
+| The same keystrokes to the frame after that | 219 ms median, 308 ms worst |
+| Remote connections at rest, 12 minutes, three widgets pinned | 0 |
 
 ### What the idle numbers are worth
 
@@ -106,6 +209,17 @@ cargo test --release --manifest-path src-tauri/Cargo.toml --test budgets measure
 
 ```powershell
 powershell -File scripts/measure-idle.ps1 -Label after
+```
+
+```powershell
+# Use Sill for a minute, put it away, then ask what it cost.
+pwsh -File scripts/measure-keystroke.ps1
+```
+
+```powershell
+# Everything above that needs a running launcher, in one go. Refuses a debug
+# build, and wants a machine nobody is using.
+pwsh -File scripts/nightly.ps1
 ```
 
 That one reports the settings that change what it means, rather than pinning
@@ -159,6 +273,20 @@ Summon latency and cold start have moved out of this section: measured on the
 release build at 25 ms median and 846 ms, held there by
 `scripts/measure-summon.ps1`, and written up in `docs/roadmap.md`.
 
+- **Every millisecond figure here is a release figure, and the keystroke rows
+  are not yet among them.** The 215 ms above is a debug build served by a
+  development server, which is two orders of magnitude away from the build the
+  claim is about: Sill's pixel work measures 125 to 414 ms in debug against 3
+  to 7 in release. It is recorded because it proves the measurement exists and
+  arrives end to end, and for no other reason. **Nothing should be quoted from
+  it.**
+- **Extension activation to its first view has an instrument and no reading.**
+  The app records it and `measure-keystroke.ps1` will report it; taking the
+  number means opening an extension on a machine set aside for it.
+- **The whole-tree idle memory row still has no threshold.** It is measured by
+  `measure-idle.ps1` and reported rather than enforced, because what it costs
+  depends on which widgets are pinned and what is indexed, and those are
+  settings rather than regressions.
 - **Screen reader behaviour.** The markup follows the combobox pattern and the
   rule for when it applies is unit tested, but nothing here has been heard by
   NVDA or Narrator.

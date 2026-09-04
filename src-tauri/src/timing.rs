@@ -156,6 +156,71 @@ pub struct Report {
     pub sources: Vec<Cost>,
     /// What each extension opened this session has cost, slowest first.
     pub extensions: Vec<Cost>,
+    /// What the window took to draw, per kind of drawing.
+    ///
+    /// The half of every latency number Rust cannot see. See [`Painted`].
+    pub paints: Vec<Cost>,
+}
+
+/// Something the window drew, and therefore a stopwatch the page owns.
+///
+/// A closed set rather than a name the page may invent. The key ends up in a
+/// map that lives for the process, and a map keyed by whatever arrives over
+/// IPC is a map that grows for as long as somebody is willing to send new
+/// words. Everything here is a `&'static str` in the end, so recording one
+/// allocates nothing, which matters because the first two happen on the path
+/// a person types on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Painted {
+    /// Keystroke to the rows being in the document and their frame beginning.
+    ///
+    /// **This is the number the keystroke budget is about.** It is the part
+    /// Sill does and the part that has to fit inside a frame.
+    KeystrokeAnswered,
+    /// Keystroke to the start of the frame after that one, which is the first
+    /// moment the pixels are certainly on a screen.
+    ///
+    /// Always about one refresh longer than the above, and on an ordinary
+    /// display that refresh is the monitor waiting rather than Sill working.
+    /// Recorded beside it rather than instead of it, because a number called
+    /// "to paint" that stops before the paint is not the number, and one that
+    /// includes the refresh interval charges Sill for the display.
+    KeystrokePresented,
+    /// Enter on an extension row to the first view it drew.
+    ///
+    /// The other half of what [`Timings::extension_took`] measures. That one
+    /// stops when Rust has a session; this one stops when there is something
+    /// on screen, and between the two is a worker starting, a bundle being
+    /// evaluated and a render arriving.
+    ExtensionFirstRender,
+}
+
+impl Painted {
+    /// The name the page sends, which is also the key it is stored under.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::KeystrokeAnswered => "keystrokeAnswered",
+            Self::KeystrokePresented => "keystrokePresented",
+            Self::ExtensionFirstRender => "extensionFirstRender",
+        }
+    }
+
+    /// What the page sent, or nothing.
+    ///
+    /// Deliberately not a default. A name nobody recognises is a page and a
+    /// binary that disagree, and recording it under some other heading would
+    /// put a keystroke's time into an extension's row.
+    pub fn parse(name: &str) -> Option<Self> {
+        // Listed rather than matched with a fallback, so a variant added later
+        // fails to compile here instead of silently having no name.
+        [
+            Self::KeystrokeAnswered,
+            Self::KeystrokePresented,
+            Self::ExtensionFirstRender,
+        ]
+        .into_iter()
+        .find(|one| one.as_str() == name)
+    }
 }
 
 #[derive(Default)]
@@ -170,6 +235,8 @@ struct Inner {
     sources: BTreeMap<&'static str, Adding>,
     /// Keyed by an extension id, copied once the first time it is opened.
     extensions: BTreeMap<String, Adding>,
+    /// Keyed by a constant, because [`Painted`] is a closed set.
+    paints: BTreeMap<&'static str, Adding>,
 }
 
 /// The timings, held as managed state rather than in a static.
@@ -326,6 +393,50 @@ impl Timings {
         crate::detail!("{extension} loaded in {} ms", took.as_millis());
     }
 
+    /// The window drew something, and this is what it took.
+    ///
+    /// Arrives in batches rather than one call per keystroke, and that is the
+    /// point rather than an optimisation: the budget table allows a keystroke
+    /// one search and one delayed page, so a third call to report on the first
+    /// two would be the instrumentation breaking a budget in order to measure
+    /// one. The page keeps its readings and hands them over when the launcher
+    /// is put away, by which time nobody is waiting.
+    pub fn painted(&self, what: Painted, took: Duration) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.paints.entry(what.as_str()).or_default().add(took);
+        }
+    }
+
+    /// A whole batch, and what it looked like, in one line of the log.
+    ///
+    /// Written once per flush rather than once per reading. The scripts that
+    /// hold these to a budget read this line, and a device run that types a
+    /// dozen characters should leave a dozen numbers rather than a dozen
+    /// lines.
+    pub fn painted_all(&self, what: Painted, took: &[Duration]) {
+        if took.is_empty() {
+            return;
+        }
+
+        for one in took {
+            self.painted(what, *one);
+        }
+
+        // The worst as well as the middle. An average of two milliseconds over
+        // a sentence hides the one keystroke that took ninety, and the one
+        // that took ninety is what somebody felt.
+        let mut us: Vec<u128> = took.iter().map(|d| d.as_micros()).collect();
+        us.sort_unstable();
+
+        crate::say!(
+            "painted {} x{} median {} us worst {} us",
+            what.as_str(),
+            us.len(),
+            us[us.len() / 2],
+            us[us.len() - 1],
+        );
+    }
+
     pub fn report(&self) -> Report {
         let Ok(inner) = self.inner.lock() else {
             return Report {
@@ -334,6 +445,7 @@ impl Timings {
                 median_ms: None,
                 sources: Vec::new(),
                 extensions: Vec::new(),
+                paints: Vec::new(),
             };
         };
 
@@ -345,6 +457,7 @@ impl Timings {
             summons,
             sources: worst_first(inner.sources.iter().map(|(name, add)| add.named(name))),
             extensions: worst_first(inner.extensions.iter().map(|(name, add)| add.named(name))),
+            paints: worst_first(inner.paints.iter().map(|(name, add)| add.named(name))),
         }
     }
 }
@@ -655,6 +768,151 @@ mod tests {
         assert_eq!(first.count, 2);
         assert_eq!(first.slowest_us, 9_000);
         assert!(report.extensions.iter().all(|c| c.name != "one-too-many"));
+    }
+
+    /// The page cannot invent a heading to file a reading under.
+    ///
+    /// The key lives in a map that lasts as long as the process, so a name
+    /// arriving over IPC and being accepted is a map that grows for as long as
+    /// somebody keeps sending new words.
+    #[test]
+    fn only_the_three_things_the_window_draws_have_a_name() {
+        assert_eq!(
+            Painted::parse("keystrokeAnswered"),
+            Some(Painted::KeystrokeAnswered)
+        );
+        assert_eq!(
+            Painted::parse("extensionFirstRender"),
+            Some(Painted::ExtensionFirstRender)
+        );
+
+        assert_eq!(Painted::parse("KeystrokeAnswered"), None);
+        assert_eq!(Painted::parse("whatever"), None);
+        assert_eq!(Painted::parse(""), None);
+    }
+
+    /// A batch is added up, and the two ends of a keystroke stay apart.
+    ///
+    /// Filing both under one heading would average the frame Sill spent with
+    /// the frame the monitor spent, and the difference between those two is
+    /// the entire budget.
+    #[test]
+    fn a_batch_of_keystrokes_is_added_up_under_its_own_heading() {
+        let timings = Timings::new();
+
+        timings.painted_all(
+            Painted::KeystrokeAnswered,
+            &[
+                Duration::from_micros(1_000),
+                Duration::from_micros(9_000),
+                Duration::from_micros(2_000),
+            ],
+        );
+        timings.painted_all(
+            Painted::KeystrokePresented,
+            &[
+                Duration::from_micros(17_000),
+                Duration::from_micros(25_000),
+                Duration::from_micros(18_000),
+            ],
+        );
+
+        let report = timings.report();
+        let by = |name: &str| {
+            report
+                .paints
+                .iter()
+                .find(|cost| cost.name == name)
+                .expect("recorded")
+        };
+
+        assert_eq!(by("keystrokeAnswered").count, 3);
+        assert_eq!(by("keystrokeAnswered").total_us, 12_000);
+        assert_eq!(
+            by("keystrokeAnswered").slowest_us,
+            9_000,
+            "the worst keystroke is gone, which is the one somebody noticed"
+        );
+        assert_eq!(by("keystrokePresented").count, 3);
+        assert_eq!(by("keystrokePresented").average_us(), 20_000);
+    }
+
+    /// An empty batch is not a reading of zero.
+    ///
+    /// A visit where nobody typed hands over nothing, and a zero in this table
+    /// is a number somebody would quote.
+    #[test]
+    fn a_visit_with_no_typing_records_nothing() {
+        let timings = Timings::new();
+        timings.painted_all(Painted::KeystrokeAnswered, &[]);
+
+        assert!(timings.report().paints.is_empty());
+    }
+
+    /// Five hundred summons and five thousand keystrokes cost what one did.
+    ///
+    /// **This is the leak test for what a summon leaves behind**, and it runs
+    /// here rather than against a running launcher on purpose. Taking that
+    /// measurement outside means opening and closing the window for several
+    /// minutes, which cannot be done on a machine somebody is using: the first
+    /// attempt at it left ten launchers on a working desktop. Asking the
+    /// structures directly needs no window at all and answers the same
+    /// question about the same code, on every push, for nothing.
+    ///
+    /// What it covers is what accumulates per summon and per keystroke inside
+    /// this module, which is the state this file adds and the state a
+    /// measurement of the whole process would be dominated by anyway. **What
+    /// it cannot cover is the renderer's own heap**, which needs a window and
+    /// therefore a machine set aside for it. `docs/budgets.md` says which is
+    /// which.
+    #[test]
+    fn five_hundred_summons_leave_nothing_behind() {
+        let timings = Timings::new();
+
+        let after_one = {
+            timings.summon_began();
+            timings.summon_shown();
+            timings.summon_painted();
+            timings.painted_all(Painted::KeystrokeAnswered, &[Duration::from_micros(1_000)]);
+            timings.painted_all(Painted::KeystrokePresented, &[Duration::from_micros(2_000)]);
+            timings.report()
+        };
+
+        for _ in 0..500 {
+            timings.summon_began();
+            timings.summon_shown();
+            timings.summon_painted();
+
+            // Ten keystrokes a visit, which is a long query typed slowly
+            // enough that every one of them was answered.
+            let typed: Vec<Duration> = (0..10).map(Duration::from_micros).collect();
+            timings.painted_all(Painted::KeystrokeAnswered, &typed);
+            timings.painted_all(Painted::KeystrokePresented, &typed);
+            timings.source_took("commands", Duration::from_micros(3_000));
+        }
+
+        let after_many = timings.report();
+
+        // Kept summons are a ring, so five hundred of them are the same size
+        // as twenty.
+        assert_eq!(after_many.summons.len(), KEPT);
+        // And the two headings the window draws under are two headings, not
+        // five thousand rows.
+        assert_eq!(after_many.paints.len(), after_one.paints.len());
+        assert_eq!(after_many.sources.len(), 1);
+
+        // The counts still climb, which is the difference between bounded and
+        // broken: a structure that stopped growing by refusing to record would
+        // pass every assertion above and measure nothing.
+        assert_eq!(
+            after_many
+                .paints
+                .iter()
+                .find(|cost| cost.name == Painted::KeystrokeAnswered.as_str())
+                .expect("recorded")
+                .count,
+            1 + 500 * 10,
+        );
     }
 
     /// Nothing measured says nothing, rather than a zero somebody would quote.

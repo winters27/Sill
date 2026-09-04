@@ -2523,6 +2523,120 @@ if (tracked.status !== 0) {
   }
 }
 
+
+/*
+ * Nothing repeating in the window may talk to Rust unless being hidden stops
+ * it.
+ *
+ * **This is the one performance budget a shared build agent can honestly
+ * hold.** Every other row of `docs/budgets.md` is milliseconds or megabytes of
+ * a running application, and an agent is a borrowed virtual machine with no
+ * display, no graphics hardware and neighbours competing for its cores, so a
+ * threshold in either unit there measures the agent. This one is a count, and
+ * the count has to be zero.
+ *
+ * What it is protecting is a claim rather than a number: **a launcher nobody
+ * is looking at makes no network calls.** That was false for a long time and
+ * nothing said so. A widget pinned to the chin asked a weather service for a
+ * reading every ten minutes for as long as the application was running,
+ * because `setInterval` in `onMount` runs until the component is destroyed and
+ * hiding a window destroys nothing. Six calls an hour, on behalf of a window
+ * that had been put away since breakfast.
+ *
+ * The fix was `pollWhileVisible`, and this is what stops the next widget from
+ * missing it. A repeating timer that reaches Rust is the shape the bug had:
+ * `weather_now` is a network call and `machine_reading` walks every process on
+ * the machine, and from this file neither is distinguishable from the other,
+ * which is the point. Both are work done for nobody.
+ *
+ * **Scoped to `setInterval` deliberately.** A `setTimeout` that reschedules
+ * itself is the same hazard and cannot be recognised without following the
+ * code, and a rule that guessed would be red for reasons nobody could act on.
+ * The clock widget is exactly that shape and is exactly why: it draws from the
+ * machine's own time and never asks Rust anything, so the rule that would
+ * catch it has nothing to catch.
+ *
+ * The Rust half of the same claim is not checked here and cannot usefully be.
+ * A `sleep` in Rust is nearly always a one-shot wait for something to settle,
+ * a few dozen of them are, and telling those from a poller needs the call
+ * graph. What answers for Rust is the count taken on a real machine by
+ * `scripts/measure-network.ps1`.
+ */
+{
+  /**
+   * Timers that repeat, reach Rust, and are allowed to.
+   *
+   * Each entry has to say why being hidden cannot leave it running. A file
+   * added here without that reasoning is the check being switched off one
+   * line at a time.
+   */
+  const ALLOWED = {
+    // Stopped by Rust rather than by the page. `liveRows` returns nothing once
+    // Rust decides the launcher is not visible, and the ticker stops itself on
+    // an empty answer. Deliberately not the page's own decision: the window
+    // goes away by the hotkey, by a click elsewhere and by an action putting
+    // it away, and a timer recognising all three would be right until somebody
+    // added a fourth.
+    "src/routes/+page.svelte": "stops on an empty answer from `liveRows`",
+    // The settings window, which is closed rather than hidden, so there is no
+    // hidden state for a poller to survive into. It reads a local setup's
+    // progress and reaches no network at all.
+    "src/lib/components/settings/DictationPanel.svelte":
+      "the settings window closes rather than hides, and it reads local setup progress",
+  };
+
+  /** The module that owns the rule, and therefore the one timer that is real. */
+  const OWNS_THE_RULE = "src/lib/visible.ts";
+
+  let checked = 0;
+
+  for (const file of sources("src")) {
+    const at = file.split(/[\\/]/).join("/").replace(/^\.\//, "");
+    if (at === OWNS_THE_RULE || at.endsWith(".test.ts")) continue;
+
+    const text = readFileSync(file, "utf8");
+    if (!text.includes("setInterval(")) continue;
+
+    checked += 1;
+
+    // A timer through `pollWhileVisible` is the answer this rule wants, and
+    // needs no entry.
+    if (text.includes("pollWhileVisible")) continue;
+    // A timer that never asks Rust anything cannot make a call at rest.
+    if (!/\binvoke[(<]/.test(text)) continue;
+
+    if (ALLOWED[at]) continue;
+
+    fail(
+      at,
+      lineOf(text, text.indexOf("setInterval(")),
+      "a repeating timer that calls into Rust, in a file that neither goes " +
+        "through `pollWhileVisible` nor says why being hidden stops it, so " +
+        "this keeps working for a window nobody can see",
+    );
+  }
+
+  if (checked === 0) {
+    fail(
+      "scripts/verify-source.mjs",
+      null,
+      "no repeating timer was found anywhere in `src`, so this rule is " +
+        "checking nothing and would stay green through the bug it exists for",
+    );
+  }
+
+  for (const at of Object.keys(ALLOWED)) {
+    if (!existsSync(at)) {
+      fail(
+        "scripts/verify-source.mjs",
+        null,
+        `${at} is allowed a repeating timer and no longer exists, so the ` +
+          "list is now describing a tree that is not this one",
+      );
+    }
+  }
+}
+
 console.log(
   failures === 0 ? "source verification passed" : `\n${failures} problem(s) found`,
 );
