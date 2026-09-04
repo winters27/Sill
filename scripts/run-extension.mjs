@@ -547,7 +547,14 @@ function rowsDrawnNow() {
   return itemsOf(rowsOf(tree, top, "")).length;
 }
 
-async function untilDrawn({ patience = 20_000, quiet = 1_500, atLeast = 0 } = {}) {
+async function untilDrawn({
+  patience = 20_000,
+  quiet = 1_500,
+  // What this run is about to assert on: enough rows, enough dropdown options,
+  // a toast whose title is about to be read. Answered once, the wait is over.
+  arrived = undefined,
+  called = "it",
+} = {}) {
   const began = Date.now();
   const until = began + patience;
 
@@ -563,10 +570,10 @@ async function untilDrawn({ patience = 20_000, quiet = 1_500, atLeast = 0 } = {}
   const before = renders;
 
   while (Date.now() < until) {
-    // Enough rows is enough, whether or not it has gone quiet: a list that
-    // keeps redrawing has already answered the question being asked of it.
-    if (atLeast > 0 && rowsDrawnNow() >= atLeast) {
-      waits.push(`${rowsDrawnNow()} row(s) after ${Date.now() - began}ms`);
+    // Enough is enough, quiet or not: a list still redrawing has already
+    // answered the question about to be asked of it.
+    if (arrived && arrived()) {
+      waits.push(`${called} after ${Date.now() - began}ms`);
       return true;
     }
 
@@ -581,8 +588,8 @@ async function untilDrawn({ patience = 20_000, quiet = 1_500, atLeast = 0 } = {}
   // without saying whether anything ever drew sends the next person to read
   // the renderer, which is where I looked first and it was not there.
   waits.push(
-    atLeast > 0
-      ? `only ${rowsDrawnNow()} of ${atLeast} row(s) after ${patience}ms`
+    arrived
+      ? `never reached ${called} in ${patience}ms`
       : renders > before
         ? `${renders - before} render(s), still drawing after ${patience}ms`
         : `nothing drew in ${patience}ms`,
@@ -718,13 +725,43 @@ send({ jsonrpc: "2.0", id: 2, method: "Manager/ready", params: { session_id: ses
  * turns the deadline into the assertion: the rows arrive and it goes on, or
  * patience runs out and the count it prints is the real one.
  */
+// A dropdown is not a row, so waiting for rows never covers it, and
+// `hacker-news` is asserted on its dropdown alone. Same wait, different count.
+const wantsDropdown = Number(argAfter("--expect-dropdown") ?? 0);
+
+function dropdownDrawnNow() {
+  const top = tree.top();
+  return top ? (dropdownOf(tree, top)?.options.length ?? 0) : 0;
+}
+
 const wantsRows = Math.max(
   Number(argAfter("--expect-icons") ?? 0),
   Number(argAfter("--expect-accessories") ?? 0) > 0 ? 1 : 0,
   Number(argAfter("--expect-rows") ?? 0),
 );
 
-await untilDrawn({ atLeast: wantsRows });
+const wanted = [
+  wantsRows > 0 && {
+    enough: () => rowsDrawnNow() >= wantsRows,
+    said: `${wantsRows} row(s)`,
+  },
+  wantsDropdown > 0 && {
+    enough: () => dropdownDrawnNow() >= wantsDropdown,
+    said: `${wantsDropdown} dropdown option(s)`,
+  },
+].filter(Boolean);
+
+await untilDrawn(
+  wanted.length
+    ? {
+        // Every one of them, not the first to land. A run asking for rows and
+        // a dropdown that stopped at the dropdown would read the rows early,
+        // which is the failure this whole change exists to remove.
+        arrived: () => wanted.every((one) => one.enough()),
+        called: wanted.map((one) => one.said).join(" and "),
+      }
+    : {},
+);
 
 /**
  * What the field said, and what it reached.
@@ -742,10 +779,43 @@ if (typed !== undefined) {
   field.before = before ? itemsOf(rowsOf(tree, before, "")).length : 0;
   field.heard = type(field.props.onChange, typed);
 
-  // Until the handler has finished re-rendering, rather than for a fixed
-  // time. An extension that filters in memory answers in one frame and one
-  // that fetches takes as long as it takes.
-  await untilDrawn({ quiet: 500 });
+  /*
+   * Until the handler has finished re-rendering, rather than for a fixed time.
+   * An extension that filters in memory answers in one frame and one that
+   * fetches takes as long as it takes.
+   *
+   * Waiting for a render was wrong in both directions. `List.filtering` hands
+   * the narrowing to the host, so the extension never draws again and the wait
+   * burned its full patience on every run: 20 s the gate did not need, and
+   * invisible, because a wait that is merely wasted looks exactly like a wait
+   * that was needed. An extension that refetches instead may take longer than
+   * any figure worth hard-coding.
+   *
+   * So wait for the count this run is about to assert, which is right for both
+   * and needs no guess about which kind of extension this is.
+   */
+  const narrowingTo = Number(argAfter("--expect-rows") ?? 0);
+  const narrowedNow = () => {
+    const now = tree.top();
+    if (!now) return 0;
+    return itemsOf(rowsOf(tree, now, field.props?.filtering ? typed : "")).length;
+  };
+
+  /*
+   * Only when there is something to narrow. If the list already sits at the
+   * expected count, "narrowed enough" is true of the tree before typing, and
+   * the wait would return on the state it is supposed to be waiting past.
+   */
+  const willNarrow = narrowingTo > 0 && field.before > narrowingTo;
+
+  await untilDrawn(
+    willNarrow
+      ? {
+          arrived: () => narrowedNow() <= narrowingTo,
+          called: `the list down to ${narrowingTo} row(s)`,
+        }
+      : { quiet: 500 },
+  );
 
   const after = tree.top();
   const narrow = field.props?.filtering ? typed : "";
@@ -814,7 +884,14 @@ const pressed = {
 if (pressed.wanted) {
   pressed.before = toast?.title;
   pressed.found = activate(toast?.actions?.[0]?.handler);
-  await settle(1000);
+  // The title this is about to read is the whole assertion, so wait for it to
+  // change rather than for a second to pass. Same reason as `untilDrawn`: a
+  // sleep long enough here is a sleep too short on a slower machine.
+  await untilDrawn({
+    patience: 10_000,
+    arrived: () => toast?.title !== pressed.before,
+    called: "the toast retitled",
+  });
   pressed.after = toast?.title;
 }
 
