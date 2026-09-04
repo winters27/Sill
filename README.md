@@ -9,6 +9,13 @@ Rust and Tauri 2 underneath, Svelte 5 on top. MIT licensed.
 **Status: early.** Version 0.1.0, no installer published yet. It is used daily
 by its author on Windows 11 and nowhere else. Build it from source.
 
+[Using Sill](docs/guide.md) is the guide for somebody with it open.
+[Writing an extension](docs/extensions.md) is the one for somebody adding to
+it, and carries the coverage table saying which parts of the Raycast API work.
+The keyboard reference is not written down anywhere: press `?` in the launcher
+with an empty field and Sill builds it from the keys that are actually
+registered.
+
 ## What it does
 
 **Search.** Start Menu apps, Windows settings pages, files through
@@ -112,6 +119,18 @@ That runs the extension host tests, `svelte-check`, the web tests, the Rust
 suite, a source-shape check, a tree check, and an end-to-end gate that loads
 real Raycast extensions.
 
+Those extensions are a sparse checkout of somebody else's repository and are
+not committed here, so on a fresh clone the gate has nothing to draw. One
+command fetches them:
+
+```bash
+npm run extensions:fetch
+```
+
+It reads which ones the gate names rather than keeping a list of its own, and
+the clone is deliberately not pinned to a commit: a gate that asks whether the
+host still renders real extensions cannot answer that from a frozen copy.
+
 `scripts/device-tests.ps1` measures what a build actually costs on a machine.
 The budgets it checks against are in [docs/budgets.md](docs/budgets.md).
 
@@ -160,9 +179,9 @@ third secret and nothing about a certificate is committed.
 | --- | --- |
 | `src-tauri/src` | Rust. Search, actions, clipboard, snippets, dictation, AI, system control |
 | `src` | Svelte. The launcher, settings, chat, and the preview routes |
-| `host` | The Node process that runs Raycast-compatible extensions |
+| `host` | The Node process that runs Raycast-compatible extensions ([README](host/README.md)) |
 | `scripts` | Build, verify and measurement scripts |
-| `docs` | Performance budgets and roadmap |
+| `docs` | The user guide, the extension guide, performance budgets and the roadmap |
 
 ## Design
 

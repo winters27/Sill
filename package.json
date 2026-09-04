@@ -19,6 +19,7 @@
     "verify:rust:fast": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "verify": "npm run host:test && npm run check && npm run verify:web && npm run verify:rust && npm run verify:source && npm run verify:tree && npm run gate:views",
     "gate:views": "bash scripts/gate-views.sh",
+    "extensions:fetch": "node scripts/fetch-raycast-src.mjs",
     "verify:source": "node scripts/verify-source.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "changelog": "node scripts/changelog.mjs",

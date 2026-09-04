@@ -9,7 +9,10 @@
 
 import { getBridge } from "./bridge";
 
-export { List, Grid, Detail, Form, Action, ActionPanel, KNOWN_TAGS } from "./components";
+// `KNOWN_TAGS` deliberately not re-exported. Everything this module holds is
+// a name an extension can reach and a row `docs/extensions.md` has to explain,
+// and that list is the host's own note to itself about what the window draws.
+export { List, Grid, Detail, Form, Action, ActionPanel } from "./components";
 
 export {
   Toast,
