@@ -66,7 +66,8 @@ pub fn builtins() -> ActionRegistry {
         // rather than beside the ones that copy it. Both are things you do
         // with a folder once you have found it.
         Box::new(JumpInDialog),
-        Box::new(OpenTerminalProfile),        Box::new(ToggleSystem),
+        Box::new(OpenTerminalProfile),
+        Box::new(ToggleSystem),
         Box::new(VerifyFile),
         Box::new(LookUpFile),
         Box::new(HashFile),
@@ -1786,7 +1787,8 @@ impl Action for OpenTerminalProfile {
             .spawn()
             .map_err(|err| format!("{program} would not start: {err}"))?;
 
-        Ok(Outcome::done(format!("Opened {}", object.title)))    }
+        Ok(Outcome::done(format!("Opened {}", object.title)))
+    }
 }
 
 /// Sends a file to the recycle bin.

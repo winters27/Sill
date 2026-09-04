@@ -54,6 +54,7 @@ export type SillObjectKind =
   | "systemControl"
   | "snippet"
   | "quicklink"
+  | "terminalProfile"
   | "script"
   | "answer"
   | "clipboardEntry"
