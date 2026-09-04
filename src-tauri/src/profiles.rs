@@ -54,6 +54,36 @@ pub struct Placed {
     /// desk lost to an upgrade.
     #[serde(default)]
     pub path: String,
+    /**
+    A named position, when the arrangement was made resolution independent.
+
+    A captured rectangle says "1213 pixels wide", which is a fact about the
+    display it was measured on. Rescaling carries that onto a different one
+    and it lands close, but "close" is what leaves a two pixel strip of
+    desktop between two windows that were flush.
+
+    A slot says "the left half", which is true on any display, so an
+    arrangement holding slots is the same arrangement on a laptop screen, a
+    dock and a television. That is what [`nearest_slot`] converts a captured
+    one into, and it wins over `rect` when it is set.
+
+    `Option`, not a default slot, because an arrangement somebody captured
+    deliberately holds rectangles nothing tiles: a window two thirds up the
+    screen and slightly off centre is a place, and forcing it to the nearest
+    named one would be Sill deciding it knew better.
+    */
+    #[serde(default)]
+    pub slot: Option<crate::windowing::Slot>,
+    /// Which display, counted from zero, when the arrangement names one.
+    ///
+    /// `None` means the display the window is already on, which is what a
+    /// captured arrangement means on the machine it was captured on. Named
+    /// only when somebody wants a window to move screens, and ignored when
+    /// that display is not attached: an arrangement that puts half its
+    /// windows nowhere because a monitor is unplugged is worse than one that
+    /// keeps them where they are.
+    #[serde(default)]
+    pub display: Option<usize>,
 }
 
 /// A named arrangement.
@@ -82,6 +112,11 @@ pub fn capture(name: &str, open: &[Window], works: &[Rect]) -> Profile {
                 work: works.get(window.monitor).copied().unwrap_or(window.rect),
                 maximized: window.maximized,
                 path: window.app_path.clone(),
+                // Captured arrangements hold rectangles. `to_slots` is what
+                // turns one into a set of named positions, deliberately as a
+                // separate step somebody asks for.
+                slot: None,
+                display: None,
             })
             .collect(),
     }
@@ -162,20 +197,115 @@ pub fn plan(profile: &Profile, open: &[Window], works: &[Rect]) -> Vec<(isize, R
         let Some(window) = best else { continue };
         taken.push(window.id);
 
-        // Rescaled into the work area the window is on now. Restoring onto the
-        // same layout is the common case and rescaling is then the identity,
-        // so this costs nothing when nothing has changed.
-        let now = works.get(window.monitor).copied().unwrap_or(saved.work);
-        let rect = if now == saved.work {
-            saved.rect
-        } else {
-            crate::windowing::rescale(saved.rect, saved.work, now)
+        // The display the arrangement names, when it names one and that
+        // display is attached. Falling back rather than skipping: an
+        // arrangement that puts half its windows nowhere because a monitor is
+        // unplugged is worse than one that keeps them where they are.
+        let onto = saved
+            .display
+            .and_then(|index| works.get(index))
+            .or_else(|| works.get(window.monitor))
+            .copied()
+            .unwrap_or(saved.work);
+
+        let rect = match saved.slot {
+            // A named position is true on any display, so there is nothing to
+            // rescale and nothing to lose in the arithmetic.
+            Some(slot) => crate::windowing::slot_rect(slot, onto),
+            // Rescaled into the work area the window is on now. Restoring onto
+            // the same layout is the common case and rescaling is then the
+            // identity, so this costs nothing when nothing has changed.
+            None if onto == saved.work => saved.rect,
+            None => crate::windowing::rescale(saved.rect, saved.work, onto),
         };
 
         out.push((window.id, rect, saved.maximized));
     }
 
     out
+}
+
+/// The named position a rectangle is closest to, if it is close to one.
+///
+/// **How much of the slot the window covers, not how near its corners are.**
+/// A window three pixels narrower than the left half and a window filling the
+/// top left quarter have corners about equally far from "left half"; only one
+/// of them is what somebody meant by it. Overlap answers that directly.
+///
+/// `None` below the threshold, which is the whole point. An arrangement
+/// somebody captured deliberately holds rectangles nothing tiles, and a
+/// window two thirds up the screen and slightly off centre is a place rather
+/// than a bad attempt at one. Converting it anyway would be Sill deciding it
+/// knew better than the arrangement.
+///
+/// Pure, so every awkward case is testable without a desktop.
+pub fn nearest_slot(
+    rect: crate::windowing::Rect,
+    work: crate::windowing::Rect,
+) -> Option<crate::windowing::Slot> {
+    /// How much of the slot and of the window must be shared before a
+    /// rectangle counts as being in that slot, as hundredths.
+    ///
+    /// Both directions matter. Covering the slot is not enough on its own,
+    /// because a full screen window covers the left half completely; being
+    /// covered by it is not enough either, because a tiny window in the corner
+    /// sits entirely inside it.
+    const ENOUGH: i64 = 90;
+
+    let area = |r: crate::windowing::Rect| (r.width as i64) * (r.height as i64);
+
+    if area(rect) <= 0 || area(work) <= 0 {
+        return None;
+    }
+
+    let mut best: Option<(i64, crate::windowing::Slot)> = None;
+
+    for slot in crate::windowing::Slot::ALL {
+        let candidate = crate::windowing::slot_rect(slot, work);
+        let shared = rect.overlap(&candidate);
+
+        if shared * 100 < area(candidate) * ENOUGH || shared * 100 < area(rect) * ENOUGH {
+            continue;
+        }
+
+        // Ties go to the slot listed first, which is the order a person reads
+        // them in: halves, then quarters, then thirds. `Fill` is last, so a
+        // window that is genuinely both never quietly becomes the vaguer one.
+        if best.is_none_or(|(most, _)| shared > most) {
+            best = Some((shared, slot));
+        }
+    }
+
+    best.map(|(_, slot)| slot)
+}
+
+/// Rewrites an arrangement as named positions, where they fit.
+///
+/// The point of the conversion: an arrangement captured on this desk becomes
+/// one that means the same thing on a laptop screen. A window that fits no
+/// slot keeps its rectangle, so the arrangement is never made worse by being
+/// converted, only more portable where it can be.
+///
+/// The display each window is on is recorded at the same time, because a
+/// two screen arrangement whose windows all say "left half" and nothing else
+/// would pile every one of them onto the same screen.
+pub fn to_slots(profile: &Profile, works: &[crate::windowing::Rect]) -> Profile {
+    Profile {
+        name: profile.name.clone(),
+        windows: profile
+            .windows
+            .iter()
+            .map(|saved| {
+                let display = works.iter().position(|work| *work == saved.work);
+
+                Placed {
+                    slot: nearest_slot(saved.rect, saved.work),
+                    display,
+                    ..saved.clone()
+                }
+            })
+            .collect(),
+    }
 }
 
 #[cfg(test)]
@@ -223,6 +353,8 @@ mod tests {
             work: work(),
             maximized: false,
             path: String::new(),
+            slot: None,
+            display: None,
         }
     }
 
@@ -305,6 +437,8 @@ mod tests {
                 work: work(),
                 maximized: false,
                 path: String::new(),
+                slot: None,
+                display: None,
             }],
         };
 
@@ -400,5 +534,215 @@ mod tests {
 
             assert!(missing(&profile, &[]).is_empty());
         }
+    }
+
+    /// The conversion that makes an arrangement portable.
+    #[test]
+    fn a_captured_half_becomes_the_slot_that_means_the_same_thing() {
+        let left = Rect {
+            x: 0,
+            y: 0,
+            width: 960,
+            height: 1040,
+        };
+
+        assert_eq!(
+            nearest_slot(left, work()),
+            Some(crate::windowing::Slot::Left)
+        );
+    }
+
+    /// The reason it is overlap and not corner distance.
+    ///
+    /// A window filling the top left quarter has corners about as far from
+    /// "left half" as a window three pixels narrower than it does, and only
+    /// one of those is what somebody meant by the left half.
+    #[test]
+    fn a_quarter_is_its_own_quarter_rather_than_a_poor_half() {
+        let top_left = Rect {
+            x: 0,
+            y: 0,
+            width: 960,
+            height: 520,
+        };
+
+        assert_eq!(
+            nearest_slot(top_left, work()),
+            Some(crate::windowing::Slot::TopLeft)
+        );
+    }
+
+    /// A place nothing tiles keeps its rectangle.
+    ///
+    /// The whole reason this answers `None`. An arrangement somebody made by
+    /// hand holds positions that are not any named one, and converting them
+    /// anyway would be Sill deciding it knew better than the arrangement.
+    #[test]
+    fn a_window_that_fits_no_slot_is_left_as_a_rectangle() {
+        let awkward = Rect {
+            x: 300,
+            y: 120,
+            width: 700,
+            height: 500,
+        };
+
+        assert_eq!(nearest_slot(awkward, work()), None);
+    }
+
+    /// A size somebody chose between two named ones is neither of them.
+    ///
+    /// This is the case the second half of the threshold exists for, and the
+    /// only one that distinguishes it. A window 1500 wide on a 1920 desktop
+    /// covers the first two thirds completely, so asking only "is the slot
+    /// covered" answers "the first two thirds". It is 78% of the width, which
+    /// is not that slot and not the left half either: it is a width the
+    /// person dragged to, and the arrangement should keep it.
+    #[test]
+    fn a_width_between_two_named_ones_is_neither_of_them() {
+        let between = Rect {
+            x: 0,
+            y: 0,
+            width: 1500,
+            height: 1040,
+        };
+
+        assert_eq!(nearest_slot(between, work()), None);
+    }
+
+    /// A window covering the whole screen is not "the left half".
+    ///
+    /// It covers the left half completely, so a test that only asked whether
+    /// the slot was covered would say it was.
+    #[test]
+    fn a_full_screen_window_is_fill_rather_than_every_slot_it_covers() {
+        assert_eq!(
+            nearest_slot(work(), work()),
+            Some(crate::windowing::Slot::Fill)
+        );
+    }
+
+    /// And a tiny window in the corner is not the quarter it sits inside.
+    #[test]
+    fn a_small_window_is_not_the_slot_it_happens_to_sit_within() {
+        let small = Rect {
+            x: 10,
+            y: 10,
+            width: 200,
+            height: 150,
+        };
+
+        assert_eq!(nearest_slot(small, work()), None);
+    }
+
+    /// A converted arrangement puts a window on a slot rather than a
+    /// rectangle, and lands exactly on a display of a different size.
+    #[test]
+    fn a_converted_arrangement_is_exact_on_a_display_it_was_never_captured_on() {
+        let captured = Profile {
+            name: "Desk".into(),
+            windows: vec![Placed {
+                app: "Code".into(),
+                title: "sill".into(),
+                rect: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 960,
+                    height: 1040,
+                },
+                work: work(),
+                maximized: false,
+                path: String::new(),
+                slot: None,
+                display: None,
+            }],
+        };
+
+        let portable = to_slots(&captured, &[work()]);
+        assert_eq!(portable.windows[0].slot, Some(crate::windowing::Slot::Left));
+        assert_eq!(portable.windows[0].display, Some(0));
+
+        // A laptop screen, which is not a scaled copy of the desk.
+        let laptop = Rect {
+            x: 0,
+            y: 0,
+            width: 1512,
+            height: 903,
+        };
+
+        let open = vec![crate::windowing::Window {
+            id: 1,
+            title: "sill".into(),
+            app: "Code".into(),
+            app_path: String::new(),
+            pid: 1,
+            minimized: false,
+            maximized: false,
+            rect: laptop,
+            monitor: 0,
+        }];
+
+        let planned = plan(&portable, &open, &[laptop]);
+        assert_eq!(planned.len(), 1);
+
+        // Exactly half, with no strip of desktop left down the middle. The
+        // rescaled rectangle would have been close and not this.
+        assert_eq!(planned[0].1.width, 756);
+        assert_eq!(planned[0].1.height, 903);
+        assert_eq!(planned[0].1.x, 0);
+    }
+
+    /// An arrangement naming a display it cannot find keeps the window where
+    /// it is rather than putting it nowhere.
+    #[test]
+    fn a_display_that_is_unplugged_leaves_the_window_where_it_is() {
+        let profile = Profile {
+            name: "Two screens".into(),
+            windows: vec![Placed {
+                app: "Code".into(),
+                title: "sill".into(),
+                rect: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 960,
+                    height: 1040,
+                },
+                work: work(),
+                maximized: false,
+                path: String::new(),
+                slot: Some(crate::windowing::Slot::Left),
+                // A second display that is not attached any more.
+                display: Some(1),
+            }],
+        };
+
+        // The one display still attached is deliberately not the one the
+        // arrangement was measured on, so falling back to the saved work area
+        // and falling back to the attached one give different answers.
+        let attached = Rect {
+            x: 0,
+            y: 0,
+            width: 1512,
+            height: 903,
+        };
+
+        let open = vec![crate::windowing::Window {
+            id: 1,
+            title: "sill".into(),
+            app: "Code".into(),
+            app_path: String::new(),
+            pid: 1,
+            minimized: false,
+            maximized: false,
+            rect: attached,
+            monitor: 0,
+        }];
+
+        let planned = plan(&profile, &open, &[attached]);
+        assert_eq!(planned.len(), 1, "the window was dropped");
+        assert_eq!(
+            planned[0].1,
+            crate::windowing::slot_rect(crate::windowing::Slot::Left, attached),
+            "it landed on the display it was saved from rather than the one that is here"
+        );
     }
 }

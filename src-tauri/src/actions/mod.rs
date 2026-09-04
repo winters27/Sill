@@ -88,6 +88,7 @@ pub fn builtins() -> ActionRegistry {
         // removes a program should not sit above the ones that do not.
         Box::new(UninstallApp),
         Box::new(RestoreWorkspace),
+        Box::new(MakeWorkspacePortable),
         Box::new(ForgetWorkspace),
         Box::new(ForgetConversation),
         Box::new(CopyConversation),
@@ -1890,6 +1891,42 @@ impl Action for RestoreWorkspace {
     }
 }
 
+/// Rewrites a saved arrangement as named positions.
+struct MakeWorkspacePortable;
+
+#[async_trait]
+impl Action for MakeWorkspacePortable {
+    fn id(&self) -> &'static str {
+        "sill.workspace.portable"
+    }
+
+    fn title(&self) -> &'static str {
+        "Use Named Positions"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Workspace
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let named = crate::commands::system::make_workspace_portable(
+            ctx.app.clone(),
+            object.target.clone(),
+        )?;
+
+        Ok(Outcome::done(match named {
+            0 => "None of those windows sit in a named position, so the arrangement still holds their exact sizes"
+                .to_string(),
+            1 => "One window now says where it goes rather than how big it was".to_string(),
+            many => format!("{many} windows now say where they go rather than how big they were"),
+        }))
+    }
+}
+
 /// Forgets a saved arrangement. P2.12.
 struct ForgetWorkspace;
 
@@ -2515,6 +2552,45 @@ impl Action for WindowState {
     }
 }
 
+/// Pins a window above the others, or stops.
+struct KeepOnTop;
+
+#[async_trait]
+impl Action for KeepOnTop {
+    fn id(&self) -> &'static str {
+        "sill.window.keepOnTop"
+    }
+
+    fn title(&self) -> &'static str {
+        "Keep on Top"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Window
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let id = window_handle(object)?;
+
+        // Toggled from what the window actually is rather than from anything
+        // Sill remembers. Another program can pin or unpin a window at any
+        // time, and a remembered answer would then send it the way it already
+        // was, which reads as the key having done nothing.
+        let already = crate::windowing::is_on_top(id);
+        crate::windowing::set_on_top(id, !already)?;
+
+        Ok(Outcome::done(if already {
+            format!("{} no longer stays on top", object.title)
+        } else {
+            format!("{} stays on top", object.title)
+        }))
+    }
+}
+
 /// Sends a window to a named position on the display it is already on.
 struct SnapWindow {
     slot: crate::windowing::Slot,
@@ -2616,6 +2692,7 @@ fn window_actions() -> Vec<Box<dyn Action>> {
             apply: crate::windowing::restore,
             said: "restored",
         }),
+        Box::new(KeepOnTop),
     ];
 
     actions.extend(

@@ -2073,6 +2073,7 @@ pub fn run() {
             commands::system::live_rows,
             commands::system::save_workspace,
             commands::system::restore_workspace,
+            commands::system::make_workspace_portable,
             commands::system::forget_workspace,
             commands::system::machine_reading,
             commands::system::find_place,

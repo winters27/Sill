@@ -38,9 +38,45 @@ pub enum Source {
     /// nothing to select and nothing to highlight, and the last picture copied
     /// is the only thing it could sensibly mean.
     ClipboardImage,
+    /// The window in front, whatever it is.
+    ///
+    /// The source that makes every window action bindable. Until this existed
+    /// a key could not snap, maximise or move a window at all: the fifteen
+    /// slots, the display move and the state actions all take a window, and
+    /// the only way to name one was to summon the launcher, type its title and
+    /// pick it out of a list. Which is not what anybody wants from "put this
+    /// on the left"; by the time you have done that, dragging it was quicker.
+    ///
+    /// Sill's own window is deliberately not a candidate, which
+    /// `windowing::foreground` already handles. A key pressed while the
+    /// launcher is open means the thing behind it, never the launcher.
+    ForegroundWindow,
     /// One particular thing from the index, named once when the binding is
     /// made. This is how a key opens a specific application.
     Command { id: String },
+}
+
+impl Source {
+    /**
+    Whether running this binding has anything to do with the clipboard.
+
+    Taking the clipboard is not free and it is not invisible: it **pauses
+    clipboard history** for the length of the operation and reads the current
+    contents so they can be put back. That is exactly right for a transform,
+    which presses Ctrl+C to read a selection and Ctrl+V to write the result.
+
+    It is wrong for the other two. A key that snaps the window in front, or
+    one that opens an application, never reads or writes the clipboard, and
+    suspending the watcher for it means something copied in that moment is
+    not recorded. Nobody would connect a missing history entry to having
+    pressed the key that moved a window.
+    */
+    fn touches_clipboard(&self) -> bool {
+        match self {
+            Source::Selection | Source::Clipboard | Source::ClipboardImage => true,
+            Source::ForegroundWindow | Source::Command { .. } => false,
+        }
+    }
 }
 
 /// One key, one action, one thing to run it against.
@@ -170,13 +206,18 @@ async fn fire(app: &AppHandle, binding: &Binding) {
     // happens in between. One owner for the whole operation: the action itself
     // writes its result to the clipboard, so anything reading "the previous
     // contents" later reads Sill's own output and restores that instead.
-    let held = Held::take(app);
+    //
+    // Only for the sources that have anything to do with it. See
+    // `Source::touches_clipboard`.
+    let held = binding.source.touches_clipboard().then(|| Held::take(app));
 
-    let (object, origin) = match resolve(app, binding, &held).await {
+    let (object, origin) = match resolve(app, binding, held.as_ref()).await {
         Ok(resolved) => resolved,
         Err(reason) => {
             crate::say!("{}: {reason}", binding.accelerator);
-            held.give_back();
+            if let Some(held) = held {
+                held.give_back();
+            }
             return;
         }
     };
@@ -196,7 +237,9 @@ async fn fire(app: &AppHandle, binding: &Binding) {
             binding.action,
             object.kind
         );
-        held.give_back();
+        if let Some(held) = held {
+            held.give_back();
+        }
         return;
     };
 
@@ -207,7 +250,9 @@ async fn fire(app: &AppHandle, binding: &Binding) {
             binding.action,
             object.kind
         );
-        held.give_back();
+        if let Some(held) = held {
+            held.give_back();
+        }
         return;
     }
 
@@ -225,7 +270,9 @@ async fn fire(app: &AppHandle, binding: &Binding) {
         Ok(outcome) => outcome,
         Err(reason) => {
             crate::say!("{} failed: {reason}", binding.accelerator);
-            held.give_back();
+            if let Some(held) = held {
+                held.give_back();
+            }
             return;
         }
     };
@@ -248,8 +295,10 @@ async fn fire(app: &AppHandle, binding: &Binding) {
         // The text changed where it sits, so the clipboard goes back to what
         // the user had. Leaving the result there is a side effect nobody asked
         // for.
-        held.give_back();
-    } else {
+        if let Some(held) = held {
+            held.give_back();
+        }
+    } else if let Some(held) = held {
         // Nothing was pasted, so the point of the shortcut was to leave the
         // result on the clipboard, and it is already there.
         held.keep_result();
@@ -277,10 +326,17 @@ fn may_paste_back(binding: &Binding, captured: Option<Origin>) -> bool {
 async fn resolve(
     app: &AppHandle,
     binding: &Binding,
-    held: &Held,
+    held: Option<&Held>,
 ) -> Result<(Object, Option<Origin>), String> {
     match &binding.source {
         Source::Selection | Source::Clipboard => {
+            // Unreachable rather than defensive: `touches_clipboard` says
+            // these two do, so `fire` took it. A test holds the two together
+            // so this can never become a silent refusal.
+            let held = held.ok_or_else(|| {
+                "the clipboard was not taken for a source that reads it".to_string()
+            })?;
+
             let captured = if matches!(binding.source, Source::Selection) {
                 // Blocking: reading a selection presses Ctrl+C and waits for
                 // the other application to answer, which is not something to
@@ -314,6 +370,12 @@ async fn resolve(
         // No origin: there was no selection behind a screenshot to put
         // anything back into.
         Source::ClipboardImage => last_image(app).map(|object| (object, None)),
+
+        // No origin either. Moving a window produces no text, and there is
+        // nothing to paste back into.
+        Source::ForegroundWindow => crate::windowing::foreground()
+            .map(|window| (Object::from_window(&window), None))
+            .ok_or_else(|| "nothing is in front".to_string()),
 
         Source::Command { id } => {
             let registry = app.state::<crate::state::RegistryState>();
@@ -515,5 +577,54 @@ mod tests {
 
         assert_eq!(preview("  short  "), "short");
         assert_eq!(preview(""), "");
+    }
+
+    /// The rule that keeps `touches_clipboard` and `resolve` in step.
+    ///
+    /// `resolve` refuses a clipboard source that arrives without the
+    /// clipboard, and `fire` decides whether to take it from this predicate.
+    /// If the two ever disagree, a transform stops working and the reason is
+    /// a message about the clipboard not being taken, which reads as a bug in
+    /// the clipboard rather than in this pair. Held together here instead.
+    #[test]
+    fn every_source_that_reads_the_clipboard_is_one_that_takes_it() {
+        let reads = [Source::Selection, Source::Clipboard, Source::ClipboardImage];
+
+        for source in reads {
+            assert!(
+                source.touches_clipboard(),
+                "{source:?} is resolved from the clipboard and would arrive without it"
+            );
+        }
+    }
+
+    /// A key that moves a window must not pause clipboard history.
+    ///
+    /// Taking the clipboard suspends the watcher for the length of the
+    /// operation, so anything copied in that moment is not recorded. Nobody
+    /// would connect a missing history entry to having pressed the key that
+    /// moved a window, which is what makes this worth a test rather than a
+    /// comment.
+    #[test]
+    fn a_window_or_a_launch_leaves_the_clipboard_alone() {
+        assert!(!Source::ForegroundWindow.touches_clipboard());
+        assert!(!Source::Command {
+            id: "app:chrome".into()
+        }
+        .touches_clipboard());
+    }
+
+    /// The source survives a round trip through the preferences file.
+    ///
+    /// A binding is stored as JSON, and a variant that serialises to a name
+    /// the reader does not know is a shortcut that quietly disappears from
+    /// somebody's settings on the next start.
+    #[test]
+    fn the_window_source_reads_back_as_itself() {
+        let written = serde_json::to_string(&Source::ForegroundWindow).expect("serialisable");
+        assert_eq!(written, r#"{"from":"foregroundWindow"}"#);
+
+        let read: Source = serde_json::from_str(&written).expect("readable");
+        assert_eq!(read, Source::ForegroundWindow);
     }
 }

@@ -259,6 +259,8 @@ export interface TapSettings {
 export type BindingSource =
   | { from: "selection" }
   | { from: "clipboard" }
+  /** The window in front, which is what makes a window action bindable. */
+  | { from: "foregroundWindow" }
   | { from: "command"; id: string };
 
 /** A key that runs an action without the launcher appearing. */
