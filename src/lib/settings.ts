@@ -288,6 +288,14 @@ export type BindingSource =
    * one for each kind of thing that might be under the cursor.
    */
   | { from: "currentSelection" }
+  /**
+   * The folder open in the Explorer window nearest the front.
+   *
+   * Not the same as `currentSelection`, which reads what is highlighted in
+   * the window that has the keyboard. This one is for the key pressed while
+   * something else is covering Explorer, which is what a Save dialog is.
+   */
+  | { from: "explorerFolder" }
   | { from: "command"; id: string };
 
 /** A key that runs an action without the launcher appearing. */

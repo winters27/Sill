@@ -60,6 +60,10 @@ pub fn builtins() -> ActionRegistry {
         Box::new(RevealInFolder),
         Box::new(CopyName),
         Box::new(TerminalHere),
+        // Beside the other action that means "take this path somewhere",
+        // rather than beside the ones that copy it. Both are things you do
+        // with a folder once you have found it.
+        Box::new(JumpInDialog),
         Box::new(ToggleSystem),
         Box::new(VerifyFile),
         Box::new(LookUpFile),
@@ -1594,6 +1598,71 @@ impl Action for TerminalHere {
             Some(profile) => format!("Opened {profile} in {}", name_of(&here)),
             None => format!("Opened a terminal in {}", name_of(&here)),
         }))
+    }
+}
+
+/// Points the open or save dialog in front at this folder.
+///
+/// `P8-07`, and the reason it is an action rather than a command of its own:
+/// the two ways somebody wants it are "the folder I have open in Explorer,
+/// right now, while this Save dialog is covering it" and "that folder I just
+/// searched for". Those are one verb over two different subjects, which is
+/// exactly what the registry is for. The first is a key bound to
+/// `Source::ExplorerFolder`; the second is this entry in the action panel of
+/// any file or folder row. Neither has its own implementation of anything.
+struct JumpInDialog;
+
+#[async_trait]
+impl Action for JumpInDialog {
+    fn id(&self) -> &'static str {
+        "sill.dialog.jump"
+    }
+
+    fn title(&self) -> &'static str {
+        "Jump To In Dialog"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        matches!(kind, ObjectKind::File | ObjectKind::Folder)
+    }
+
+    /// Reaches into another application's window, which is what
+    /// `WindowControl` says.
+    ///
+    /// Deliberately **not** `InputInjection`. Nothing is synthesised: the
+    /// path goes to one control by its handle and the accept button is told
+    /// it was pressed by name. Declaring the capability that means "types
+    /// wherever the keyboard is pointing" would be a false description of the
+    /// mechanism, and this list exists to be read off rather than traced.
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let folder = matches!(object.kind, ObjectKind::Folder);
+        let target = object.target.clone();
+
+        // Blocking, because every step waits on another process to answer a
+        // window message. On a runtime worker that is a launcher that stops
+        // responding for as long as somebody else's dialog is busy.
+        tokio::task::spawn_blocking(move || {
+            let dialog =
+                crate::dialog::in_front().map_err(|refusal| refusal.reason().to_string())?;
+
+            // Read before the plan is made, so a half-typed filename can
+            // survive the navigation that is about to clear it.
+            let typed = crate::dialog::typed_in(&dialog);
+            let jump = crate::dialog::plan(&target, folder, &typed)?;
+
+            crate::dialog::jump_to(&dialog, &jump)?;
+
+            Ok(Outcome::done(format!(
+                "Pointed the dialog at {}",
+                name_of(&jump.folder)
+            )))
+        })
+        .await
+        .map_err(|err| format!("The jump did not finish: {err}"))?
     }
 }
 

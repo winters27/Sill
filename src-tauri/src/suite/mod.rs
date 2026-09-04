@@ -63,6 +63,7 @@ mod file_merge;
 mod keyword_matching;
 mod ranking_memory;
 mod real_desktops;
+mod real_dialog;
 mod real_explorer;
 mod real_games;
 mod real_hello;
