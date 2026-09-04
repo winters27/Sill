@@ -42,6 +42,16 @@ export interface RankedCommand {
     /** A window that is open right now. Never from the index. */
     | "window"
     /**
+     * One tab of a browser that is running right now.
+     *
+     * Read out of the browser through UI Automation when the query was typed,
+     * with nothing kept afterwards, so like a window it is switched to through
+     * the action registry rather than launched by id. Its entrypoint is a
+     * description of where the tab was rather than a hold on it, and Rust
+     * reads the strip again before it acts.
+     */
+    | "browser-tab"
+    /**
      * A web address a browser remembers. Never from the index either.
      *
      * Read out of a browser's own database when the query was typed, and gone
@@ -175,6 +185,16 @@ export interface LaunchedCommand {
     | "script-arg"
     /** A window that is open right now. Never from the index. */
     | "window"
+    /**
+     * One tab of a browser that is running right now.
+     *
+     * Read out of the browser through UI Automation when the query was typed,
+     * with nothing kept afterwards, so like a window it is switched to through
+     * the action registry rather than launched by id. Its entrypoint is a
+     * description of where the tab was rather than a hold on it, and Rust
+     * reads the strip again before it acts.
+     */
+    | "browser-tab"
     /**
      * A web address a browser remembers. Never from the index either.
      *
@@ -922,6 +942,7 @@ export function indexFolder(path: string, wanted: boolean): Promise<string[]> {
 export interface Elsewhere {
   files: FileHit[];
   pages: BrowserHit[];
+  tabs: BrowserTab[];
 }
 
 export function searchElsewhere(query: string): Promise<Elsewhere> {
@@ -931,7 +952,7 @@ export function searchElsewhere(query: string): Promise<Elsewhere> {
   // whose whole job is to answer before the next character arrives. What a
   // failure costs is one query's results, and the next keystroke asks again.
   return invoke<Elsewhere>("search_elsewhere", { query }).catch(
-    silently({ files: [], pages: [] }),
+    silently({ files: [], pages: [], tabs: [] }),
   );
 }
 
@@ -1046,6 +1067,57 @@ export function browserAsCommand(hit: BrowserHit): RankedCommand {
     // Zen are told apart at a glance, and neither is dressed as one of Sill's
     // own commands, which is the same rule the Windows switches follow.
     icon: hit.icon ?? undefined,
+    matched: [],
+  };
+}
+
+/** A tab a browser has open right now. */
+export interface BrowserTab {
+  /** The window it is in and the browser's own name for it. */
+  id: string;
+  title: string;
+  /** Which browser it belongs to, which is the group heading. */
+  browser: string;
+  /** The browser's own program, for the row's icon. */
+  program: string | null;
+  /** Already the tab in front of its own window. */
+  active: boolean;
+  /**
+   * Everything the action needs to find this tab again.
+   *
+   * **Composed by Rust and read back by Rust**, and opaque here on purpose.
+   * The row carries a description of where a tab was rather than a hold on
+   * one, because between the keystroke that produced the row and the Enter
+   * that runs it, tabs get opened, closed, dragged and renamed. Writing that
+   * description here would put its format in two languages, and a format in
+   * two languages agrees until the day somebody adds a field to one.
+   */
+  entrypoint: string;
+}
+
+/**
+ * A tab as a result row.
+ *
+ * Reuses the command row exactly as a file and a remembered page do, so
+ * selection, grouping and the keyboard work without knowing what a tab is.
+ *
+ * The subtitle says the browser and nothing else. A tab has no address to show
+ * here: a tab strip exposes what a tab is called and not where it points, and
+ * a subtitle guessed from the title would be a row that lies about what it
+ * knows.
+ */
+export function tabAsCommand(tab: BrowserTab): RankedCommand {
+  return {
+    id: tab.id,
+    extension: "browser-tab",
+    extensionTitle: tab.browser,
+    title: tab.title,
+    subtitle: tab.active ? `${tab.browser}, in front` : tab.browser,
+    mode: "browser-tab",
+    entrypoint: tab.entrypoint,
+    // The browser's own mark, for the reason a history hit wears one: going to
+    // a tab is Sill handing you back to that browser, not Sill doing something.
+    icon: tab.program ?? undefined,
     matched: [],
   };
 }

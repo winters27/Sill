@@ -141,6 +141,16 @@ export interface Browsers {
   /** Pages that were saved, which is the smaller and more deliberate set. */
   bookmarks: boolean;
   maxResults: number;
+  /** Tabs the running browsers have open, read when somebody types. */
+  tabs: boolean;
+  /**
+   * Whether that includes Firefox and the browsers built on it.
+   *
+   * Its own switch because it is the one setting in Sill whose cost lands in
+   * another program: a Firefox keeps its accessibility engine off until a
+   * client asks, and reading tabs is the asking.
+   */
+  tabsFirefox: boolean;
 }
 
 /** The extension store. */

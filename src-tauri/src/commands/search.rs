@@ -825,6 +825,115 @@ async fn matching_pages(
 pub(crate) struct Elsewhere {
     files: Vec<files::FileHit>,
     pages: Vec<browsers::Hit>,
+    /// Tabs the running browsers have open right now.
+    tabs: Vec<TabRow>,
+}
+
+/// One open tab, as a row.
+///
+/// A shape of its own rather than the domain type, for the one reason rule 9
+/// allows: `entrypoint` is a **format**, and the window that draws the row is
+/// the wrong place to know it. Written there, the composing and the parsing
+/// would be one function in TypeScript and one in Rust, and the pair would
+/// hold only for as long as nobody added a field. Here it is `Where`'s own
+/// writer, and `Where`'s own reader takes it back.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TabRow {
+    /// Stable while the tab lives, which is as long as the row is worth
+    /// anything: the window it is in and the browser's own name for it.
+    id: String,
+    title: String,
+    /// Which browser, for the row's group and its label.
+    browser: String,
+    /// That browser's program, for the row's icon.
+    program: Option<String>,
+    /// Already the tab in front of its own window.
+    active: bool,
+    /// Everything the action needs to find this tab again. See `uia::Where`.
+    entrypoint: String,
+}
+
+impl TabRow {
+    /// What the row carries, for the probe that presses Enter on one.
+    ///
+    /// The field stays private: everything else reads this through JSON, and
+    /// a reader inside Rust would be a second way to get at a value whose only
+    /// consumer is a `#[tauri::command]`'s answer.
+    #[cfg(test)]
+    pub(crate) fn entrypoint(&self) -> &str {
+        &self.entrypoint
+    }
+}
+
+impl From<crate::uia::Tab> for TabRow {
+    fn from(tab: crate::uia::Tab) -> Self {
+        let located = tab.located();
+
+        Self {
+            id: format!("browser-tab:{}:{}", tab.window, tab.key),
+            title: tab.title,
+            browser: tab.browser,
+            program: tab.program,
+            active: tab.active,
+            entrypoint: located.to_entrypoint(),
+        }
+    }
+}
+
+/// Tabs the running browsers have open, matching a query.
+///
+/// Here rather than beside `search_commands` for the same reason files and
+/// history are here: it asks another program a question, so the window shows
+/// what Sill already knows first and lets this arrive after.
+///
+/// **Nothing is read unless a browser is running.** The window list is
+/// something the launcher enumerates anyway, so a machine with no browser open
+/// spends one filter over a list it already has and never touches UI
+/// Automation at all.
+async fn matching_tabs(
+    query: &str,
+    settings: crate::preferences::Browsers,
+    searching: &crate::state::Searching,
+    token: u64,
+) -> Result<Vec<TabRow>, String> {
+    if !settings.tabs {
+        return Ok(Vec::new());
+    }
+
+    let mut families = vec![crate::browsers::Family::Chromium];
+
+    // Firefox separately, because reading one switches that browser's
+    // accessibility engine on and it stays on. See `preferences::Browsers`.
+    if settings.tabs_firefox {
+        families.push(crate::browsers::Family::Firefox);
+    }
+
+    let open = crate::uia::browser_windows(&crate::windowing::list(), &families);
+
+    if open.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Checked here rather than earlier because the check above is the cheap
+    // one and this is the expensive one: past this line the read crosses into
+    // another program's process, once per window.
+    if !searching.is_current(token) {
+        return Ok(Vec::new());
+    }
+
+    let query = query.to_string();
+    let wanted = settings.max_results as usize;
+
+    // Cross-process COM calls that block, so never on an async worker.
+    tokio::task::spawn_blocking(move || {
+        crate::uia::rank(crate::uia::read(&open), &query, wanted)
+            .into_iter()
+            .map(TabRow::from)
+            .collect()
+    })
+    .await
+    .map_err(|err| format!("browser tab search failed: {err}"))
 }
 
 /// Both of the slow sources, asked once and answered together.
@@ -883,7 +992,10 @@ pub(crate) async fn search_elsewhere(
     // they are separately named here: they run at the same time, so a total
     // for both would be whichever of them is slower and would never say which.
     let clock = timings.inner();
-    let (files, pages) = tokio::join!(
+    // The same settings answer two questions here, so each half takes its own
+    // copy rather than one borrowing while the other moves.
+    let tab_settings = browser_settings.clone();
+    let (files, pages, tabs) = tokio::join!(
         async {
             let _timing = clock.timing("files");
             matching_files(&query, files_settings, catalog, traces, &searching, token).await
@@ -892,11 +1004,16 @@ pub(crate) async fn search_elsewhere(
             let _timing = clock.timing("browser pages");
             matching_pages(&query, browser_settings, scratch, &searching, token).await
         },
+        async {
+            let _timing = clock.timing("browser tabs");
+            matching_tabs(&query, tab_settings, &searching, token).await
+        },
     );
 
     Ok(Elsewhere {
         files: files?,
         pages: pages?,
+        tabs: tabs?,
     })
 }
 
@@ -1290,8 +1407,69 @@ pub(crate) async fn open_path(path: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::splice_suggestions;
+    use super::{splice_suggestions, TabRow};
     use crate::registry::{CommandRecord, MatchClass, RankedCommand};
+
+    /// A row's entrypoint is read back by the action that runs it.
+    ///
+    /// The one seam in this feature where a mistake is silent: the row is
+    /// written here and parsed in `sill.browser.tab.focus`, and if the two
+    /// disagree the row is simply refused with "is not a tab". Both sides are
+    /// `Where`'s own, which is what this holds in place.
+    #[test]
+    fn a_tab_row_carries_something_the_action_can_read_back() {
+        for title in [
+            "Plain",
+            "",
+            // Chromium's real tab names, colons and all.
+            "Alpha Tab - Memory usage - 21.0 MB",
+            "Comparing v3.17.16...v3.18.0 \u{b7} cline/cline",
+            "12:34:56",
+        ] {
+            let tab = crate::uia::Tab {
+                browser: "Zen".to_string(),
+                program: None,
+                window: -4242,
+                index: 9,
+                title: title.to_string(),
+                active: true,
+                key: "42.16190184.4.0.0.753".to_string(),
+            };
+
+            let located = tab.located();
+            let row = TabRow::from(tab);
+
+            assert_eq!(
+                crate::uia::Where::parse(&row.entrypoint),
+                Some(located),
+                "the row written for {title:?} is not one the action can read"
+            );
+        }
+    }
+
+    /// A tab with no identifier still produces a readable row.
+    ///
+    /// The fallback path, which is what a browser that will not name its own
+    /// elements gets. An empty field in the middle of a written record is
+    /// exactly the case a parser gets wrong.
+    #[test]
+    fn a_tab_the_browser_would_not_name_still_writes_a_row() {
+        let tab = crate::uia::Tab {
+            browser: "Chrome".to_string(),
+            program: Some(r"C:\chrome.exe".to_string()),
+            window: 7,
+            index: 0,
+            title: "Inbox".to_string(),
+            active: false,
+            key: String::new(),
+        };
+
+        let located = tab.located();
+        let row = TabRow::from(tab);
+
+        assert_eq!(crate::uia::Where::parse(&row.entrypoint), Some(located));
+        assert_eq!(row.id, "browser-tab:7:");
+    }
 
     /// A result that matched by name, or one that merely matched.
     ///

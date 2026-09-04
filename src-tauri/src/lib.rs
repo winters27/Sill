@@ -80,6 +80,7 @@ pub mod terminals;
 pub mod text;
 pub mod timing;
 pub mod tts;
+pub mod uia;
 pub mod utilities;
 pub mod weather;
 pub mod websearch;

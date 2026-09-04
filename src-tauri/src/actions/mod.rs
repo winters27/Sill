@@ -105,6 +105,7 @@ pub fn builtins() -> ActionRegistry {
     ActionRegistry::new(
         core.into_iter()
             .chain(transforms())
+            .chain(std::iter::once(Box::new(SwitchToTab) as Box<dyn Action>))
             .chain(window_actions())
             .collect(),
     )
@@ -2663,6 +2664,55 @@ impl Action for NextDisplay {
             Some(undo) => Outcome::undoable(message, undo),
             None => Outcome::done(message),
         })
+    }
+}
+
+/// Brings one browser tab to the front of its browser.
+///
+/// The only action a tab has, and that is the whole of what a tab is for in a
+/// launcher. Copying its address would need the address, which a tab strip does
+/// not carry: a tab exposes what it is called and nothing else, and inventing
+/// an address from a title would be a row that lies.
+struct SwitchToTab;
+
+#[async_trait]
+impl Action for SwitchToTab {
+    fn id(&self) -> &'static str {
+        "sill.browser.tab.focus"
+    }
+
+    fn title(&self) -> &'static str {
+        "Switch To Tab"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::BrowserTab
+    }
+
+    /// The same capability switching to a window needs, deliberately.
+    ///
+    /// Going to a tab is going to the window it lives in and then changing
+    /// what that window shows. A capability of its own would let something
+    /// hold `WindowControl` and still be refused this, or the other way round,
+    /// and neither is a distinction anybody wants to reason about.
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    /// Reads the strip again rather than trusting what the row was built from.
+    ///
+    /// See `uia::pick`. The row carries a description of a tab, not a hold on
+    /// one, and between the query and the Enter the strip can have changed.
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let want = crate::uia::Where::parse(&object.target)
+            .ok_or_else(|| format!("{} is not a tab", object.title))?;
+
+        crate::uia::activate(&want)?;
+        Ok(Outcome::done(format!("Switched to {}", object.title)))
     }
 }
 

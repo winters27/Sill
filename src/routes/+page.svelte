@@ -100,6 +100,7 @@
     queryHistory,
     openPath,
     browserAsCommand,
+    tabAsCommand,
     defaultBrowser,
     extractTextFromLastImage,
     pathRow,
@@ -1156,6 +1157,10 @@
           [
             ...commands,
             ...found.files.map(fileAsCommand),
+            // Above the remembered pages, deliberately. A tab is open right
+            // now and a history entry is a page you once had open, so when
+            // both match, the one already on screen is the nearer answer.
+            ...found.tabs.map(tabAsCommand),
             ...found.pages.map(browserAsCommand),
           ],
           current,
@@ -1967,6 +1972,21 @@
       if (command.mode === "window") {
         try {
           await runObjectAction("sill.window.focus", asTarget(command));
+          await dismiss();
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
+      // A tab is not in the index either, for the same reason and more so: it
+      // is read out of a running browser when somebody types and is gone the
+      // moment they stop. The action reads the strip again and refuses rather
+      // than switching to whatever has taken that tab's place, so a failure
+      // here is worth showing instead of dismissing over.
+      if (command.mode === "browser-tab") {
+        try {
+          await runObjectAction("sill.browser.tab.focus", asTarget(command));
           await dismiss();
         } catch (err) {
           status = `${err}`;

@@ -1334,6 +1334,31 @@
               {/snippet}
             </Row>
             <Row
+              title="Open browser tabs"
+              description="Tabs your browsers have open right now, so typing a page's name goes to the copy already on screen. Read from the running browsers when you type, and nothing is held between one search and the next."
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.browsers.tabs}
+                  onchange={commit}
+                  label="Open browser tabs"
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="Include Firefox and browsers built on it"
+              description="Firefox, Zen, LibreWolf and Waterfox keep their accessibility engine switched off until something asks, and reading tabs is the asking. Measured here, it costs that browser about 10 MB in its window's process and 85 MB across its pages, and stays until it is restarted. Chrome and Edge already expose their windows and cost nothing extra."
+              disabled={!p.browsers.tabs}
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.browsers.tabsFirefox}
+                  onchange={commit}
+                  label="Include Firefox and browsers built on it"
+                />
+              {/snippet}
+            </Row>
+            <Row
               title="Maximum browser results"
               description="These rank below commands and files, so a high number mostly costs scrolling."
               disabled={!p.browsers.enabled}

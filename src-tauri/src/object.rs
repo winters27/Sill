@@ -64,6 +64,13 @@ pub enum ObjectKind {
     /// enumerated at the moment it is searched for and its identity is a
     /// handle that stops being valid when it closes.
     Window,
+    /// One tab of a browser that is running right now.
+    ///
+    /// Not an [`ObjectKind::Url`], which is an address anything can open, and
+    /// not an [`ObjectKind::Window`], which is what the tab is inside. A tab
+    /// already exists somewhere, the only useful thing to do with one is go to
+    /// it, and going to it is neither opening an address nor raising a window.
+    BrowserTab,
     /// Words to look up on the web.
     ///
     /// Not a [`ObjectKind::Url`]: there is no address yet. Which engine turns
@@ -149,6 +156,7 @@ impl ObjectKind {
         Self::Text,
         Self::Emoji,
         Self::Window,
+        Self::BrowserTab,
         Self::Search,
         Self::Url,
         Self::AudioSession,
@@ -193,6 +201,7 @@ impl ObjectKind {
             Self::Text => "piece of text",
             Self::Emoji => "emoji",
             Self::Window => "open window",
+            Self::BrowserTab => "browser tab",
             Self::Search => "web search",
             Self::Url => "web page",
             Self::AudioSession => "program's volume",
@@ -242,6 +251,9 @@ impl ObjectKind {
             "text" => Self::Text,
             "emoji" => Self::Emoji,
             "window" => Self::Window,
+            // A tab a browser has open, which no scan produces and no index
+            // holds: it is read from the running browser when somebody types.
+            "browser-tab" => Self::BrowserTab,
             "audio-session" => Self::AudioSession,
             // What is playing, which is a row the search builds when somebody
             // asks for it and never anything the index holds.
@@ -287,6 +299,8 @@ impl ObjectKind {
                 // Switching to a window is the clearest case of all: the whole
                 // point is that something else ends up in front.
                 | Self::Window
+                // And switching to a tab is switching to the window it is in.
+                | Self::BrowserTab
         )
     }
 }
@@ -514,21 +528,22 @@ mod tests {
                 ObjectKind::Text => 12,
                 ObjectKind::Emoji => 13,
                 ObjectKind::Window => 14,
-                ObjectKind::Search => 15,
-                ObjectKind::Url => 16,
-                ObjectKind::AudioSession => 17,
-                ObjectKind::NowPlaying => 18,
-                ObjectKind::Process => 19,
-                ObjectKind::Workspace => 20,
-                ObjectKind::Script => 21,
-                ObjectKind::Conversation => 22,
-                ObjectKind::StoreListing => 23,
+                ObjectKind::BrowserTab => 15,
+                ObjectKind::Search => 16,
+                ObjectKind::Url => 17,
+                ObjectKind::AudioSession => 18,
+                ObjectKind::NowPlaying => 19,
+                ObjectKind::Process => 20,
+                ObjectKind::Workspace => 21,
+                ObjectKind::Script => 22,
+                ObjectKind::Conversation => 23,
+                ObjectKind::StoreListing => 24,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            24,
+            25,
             "a kind was added or removed without `ALL` being told",
         );
 

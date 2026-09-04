@@ -83,6 +83,16 @@ const HEADINGS: Record<string, string> = {
    * carries it without a label.
    */
   url: "Browser",
+  /*
+   * Open tabs, under their own heading rather than with the pages.
+   *
+   * They answer a different question. "Browser" is somewhere you have been;
+   * this is somewhere you are, in a window that is on this screen right now,
+   * and choosing one takes you there rather than opening it again. Filed
+   * together, the row that reopens a page and the row that goes to the copy
+   * already open would be indistinguishable until you pressed Enter.
+   */
+  "browser-tab": "Open Tabs",
   websearch: "Web Search",
   emoji: "Emoji",
   "audio-session": "Playing Now",

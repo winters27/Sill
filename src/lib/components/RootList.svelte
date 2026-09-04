@@ -348,6 +348,10 @@
         return "Web Search";
       case "window":
         return "Open Window";
+      // The browser it is in, which the row's title cannot say: a tab is
+      // called what its page is called, and the same page can be open in two.
+      case "browser-tab":
+        return command.extensionTitle;
       case "audio-session":
         return "App Volume";
       // The player, when Windows gave a name that is one. The row's own title
