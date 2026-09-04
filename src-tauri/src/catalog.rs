@@ -236,6 +236,26 @@ fn under(path: &str, folders: &[String]) -> bool {
         .any(|folder| settled.starts_with(folder.as_str()))
 }
 
+/// Whether a path sits inside any of a set of folders, settling them first.
+///
+/// The same question [`under`] answers, for callers holding a handful of paths
+/// rather than a bucket of them. The search loop cannot use this: it would
+/// settle the same folder list once per candidate.
+pub fn inside_any(path: &str, folders: &[String]) -> bool {
+    let folders: Vec<String> = folders
+        .iter()
+        .map(|folder| folder.trim())
+        .filter(|folder| !folder.is_empty())
+        .map(|folder| {
+            let mut settled = settled(folder);
+            settled.push('\\');
+            settled
+        })
+        .collect();
+
+    folders.is_empty() || under(path, &folders)
+}
+
 /// One folder, written one way.
 ///
 /// Case is dropped because Windows does not care about it, and separators are
@@ -307,9 +327,10 @@ pub fn worth_indexing(path: &Path, roots: &[PathBuf]) -> bool {
     })
 }
 
-/// Where one file's path sits in the arena.
+/// Where one file's path sits in the arena, and the two numbers about it that
+/// a query can ask for.
 ///
-/// Sixteen bytes and no allocation of its own. The first version gave every
+/// Twenty-four bytes and no allocation of its own. The first version gave every
 /// entry its own `Box<str>`, which measured at **25.8 MB of private memory**
 /// for a home folder against 11.3 MB before the index existed: forty-nine
 /// thousand separate allocations, each with a header, for five megabytes of
@@ -317,6 +338,27 @@ pub fn worth_indexing(path: &Path, roots: &[PathBuf]) -> bool {
 ///
 /// The name is not stored at all. A file name is always the tail of its own
 /// path, so it is an offset rather than a second copy of the same bytes.
+///
+/// # Why size and time are here rather than read when asked
+///
+/// `size:` and `date:` have to compare every candidate a query reaches, and on
+/// this machine's index that is a few thousand entries for an ordinary query
+/// and all 49,451 for one that is nothing but operators. A `GetFileAttributesEx`
+/// each is disk work per candidate on the keystroke path, which rule 23 does
+/// not allow and which would make the two operators the slowest thing in the
+/// launcher.
+///
+/// So they are held, and they cost **eight bytes an entry, 386 KB on a 49,451
+/// entry index**, measured against 5.1 MB of path text and 1.1 MB of slots for
+/// the same walk. `suite::real_operators` prints all three. The size is
+/// kibibytes rounded up rather than bytes, so a 4 TB file still fits in a `u32`
+/// and a one-byte file never reads as empty; nobody filters at a finer grain
+/// than that. The time is seconds since the epoch, which lasts until 2106.
+///
+/// **Reading them costs nothing at walk time on Windows.** The directory scan
+/// already returns size and write time in `WIN32_FIND_DATA`, and both `walkdir`
+/// and `ignore` keep that around, so `DirEntry::metadata()` with links not
+/// followed is a clone of a struct already in hand rather than a system call.
 #[derive(Debug, Clone, Copy)]
 struct Slot {
     /// Where the path starts in the arena.
@@ -325,6 +367,14 @@ struct Slot {
     end: u32,
     /// Where the name starts, which is somewhere between the two.
     name_at: u32,
+    /// How big it is, in kibibytes rounded up. Zero for a directory.
+    kib: u32,
+    /// When it was last written, in seconds since the epoch.
+    ///
+    /// Zero when the filesystem would not say, which reads as the beginning of
+    /// time and so falls outside every `date:` window. A file whose age is
+    /// unknown is not one somebody meant by "changed this week".
+    modified: u32,
     is_dir: bool,
     /// Whether the file is still there.
     ///
@@ -488,7 +538,12 @@ impl Catalog {
                     continue;
                 }
 
-                if let Some(slot) = push(&mut paths, found.path(), is_dir) {
+                // Free on Windows: links are not followed, so this hands back
+                // the metadata the directory scan already returned rather than
+                // asking the disk a second time. See [`Slot`].
+                let facts = found.metadata().as_ref().map(facts).unwrap_or_default();
+
+                if let Some(slot) = push(&mut paths, found.path(), is_dir, facts) {
                     entries.push(slot);
                 }
             }
@@ -615,7 +670,15 @@ impl Catalog {
                 continue;
             }
 
-            let Some(slot) = push_after(&mut arena, split, path, path.is_dir()) else {
+            // One question of the disk rather than two. This used to ask
+            // `is_dir()`, which is a `GetFileAttributesEx` of its own; asking
+            // for the whole metadata answers that as well as the size and the
+            // write time, so holding two more numbers costs a patch nothing.
+            let md = path.metadata().ok();
+            let is_dir = md.as_ref().is_some_and(|md| md.is_dir());
+            let facts = md.as_ref().map(facts).unwrap_or_default();
+
+            let Some(slot) = push_after(&mut arena, split, path, is_dir, facts) else {
                 continue;
             };
 
@@ -691,8 +754,22 @@ impl Catalog {
     /// like every other row rather than having a second idea of what a good
     /// match is.
     pub fn search(&self, query: &str, limit: usize, only_in: &[String]) -> Vec<FileHit> {
-        let query = query.trim();
-        if query.is_empty() || self.entries.is_empty() {
+        self.search_at(query, limit, only_in, now())
+    }
+
+    /// The same, with the clock passed in, so `date:` can be tested.
+    fn search_at(&self, query: &str, limit: usize, only_in: &[String], now: u32) -> Vec<FileHit> {
+        if self.entries.is_empty() {
+            return Vec::new();
+        }
+
+        let (asked, filters) = operators_at(query, now);
+        let query = asked.trim();
+        let filtering = !filters.asked_for_nothing();
+
+        // A query of nothing but operators is still a question: `ext:pdf` on
+        // its own means every PDF. What is not a question is nothing at all.
+        if query.is_empty() && !filtering {
             return Vec::new();
         }
 
@@ -712,10 +789,21 @@ impl Catalog {
             })
             .collect();
 
-        let candidates = self.candidates(query);
+        let candidates = if query.is_empty() {
+            // No letter to look up, so there is no bucket and the whole index
+            // is in the running. Only reachable by typing an operator and
+            // nothing else, and the filters below are integer comparisons, so
+            // it is a scan rather than a ranking pass.
+            std::borrow::Cow::Owned((0..self.entries.len() as u32).collect())
+        } else {
+            self.candidates(query)
+        };
+
         let needle: Vec<char> = query.to_lowercase().chars().collect();
 
-        let mut scored: Vec<(crate::registry::MatchClass, usize, u32)> = Vec::new();
+        // `None` when the query was only operators, and then every row has it,
+        // so the sort falls through to the name length as it should.
+        let mut scored: Vec<(Option<crate::registry::MatchClass>, usize, u32)> = Vec::new();
 
         for &at in candidates.iter() {
             let slot = self.entries[at as usize];
@@ -726,14 +814,26 @@ impl Catalog {
                 continue;
             }
 
+            let name = self.name(&slot);
+
+            // Before the folder test, which allocates a settled copy of the
+            // path per candidate. These are integer comparisons and at worst
+            // one look at the tail of the name.
+            if filtering && !filters.allows(&slot, name) {
+                continue;
+            }
+
             if !inside.is_empty() && !under(self.path(&slot), &inside) {
                 continue;
             }
 
-            let name = self.name(&slot);
+            if needle.is_empty() {
+                scored.push((None, name.chars().count(), at));
+                continue;
+            }
 
             if let Some(class) = matches(&needle, name) {
-                scored.push((class, name.chars().count(), at));
+                scored.push((Some(class), name.chars().count(), at));
             }
         }
 
@@ -910,12 +1010,57 @@ fn span<'a>(base: &'a str, added: &'a str, split: usize, at: u32, end: u32) -> &
     }
 }
 
+/// The two numbers about a file that a query can ask for.
+///
+/// Read from metadata the caller already has rather than fetched, because on
+/// Windows the walk is handed both by the directory scan and asking the disk
+/// again would turn a free index into one syscall per file.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Facts {
+    kib: u32,
+    modified: u32,
+}
+
+/// Reads them out of a `Metadata`, saturating rather than failing.
+///
+/// A file larger than four terabytes reads as four terabytes, and one written
+/// after 2106 reads as 2106. Both are wrong in the same direction as the
+/// comparison they will be used in, so a `size:>1gb` still finds the huge one.
+fn facts(md: &std::fs::Metadata) -> Facts {
+    Facts {
+        // Rounded up, so a file with anything in it is never zero kibibytes and
+        // `size:>0` means what it looks like it means.
+        kib: u32::try_from(md.len().div_ceil(1024)).unwrap_or(u32::MAX),
+        modified: md
+            .modified()
+            .ok()
+            .and_then(|when| when.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|since| u32::try_from(since.as_secs()).unwrap_or(u32::MAX))
+            .unwrap_or(0),
+    }
+}
+
+/// Now, in seconds since the epoch.
+fn now() -> u32 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|since| u32::try_from(since.as_secs()).unwrap_or(u32::MAX))
+        .unwrap_or(0)
+}
+
 /// Appends a path to the second arena and returns where it landed.
 ///
 /// The same as [`push`] except that offsets carry on from the end of the first
 /// arena, so a slot made here addresses the pair the same way one made by the
 /// walk does.
-fn push_after(arena: &mut String, split: usize, path: &Path, is_dir: bool) -> Option<Slot> {
+fn push_after(
+    arena: &mut String,
+    split: usize,
+    path: &Path,
+    is_dir: bool,
+    facts: Facts,
+) -> Option<Slot> {
     let name = path.file_name()?.to_str()?;
     let full = path.to_str()?;
     let name_from = full.len().checked_sub(name.len())?;
@@ -928,6 +1073,8 @@ fn push_after(arena: &mut String, split: usize, path: &Path, is_dir: bool) -> Op
         at,
         end,
         name_at: at + name_from as u32,
+        kib: facts.kib,
+        modified: facts.modified,
         is_dir,
         live: true,
     })
@@ -937,7 +1084,7 @@ fn push_after(arena: &mut String, split: usize, path: &Path, is_dir: bool) -> Op
 ///
 /// Nothing if the path has no name or is not valid text. A path Windows cannot
 /// render as UTF-8 is one nobody is going to type either.
-fn push(paths: &mut String, path: &Path, is_dir: bool) -> Option<Slot> {
+fn push(paths: &mut String, path: &Path, is_dir: bool, facts: Facts) -> Option<Slot> {
     let name = path.file_name()?.to_str()?;
     let full = path.to_str()?;
 
@@ -953,6 +1100,8 @@ fn push(paths: &mut String, path: &Path, is_dir: bool) -> Option<Slot> {
         at,
         end,
         name_at: at + name_from as u32,
+        kib: facts.kib,
+        modified: facts.modified,
         is_dir,
         live: true,
     })
@@ -969,6 +1118,351 @@ fn threads() -> usize {
         .unwrap_or(2)
 }
 
+// --------------------------------------------------- asking for more than a name
+
+/// A range of numbers a slot has to fall inside, both ends included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Between {
+    low: u32,
+    high: u32,
+}
+
+impl Between {
+    fn holds(&self, value: u32) -> bool {
+        value >= self.low && value <= self.high
+    }
+}
+
+/// What a query asked for beyond a name.
+///
+/// `ext:rs`, `size:>1mb` and `date:week`, which narrow a search rather than
+/// being one. Everything here is compared against numbers and bytes already in
+/// the index, so a filter is a handful of integer comparisons per candidate and
+/// never a question put to the disk.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Filters {
+    /// Extensions, lower case and without the dot. Any one of them will do.
+    ext: Vec<String>,
+    /// Size in kibibytes.
+    size: Option<Between>,
+    /// Last written, in seconds since the epoch.
+    modified: Option<Between>,
+}
+
+impl Filters {
+    /// Whether the query narrowed anything, which is the ordinary case.
+    ///
+    /// Hoisted out of the per-candidate loop by the caller: typing does not pay
+    /// for operators beyond one bool.
+    pub fn asked_for_nothing(&self) -> bool {
+        self.ext.is_empty() && self.size.is_none() && self.modified.is_none()
+    }
+
+    /// Whether one indexed file answers what was asked.
+    fn allows(&self, slot: &Slot, name: &str) -> bool {
+        if let Some(size) = self.size {
+            // A directory has no size worth comparing, so asking about size is
+            // asking about files.
+            if slot.is_dir || !size.holds(slot.kib) {
+                return false;
+            }
+        }
+
+        if let Some(modified) = self.modified {
+            if !modified.holds(slot.modified) {
+                return false;
+            }
+        }
+
+        if !self.ext.is_empty() && !self.ext.iter().any(|want| has_extension(name, want)) {
+            return false;
+        }
+
+        true
+    }
+}
+
+/// Whether a file name ends in one particular extension.
+///
+/// Written out rather than going through `Path`, because this runs once per
+/// candidate and `Path::extension` on a borrowed name would allocate nothing
+/// but would still walk the name twice. A dot at the start does not count:
+/// `.gitignore` has no extension, it has a name beginning with a dot.
+fn has_extension(name: &str, want: &str) -> bool {
+    let Some(dot) = name.rfind('.') else {
+        return false;
+    };
+
+    dot != 0 && name[dot + 1..].eq_ignore_ascii_case(want)
+}
+
+/// Splits a typed query into the text to match on and what it asked to narrow.
+///
+/// # What this costs a query with no operator in it
+///
+/// One scan for a colon, and then nothing. A query without one is handed back
+/// **borrowed**, so the ordinary keystroke allocates nothing here and the
+/// search that follows is the search that was there before. A query that has a
+/// colon but no operator, which is what `C:\work` is, costs a walk over its
+/// words and still allocates nothing.
+///
+/// The allocation only happens once a term is actually taken out, because that
+/// is the only case where the remaining text is not a piece of the input.
+pub fn operators(query: &str) -> (std::borrow::Cow<'_, str>, Filters) {
+    operators_at(query, now())
+}
+
+/// The same, with the clock passed in.
+///
+/// Split out because `date:week` means "the last seven days" and a test that
+/// asks what today is cannot say what the answer should be. This is the same
+/// shape as `verdict` in `files`: the rule is worth pinning down, and the fact
+/// about this particular moment is not part of it.
+fn operators_at(query: &str, now: u32) -> (std::borrow::Cow<'_, str>, Filters) {
+    let mut filters = Filters::default();
+
+    // Every operator has one, so a query without one cannot contain any, and
+    // this is the whole of what ordinary typing pays.
+    if !query.contains(':') {
+        return (std::borrow::Cow::Borrowed(query), filters);
+    }
+
+    // Built only once something has actually been taken out. Until then the
+    // input is still the answer and copying it would be work for nothing.
+    let mut kept: Option<String> = None;
+
+    for term in query.split_whitespace() {
+        if read_operator(term, now, &mut filters) {
+            if kept.is_none() {
+                // What came before the first operator, which is a piece of the
+                // input and so is copied once rather than word by word.
+                let from = term.as_ptr() as usize - query.as_ptr() as usize;
+                kept = Some(query[..from].trim_end().to_string());
+            }
+
+            continue;
+        }
+
+        if let Some(text) = kept.as_mut() {
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.push_str(term);
+        }
+    }
+
+    match kept {
+        Some(text) => (std::borrow::Cow::Owned(text), filters),
+        None => (std::borrow::Cow::Borrowed(query), filters),
+    }
+}
+
+/// Reads one word as an operator, saying whether it was one.
+///
+/// A word with a name this understands but a value it does not is **not** an
+/// operator, so it stays in the query as text. That is what makes typing one
+/// letter at a time behave: `size:` and `size:>` on the way to `size:>1mb`
+/// match nothing rather than suddenly listing every file on the machine.
+fn read_operator(term: &str, now: u32, into: &mut Filters) -> bool {
+    let Some((name, value)) = term.split_once(':') else {
+        return false;
+    };
+
+    if value.is_empty() {
+        return false;
+    }
+
+    match name.to_ascii_lowercase().as_str() {
+        "ext" => match read_extensions(value) {
+            Some(mut found) => {
+                into.ext.append(&mut found);
+                true
+            }
+            None => false,
+        },
+        "size" => match read_size(value) {
+            Some(range) => {
+                into.size = Some(both_of(into.size, range));
+                true
+            }
+            None => false,
+        },
+        "date" => match read_date(value, now) {
+            Some(range) => {
+                into.modified = Some(both_of(into.modified, range));
+                true
+            }
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+/// Two of the same operator mean both, not the last one.
+///
+/// `size:>1mb size:<4mb` is the only way to write a band, since one term
+/// carries one comparison. Taking the last would make the first silently
+/// nothing, which is worse than a narrow answer.
+fn both_of(had: Option<Between>, now: Between) -> Between {
+    match had {
+        Some(before) => Between {
+            low: before.low.max(now.low),
+            high: before.high.min(now.high),
+        },
+        None => now,
+    }
+}
+
+/// `ext:rs` or `ext:.rs` or `ext:rs,md`.
+fn read_extensions(value: &str) -> Option<Vec<String>> {
+    let found: Vec<String> = value
+        .split(',')
+        .map(|one| one.trim().trim_start_matches('.'))
+        .filter(|one| !one.is_empty())
+        .map(|one| one.to_ascii_lowercase())
+        .collect();
+
+    (!found.is_empty()).then_some(found)
+}
+
+/// `size:>1mb`, `size:<=500kb`, `size:1gb`.
+///
+/// A bare value reads as "at least", which is not what a whole-volume indexer
+/// means by it: there, `size:1mb` is a file of exactly that many bytes.
+/// Deliberately different, because an exact byte count is a thing nobody knows
+/// and so a thing nobody is searching for, and answering nothing to somebody
+/// who typed `size:100mb` looking for the big files is a worse default than
+/// answering the big files.
+fn read_size(value: &str) -> Option<Between> {
+    let (compare, rest) = comparator(value);
+    let kib = read_bytes(rest)?.div_ceil(1024);
+    // Held as a `u32` of kibibytes, so a threshold past four terabytes is the
+    // largest thing the index can describe rather than a wrap to nothing.
+    let kib = u32::try_from(kib).unwrap_or(u32::MAX);
+
+    Some(match compare {
+        Compare::More => Between {
+            low: kib.saturating_add(1),
+            high: u32::MAX,
+        },
+        Compare::AtLeast => Between {
+            low: kib,
+            high: u32::MAX,
+        },
+        Compare::Less => Between {
+            low: 0,
+            high: kib.saturating_sub(1),
+        },
+        Compare::AtMost => Between { low: 0, high: kib },
+        Compare::Exactly => Between {
+            low: kib,
+            high: kib,
+        },
+    })
+}
+
+/// How a value is being compared, and what is left of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Compare {
+    More,
+    AtLeast,
+    Less,
+    AtMost,
+    Exactly,
+}
+
+fn comparator(value: &str) -> (Compare, &str) {
+    for (mark, compare) in [
+        (">=", Compare::AtLeast),
+        ("<=", Compare::AtMost),
+        (">", Compare::More),
+        ("<", Compare::Less),
+        ("=", Compare::Exactly),
+    ] {
+        if let Some(rest) = value.strip_prefix(mark) {
+            return (compare, rest);
+        }
+    }
+
+    // Nothing said, so "at least". See [`read_size`].
+    (Compare::AtLeast, value)
+}
+
+/// A number with an optional unit, in bytes.
+///
+/// Binary units, because that is what Windows shows in a file's properties and
+/// what somebody comparing against a size they read there means.
+fn read_bytes(value: &str) -> Option<u64> {
+    let value = value.trim();
+    let digits = value
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(value.len());
+
+    let number: u64 = value.get(..digits)?.parse().ok()?;
+
+    let scale = match value[digits..].trim().to_ascii_lowercase().as_str() {
+        "" | "b" => 1u64,
+        "k" | "kb" | "kib" => 1024,
+        "m" | "mb" | "mib" => 1024 * 1024,
+        "g" | "gb" | "gib" => 1024 * 1024 * 1024,
+        "t" | "tb" | "tib" => 1024u64 * 1024 * 1024 * 1024,
+        _ => return None,
+    };
+
+    number.checked_mul(scale)
+}
+
+/// `date:today`, `date:week`, `date:7d`, `date:6h`.
+///
+/// Always "written within the last so long", and never a comparison. A `>` on a
+/// duration reads two ways round: greater than seven days could be the date or
+/// the age, and the two mean opposite sets of files. One meaning is better than
+/// a coin toss.
+///
+/// The windows roll from now rather than falling on calendar boundaries, so
+/// `date:today` is the last twenty-four hours rather than since midnight.
+/// Midnight needs the machine's timezone, which needs a date library this does
+/// not have, and the difference is never the difference between finding a file
+/// and not.
+fn read_date(value: &str, now: u32) -> Option<Between> {
+    let value = value.trim().to_ascii_lowercase();
+
+    let seconds: u64 = match value.as_str() {
+        "today" => 24 * 60 * 60,
+        "week" => 7 * 24 * 60 * 60,
+        "month" => 30 * 24 * 60 * 60,
+        "year" => 365 * 24 * 60 * 60,
+        _ => {
+            let digits = value
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(value.len());
+
+            let number: u64 = value.get(..digits)?.parse().ok()?;
+
+            let scale = match &value[digits..] {
+                "h" => 60 * 60,
+                "d" => 24 * 60 * 60,
+                "w" => 7 * 24 * 60 * 60,
+                "m" => 30 * 24 * 60 * 60,
+                "y" => 365 * 24 * 60 * 60,
+                _ => return None,
+            };
+
+            number.checked_mul(scale)?
+        }
+    };
+
+    let ago = u32::try_from(seconds).unwrap_or(u32::MAX);
+
+    Some(Between {
+        low: now.saturating_sub(ago),
+        // Not `now`. A clock that has been put back, or a file copied off a
+        // machine an hour ahead, leaves a write time in the future, and those
+        // are the most recently written things there are.
+        high: u32::MAX,
+    })
+}
+
 // ------------------------------------------------------------ keeping it
 
 /// What the saved index starts with, so an old or foreign file is not read.
@@ -977,7 +1471,7 @@ fn threads() -> usize {
 /// different version is not migrated, it is ignored and rebuilt: it is a copy
 /// of something that can be regenerated in seconds, and migration code for a
 /// throwaway file is code that can be wrong.
-const MAGIC: &[u8; 8] = b"SILLIDX1";
+const MAGIC: &[u8; 8] = b"SILLIDX2";
 
 impl Catalog {
     /// Writes the index where the next start can find it.
@@ -997,7 +1491,7 @@ impl Catalog {
     /// format did not have to learn about either.
     pub fn save(&self, to: &Path) -> std::io::Result<()> {
         let mut out =
-            Vec::with_capacity(self.base.len() + self.added.len() + self.entries.len() * 16 + 64);
+            Vec::with_capacity(self.base.len() + self.added.len() + self.entries.len() * 24 + 64);
 
         out.extend_from_slice(MAGIC);
 
@@ -1026,6 +1520,8 @@ impl Catalog {
                 at,
                 end: at + (slot.end - slot.at),
                 name_at: at + name_from,
+                kib: slot.kib,
+                modified: slot.modified,
                 is_dir: slot.is_dir,
                 live: true,
             });
@@ -1039,6 +1535,8 @@ impl Catalog {
             put_u32(&mut out, slot.at);
             put_u32(&mut out, slot.end);
             put_u32(&mut out, slot.name_at);
+            put_u32(&mut out, slot.kib);
+            put_u32(&mut out, slot.modified);
             put_u32(&mut out, u32::from(slot.is_dir));
         }
 
@@ -1105,6 +1603,8 @@ impl Catalog {
                 at: take_u32(&raw, &mut at)?,
                 end: take_u32(&raw, &mut at)?,
                 name_at: take_u32(&raw, &mut at)?,
+                kib: take_u32(&raw, &mut at)?,
+                modified: take_u32(&raw, &mut at)?,
                 is_dir: take_u32(&raw, &mut at)? != 0,
                 // Nothing dead is ever written, so everything read is alive.
                 live: true,
@@ -1294,7 +1794,9 @@ mod tests {
         let mut paths = String::new();
         let entries: Vec<Slot> = names
             .iter()
-            .filter_map(|(path, is_dir)| push(&mut paths, Path::new(path), *is_dir))
+            .filter_map(|(path, is_dir)| {
+                push(&mut paths, Path::new(path), *is_dir, Facts::default())
+            })
             .collect();
 
         Catalog {
@@ -1412,10 +1914,14 @@ mod tests {
 
         assert_eq!(many.held(), text, "the arena holds exactly the paths");
         assert_eq!(many.entries.len(), 3);
-        // Sixteen bytes each, and nothing on the heap of their own. Still
-        // sixteen after the tombstone: it went into padding that was already
-        // being paid for.
-        assert_eq!(std::mem::size_of::<Slot>(), 16);
+        // Twenty-four bytes each, and nothing on the heap of their own. It was
+        // sixteen, including the tombstone, which went into padding that was
+        // already being paid for. `size:` and `date:` added a size and a write
+        // time, which is the eight bytes: **386 KB on a 49,451 entry index**,
+        // against 5.1 MB of path text and 1.1 MB of slots. Guarded here so that
+        // a third field cannot be added to a slot without somebody deciding
+        // whether fifty thousand copies of it are worth the answer it buys.
+        assert_eq!(std::mem::size_of::<Slot>(), 24);
     }
 
     /// A patch shares the walked text instead of copying it.
@@ -1972,5 +2478,427 @@ mod tests {
         let found = narrowed(&["", "   ", r"C:\play"]);
 
         assert_eq!(found, vec![r"C:\play\notes.md"], "{found:?}");
+    }
+
+    // ------------------------------------------------ asking for more
+
+    /// What an operator costs a query that does not use one.
+    ///
+    /// This is the whole guard. `ext:` is three characters somebody types on
+    /// the way to something else, and the parser runs on every keystroke
+    /// whether or not one is there. A query with no colon in it is handed
+    /// **back**, not copied: the `Cow` is borrowed and points at the very bytes
+    /// that came in, so the ordinary keystroke allocates nothing here and
+    /// splits nothing.
+    #[test]
+    fn a_query_with_no_operator_in_it_is_not_even_copied() {
+        for typed in [
+            "budget",
+            "quarterly budget report",
+            "",
+            "   spaced out   ",
+            "*.json",
+        ] {
+            let (asked, filters) = operators_at(typed, 1_700_000_000);
+
+            assert!(
+                matches!(asked, std::borrow::Cow::Borrowed(_)),
+                "{typed:?} was copied when nothing was taken out of it"
+            );
+            assert!(
+                std::ptr::eq(asked.as_ptr(), typed.as_ptr()),
+                "{typed:?} came back as different bytes"
+            );
+            assert!(filters.asked_for_nothing());
+        }
+    }
+
+    /// And a colon on its own is not an operator either.
+    ///
+    /// `C:\work` is a thing people type into a launcher. It reaches the slow
+    /// half of the parser, because the only cheap way to rule a query out is
+    /// the colon, but it still comes back borrowed and narrowing nothing.
+    #[test]
+    fn a_drive_letter_is_not_an_operator() {
+        for typed in [r"C:\work", "notes: a list", "colour:red", "12:30"] {
+            let (asked, filters) = operators_at(typed, 1_700_000_000);
+
+            assert!(
+                std::ptr::eq(asked.as_ptr(), typed.as_ptr()),
+                "{typed:?} was rewritten"
+            );
+            assert!(filters.asked_for_nothing(), "{typed:?} narrowed something");
+        }
+    }
+
+    /// The parse is not allowed to become the expensive part of typing.
+    ///
+    /// A generous ceiling rather than a tight one: this runs in a debug build
+    /// on whatever machine happens to be free. It is here to catch the ordinary
+    /// path growing a `to_lowercase` or a `split`, which would be orders away
+    /// from this, not to measure the machine.
+    #[test]
+    fn parsing_an_ordinary_query_is_not_where_a_keystroke_goes() {
+        const ROUNDS: usize = 100_000;
+
+        let began = std::time::Instant::now();
+        for _ in 0..ROUNDS {
+            let asked = operators_at(std::hint::black_box("quarterly budget report"), 0);
+            std::hint::black_box(asked);
+        }
+        let took = began.elapsed();
+
+        assert!(
+            took < std::time::Duration::from_millis(250),
+            "{ROUNDS} parses took {took:?}, which is work a keystroke should not be doing"
+        );
+    }
+
+    #[test]
+    fn an_extension_is_taken_out_of_the_query() {
+        let (asked, filters) = operators_at("budget ext:pdf", 1_700_000_000);
+
+        assert_eq!(asked, "budget");
+        assert_eq!(filters.ext, vec!["pdf".to_string()]);
+        assert!(filters.size.is_none());
+        assert!(filters.modified.is_none());
+    }
+
+    #[test]
+    fn an_operator_may_come_first_or_last_or_in_the_middle() {
+        for typed in [
+            "ext:pdf budget report",
+            "budget ext:pdf report",
+            "budget report ext:pdf",
+        ] {
+            let (asked, filters) = operators_at(typed, 1_700_000_000);
+            assert_eq!(asked, "budget report", "{typed:?}");
+            assert_eq!(filters.ext, vec!["pdf".to_string()], "{typed:?}");
+        }
+    }
+
+    #[test]
+    fn an_extension_may_be_written_with_a_dot_or_as_a_list() {
+        for typed in ["ext:.rs", "ext:RS"] {
+            let (_, filters) = operators_at(&format!("code {typed}"), 0);
+            assert_eq!(filters.ext, vec!["rs".to_string()], "{typed:?}");
+        }
+
+        let (_, filters) = operators_at("photo ext:png,jpg,.JPEG", 0);
+        assert_eq!(
+            filters.ext,
+            vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_size_reads_its_comparator_and_its_unit() {
+        // Binary units, because that is what a file's properties dialog shows.
+        assert_eq!(read_bytes("1mb"), Some(1024 * 1024));
+        assert_eq!(read_bytes("1MiB"), Some(1024 * 1024));
+        assert_eq!(read_bytes("512"), Some(512));
+        assert_eq!(read_bytes("2 gb"), Some(2 * 1024 * 1024 * 1024));
+        assert_eq!(read_bytes("big"), None);
+        assert_eq!(read_bytes("4pb"), None);
+
+        // Held in kibibytes, so a megabyte is 1024 of them.
+        assert_eq!(
+            read_size(">1mb"),
+            Some(Between {
+                low: 1025,
+                high: u32::MAX
+            })
+        );
+        assert_eq!(
+            read_size(">=1mb"),
+            Some(Between {
+                low: 1024,
+                high: u32::MAX
+            })
+        );
+        assert_eq!(read_size("<1mb"), Some(Between { low: 0, high: 1023 }));
+        assert_eq!(read_size("<=1mb"), Some(Between { low: 0, high: 1024 }));
+        assert_eq!(
+            read_size("=1mb"),
+            Some(Between {
+                low: 1024,
+                high: 1024
+            })
+        );
+
+        // Nothing said means at least, which is what somebody typing
+        // `size:100mb` looking for the big files means.
+        assert_eq!(read_size("1mb"), read_size(">=1mb"));
+    }
+
+    /// A half-typed operator is text, not an operator that matches everything.
+    ///
+    /// `size:>1mb` is typed one character at a time and passes through `size:`
+    /// and `size:>` on the way. If those parsed as "any size" the list would
+    /// flash the whole index for two keystrokes.
+    #[test]
+    fn a_half_typed_operator_stays_in_the_query() {
+        for typed in [
+            "size:", "size:>", "size:>x", "ext:", "ext:.", "date:", "date:3",
+        ] {
+            let (asked, filters) = operators_at(typed, 1_700_000_000);
+
+            assert_eq!(asked, typed, "{typed:?} was taken out of the query");
+            assert!(
+                filters.asked_for_nothing(),
+                "{typed:?} narrowed something before it was finished"
+            );
+        }
+    }
+
+    #[test]
+    fn a_date_window_rolls_back_from_now() {
+        let now = 1_700_000_000u32;
+        let day = 24 * 60 * 60;
+
+        let (asked, filters) = operators_at("notes date:week", now);
+        assert_eq!(asked, "notes");
+        assert_eq!(
+            filters.modified,
+            Some(Between {
+                low: now - 7 * day,
+                high: u32::MAX
+            })
+        );
+
+        assert_eq!(read_date("today", now), read_date("1d", now));
+        assert_eq!(read_date("month", now), read_date("30d", now));
+        assert_eq!(read_date("year", now), read_date("365d", now));
+        assert_eq!(
+            read_date("6h", now),
+            Some(Between {
+                low: now - 6 * 60 * 60,
+                high: u32::MAX
+            })
+        );
+
+        // Not "up to now". A file copied off a machine an hour ahead has a
+        // write time in the future, and it is the newest thing there is.
+        assert_eq!(
+            read_date("today", now).map(|window| window.high),
+            Some(u32::MAX)
+        );
+    }
+
+    #[test]
+    fn two_of_the_same_operator_narrow_rather_than_replace() {
+        // The only way to write a band, since one term carries one comparison.
+        let (asked, filters) = operators_at("log size:>1mb size:<4mb", 0);
+
+        assert_eq!(asked, "log");
+        assert_eq!(
+            filters.size,
+            Some(Between {
+                low: 1025,
+                high: 4095
+            })
+        );
+    }
+
+    #[test]
+    fn a_dot_at_the_start_of_a_name_is_not_an_extension() {
+        // `.gitignore` is a name that begins with a dot, not a file of type
+        // "gitignore". Matching it would make `ext:` answer things nobody
+        // asked about.
+        assert!(!has_extension(".gitignore", "gitignore"));
+        assert!(has_extension("notes.md", "md"));
+        assert!(has_extension("NOTES.MD", "md"));
+        assert!(has_extension("archive.tar.gz", "gz"));
+        assert!(!has_extension("archive.tar.gz", "tar"));
+        assert!(!has_extension("Makefile", "makefile"));
+    }
+
+    // ------------------------------------------- operators against an index
+
+    /// A small index on disk, with sizes and write times chosen by the test.
+    fn a_few_files(dir: &Path, now: u32) {
+        let day = 24u32 * 60 * 60;
+
+        for (name, bytes, ago) in [
+            ("report.pdf", 3 * 1024 * 1024usize, 2 * day),
+            ("report.txt", 12usize, 400 * day),
+            ("holiday.png", 700 * 1024usize, 2 * day),
+            ("archive.zip", 40 * 1024 * 1024usize, 400 * day),
+        ] {
+            let at = dir.join(name);
+            std::fs::write(&at, vec![b'x'; bytes]).expect("write");
+
+            let file = std::fs::File::options()
+                .write(true)
+                .open(&at)
+                .expect("open");
+
+            file.set_modified(
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::from(now - ago)),
+            )
+            .expect("set the write time");
+        }
+    }
+
+    fn names(hits: &[FileHit]) -> Vec<String> {
+        let mut found: Vec<String> = hits.iter().map(|hit| hit.name.clone()).collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn an_extension_narrows_a_search_to_one_kind_of_file() {
+        let now = 1_700_000_000u32;
+        let dir = tempfile::tempdir().expect("temp dir");
+        a_few_files(dir.path(), now);
+
+        let catalog = Catalog::build(&[dir.path().to_path_buf()]);
+
+        assert_eq!(
+            names(&catalog.search_at("report", 20, &[], now)),
+            vec!["report.pdf", "report.txt"],
+            "without an operator both should be there"
+        );
+
+        assert_eq!(
+            names(&catalog.search_at("report ext:pdf", 20, &[], now)),
+            vec!["report.pdf"]
+        );
+    }
+
+    #[test]
+    fn a_size_narrows_to_the_big_ones() {
+        let now = 1_700_000_000u32;
+        let dir = tempfile::tempdir().expect("temp dir");
+        a_few_files(dir.path(), now);
+
+        let catalog = Catalog::build(&[dir.path().to_path_buf()]);
+
+        assert_eq!(
+            names(&catalog.search_at("report size:>1mb", 20, &[], now)),
+            vec!["report.pdf"],
+            "the twelve byte one is not over a megabyte"
+        );
+
+        assert_eq!(
+            names(&catalog.search_at("report size:<1mb", 20, &[], now)),
+            vec!["report.txt"]
+        );
+    }
+
+    #[test]
+    fn a_date_narrows_to_what_changed_recently() {
+        let now = 1_700_000_000u32;
+        let dir = tempfile::tempdir().expect("temp dir");
+        a_few_files(dir.path(), now);
+
+        let catalog = Catalog::build(&[dir.path().to_path_buf()]);
+
+        assert_eq!(
+            names(&catalog.search_at("report date:week", 20, &[], now)),
+            vec!["report.pdf"],
+            "the other one was written over a year ago"
+        );
+
+        assert_eq!(
+            names(&catalog.search_at("report date:2y", 20, &[], now)),
+            vec!["report.pdf", "report.txt"]
+        );
+    }
+
+    /// `ext:png` on its own means every PNG, and is still a question.
+    #[test]
+    fn a_query_of_nothing_but_operators_is_still_a_question() {
+        let now = 1_700_000_000u32;
+        let dir = tempfile::tempdir().expect("temp dir");
+        a_few_files(dir.path(), now);
+
+        let catalog = Catalog::build(&[dir.path().to_path_buf()]);
+
+        assert_eq!(
+            names(&catalog.search_at("ext:png", 20, &[], now)),
+            vec!["holiday.png"]
+        );
+
+        assert_eq!(
+            names(&catalog.search_at("size:>10mb", 20, &[], now)),
+            vec!["archive.zip"]
+        );
+
+        // And nothing at all is still nothing.
+        assert!(catalog.search_at("", 20, &[], now).is_empty());
+        assert!(catalog.search_at("   ", 20, &[], now).is_empty());
+    }
+
+    /// Operators and the folder narrowing are both applied, not either.
+    #[test]
+    fn an_operator_does_not_replace_the_folder_setting() {
+        let now = 1_700_000_000u32;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let inside = dir.path().join("inside");
+        std::fs::create_dir(&inside).expect("a folder");
+        a_few_files(&inside, now);
+        a_few_files(dir.path(), now);
+
+        let catalog = Catalog::build(&[dir.path().to_path_buf()]);
+
+        let only_in = vec![inside.to_string_lossy().into_owned()];
+        let found = catalog.search_at("report ext:pdf", 20, &only_in, now);
+
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            settled(&found[0].path).starts_with(&settled(&inside.to_string_lossy())),
+            "{found:?} came from outside the folder that was asked for"
+        );
+    }
+
+    /// The size and the write time have to survive the saved index.
+    ///
+    /// They are the two fields the file format grew for this, and an index read
+    /// back without them would answer `size:` and `date:` with nothing on every
+    /// start but the first.
+    #[test]
+    fn size_and_write_time_come_back_from_the_saved_index() {
+        let now = 1_700_000_000u32;
+        let dir = tempfile::tempdir().expect("temp dir");
+        a_few_files(dir.path(), now);
+
+        let file = dir.path().join("files.bin");
+        let built = Catalog::build(&[dir.path().to_path_buf()]);
+        built.save(&file).expect("save");
+
+        let read = Catalog::load(&file, built.roots()).expect("the index reads back");
+
+        assert_eq!(
+            names(&read.search_at("report size:>1mb", 20, &[], now)),
+            names(&built.search_at("report size:>1mb", 20, &[], now))
+        );
+        assert_eq!(
+            names(&read.search_at("report date:week", 20, &[], now)),
+            vec!["report.pdf"]
+        );
+    }
+
+    /// And a file that arrives by a patch has them too.
+    ///
+    /// A patch does not walk, so it asks the disk itself. Missing this leaves
+    /// anything created since the last walk invisible to both operators until
+    /// the next one.
+    #[test]
+    fn a_patched_in_file_can_be_asked_about_by_size() {
+        let now = 1_700_000_000u32;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let built = Catalog::build(&[dir.path().to_path_buf()]);
+
+        let late = dir.path().join("latecomer.pdf");
+        std::fs::write(&late, vec![b'x'; 3 * 1024 * 1024]).expect("write");
+
+        let patched = built.apply(&[late], &[]).expect("a patch");
+
+        assert_eq!(
+            names(&patched.search_at("latecomer size:>1mb", 20, &[], now)),
+            vec!["latecomer.pdf"],
+            "a file added without a walk has no size"
+        );
     }
 }

@@ -62,6 +62,8 @@ mod clipboard_merge;
 mod file_merge;
 mod keyword_matching;
 mod ranking_memory;
+mod real_operators;
+mod real_previews;
 mod real_terminals;
 mod registry;
 mod settings_apply_live;
