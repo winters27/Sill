@@ -409,14 +409,31 @@ pub(crate) fn scan_everything(
 
     for app in &on_path {
         if keep(app, &mut names, &mut targets) {
-            // A PATH entry is still categorised by where it resolves, so a
-            // System32 tool reads as "System". "Command Line" is reserved for
-            // things that are applications only by virtue of being on PATH.
-            let kind = match apps::categorize(app) {
-                "Application" => "Command Line",
-                other => other,
-            };
-            out.push(registry::executable_record(&app.name, &app.path, kind));
+            /*
+             * A program on PATH is a command-line program, wherever it lives.
+             *
+             * This used to ask `categorize`, which answers by where a thing
+             * resolves, and then rename only its "Application" answer. Every
+             * other answer passed through, so **656 of the 1,142 entries on
+             * this machine said "System"** because `reg`, `runonce` and
+             * `openfiles` sit under the Windows directory. They then drew
+             * under the heading "Command Line" while saying "System" on the
+             * right: two different answers to "what is this" on one row.
+             *
+             * It also made "System" mean three unrelated things in one list,
+             * since an application in the Windows folder and a Windows toggle
+             * both say it too, and a toggle is a thing you flip.
+             *
+             * Where it lives is not what kind of thing it is, and where it
+             * lives is already on the row: `executable_record` puts the full
+             * path in the subtitle, which is the only thing telling three
+             * Pythons apart.
+             */
+            out.push(registry::executable_record(
+                &app.name,
+                &app.path,
+                "Command Line",
+            ));
         }
     }
 

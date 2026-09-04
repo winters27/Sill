@@ -367,11 +367,81 @@
       case "emoji":
         // The group, which is the only useful thing to say about one.
         return command.extensionTitle;
-      default:
-        // Applications carry a category worked out from where they resolve,
-        // which says more than the word "Application" would.
+      // A link somebody saved, and the same one waiting for what to put in
+      // it. The same thing either way, so the same word.
+      case "quicklink":
+      case "quicklink-arg":
+        return "Quicklink";
+      // Likewise a script and a script that has stopped to ask.
+      case "script":
+      case "script-arg":
+        return "Script";
+      // A switch, not a place. "System" alone read the same as a tool that
+      // ships with Windows, and this is a thing you flip.
+      case "system":
+        return "System Control";
+      // Text somebody captured, which is the only kind whose title is the
+      // thing itself rather than a name for it.
+      case "text":
+        return "Text";
+      // One running program. Singular, because the row is one of them and
+      // `extensionTitle` says "Processes", which is the heading's job.
+      case "process":
+        return "Process";
+      // The chat you were in, and one you left. Both are conversations; which
+      // one it is shows in where it sits, not in a second word.
+      case "conversation":
+      case "past-conversation":
+        return "Conversation";
+      case "note":
+        return "Note";
+      // The row that sets one and the reminder that arrives when it fires.
+      // Different kinds to Rust because different things can be done to them,
+      // the same thing to somebody reading a list.
+      case "reminder":
+      case "reminder-shown":
+        return "Reminder";
+      // Something in the store, which is not installed and so is not yet a
+      // command. Saying "Extension" would claim it was.
+      case "store-listing":
+        return "In the Store";
+      case "terminal-profile":
+        return "Terminal";
+      // Applications and settings carry a category worked out in Rust, which
+      // says more than one flat word would: "Store App", "Game", "Control
+      // Panel", "Windows Tools".
+      case "app":
+      case "file-setup":
+      case "folder":
         return command.extensionTitle;
+      default:
+        /*
+         * Named rather than defaulted, and this is why.
+         *
+         * A `default` here was silently right for the kinds that carry a
+         * category and silently wrong for anything else: a new mode arrived
+         * with whatever `extensionTitle` happened to hold, and nothing said
+         * so. That is the same shape as `groupOf`'s old
+         * `default: "Applications"`, which filed a saved arrangement, a
+         * running process and a clipboard entry as applications.
+         *
+         * `never` makes the compiler name a mode nobody labelled, so the
+         * mistake is a build failure rather than a wrong word on a row.
+         */
+        return unlabelled(command.mode);
     }
+  }
+
+  /**
+   * A mode with no label, which must not compile.
+   *
+   * Reached only if the switch above stops being exhaustive. The `never`
+   * parameter is what fails the build; the body is what keeps a row drawable
+   * if one ever gets here at runtime, because a launcher that throws while
+   * drawing a list is worse than one that says the wrong word.
+   */
+  function unlabelled(mode: never): string {
+    return String(mode);
   }
 
   /**
