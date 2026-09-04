@@ -2,16 +2,24 @@
   import type { ElementNode, ViewTree } from "$lib/exthost/tree";
   import Instead from "./Instead.svelte";
   import { standing } from "$lib/instead";
+  import { pickFiles } from "$lib/exthost/commands";
+  import { hint } from "$lib/hint";
 
   interface Props {
     tree: ViewTree;
     node: ElementNode;
     version: number;
+    /**
+     * The command this form belongs to, which the file picker is opened
+     * against. Empty in the preview harness, where there is no Rust behind the
+     * button and pressing it is expected to do nothing.
+     */
+    session?: string;
     /** Called with the collected values, keyed by each field's id. */
     onsubmit: (values: Record<string, unknown>) => void;
   }
 
-  let { tree, node, version, onsubmit }: Props = $props();
+  let { tree, node, version, session = "", onsubmit }: Props = $props();
 
   /**
    * Field values, keyed by the `id` the extension gave each control.
@@ -51,7 +59,10 @@
         // Raycast hands the extension a Date; over the wire it is the ISO
         // string a `<input type=date>` also speaks, so nothing is converted.
         values[key] = str(field, "defaultValue");
-      } else if (field.tag === "Form.TagPicker") {
+      } else if (field.tag === "Form.TagPicker" || field.tag === "Form.FilePicker") {
+        // Both hand the extension a list. A picker's is a list of paths, and
+        // Raycast's own `defaultValue` for one is `string[]`, so an extension
+        // reopening a form with what was chosen last time gets it back.
         values[key] = Array.isArray(field.props.defaultValue) ? field.props.defaultValue : [];
       } else if (field.tag === "Form.Dropdown") {
         const first = tree.elementChildren(field).find((c) => c.tag === "Form.Dropdown.Item");
@@ -89,6 +100,54 @@
         value: str(child, "value"),
         title: str(child, "title") || str(child, "value"),
       }));
+  }
+
+  /** What a picker has been given, which is always a list of paths. */
+  function chosen(key: string): string[] {
+    const held = values[key];
+    return Array.isArray(held) ? (held as string[]) : [];
+  }
+
+  /**
+   * The name to show for a chosen path, which is its last part.
+   *
+   * The whole path is a tooltip rather than the label. A form field is about
+   * 380 pixels wide and a real path is longer than that, so drawing it in full
+   * either wraps the row or is cut off in the middle, and the half that gets
+   * cut is the half that says which file it is.
+   */
+  function leaf(path: string): string {
+    const parts = path.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] ?? path;
+  }
+
+  /**
+   * Opens Windows' own dialog and keeps whatever came back.
+   *
+   * The dialog runs in Rust. The launcher window is not on
+   * `capabilities/file-picker.json`, so the frontend cannot open one, and that
+   * is deliberate rather than an oversight: this is the window an extension
+   * draws into.
+   *
+   * Nothing is read here and nothing is read there. What arrives is the paths
+   * somebody chose, and an extension wanting to open one of them still needs
+   * `fileRead` at the module gate, exactly as it did before there was a picker.
+   */
+  async function choose(field: ElementNode, key: string) {
+    if (!session) return;
+
+    const picked = await pickFiles(
+      session,
+      field.props.canChooseDirectories === true && field.props.canChooseFiles !== true,
+      field.props.allowMultipleSelection !== false,
+    );
+
+    // Nothing chosen leaves what was there. Somebody opening the dialog and
+    // changing their mind has not asked for the field to be emptied, and
+    // clearing it is what the button beside it is for.
+    if (picked.length === 0) return;
+
+    values[key] = field.props.allowMultipleSelection === false ? picked.slice(0, 1) : picked;
   }
 
   function dropdownOptions(field: ElementNode) {
@@ -161,6 +220,32 @@
               {option.title}
             </button>
           {/each}
+        </div>
+      </div>
+    {:else if field.tag === "Form.FilePicker"}
+      <div class="row">
+        <div class="label">{str(field, "title")}</div>
+        <!--
+          A button and what it chose, rather than a text field somebody could
+          type a path into. A typed path is the extension being handed a place
+          nobody looked at, and the point of a picker is that the dialog is
+          Windows' own and the name in it is real.
+
+          The whole path is a tooltip, through `hint`, because a native
+          `title=` is the wrong font on the wrong surface a second late.
+        -->
+        <div class="picked">
+          <button type="button" class="pick" onclick={() => void choose(field, key)}>
+            {chosen(key).length ? "Change" : "Choose"}
+          </button>
+          {#each chosen(key) as path (path)}
+            <span class="path" use:hint={path}>{leaf(path)}</span>
+          {/each}
+          {#if chosen(key).length}
+            <button type="button" class="pick" onclick={() => (values[key] = [])}>Clear</button>
+          {:else}
+            <span class="description">Nothing chosen</span>
+          {/if}
         </div>
       </div>
     {:else if field.tag === "Form.DatePicker"}
@@ -316,6 +401,31 @@
   .pick:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
+  }
+
+  /*
+   * The picker's row: the button, then the names, then the way back to none.
+   *
+   * Wrapping rather than scrolling, because several files chosen at once is
+   * the case this exists for and a row that scrolls sideways hides the ones
+   * somebody just added.
+   */
+  .picked {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .path {
+    color: var(--text-1);
+    font-size: var(--text-meta);
+    line-height: var(--line-meta);
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   input[type="date"],

@@ -787,6 +787,26 @@ export function performBuiltin(
 }
 
 /**
+ * Opens Windows' own file dialog for a `Form.FilePicker`, and answers with the
+ * paths somebody chose.
+ *
+ * In Rust, and not because that is tidier. The main window is not on
+ * `capabilities/file-picker.json`, so it cannot open a dialog through the
+ * plugin at all, and that is on purpose: this is the window an extension draws
+ * into. The session goes with it and is looked up rather than believed.
+ *
+ * An empty list is somebody closing the dialog without choosing, which is not
+ * a failure and needs no message.
+ */
+export function pickFiles(
+  session: string,
+  directories: boolean,
+  multiple: boolean,
+): Promise<string[]> {
+  return invoke<string[]>("pick_files", { session, directories, multiple });
+}
+
+/**
  * The icon for a launchable, as a data URI.
  *
  * Cached here as well as in Rust: a row re-renders on every keystroke while

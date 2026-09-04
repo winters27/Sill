@@ -10,6 +10,7 @@ pub mod api;
 pub mod bridge;
 pub mod framing;
 pub mod grants;
+pub mod icons;
 pub mod manager;
 pub mod permission;
 pub mod preferences;

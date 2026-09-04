@@ -18,9 +18,11 @@
    */
   import "$lib/theme/theme.css";
   import DetailPane from "$lib/components/DetailPane.svelte";
+  import Footer from "$lib/components/Footer.svelte";
   import FormView from "$lib/components/FormView.svelte";
   import GridView from "$lib/components/GridView.svelte";
   import ListView from "$lib/components/ListView.svelte";
+  import { toastActions } from "$lib/exthost/actions";
   import { rowsOf } from "$lib/exthost/search";
   import { ROOT_ID, ViewTree, type Op } from "$lib/exthost/tree";
 
@@ -205,6 +207,19 @@ npm run dev
       },
       { tag: "Form.DatePicker", props: { id: "due", title: "Due", type: "date" } },
       { tag: "Form.DatePicker", props: { id: "at", title: "At" } },
+      // Both states of a picker, because they are the two different rows: one
+      // offering to choose and one holding what was chosen. No session is
+      // passed to the form below, so the buttons open nothing here; what this
+      // is for is whether the names sit on the baseline beside them.
+      { tag: "Form.FilePicker", props: { id: "empty", title: "Attachment" } },
+      {
+        tag: "Form.FilePicker",
+        props: {
+          id: "sources",
+          title: "Sources",
+          defaultValue: ["C:\\Users\\someone\\Documents\\notes.md", "C:\\Windows\\System32"],
+        },
+      },
       { tag: "Form.Separator" },
       { tag: "Form.Checkbox", props: { id: "pin", title: "Pin", label: "Keep at the top" } },
     ],
@@ -282,6 +297,49 @@ npm run dev
     {/if}
   </section>
 
+  <!--
+    A toast is the one thing a command can put in front of somebody that leaves
+    no mark on the tree, so it is drawn here in the chin it actually lives in.
+    Both shapes: a message on its own, and a failure with the two buttons an
+    extension is allowed to offer.
+  -->
+  <h2>A toast, and a toast with the extension's own buttons</h2>
+  <section class="chin">
+    <Footer
+      mode="root"
+      toast={{ title: "Copied to clipboard", style: "success", actions: [] }}
+      status=""
+      prefs={null}
+      viewTag="List"
+      hasActions={true}
+      onbuiltin={() => {}}
+      onrun={() => {}}
+      onactions={() => {}}
+      ontoastaction={() => {}}
+    />
+  </section>
+  <section class="chin">
+    <Footer
+      mode="root"
+      toast={{
+        title: "Could not reach the server",
+        style: "failure",
+        actions: toastActions([
+          { title: "Try Again", handler: "h1", shortcut: { modifiers: ["cmd"], key: "r" } },
+          { title: "Give Up", handler: "h2" },
+        ]),
+      }}
+      status=""
+      prefs={null}
+      viewTag="List"
+      hasActions={true}
+      onbuiltin={() => {}}
+      onrun={() => {}}
+      onactions={() => {}}
+      ontoastaction={() => {}}
+    />
+  </section>
+
   <h2>Grid</h2>
   <section class="window short">
     {#if gridNode}
@@ -342,6 +400,20 @@ npm run dev
     flex: none;
     width: 750px;
     height: 420px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    background-color: var(--surface-base);
+    overflow: hidden;
+  }
+
+  /* The chin alone, at the width it has in the launcher, so the buttons are
+     judged against the space they actually get. */
+  .chin {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    flex: none;
+    width: 750px;
     border: 1px solid var(--hairline);
     border-radius: var(--radius-lg);
     background-color: var(--surface-base);

@@ -618,6 +618,13 @@ try {
   assert(utilsOps.includes("Pear"), "usePromise resolved and both rows arrived");
   assert(utilsOps.includes("avatar-ok"), "getAvatarIcon produced an inline SVG");
   assert(utilsOps.includes("never"), "useCachedState fell back to its initial value");
+  // The published `@raycast/utils` hands React `cache.subscribe` without the
+  // cache, so a command that rendered at all is a command whose `subscribe`
+  // survived being detached.
+  assert(
+    utilsOps.includes("detached-ok"),
+    "Cache.subscribe worked when React called it without its cache",
+  );
 
   // ---- something utils does not have here ----
   const missing = await request("Manager/load", {

@@ -132,6 +132,50 @@ export function collectActions(tree: ViewTree, node: ElementNode): ActionEntry[]
   return out;
 }
 
+/** A button on an extension's toast, as the worker sends it. */
+export interface ToastButton {
+  title: string;
+  /** The handler id to activate. A button without one is never sent. */
+  handler: string;
+  shortcut?: unknown;
+}
+
+/**
+ * A toast's buttons, as ordinary actions.
+ *
+ * `showToast({ primaryAction: { title: "Retry", onAction } })` is a button on a
+ * message and nothing more than that. What it runs is a callback in the worker,
+ * registered in the same registry every other callback uses, so once it is an
+ * `ActionEntry` the window runs it with the code that already runs an
+ * extension's actions. Nothing about a toast reaches the running of one.
+ *
+ * That is deliberate rather than tidy. A second way to run an extension's code
+ * would be a second place to get the session check, the error message and the
+ * dead-button rule right, and this project has already paid for one of those:
+ * `Action.CopyToClipboard` reached the clipboard through a door that asked no
+ * permission for months because it was the second path.
+ *
+ * ## The ids
+ *
+ * Negative, because `ActionEntry.id` keys a list and a real one is a node id
+ * from the tree, which counts up from one. A toast button is in no tree, so it
+ * has no node to take an id from, and borrowing a positive number is how two
+ * things end up with one key.
+ */
+export function toastActions(buttons: ToastButton[]): ActionEntry[] {
+  return buttons.map((button, index) => ({
+    id: -1 - index,
+    title: button.title,
+    handler: button.handler,
+    shortcut: readShortcut(button.shortcut),
+    // Not `Action`, because these are not in an action panel and must not be
+    // mistaken for a row in one. `isRunnable` answers yes for them on the
+    // handler, which every one of them has.
+    tag: "Toast.Action",
+    props: {},
+  }));
+}
+
 /** Groups actions for display while preserving declaration order. */
 export function groupActions(actions: ActionEntry[]): { section?: string; items: ActionEntry[] }[] {
   const groups: { section?: string; items: ActionEntry[] }[] = [];

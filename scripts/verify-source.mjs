@@ -3244,6 +3244,281 @@ if (tracked.status !== 0) {
   }
 }
 
+/*
+ * Every form field an extension can declare is a field the form draws.
+ *
+ * `FormView.svelte` is a chain of `{:else if}` over tags with nothing at the
+ * end of it, which is the shape this project keeps losing days to. What falls
+ * off the end here is a field: `Form.FilePicker` was declared by the API layer
+ * and drawn by nothing for as long as forms have existed, so an extension
+ * asking somebody to choose a file showed them a form with a hole in it and
+ * submitted an empty value. Nothing failed and nothing said anything.
+ *
+ * So the chain is held to the API layer. Every `Form.*` tag the host can put
+ * on the wire either has an arm in the form or a line below saying which
+ * component reads it instead, and adding a tag without doing one of those
+ * fails here rather than on somebody's screen.
+ *
+ * The exceptions are a list rather than a default, for the same reason: a
+ * default lets the next one through in silence, and each of these had to be
+ * argued for once.
+ */
+{
+  const COMPONENTS = "host/src/api/components.ts";
+  const FORM = "src/lib/components/FormView.svelte";
+
+  /** Tags that are not fields, and what reads them instead. */
+  const NOT_A_FIELD = {
+    "Form.Dropdown.Item": "read by Form.Dropdown, which draws the options",
+    "Form.Dropdown.Section": "read by Form.Dropdown, which flattens its options",
+    "Form.TagPicker.Item": "read by Form.TagPicker, which draws the chips",
+    "Form.LinkAccessory":
+      "a slot on the Form itself rather than a field in it, and Sill draws no " +
+      "accessory beside a form's title yet",
+  };
+
+  const declared = new Set(
+    [
+      ...readFileSync(COMPONENTS, "utf8").matchAll(/host<AnyProps>\("(Form\.[^"]+)"\)/g),
+    ].map((one) => one[1]),
+  );
+
+  if (declared.size < 10) {
+    fail(
+      COMPONENTS,
+      null,
+      `only ${declared.size} \`Form.*\` tag(s) found, so this is parsing rather ` +
+        "than checking",
+    );
+  }
+
+  /*
+   * The markup only, which is where drawing happens.
+   *
+   * Sabotage found this. The first version searched the whole file, and the
+   * script above names every tag it seeds a default value for, so renaming the
+   * arm that draws a file picker left the seeding line behind and this passed
+   * while the field vanished from the form. Seeding a value for a field and
+   * drawing it are different things, and only one of them is what this rule
+   * claims.
+   */
+  const whole = readFileSync(FORM, "utf8");
+  const form = whole.slice(whole.indexOf("</script>"));
+
+  if (!form) {
+    fail(FORM, null, "no markup after `</script>`, so this is reading nothing");
+  }
+
+  for (const tag of declared) {
+    if (form.includes(`field.tag === "${tag}"`)) continue;
+    if (NOT_A_FIELD[tag]) continue;
+    fail(
+      FORM,
+      null,
+      `\`${tag}\` is a component an extension can declare and no arm here ` +
+        "draws it, so a form using it is drawn with that field missing",
+    );
+  }
+
+  for (const tag of Object.keys(NOT_A_FIELD)) {
+    if (declared.has(tag)) continue;
+    fail(
+      "scripts/verify-source.mjs",
+      null,
+      `\`${tag}\` is excused from being drawn and ${COMPONENTS} no longer ` +
+        "declares it, so this list describes a component set that is not this one",
+    );
+  }
+}
+
+/*
+ * The extension file picker hands back paths and never looks at them.
+ *
+ * `pick_files` is the one door from an extension to a native file dialog, and
+ * the reason it is allowed to exist without charging a permission is that it
+ * cannot see anything: Windows draws the dialog, somebody chooses, and a path
+ * comes back. The moment it reads or lists anything, the argument stops being
+ * true and an extension granted nothing has a way to look inside a folder
+ * through a form field.
+ *
+ * Nothing else would catch that. A filesystem call added here compiles, passes
+ * every test, and reads as a helpful convenience.
+ */
+{
+  const EXTENSIONS = "src-tauri/src/commands/extensions.rs";
+  const text = readFileSync(EXTENSIONS, "utf8");
+  const from = text.indexOf("pub(crate) async fn pick_files");
+
+  if (from === -1) {
+    fail(EXTENSIONS, null, "no `pick_files`, which is the extension file picker");
+  } else {
+    // To the next top-level item, so the arms of the match are all inside it
+    // and nothing after it is read as part of it.
+    const until = text.indexOf("\n#[", from);
+    const body = text.slice(from, until === -1 ? text.length : until);
+
+    for (const reaching of [
+      "read_dir",
+      "read_to_string",
+      "fs::read",
+      "fs::write",
+      "File::open",
+      "metadata(",
+      "exists(",
+    ]) {
+      if (!body.includes(reaching)) continue;
+      fail(
+        EXTENSIONS,
+        lineOf(text, from + body.indexOf(reaching)),
+        `\`pick_files\` calls \`${reaching}\`, so a picker an extension can open ` +
+          "with no permission now looks at the disk itself",
+      );
+    }
+  }
+}
+
+/*
+ * The window draws the icon names Rust says it draws, and only those.
+ *
+ * An extension writes `Icon.Cog` and gets back the string "Cog". Which
+ * drawing that is, and that it is the same drawing `Icon.Gear` gets, is
+ * interpretation of somebody else's vocabulary, so it is decided once in
+ * `exthost/icons.rs`. The window still has to hold the same names to draw
+ * with, and that is a second list of forty-eight names with nothing making it
+ * agree with the first.
+ *
+ * This is what makes them agree. Four ways a pair like this comes apart, and
+ * every one of them fails here:
+ *
+ * - a name Rust has and the window does not, which is a row drawing a letter
+ *   tile while the table says it has a picture;
+ * - a name the window has and Rust does not, which is a picture nothing owns;
+ * - a name whose mark differs between them, which is the wrong drawing;
+ * - a mark named by one side with no arm, or an arm for a mark nothing names,
+ *   which is a drawing that can never be reached.
+ *
+ * The last pair is why the markup is keyed by the mark rather than by the
+ * name. `{:else if drawn === "Gear" || drawn === "Cog"}` could say the two are
+ * one picture while the table said they were two, and nothing could tell.
+ */
+{
+  const RUST = "src-tauri/src/exthost/icons.rs";
+  const DRAWS = "src/lib/components/ExtIcon.svelte";
+
+  const rustText = readFileSync(RUST, "utf8");
+  const drawsText = readFileSync(DRAWS, "utf8");
+
+  /** The table itself, so a pair written in a doc comment is not read. */
+  const table = rustText.match(/MARKS:\s*&\[\(&str,\s*&str\)\]\s*=\s*&\[([\s\S]*?)\n\];/);
+
+  const inRust = new Map();
+  if (!table) {
+    fail(RUST, null, "no `MARKS` table, which the window's icon names are held to");
+  } else {
+    for (const row of table[1].matchAll(/\("([^"]+)",\s*"([^"]+)"\)/g)) {
+      inRust.set(row[1], row[2]);
+    }
+  }
+
+  const window = drawsText.match(/const MARKS: Record<string, string> = \{([\s\S]*?)\n  \};/);
+
+  const inWindow = new Map();
+  if (!window) {
+    fail(DRAWS, null, "no `MARKS` map, so nothing here is being held to " + RUST);
+  } else {
+    for (const row of window[1].matchAll(/^\s*([A-Za-z][A-Za-z0-9]*): "([^"]+)",/gm)) {
+      inWindow.set(row[1], row[2]);
+    }
+  }
+
+  /*
+   * A parse that found nothing agrees with everything, which is the failure
+   * mode every other cross-file rule in this file guards the same way. The
+   * floor is far under the real count and only turns a broken regex into a
+   * failure rather than into a silent yes.
+   */
+  for (const [what, found, where] of [
+    ["name", inRust, RUST],
+    ["name", inWindow, DRAWS],
+  ]) {
+    if (found.size >= 20) continue;
+    fail(where, null, `only ${found.size} icon ${what}(s) found, so this is parsing rather than checking`);
+  }
+
+  for (const [name, mark] of inRust) {
+    if (!inWindow.has(name)) {
+      fail(
+        DRAWS,
+        null,
+        `\`${name}\` has a mark in ${RUST} and none here, so a row asking for ` +
+          "it draws a lettered tile while the table says it has a picture",
+      );
+    } else if (inWindow.get(name) !== mark) {
+      fail(
+        DRAWS,
+        null,
+        `\`${name}\` is "${inWindow.get(name)}" here and "${mark}" in ${RUST}, ` +
+          "so the window draws a different icon from the one Rust names",
+      );
+    }
+  }
+
+  for (const name of inWindow.keys()) {
+    if (inRust.has(name)) continue;
+    fail(
+      DRAWS,
+      null,
+      `\`${name}\` is drawn here and is not in ${RUST}, so the window has an ` +
+        "icon name of its own and the table has stopped being the table",
+    );
+  }
+
+  /*
+   * One arm draws one mark, and the whole condition is the mark.
+   *
+   * Sabotage found this: an arm rewritten to `drawn === "clock" || drawn ===
+   * "gear"` drew a clock for every name the table folds onto the gear, and the
+   * set of marks named by an arm was unchanged, so counting names passed. An
+   * arm carrying two marks is the `||` chain this design exists to get rid of,
+   * because it can say two names are one picture while the table says they are
+   * two and nothing can see the difference.
+   */
+  for (const arm of drawsText.matchAll(/\{[:#](?:else )?if ([^}]*drawn ===[^}]*)\}/g)) {
+    if (/^drawn === "[a-z][a-z-]*"$/.test(arm[1].trim())) continue;
+    fail(
+      DRAWS,
+      lineOf(drawsText, arm.index),
+      `\`${arm[1].trim()}\` draws on more than one mark, so which picture a ` +
+        "name gets is decided here rather than in " + RUST,
+    );
+  }
+
+  // Every mark either side names, against the arms that draw one.
+  const wanted = new Set([...inRust.values(), ...inWindow.values()]);
+  const arms = new Set(
+    [...drawsText.matchAll(/drawn === "([a-z][a-z-]*)"/g)].map((one) => one[1]),
+  );
+
+  for (const mark of wanted) {
+    if (arms.has(mark)) continue;
+    fail(
+      DRAWS,
+      null,
+      `the mark "${mark}" is named and nothing draws it, so every name folded ` +
+        "onto it falls through to the lettered tile",
+    );
+  }
+
+  for (const mark of arms) {
+    if (wanted.has(mark)) continue;
+    fail(
+      DRAWS,
+      null,
+      `an arm draws the mark "${mark}" and no name resolves to it, so that ` +
+        "drawing is unreachable",
+    );
+  }
+}
 
 console.log(
   failures === 0 ? "source verification passed" : `\n${failures} problem(s) found`,

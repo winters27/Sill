@@ -185,8 +185,18 @@ export class Cache {
     }
   }
 
-  /** Subscribes to changes in this namespace. Returns the unsubscribe. */
-  subscribe(subscriber: (key: string, value?: string) => void): () => void {
+  /**
+   * Subscribes to changes in this namespace. Returns the unsubscribe.
+   *
+   * A property holding an arrow, not a method, and that is the whole reason
+   * this is written oddly. `@raycast/utils` does
+   * `useSyncExternalStore(cache.subscribe, ...)`, which hands React the
+   * function without the object it came from, so React calls it with no `this`
+   * and a method reads `this.namespace` of undefined. Every extension using
+   * `useCachedState` died on its first render because of it, and the error
+   * arrived from inside React with nothing in the stack naming Sill.
+   */
+  subscribe = (subscriber: (key: string, value?: string) => void): (() => void) => {
     const set = listeners.get(this.namespace) ?? new Set();
     set.add(subscriber);
     listeners.set(this.namespace, set);
@@ -195,5 +205,5 @@ export class Cache {
       set.delete(subscriber);
       if (set.size === 0) listeners.delete(this.namespace);
     };
-  }
+  };
 }
