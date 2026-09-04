@@ -1056,6 +1056,123 @@ mod tests {
         );
     }
 
+    /// An entry past its retention actually goes, from the recording path.
+    ///
+    /// The reliability pass this item exists for, and it found the gap it was
+    /// written to find: `P3-12` fixed the prune running only when the thing
+    /// copied was a picture, and left nothing guarding the fix. Stubbing the
+    /// call out of `after_recording` failed no test at all.
+    #[test]
+    fn a_copy_prunes_what_is_past_its_retention() {
+        let clipboard = Clipboard::for_test();
+        let now = crate::state::now_seconds();
+        let long_ago = now - 60 * 60 * 24 * 30;
+
+        {
+            let store = clipboard.store();
+            store
+                .record(crate::clipboard::store::Recording {
+                    hash: "old",
+                    kind: crate::clipboard::kind::Kind::Text,
+                    text: "copied last month",
+                    html: None,
+                    app: None,
+                    app_path: None,
+                    bytes: 17,
+                    now: long_ago,
+                })
+                .expect("recorded");
+        }
+
+        prune_occasionally(&clipboard, 7);
+
+        let left = clipboard
+            .store()
+            .search("", None, 50)
+            .expect("readable")
+            .len();
+
+        assert_eq!(
+            left, 0,
+            "an entry thirty days old survived a seven day retention"
+        );
+    }
+
+    /// And not on every copy, which would be a database sweep per keystroke
+    /// somebody pressed Ctrl+C on.
+    #[test]
+    fn pruning_happens_at_most_once_a_day() {
+        let clipboard = Clipboard::for_test();
+        let now = crate::state::now_seconds();
+
+        // First call takes the slot.
+        prune_occasionally(&clipboard, 7);
+
+        {
+            let store = clipboard.store();
+            store
+                .record(crate::clipboard::store::Recording {
+                    hash: "old",
+                    kind: crate::clipboard::kind::Kind::Text,
+                    text: "also old",
+                    html: None,
+                    app: None,
+                    app_path: None,
+                    bytes: 8,
+                    now: now - 60 * 60 * 24 * 30,
+                })
+                .expect("recorded");
+        }
+
+        // Second call within the window must not sweep, so the entry recorded
+        // between the two is still there.
+        prune_occasionally(&clipboard, 7);
+
+        assert_eq!(
+            clipboard
+                .store()
+                .search("", None, 50)
+                .expect("readable")
+                .len(),
+            1,
+            "the second copy in a day swept the database again"
+        );
+    }
+
+    /// Retention switched off means nothing is ever deleted.
+    #[test]
+    fn no_retention_means_nothing_is_swept() {
+        let clipboard = Clipboard::for_test();
+
+        {
+            let store = clipboard.store();
+            store
+                .record(crate::clipboard::store::Recording {
+                    hash: "ancient",
+                    kind: crate::clipboard::kind::Kind::Text,
+                    text: "kept forever",
+                    html: None,
+                    app: None,
+                    app_path: None,
+                    bytes: 12,
+                    now: 0,
+                })
+                .expect("recorded");
+        }
+
+        prune_occasionally(&clipboard, 0);
+
+        assert_eq!(
+            clipboard
+                .store()
+                .search("", None, 50)
+                .expect("readable")
+                .len(),
+            1,
+            "retention was off and something was deleted anyway"
+        );
+    }
+
     #[test]
     fn resuming_forgets_anything_reserved_while_suspended() {
         // Both mechanisms are live: a single known write still reserves one

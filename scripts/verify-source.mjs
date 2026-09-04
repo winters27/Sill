@@ -1976,6 +1976,78 @@ for (const file of sources("src-tauri/src")) {
   }
 }
 
+/*
+ * Every recorded copy is still followed by the housekeeping.
+ *
+ * The two bounds on the clipboard, retention and the row cap, run from the
+ * recording path rather than a timer, because a copy is the only moment the
+ * history grows and a thread waking daily to find nothing to do is the idle
+ * cost rule 23 refuses.
+ *
+ * That is also how the pruning was lost once already: the call sat below the
+ * text branch's `return`, so retention was honoured on a machine where
+ * somebody screenshots and not on one where they copy words, and the setting
+ * did nothing for anybody who copies text. It was found months later.
+ *
+ * `after_recording` takes an `AppHandle`, so no unit test can call it, and
+ * removing either line from its body fails nothing. This is that missing
+ * assertion: the body has to call both, and every branch that records has to
+ * call the body.
+ */
+{
+  const WATCHED = "src-tauri/src/clipboard/monitor.rs";
+
+  if (existsSync(WATCHED)) {
+    const text = readFileSync(WATCHED, "utf8");
+    const at = text.indexOf("fn after_recording(");
+
+    if (at < 0) {
+      fail(WATCHED, null, "after_recording is gone, and with it both clipboard bounds");
+    } else {
+      // The body, to its closing brace at column zero indentation.
+      const opened = text.indexOf("{", at);
+      let depth = 0;
+      let end = opened;
+      for (let i = opened; i < text.length; i++) {
+        if (text[i] === "{") depth++;
+        else if (text[i] === "}" && --depth === 0) {
+          end = i;
+          break;
+        }
+      }
+
+      const body = text.slice(opened, end);
+
+      for (const wanted of ["prune_occasionally(", "cap_rows("]) {
+        if (!body.includes(wanted)) {
+          fail(
+            WATCHED,
+            lineOf(text, at),
+            `after_recording does not call ${wanted}, so that bound on the ` +
+              "clipboard runs nowhere: there is no timer behind it",
+          );
+        }
+      }
+
+      // And the branches that record still go through it. Three today: a
+      // refusal that was superseded, an image, and text.
+      // Not `fn after_recording(app`, which is the definition. Counting
+      // that as a call is how the first version of this rule passed a
+      // sabotage that removed a branch.
+      const calls = (text.match(/(?<!fn )after_recording\(app/g) || []).length;
+      if (calls < 3) {
+        fail(
+          WATCHED,
+          null,
+          `only ${calls} recording branches call after_recording, and there ` +
+            "were three. A branch that returns before it is a bound that " +
+            "silently stops applying to whatever it records",
+        );
+      }
+    }
+  }
+}
+
 const FONTS = /\.(woff2?|ttf|otf|eot)$/i;
 const tracked = spawnSync("git", ["ls-files"], { encoding: "utf8" });
 
