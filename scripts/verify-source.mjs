@@ -2523,6 +2523,120 @@ if (tracked.status !== 0) {
   }
 }
 
+/*
+ * The page's account of what an extension may reach is the gate's own.
+ *
+ * `docs/extensions.md` tells a reader which Node built-ins cost a permission,
+ * which come free, and by implication which are refused outright, and somebody
+ * choosing whether to install a stranger's code reads that. A page saying `fs`
+ * is gated while the gate had quietly stopped gating it is the worst kind of
+ * documentation drift there is, and this project has already shipped the
+ * reverse of it once: the same page said `eval` and a dynamic `import()` were
+ * ways out long after one of them was a hole and after none of them was.
+ *
+ * So both lists are held to `patch-require.ts`. The gated table is checked in
+ * both columns, name and permission phrase, because a row naming the wrong
+ * permission is a row that reads as a promise and is not one. The free list is
+ * checked by name, and it is the security-relevant one: a built-in that stops
+ * being free is a built-in the page still says costs nothing.
+ */
+{
+  const DOC = "docs/extensions.md";
+  const GATE = "host/src/worker/patch-require.ts";
+
+  /** One section of a marked region, as raw text. */
+  function region(text, name) {
+    const between = text.match(new RegExp(`<!-- ${name} -->([\\s\\S]*?)<!-- /${name} -->`));
+    if (!between) {
+      fail(DOC, null, `no \`${name}\` region, so nothing there is being checked`);
+      return undefined;
+    }
+    return between[1];
+  }
+
+  /** Everything backticked in a stretch of the page. */
+  const backticked = (text) => new Set([...text.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+
+  const gate = readFileSync(GATE, "utf8");
+
+  /**
+   * `GATED` as the gate declares it, module name to the phrase a refusal uses.
+   *
+   * Read between the declaration and its closing brace rather than over the
+   * whole file, so the `BINDINGS` table below it, which is keyed by binding
+   * name and not by module, cannot be swept in.
+   */
+  const gatedSource = gate.match(/const GATED[^{]*\{([\s\S]*?)\n\};/)?.[1] ?? "";
+  const gated = new Map(
+    [...gatedSource.matchAll(/^\s*(\w+):\s*\{[^}]*plainly:\s*"([^"]+)"/gm)].map((m) => [
+      m[1],
+      m[2],
+    ]),
+  );
+
+  const freeSource = gate.match(/const FREE = new Set\(\[([\s\S]*?)\]\)/)?.[1] ?? "";
+  const free = new Set([...freeSource.matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+
+  // A regex that found nothing agrees with anything, so the floors turn a
+  // broken parse into a failure rather than a silent pass.
+  for (const [what, size, least] of [
+    ["gated", gated.size, 8],
+    ["free", free.size, 15],
+  ]) {
+    if (size >= least) continue;
+    fail(GATE, null, `only ${size} ${what} module(s) parsed out, so this is not checking`);
+  }
+
+  const gatedRegion = region(readFileSync(DOC, "utf8"), "coverage:gated");
+  const freeRegion = region(readFileSync(DOC, "utf8"), "coverage:free");
+
+  if (gatedRegion !== undefined) {
+    const rows = new Map(
+      [...gatedRegion.matchAll(/^\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|/gm)].map((m) => [m[1], m[2]]),
+    );
+
+    for (const [name, plainly] of gated) {
+      if (rows.get(name) === plainly) continue;
+      fail(
+        DOC,
+        null,
+        `\`${name}\` needs a row under \`coverage:gated\` reading "${plainly}", the ` +
+          `phrase its refusal uses; the page says ` +
+          `${rows.has(name) ? `"${rows.get(name)}"` : "nothing"}`,
+      );
+    }
+
+    for (const name of rows.keys()) {
+      if (gated.has(name)) continue;
+      fail(
+        DOC,
+        null,
+        `\`${name}\` has a row under \`coverage:gated\` and ${GATE} does not gate it, ` +
+          "so the page describes a permission nothing asks for",
+      );
+    }
+  }
+
+  if (freeRegion !== undefined) {
+    const named = backticked(freeRegion);
+
+    for (const name of free) {
+      if (named.has(name)) continue;
+      fail(DOC, null, `\`${name}\` is handed over for free and \`coverage:free\` omits it`);
+    }
+
+    for (const name of named) {
+      if (free.has(name)) continue;
+      fail(
+        DOC,
+        null,
+        `\`coverage:free\` says \`${name}\` costs nothing and ${GATE} does not hand ` +
+          "it over, so the page promises a module an extension will be refused",
+      );
+    }
+  }
+}
+
 console.log(
   failures === 0 ? "source verification passed" : `\n${failures} problem(s) found`,
 );
