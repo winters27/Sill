@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "p=$(grep -o '\"file_path\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | head -1); printf '%s' \"$p\" | grep -qE '[\\/]src[\\/].*\\.(svelte|ts)\"$' && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Sill is Rust-first, and this is a frontend file. Before writing logic here: could this operation live in Rust instead? Ranking, fuzzy matching, filtering, sorting, scoring, parsing, validation, caching, persistence, filesystem work, OS access and action resolution belong in src-tauri. Svelte owns DOM, styling, focus/hover/selection, and ephemeral interaction state. If you are adding domain logic here, say why it cannot live in Rust. Also: what does this cost at rest? No new timer or poll without saying why an event will not do. See CONTRIBUTING.md.\"}}' || true",
+            "shell": "bash",
+            "statusMessage": "Rust-first check"
+          }
+        ]
+      }
+    ]
+  }
+}
