@@ -179,3 +179,22 @@ fn renaming_keeps_the_membership() {
     assert_eq!(listed[0].name, "New name");
     assert_eq!(store.collection_entries(id).expect("reads").len(), 1);
 }
+
+/// `tag:name` on the clipboard means the collection of that name.
+#[test]
+fn a_collection_name_answers_a_tag_filter() {
+    let (store, _dir) = store();
+    let kept = add(&store, "kept");
+    add(&store, "loose");
+
+    let work = store.create_collection("Work", NOW).expect("creates");
+    store.add_to_collection(work, &[kept]).expect("adds");
+
+    assert_eq!(store.collection_named("work").expect("looks up"), Some(work));
+    assert_eq!(store.collection_named("WORK ").expect("looks up"), Some(work));
+    assert_eq!(store.collection_named("home").expect("looks up"), None);
+
+    let inside = store.collection_entries(work).expect("lists");
+    assert_eq!(inside.len(), 1);
+    assert_eq!(inside[0].id, kept);
+}

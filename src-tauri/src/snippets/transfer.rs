@@ -314,6 +314,7 @@ mod tests {
             created: 1_700_000_000,
             whole_word: true,
             collection: "Email".into(),
+            tags: Vec::new(),
             only_in: vec!["outlook".into()],
             html: "Heads up: <b>this is important</b>".into(),
         }];

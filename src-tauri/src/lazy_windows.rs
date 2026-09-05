@@ -112,6 +112,27 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
             .shadow(true)
             .build(),
 
+        /*
+         * Confetti, over every screen for a few seconds.
+         *
+         * Transparent and on top so it lands over whatever was in front, and
+         * the mouse goes straight through it: it is a picture, not a thing.
+         * Built on the first throw and put to sleep after each, so on a
+         * machine where nobody throws any it costs exactly nothing.
+         */
+        "confetti" => builder("confetti")
+            .title("Sill confetti")
+            .inner_size(800.0, 600.0)
+            .resizable(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .shadow(false)
+            .maximizable(false)
+            .minimizable(false)
+            .build()
+            .and_then(|window| window.set_ignore_cursor_events(true).map(|()| window)),
+
         other => return Err(format!("{other} is not a window Sill builds on demand")),
     };
 
@@ -126,7 +147,7 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
 /// Public so a test can assert that every one of them is buildable and that
 /// none of them is still declared in the configuration, which is the mistake
 /// that would give a window a renderer again without anybody noticing.
-pub const DEFERRED: &[&str] = &["markup", "capture", "dictation", "note"];
+pub const DEFERRED: &[&str] = &["markup", "capture", "dictation", "note", "confetti"];
 
 /**
 Puts one of these away, and lets its renderer go to sleep.

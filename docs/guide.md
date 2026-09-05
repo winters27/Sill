@@ -27,6 +27,8 @@ were last in under the cursor. Screenshot keys are in the same place and are
 unset by default: there is no obviously free combination for them, and a
 default that collides with something you already use is worse than none.
 
+Type `confetti` when the occasion calls for it.
+
 ## Typing
 
 Whatever you type is matched against everything at once. Matching is fuzzy
@@ -38,6 +40,12 @@ Results are ordered by what you actually open. Something you pick often, or
 picked recently, climbs; something you never pick sinks. You can also give
 anything a name of your own, and an exact match on a name you chose beats
 every kind of guess.
+
+A few words open lists of their own. `font mono` lists the installed fonts
+whose names hold those words, each drawn in itself, and Enter copies the
+name. `resolution` lists the modes your display can be in. `tag:work` keeps
+only the snippets and quicklinks you tagged that way, on their own or with
+more words to narrow them.
 
 Typing nothing shows the root list, which is where the things that have no
 search term live.
@@ -71,6 +79,12 @@ the clipboard as confidential, which password managers do, and Sill honours
 that. It also spots the shapes that secrets come in, so a key copied out of a
 terminal by a tool that did not think to mark it is left out too.
 
+An entry can be given a name, which stands in for its first line in the list
+and is searched like the text is, and its text can be corrected in place for
+the typo in the thing you copied three times. Both come back with Undo. An
+edit that would turn one entry into the text of another is refused rather
+than quietly merged.
+
 ## Text you type over and over
 
 A snippet is saved text with a keyword. Type the keyword anywhere on the
@@ -90,12 +104,37 @@ around it, so a link with its own query string still works.
 
 Web search is the same idea with the search engines already set up.
 
+A quicklink can also be a file, a folder, or a program's own address such as
+a `notion://` link into a page. Sill opens web, mail and settings addresses on
+its own; for any other scheme the link's editor shows a switch, and turning it
+on lets that one link open that one scheme. A file you import arrives with
+every such switch off, and the schemes that run code can never be switched on.
+
 ## Sums
 
 Type a sum and the answer appears. It handles units and conversions, and it
 is deliberately hard to trigger: a version number is not a sum, and something
 that looks like arithmetic but is not gets left alone rather than replacing
 your search with a number.
+
+Dates add up too. `today + 3 weeks` says which day that is, `days until
+2026-12-25` counts them, and one date minus another is the days between. A
+date on its own is left alone, because typed alone it is more often the start
+of a file name than a question.
+
+Every answer you press Enter on is remembered, fifty at most. Type `sums` to
+see them, or `sums usd` for the ones that mention it, and Enter copies the
+answer again.
+
+A colour typed one way is offered in the others: `#ff8800` gets its `rgb()`
+and `hsl()` forms, each a row with a swatch that Enter copies. `Pick a
+Colour` goes the other way: click any pixel on screen and its hex lands on
+the clipboard.
+
+`tokyo time`, or `time in tokyo`, says what the clock reads there and how
+far ahead or behind that is. Cities are the ones Windows lists for each time
+zone, so `eastern time` works too. The World clock widget shows the cities
+you choose in Settings, ticking on this machine's own clock.
 
 ## Reminders and timers
 
@@ -137,6 +176,21 @@ picture of each. Typing narrows it.
 Windows can also be arranged from the launcher: halves, thirds, quarters,
 maximise, centre. A workspace saves a set of programs and where their windows
 go, and opening one starts anything that is not running.
+
+`Quit All Applications` asks every program with a window to close, the way
+its own close button would, after saying how many that is and asking you
+first. Anything with unsaved work puts up its own question, and nothing is
+ended by force. The desktop and Sill itself are left alone.
+
+Positions of your own live in Settings, under Shortcuts, as fractions of the
+display: left 0, top 0, width 0.5, height 1 is the left half. Every layout is
+in the action panel on any window, and a key on one sends the window in front
+there.
+
+`resolution` lists the modes the display can be in, and `display 2
+resolution` the second display's. Enter sets one, then asks whether to keep
+it; with no answer in fifteen seconds it goes back by itself, and Undo puts
+it back later.
 
 ## The machine's own switches
 
@@ -183,6 +237,10 @@ The model can read: the index, files, folders, the clipboard, your windows,
 the selection, the screen, and how the machine is set. Anything that writes a
 file, starts a program, types for you or changes the machine stops at a card
 and waits for you to say yes.
+
+Reading the screen can be all of it or a part: the model can name a region,
+or ask you to drag one out on the capture overlay, and the card says which it
+is about to read.
 
 ## Extensions
 

@@ -149,7 +149,11 @@
     if (inside) inside = collections.find((c) => c.id === inside?.id) ?? null;
   }
 
-  async function refresh() {
+  /**
+   * Exported for the launcher, which names and edits entries through the
+   * action registry and then needs the row it drew to say the new thing.
+   */
+  export async function refresh() {
     // Anything that changes the list can have changed an entry: pinning it,
     // pasting it (which counts a use), or removing it. Every one of those
     // ends here, so this is the one place the held details have to go.
@@ -691,7 +695,8 @@
           <span class="mark">
             <ClipKindIcon kind={row.entry.kind} swatch={row.entry.text} size={14} />
           </span>
-          <span class="line">{preview(row.entry.text)}</span>
+          <!-- A name somebody gave the entry stands in for its first line. -->
+          <span class="line">{row.entry.title ?? preview(row.entry.text)}</span>
           {#if row.entry.pinned}
             <svg class="pin" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true">
               <path

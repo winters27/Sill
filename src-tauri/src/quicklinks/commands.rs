@@ -80,7 +80,7 @@ pub fn open_quicklink(app: AppHandle, id: String, query: String) -> Result<Strin
     filled.query = query;
     let target = resolve::resolve(&link.link, &filled);
 
-    open(&target, &link.open_with)?;
+    open(&target, &link.open_with, &link.allowed_scheme)?;
 
     links[at].uses += 1;
     if let Err(err) = store::save(&path, &links) {
@@ -99,8 +99,9 @@ pub fn open_quicklink(app: AppHandle, id: String, query: String) -> Result<Strin
 /// link in one runs in whatever browser is default the moment somebody picks
 /// the row. The named-application branch needs it just as much; passing an
 /// address as an argument does not make it text.
-fn open(target: &str, open_with: &str) -> Result<(), String> {
-    let target = crate::reach::target(target)?;
+fn open(target: &str, open_with: &str, allowed_scheme: &str) -> Result<(), String> {
+    let allowed = Some(allowed_scheme.trim()).filter(|scheme| !scheme.is_empty());
+    let target = crate::reach::target_allowing(target, allowed)?;
     let target = target.as_str();
 
     if open_with.trim().is_empty() {
@@ -116,6 +117,17 @@ fn open(target: &str, open_with: &str) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("Could not open {target} with {open_with}: {e}"))
+}
+
+/// The scheme a link would need allowing for, or nothing.
+///
+/// Asked by the editor when the link field is left, so the switch appears
+/// only for a link it means something for. Rust answers because Rust is
+/// what refuses at open time, and an editor with its own idea of the list
+/// would drift from it.
+#[tauri::command]
+pub fn quicklink_scheme_to_allow(link: String) -> Option<String> {
+    crate::reach::scheme_to_allow(&link)
 }
 
 /// Writes every quicklink to a file, and says where it went.

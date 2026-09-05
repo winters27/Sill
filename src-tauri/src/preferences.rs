@@ -387,6 +387,11 @@ pub struct Widgets {
     /// one: seconds mean a redraw every second for as long as the launcher is
     /// open, and a clock nobody is watching should cost a redraw a minute.
     pub seconds: bool,
+    /// Cities the world clock shows, by the name Windows lists them under.
+    ///
+    /// Names rather than zone keys, because a name is what somebody typed and
+    /// what the widget says back. Resolved to a zone when the widget draws.
+    pub clocks: Vec<String>,
 }
 
 impl Default for Widgets {
@@ -399,6 +404,7 @@ impl Default for Widgets {
             place: crate::weather::Place::default(),
             fahrenheit: true,
             seconds: false,
+            clocks: Vec::new(),
         }
     }
 }
@@ -1069,6 +1075,14 @@ pub struct Preferences {
     /// process: see `crate::actions::mcp`.
     #[serde(default)]
     pub mcp: Mcp,
+    /// Window positions of the person's own, each bindable to a key. See
+    /// `crate::layouts`. Read one at a time so a damaged entry costs one
+    /// layout rather than the file.
+    #[serde(
+        default,
+        deserialize_with = "crate::json_store::entries_that_can_be_read"
+    )]
+    pub layouts: Vec<crate::layouts::Layout>,
 }
 
 /**

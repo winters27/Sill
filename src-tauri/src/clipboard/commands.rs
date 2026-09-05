@@ -33,11 +33,39 @@ pub fn clipboard_search(
     kind: Option<String>,
 ) -> Result<Vec<Entry>, String> {
     let filter = kind.as_deref().filter(|k| *k != "all").map(Kind::from_str);
-    let out = clipboard
-        .store()
-        .search(&query, filter, LIMIT)
-        .map_err(|e| e.to_string());
-    out
+
+    // `tag:work` narrows to the collection of that name, which is what a tag
+    // is here: collections were already a many-to-many grouping, so a tag is
+    // the same thing spelled the way snippets and quicklinks spell it.
+    let (rest, tag) = crate::registry::tag_operator(&query);
+    let store = clipboard.store();
+
+    let Some(tag) = tag else {
+        return store.search(&query, filter, LIMIT).map_err(|e| e.to_string());
+    };
+
+    let Some(collection) = store.collection_named(&tag).map_err(|e| e.to_string())? else {
+        return Ok(Vec::new());
+    };
+
+    let needle = rest.trim().to_ascii_lowercase();
+    let entries = store
+        .collection_entries(collection)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|entry| filter.is_none_or(|kind| entry.kind == kind))
+        .filter(|entry| {
+            needle.is_empty()
+                || entry.text.to_ascii_lowercase().contains(&needle)
+                || entry
+                    .title
+                    .as_deref()
+                    .is_some_and(|title| title.to_ascii_lowercase().contains(&needle))
+        })
+        .take(LIMIT)
+        .collect();
+
+    Ok(entries)
 }
 
 /// One entry in full, with its image when it has one.

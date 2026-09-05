@@ -80,6 +80,7 @@ const PREFERENCES = {
   emoji: {},
   privacy: {},
   mcp: {},
+  layouts: [],
 } satisfies Record<keyof Preferences, unknown>;
 
 /** One ranked row, with only the fields the root list reads. */

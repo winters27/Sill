@@ -58,6 +58,7 @@
 
 mod acl_parity;
 mod clipboard_collections;
+mod clipboard_edit;
 mod clipboard_merge;
 mod file_merge;
 mod host_answering;
@@ -67,7 +68,9 @@ mod ranking_memory;
 mod real_controls;
 mod real_desktops;
 mod real_dialog;
+mod real_displays;
 mod real_explorer;
+mod real_fonts;
 mod real_games;
 mod real_hello;
 mod real_jumplists;

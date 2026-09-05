@@ -24,6 +24,8 @@ export interface ClipEntry {
   id: number;
   kind: ClipKind;
   text: string;
+  /** A name somebody gave it, shown in place of the text's first line. */
+  title: string | null;
   /** Unix seconds. */
   firstSeen: number;
   lastSeen: number;

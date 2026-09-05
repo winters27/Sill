@@ -19,9 +19,12 @@
   import {
     cancelCapture,
     captureArea,
+    capturePurpose,
     captureTargets,
     captureWindow,
+    choseArea,
     type CaptureTarget,
+    type Purpose,
   } from "$lib/capture";
   import { windowUnder } from "$lib/markup";
   import { getPreferences } from "$lib/settings";
@@ -41,6 +44,12 @@
   let clickAWindow = $state(true);
   /** The scale and origin needed to convert both ways. Read once on show. */
   let frame = $state({ scale: 1, x: 0, y: 0 });
+  /**
+   * What the overlay is up for, read once on show. Rust decides; the
+   * overlay only draws the same drag and hands the rectangle to whoever
+   * asked instead of copying it.
+   */
+  let purpose = $state<Purpose>("copy");
 
   interface Box {
     left: number;
@@ -115,8 +124,14 @@
     dragging = false;
 
     const area = picked;
+    const start = from;
     from = null;
     to = null;
+
+    if (purpose !== "copy") {
+      await hand(area, start);
+      return;
+    }
 
     if (!area || area.width < ENOUGH || area.height < ENOUGH) {
       // Too small to be a drag, so it was a click. On a window, that means
@@ -151,6 +166,50 @@
       status = await captureArea(
         position.x + Math.round(area.left * scale),
         position.y + Math.round(area.top * scale),
+        Math.round(area.width * scale),
+        Math.round(area.height * scale),
+      );
+    } catch (err) {
+      status = `${err}`;
+    }
+  }
+
+  /**
+   * Hands the rectangle to whoever put the overlay up, instead of copying it.
+   *
+   * The same logical-to-physical conversion as a copy, for the same reason.
+   * A click is enough for a colour, because one pixel is the whole of what
+   * was asked for; for the other purposes a click is a change of mind, as it
+   * is for a copy.
+   */
+  async function hand(area: Box | null, start: { x: number; y: number } | null) {
+    const scale = await getCurrentWindow().scaleFactor();
+    const position = await getCurrentWindow().outerPosition();
+    const physical = (x: number, y: number) => ({
+      x: position.x + Math.round(x * scale),
+      y: position.y + Math.round(y * scale),
+    });
+
+    if (!area || area.width < ENOUGH || area.height < ENOUGH) {
+      if (purpose === "colour" && start) {
+        const point = physical(start.x, start.y);
+        try {
+          await choseArea(point.x, point.y, 1, 1);
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
+      await cancel();
+      return;
+    }
+
+    const origin = physical(area.left, area.top);
+    try {
+      await choseArea(
+        origin.x,
+        origin.y,
         Math.round(area.width * scale),
         Math.round(area.height * scale),
       );
@@ -198,16 +257,18 @@
       // and the settings window had found.
       void forgetUnreadable("capture");
 
-      const [scale, position, prefs] = await Promise.all([
+      const [scale, position, prefs, asked] = await Promise.all([
         window.scaleFactor(),
         window.outerPosition(),
         // Silent. Every setting read from this has a default written beside
         // it, and the overlay with its defaults is the overlay somebody who
         // has never opened settings already uses.
         getPreferences().catch(() => null),
+        capturePurpose(),
       ]);
 
       frame = { scale, x: position.x, y: position.y };
+      purpose = asked;
       clickAWindow = prefs?.screenshot?.clickAWindow ?? true;
       targets = clickAWindow ? await captureTargets() : [];
     }

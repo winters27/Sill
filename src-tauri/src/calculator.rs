@@ -146,6 +146,13 @@ fn looks_like_a_calculation(input: &str) -> bool {
         return false;
     }
 
+    // Nor is it a subtraction. `2024-08-28` answered 1988 and
+    // `2026-03-01 - 2026-01-15` answered a number that was no count of days.
+    // Date arithmetic is `dates.rs`'s, and it runs in front of this.
+    if holds_an_iso_date(input) {
+        return false;
+    }
+
     let lower = input.to_ascii_lowercase();
 
     // A conversion says what it is without needing an operator.
@@ -194,6 +201,24 @@ fn looks_like_a_date(input: &str) -> bool {
             let part = part.trim();
             !part.is_empty() && part.len() <= 4 && part.chars().all(|c| c.is_ascii_digit())
         })
+}
+
+/// Whether any word has the shape `YYYY-MM-DD`.
+///
+/// Four digits, a hyphen, two, a hyphen, two. Narrow enough that `1-2-3` and
+/// a phone number stay whatever they were, and exactly the shape a date sum
+/// or a file name carries.
+fn holds_an_iso_date(input: &str) -> bool {
+    input.split(|c: char| c.is_whitespace()).any(|word| {
+        let bytes = word.as_bytes();
+        bytes.len() == 10
+            && bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes
+                .iter()
+                .enumerate()
+                .all(|(at, byte)| at == 4 || at == 7 || byte.is_ascii_digit())
+    })
 }
 
 /// Whether the letters in the input are ones a calculation would contain.
@@ -564,6 +589,12 @@ mod tests {
             "settings",
             "screenshot-2024-08-28",
             "2024-08-28.log",
+            // Dates, which used to reach fend as integer subtraction and come
+            // back as numbers: 1988 for the first, and for the second a count
+            // that was not a count of days.
+            "2024-08-28",
+            "2026-03-01 - 2026-01-15",
+            "days until 2026-12-25",
             "v1.2.3-rc1",
             "node-v20.11.0",
             "python3.12",

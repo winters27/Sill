@@ -2,9 +2,21 @@
   interface Props {
     terms: string[];
     onchange: (terms: string[]) => void;
+    /** What the field asks for. Hiding is what this list was built for. */
+    placeholder?: string;
+    /** What the field is called to a screen reader. */
+    ariaLabel?: string;
+    /** What removing one chip is called, for a screen reader. */
+    removeLabel?: (term: string) => string;
   }
 
-  let { terms = $bindable(), onchange }: Props = $props();
+  let {
+    terms = $bindable(),
+    onchange,
+    placeholder = "A name or folder to hide, then Enter",
+    ariaLabel = "A name or folder to hide",
+    removeLabel = (term: string) => `Stop hiding ${term}`,
+  }: Props = $props();
 
   let draft = $state("");
 
@@ -36,7 +48,7 @@
       {#each terms as term (term)}
         <span class="chip">
           {term}
-          <button aria-label="Stop hiding {term}" onclick={() => remove(term)}>
+          <button aria-label={removeLabel(term)} onclick={() => remove(term)}>
             <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true">
               <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
@@ -48,8 +60,8 @@
 
   <input
     bind:value={draft}
-    placeholder="A name or folder to hide, then Enter"
-    aria-label="A name or folder to hide"
+    {placeholder}
+    aria-label={ariaLabel}
     spellcheck="false"
     onkeydown={(e) => {
       if (e.key === "Enter") {

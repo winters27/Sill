@@ -6,7 +6,7 @@ use tauri::Manager;
 
 use crate::ai::chat::{Chat, Summary, Turn};
 use crate::ai::openai::Attached;
-use crate::ai::provider::{self, Provider};
+use crate::ai::provider::{self, chosen, what_is_missing, Provider};
 use crate::state::PrefsState;
 
 /// What Windows Hello can do on this machine.
@@ -522,49 +522,9 @@ pub(crate) struct Offer {
     pub note: String,
 }
 
-/// The chosen provider, or the only one if only one is set up.
-///
-/// Falling back to the only one is not a guess: somebody who has configured
-/// exactly one provider and never opened the chooser means that one.
-fn chosen(settings: &crate::preferences::Ai) -> Option<Provider> {
-    if !settings.provider.is_empty() {
-        if let Some(found) = settings
-            .providers
-            .iter()
-            .find(|candidate| candidate.id == settings.provider)
-        {
-            return Some(found.clone());
-        }
-    }
-
-    match settings.providers.as_slice() {
-        [only] => Some(only.clone()),
-        _ => None,
-    }
-}
-
-/// What this provider still needs, if anything.
-fn what_is_missing(chosen: &Provider) -> Option<String> {
-    if chosen.wire == provider::Wire::ClaudeCode {
-        return crate::ai::claude_code::locate().is_none().then(|| {
-            "Claude Code is not installed, or not somewhere Sill can find it.".to_string()
-        });
-    }
-
-    if chosen.base_url.trim().is_empty() {
-        return Some(format!("{} has no address.", chosen.name));
-    }
-
-    if let Err(refused) = provider::check(&chosen.base_url) {
-        return Some(refused.message().to_string());
-    }
-
-    if chosen.model.trim().is_empty() {
-        return Some(format!("No model is chosen for {}.", chosen.name));
-    }
-
-    None
-}
+// `chosen` and `what_is_missing` live in `ai::provider` now. A key bound to a
+// text action and a dictation style ask the same question the chat asks, and
+// neither of them arrives through a command.
 
 #[cfg(test)]
 mod tests {

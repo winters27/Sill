@@ -551,6 +551,55 @@ fn still_endable(pid: u32, was: &str) -> Result<(), String> {
     may_end(pid, was, named(pid).as_deref(), ours).map_err(|refused| refused.say(was))
 }
 
+/// The programs "quit everything" means: the ones with a window somebody
+/// could be looking at, that are not the shell, not protected, and not Sill.
+///
+/// Pure, over a listing, so the choice can be checked without a machine.
+/// Explorer is left alone by name because closing it is closing the desktop,
+/// which nobody who typed "quit all" meant.
+pub fn quit_all_targets(running: &[Process], me: u32) -> Vec<&Process> {
+    running
+        .iter()
+        .filter(|process| {
+            process.visible
+                && process.pid != me
+                && !is_protected(&process.name)
+                && !process.name.eq_ignore_ascii_case("explorer.exe")
+        })
+        .collect()
+}
+
+/// Asks every open program to close, the way its own close button does.
+///
+/// [`quit`] per target, never [`force_quit`]: a program with unsaved work
+/// gets to ask about it, and one that refuses is counted rather than killed.
+/// Sill's own process tree is excluded by [`may_end`] as well as by name.
+#[cfg(windows)]
+pub fn quit_all() -> Result<String, String> {
+    let running = running();
+    let targets = quit_all_targets(&running, std::process::id());
+
+    let mut asked = 0usize;
+    let mut refused = 0usize;
+
+    for process in targets {
+        match quit(process.pid, &process.name) {
+            Ok(_) => asked += 1,
+            Err(_) => refused += 1,
+        }
+    }
+
+    Ok(match refused {
+        0 => format!("Asked {asked} programs to close"),
+        n => format!("Asked {asked} programs to close; {n} could not be asked"),
+    })
+}
+
+#[cfg(not(windows))]
+pub fn quit_all() -> Result<String, String> {
+    Err("only on Windows".to_string())
+}
+
 /// Asks a program to close, the way its own close button does.
 ///
 /// `WM_CLOSE` to every window it has, never `TerminateProcess`: the program
@@ -890,5 +939,40 @@ mod tests {
             all.iter().any(|p| p.visible),
             "something on this desktop has a window"
         );
+    }
+}
+
+#[cfg(test)]
+mod quitting_everything {
+    use super::*;
+
+    fn process(pid: u32, name: &str, visible: bool) -> Process {
+        Process {
+            pid,
+            name: name.to_string(),
+            path: None,
+            bytes: 0,
+            visible,
+        }
+    }
+
+    #[test]
+    fn quit_all_leaves_the_shell_the_kernel_and_sill_alone() {
+        let running = vec![
+            process(10, "firefox.exe", true),
+            process(11, "Code.exe", true),
+            process(12, "explorer.exe", true),
+            process(13, "svchost.exe", false),
+            process(14, "csrss.exe", true),
+            process(15, "sill.exe", true),
+            process(16, "notepad.exe", false),
+        ];
+
+        let names: Vec<&str> = quit_all_targets(&running, 15)
+            .into_iter()
+            .map(|process| process.name.as_str())
+            .collect();
+
+        assert_eq!(names, vec!["firefox.exe", "Code.exe"]);
     }
 }

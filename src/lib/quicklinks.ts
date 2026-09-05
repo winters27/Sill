@@ -5,6 +5,7 @@
  * copy here loses a field rather than corrupting one.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { orElse } from "$lib/status";
 
 export interface Quicklink {
   /** Empty when creating; Rust assigns one on the first save. */
@@ -16,6 +17,14 @@ export interface Quicklink {
   keyword: string;
   /** Path to the application that opens it, or empty for the system default. */
   openWith: string;
+  /**
+   * A scheme this one link may open beyond the ones Sill opens on its own,
+   * `notion` for a `notion://` deep link. Empty for nearly every link.
+   * Granted by the person editing it, never by an imported file.
+   */
+  allowedScheme: string;
+  /** Words of your own it is found by, and grouped under with `tag:`. */
+  tags: string[];
   uses: number;
   /** Unix seconds. */
   created: number;
@@ -71,5 +80,29 @@ export function needsArgument(link: string): boolean {
 
 /** An empty one, for the editor's "new" state. */
 export function blankQuicklink(): Quicklink {
-  return { id: "", name: "", link: "", keyword: "", openWith: "", uses: 0, created: 0 };
+  return {
+    id: "",
+    name: "",
+    link: "",
+    keyword: "",
+    openWith: "",
+    allowedScheme: "",
+    tags: [],
+    uses: 0,
+    created: 0,
+  };
+}
+
+/**
+ * The scheme a link would need allowing for, or nothing.
+ *
+ * Rust decides, because Rust is what refuses at open time and the editor
+ * must not disagree with it. Nothing when the link is a web address, a path,
+ * or one of the schemes that run code and can never be allowed.
+ */
+export async function quicklinkSchemeToAllow(link: string): Promise<string | null> {
+  const said = await invoke<unknown>("quicklink_scheme_to_allow", { link }).catch(
+    orElse("settings", "whether a quicklink needs a scheme allowed", null, "quicklinks"),
+  );
+  return typeof said === "string" && said ? said : null;
 }

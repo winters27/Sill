@@ -112,6 +112,9 @@ pub const PANELS: &[Panel] = &[
             "hyper",
             "actionKeys",
             "navigation",
+            // Window layouts are edited under Shortcuts, beside the keys
+            // that send windows to them.
+            "layouts",
         ],
     },
     Panel {
@@ -1058,6 +1061,14 @@ mod tests {
             command: "node".into(),
             args: vec!["server.js".into()],
             actions: Vec::new(),
+        }];
+        prefs.layouts = vec![crate::layouts::Layout {
+            id: "reading".into(),
+            name: "Reading".into(),
+            x: 0.25,
+            y: 0.1,
+            width: 0.5,
+            height: 0.8,
         }];
 
         prefs

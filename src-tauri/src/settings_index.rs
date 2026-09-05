@@ -241,6 +241,19 @@ pub const SETTINGS: &[Setting] = &[
         "Where the weather is for",
         "weather location city place temperature forecast fahrenheit celsius",
     ),
+    s(
+        "widgets",
+        "Widgets",
+        "World clock cities",
+        "world clock city time zone abroad tokyo london timezone",
+    ),
+    // ------------------------------------------------------------ layouts
+    s(
+        "shortcuts",
+        "Shortcuts",
+        "Custom layouts",
+        "layout window rectangle fraction custom grid position bind key snap",
+    ),
     // ----------------------------------------------------------------- tts
     s(
         "tts",

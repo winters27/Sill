@@ -74,6 +74,29 @@ A line is done when something checks it. Where that is a test, it is named.
 | P3.9, P3.10 | Automation and workflows | Not started |
 | P3.11 | MCP server | **Done.** The same tools over MCP, through the same gate |
 
+## The Raycast gap, 2026-09-05
+
+Raycast's own list of what it can do, checked item by item against Sill.
+Twenty-eight features in eleven tranches; the plan and the check that
+shaped it are in the vault. A row is done when the named test is green.
+
+| | Item | State |
+| --- | --- | --- |
+| G0 | Shared foundation: a one-shot model call, a capture overlay that hands a rectangle back, date helpers | **Done.** `ai::oneshot` with no tools and no conversation; `commands::system::choose_region` with `Purpose` and a sixty second patience; `timers::weekday`. Checked by `oneshot::tests`, `system::choosing`, `dates::tests::the_weekday_of_the_epoch_was_a_thursday` |
+| G1.1 | Date arithmetic in the search field | **Done.** `dates.rs` in front of the calculator: `today + 3 weeks`, `days until`, date minus date, month arithmetic that clamps the day. The calculator now refuses anything holding an ISO date, which was answering `2024-08-28` with 1988. Checked by `dates::tests` and `calculator::tests::forty_ordinary_queries_are_not_mistaken_for_calculations` |
+| G1.2 | Calculator history | **Done.** `sums.rs`, fifty kept, read only when `sums` is typed, remembered by `CopyAnswer` on Enter. Checked by `sums::tests::nothing_is_read_unless_asked` and `fifty_is_the_most_kept` |
+| G1.3 | Colour formats and a picker | **Done.** `colour.rs` reads hex, `rgb()` and `hsl()` and answers with the forms not typed, as answer rows carrying the hex in `icon` for the swatch. `Pick a Colour` is a builtin that puts the overlay up with `Purpose::Colour`, reads one pixel and copies it. Checked by `colour::tests::hsl_round_trips_through_rgb` and `a_captured_pixel_reads_as_the_colour_it_is` |
+| G1.4 | World clock | **Done.** `zones.rs` reads Windows' own zone table (`EnumDynamicTimeZoneInformation` plus each zone's registry `Display` for its cities) once an hour at most, and ICU maps a zone to the IANA name the browser's clock understands. `tokyo time` is an answer row; the widget resolves its cities once per settings change and ticks on machine time, asking Rust nothing a minute. Checked by `zones::tests::the_difference_is_said_in_hours_and_halves`, `a_city_is_matched_as_a_whole_word` and `nothing_is_read_unless_asked` |
+| G2.1 | Quit all applications | **Done.** `processes::quit_all_targets` picks the visible programs that are not the shell, not protected and not Sill; the builtin says the count and asks on a native dialog before `quit` sends each its own close. No undo, which is why it asks. Checked by `processes::quitting_everything` |
+| G2.2 | Confetti | **Done.** A deferred transparent window over every screen that ignores the mouse, drawn from `$lib/confetti` and put away by the page itself once every piece has fallen off the bottom. Checked by `confetti.test.ts` and `lazy_windows::tests` |
+| G2.3 | Quicklinks to app deep links | **Done.** `Quicklink.allowed_scheme`, one scheme per link, granted only in the editor; `reach::target_allowing` opens exactly that scheme and nothing on `NEVER`; an import and an export both leave it behind. Checked by `reach::allowances` and `quicklinks::transfer::allowances` |
+| G2.4 | Clipboard entry name and edit | **Done.** A `title` column and `set_text` that moves the hash and refuses a collision; `sill.clipboard.rename` and `sill.clipboard.edit` borrow the field like renaming a file, both undone by `Undo::RestoreClipboardEntry`. Checked by `suite::clipboard_edit` |
+| G2.5 | The model reads a region of the screen | **Done.** `read_screen` takes a `region`, clamped to the screens there are, or `choose`, which puts the capture overlay up with `Purpose::Choose`; the card names which. Checked by `tools::reading_a_region` |
+| G3.1 | Installed fonts with a preview line | **Done.** `fonts.rs` enumerates GDI's families once per ten minutes when `font` is typed, tidied of vertical faces and duplicates; `ObjectKind::Font`, a row whose sample line is set in the face, `sill.font.copyName`. Checked by `fonts::tests::nothing_is_read_unless_asked` and `suite::real_fonts` |
+| G3.2 | Display resolution and refresh rate | **Done.** `displays.rs` lists a display's 32-bit modes from `EnumDisplaySettingsEx`, tests a change with `CDS_TEST`, applies it with the registry updated, asks on a native dialog raced against fifteen seconds and puts the mode back on silence or Revert; a late Keep re-applies it. `Undo::RestoreDisplayMode`. Checked by `displays::tests::modes_are_deduplicated_and_ordered`, `a_rows_target_reads_back_as_the_mode_it_was` and `suite::real_displays` |
+| G3.3 | Custom window layouts, each bindable | **Done.** `layouts.rs` keeps rectangles as fractions of the work area, clamped and rounded so shared edges meet; `sill.window.layout` takes the layout's name as its argument, which is what a key records and the panel asks for. Checked by `layouts::tests::two_half_layouts_tile_the_work_area_exactly` and `a_layout_never_leaves_the_work_area` |
+| G3.4 | Tags on snippets, quicklinks and the clipboard | **Done.** A tag is a `#name` keyword on the row, so a plain word finds it; `registry::tag_operator` takes `tag:name` out of the query and keeps only tagged rows; on the clipboard the tag is the collection of that name. Checked by `registry::tags` and `suite::clipboard_collections::a_collection_name_answers_a_tag_filter` |
+
 ## Built since the audit, and not on it
 
 - **A file index of Sill's own.** File search no longer needs another program

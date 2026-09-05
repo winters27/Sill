@@ -219,7 +219,7 @@
    * `verify:source` holds this list against the modes `registry.rs` actually
    * builds rows for, so a third one cannot arrive with a dead Enter key.
    */
-  const BUILT_HERE: string[] = ["note", "reminder"];
+  const BUILT_HERE: string[] = ["note", "reminder", "font", "display-mode"];
 
   let nav = $state<{ depth: number; pop: string }>(NOT_NAVIGATED);
 
@@ -254,7 +254,7 @@
    * modes that behave almost the same.
    */
   let awaiting = $state<{
-    what: "quicklink" | "rename" | "snippet" | "script";
+    what: "quicklink" | "rename" | "snippet" | "script" | "clipRename" | "clipEdit" | "layout";
     id: string;
     title: string;
     link: string;
@@ -1730,6 +1730,44 @@
 
       if (asked.what === "rename") {
         // The registry, with what was typed as the action's argument. It was a
+      if (asked.what === "layout") {
+        if (!asked.of) return;
+
+        try {
+          status = (await runObjectAction("sill.window.layout", asked.of, query)).message;
+          awaiting = null;
+          mode = "root";
+          query = "";
+          selected = 0;
+          await dismiss();
+        } catch (err) {
+          status = `${err}`;
+        }
+        return;
+      }
+
+      if (asked.what === "clipRename" || asked.what === "clipEdit") {
+        if (!asked.of) return;
+        const actionId =
+          asked.what === "clipRename" ? "sill.clipboard.rename" : "sill.clipboard.edit";
+
+        try {
+          const outcome = await runObjectAction(actionId, asked.of, query);
+          status = outcome.message;
+          lastUndo = outcome.undoneBy ?? null;
+          awaiting = null;
+          mode = "clipboard";
+          query = "";
+          selected = 0;
+          await clipboardView?.refresh();
+        } catch (err) {
+          // Left in the field, because the text that failed is the one worth
+          // editing rather than retyping.
+          status = `${err}`;
+        }
+        return;
+      }
+
         // command of its own that did the renaming itself, which made renaming
         // the one thing on this list no key could be bound to.
         if (!asked.of) return;
@@ -2014,7 +2052,14 @@
        */
       if (command.mode === "answer") {
         try {
-          const outcome = await runObjectAction("sill.copyAnswer", asTarget(command));
+          // The sum rides along as the argument: the row's subtitle is what
+          // was typed, and Rust remembers the pair so `sums` can bring it
+          // back. The window carries it and decides nothing about it.
+          const outcome = await runObjectAction(
+            "sill.copyAnswer",
+            asTarget(command),
+            command.subtitle,
+          );
           status = outcome.message;
         } catch (err) {
           status = `${err}`;
@@ -2607,7 +2652,34 @@
         const text = whole?.text ?? entry.text;
 
         try {
-          const outcome = await runObjectAction(action.tag.slice("Sill.Action:".length), {
+        const actionId = action.tag.slice("Sill.Action:".length);
+
+        /*
+         * Naming or correcting an entry borrows the field, the way renaming
+         * a file does: the action wants a line of text the panel cannot
+         * hold. What is prefilled is what is there now, so a small change
+         * is a small edit.
+         */
+        if (actionId === "sill.clipboard.rename" || actionId === "sill.clipboard.edit") {
+          const renaming = actionId === "sill.clipboard.rename";
+          awaiting = {
+            what: renaming ? "clipRename" : "clipEdit",
+            id: String(entry.id),
+            title: renaming ? "Name this entry" : "Edit this entry",
+            link: text.slice(0, 40),
+            of: {
+              id: String(entry.id),
+              mode: "clipboard",
+              target: text,
+              title: text.slice(0, 40),
+            },
+          };
+          mode = "argument";
+          selected = 0;
+          query = renaming ? (whole?.title ?? "") : text;
+          return;
+        }
+          const outcome = await runObjectAction(actionId, {
             id: String(entry.id),
             mode: "clipboard",
             target: text,
@@ -2739,6 +2811,22 @@
 
       if (chosen === "sill.file.rename") {
         awaiting = {
+      if (chosen === "sill.window.layout") {
+        // The layout's name, asked for in the field the way a new file name
+        // is. Rust finds the layout by it; the window holds only the word.
+        awaiting = {
+          what: "layout",
+          id: command.entrypoint,
+          title: command.title,
+          link: "Which layout?",
+          of: asTarget(command),
+        };
+        mode = "argument";
+        selected = 0;
+        query = "";
+        return;
+      }
+
           what: "rename",
           id: command.entrypoint,
           title: command.title,

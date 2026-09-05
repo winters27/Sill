@@ -41,6 +41,12 @@ pub struct Snippet {
     /// they do, and renaming one is renaming it on the snippets that carry it.
     /// A separate table would be a second place for them to disagree.
     pub collection: String,
+    /// Words of its own it is found by, and grouped under with `tag:`.
+    ///
+    /// Beside the collection rather than instead of it: a collection is one
+    /// heading a snippet sits under, and a tag is any number of words it
+    /// answers to. Carried into the index as `#name` keywords.
+    pub tags: Vec<String>,
     /// The programs it may expand in. Empty means anywhere.
     ///
     /// Matched against the foreground program's file name without its
@@ -71,6 +77,7 @@ impl Default for Snippet {
             // fail in is firing when you did not mean it.
             whole_word: true,
             collection: String::new(),
+            tags: Vec::new(),
             only_in: Vec::new(),
             html: String::new(),
         }

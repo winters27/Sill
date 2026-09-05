@@ -154,6 +154,27 @@ pub enum Undo {
         maximized: bool,
         title: String,
     },
+    /// Put a clipboard entry's name and text back as they were.
+    ///
+    /// Both, always, because one action changes one of them and the other
+    /// is carried along unchanged; describing the whole entry is what makes
+    /// the undo the same shape for a rename and for an edit.
+    RestoreClipboardEntry {
+        id: i64,
+        title: Option<String>,
+        text: String,
+    },
+    /// Put a display back in the mode it was in.
+    ///
+    /// The numbers rather than a handle, so it means the same thing after a
+    /// restart, and the device name Windows itself uses for the display.
+    RestoreDisplayMode {
+        device: String,
+        display: usize,
+        width: u32,
+        height: u32,
+        hz: u32,
+    },
 }
 
 /// What happened, and whether it can be reversed.
@@ -620,6 +641,45 @@ pub fn undo(ctx: &ActionCtx, undo: &Undo) -> Result<String, String> {
             }
 
             Ok(format!("{title} put back"))
+        }
+
+        Undo::RestoreClipboardEntry { id, title, text } => {
+            use tauri::Manager;
+
+            let clipboard = ctx
+                .app
+                .try_state::<crate::clipboard::monitor::Clipboard>()
+                .ok_or_else(|| "clipboard history is not running".to_string())?;
+            let store = clipboard.store();
+
+            store
+                .set_title(*id, title.as_deref())
+                .map_err(|err| format!("could not put the name back: {err}"))?;
+            store
+                .set_text(*id, text, crate::state::now_seconds())
+                .map_err(|err| format!("could not put the text back: {err}"))?;
+
+            Ok("Clipboard entry put back".to_string())
+        }
+
+        Undo::RestoreDisplayMode {
+            device,
+            display,
+            width,
+            height,
+            hz,
+        } => {
+            let mode = crate::displays::Mode {
+                device: device.clone(),
+                display: *display,
+                width: *width,
+                height: *height,
+                hz: *hz,
+                current: false,
+            };
+
+            crate::displays::set(device, &mode)?;
+            Ok(format!("Display {display} put back to {}", crate::displays::said(&mode)))
         }
     }
 }

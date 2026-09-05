@@ -253,9 +253,188 @@ pub(crate) async fn capture_display(app: AppHandle, index: usize) -> Result<Stri
 /// Takes the overlay away without capturing anything.
 #[tauri::command]
 pub(crate) async fn cancel_capture(app: AppHandle) -> Result<(), String> {
+    // Whoever was waiting for a choice hears that there will not be one:
+    // dropping their sender is what their receiver reads as cancelled.
+    forget_choice(&app);
     crate::lazy_windows::hide(&app, "capture");
 
     Ok(())
+}
+
+/// What the overlay is up for.
+///
+/// One overlay, four askers. Copying a picture is the ordinary one. The
+/// other three want the rectangle handed back to whoever put the overlay up
+/// rather than copied anywhere: a region for the model to read, a pixel to
+/// name the colour of, a code to decode. The overlay asks which on show,
+/// because only the asker knows and a window cannot be given an argument
+/// when it is shown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Purpose {
+    #[default]
+    Copy,
+    Choose,
+    Colour,
+    Qr,
+}
+
+/// A rectangle of the screen, in the screen's own physical pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Region {
+    pub left: i32,
+    pub top: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Whoever is waiting for the overlay to hand a rectangle back.
+///
+/// One at a time, like [`Marking`]: there is one overlay, so a second asker
+/// replaces the first, whose receiver then reads the dropped sender as a
+/// cancellation rather than waiting on a choice nobody can make any more.
+#[derive(Default)]
+pub(crate) struct Choosing(
+    pub std::sync::Mutex<Option<(Purpose, tokio::sync::oneshot::Sender<Region>)>>,
+);
+
+/// How long a choice is waited for before the overlay is taken down.
+const CHOOSE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn forget_choice(app: &AppHandle) {
+    if let Some(choosing) = app.try_state::<Choosing>() {
+        if let Ok(mut held) = choosing.0.lock() {
+            *held = None;
+        }
+    }
+}
+
+/// Which purpose the overlay is up for right now. Copying, unless somebody
+/// is waiting for a choice.
+#[tauri::command]
+pub(crate) fn capture_purpose(choosing: State<'_, Choosing>) -> Purpose {
+    choosing
+        .0
+        .lock()
+        .ok()
+        .and_then(|held| held.as_ref().map(|(purpose, _)| *purpose))
+        .unwrap_or_default()
+}
+
+/// The overlay handing a rectangle back to whoever asked for one.
+///
+/// Hidden first and then waited on, exactly as `capture_area` does: the asker
+/// is about to read the screen, and the overlay is a window like any other.
+#[tauri::command]
+pub(crate) async fn chose_area(
+    app: AppHandle,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+) -> Result<(), String> {
+    crate::lazy_windows::hide(&app, "capture");
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+    let waiting = {
+        let choosing = app.state::<Choosing>();
+        let mut held = choosing
+            .0
+            .lock()
+            .map_err(|_| "choosing slot poisoned".to_string())?;
+        held.take()
+    };
+
+    let nobody = || "nobody was waiting for a choice".to_string();
+    let (_, sender) = waiting.ok_or_else(nobody)?;
+    sender
+        .send(Region {
+            left,
+            top,
+            width,
+            height,
+        })
+        .map_err(|_| nobody())
+}
+
+/// Puts the overlay up for a purpose and waits for the rectangle.
+///
+/// Whoever calls this is somebody about to read the screen, so what comes
+/// back is where to read, never a picture: the reading is theirs to take
+/// under their own privacy check.
+pub(crate) async fn choose_region(app: &AppHandle, purpose: Purpose) -> Result<Region, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+
+    {
+        let choosing = app.state::<Choosing>();
+        let mut held = choosing
+            .0
+            .lock()
+            .map_err(|_| "choosing slot poisoned".to_string())?;
+        *held = Some((purpose, sender));
+    }
+
+    if let Err(why) = begin_capture(app.clone()).await {
+        forget_choice(app);
+        return Err(why);
+    }
+
+    match tokio::time::timeout(CHOOSE_PATIENCE, receiver).await {
+        Ok(Ok(region)) => Ok(region),
+        Ok(Err(_)) => Err("nothing was chosen".to_string()),
+        Err(_) => {
+            forget_choice(app);
+            crate::lazy_windows::hide(app, "capture");
+            Err("nothing was chosen within a minute".to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod choosing {
+    use super::*;
+
+    /// A second asker replaces the first, and the first hears it at once
+    /// rather than waiting for a choice the overlay will never make for it.
+    #[test]
+    fn a_second_choice_replaces_the_first() {
+        use tokio::sync::oneshot::error::TryRecvError;
+
+        let choosing = Choosing::default();
+        let (first, mut first_hears) = tokio::sync::oneshot::channel::<Region>();
+        let (second, mut second_hears) = tokio::sync::oneshot::channel::<Region>();
+
+        *choosing.0.lock().unwrap() = Some((Purpose::Colour, first));
+        *choosing.0.lock().unwrap() = Some((Purpose::Qr, second));
+
+        assert!(matches!(first_hears.try_recv(), Err(TryRecvError::Closed)));
+
+        let (purpose, sender) = choosing.0.lock().unwrap().take().expect("the second");
+        assert_eq!(purpose, Purpose::Qr);
+
+        let region = Region {
+            left: 10,
+            top: 20,
+            width: 30,
+            height: 40,
+        };
+        sender.send(region).unwrap();
+        assert_eq!(second_hears.try_recv().unwrap(), region);
+    }
+
+    #[test]
+    fn with_nobody_waiting_the_purpose_is_copying() {
+        let choosing = Choosing::default();
+        let purpose = choosing
+            .0
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|(purpose, _)| *purpose)
+            .unwrap_or_default();
+
+        assert_eq!(purpose, Purpose::Copy);
+    }
 }
 
 /// Copies a rectangle of the screen, in the screen's own physical pixels.
@@ -695,6 +874,72 @@ pub(crate) fn forget_machine_reading(app: tauri::AppHandle) {
 #[tauri::command]
 pub(crate) async fn find_place(name: String) -> Result<crate::weather::Place, String> {
     crate::weather::find(&name).await
+}
+
+/// Throws confetti over every screen.
+///
+/// The window is sized to the whole virtual screen in physical pixels, the
+/// way the capture overlay is, shown, and told to start. It asks to be put
+/// away itself once every piece has fallen off the bottom.
+#[tauri::command]
+pub(crate) async fn throw_confetti(app: AppHandle) -> Result<(), String> {
+    let window = crate::lazy_windows::ensure(&app, "confetti")?;
+
+    let (left, top, width, height) = crate::capture::virtual_screen();
+    if width <= 0 || height <= 0 {
+        return Err("no screens were found".to_string());
+    }
+
+    window
+        .set_position(tauri::PhysicalPosition::new(left, top))
+        .map_err(|err| format!("could not place the confetti: {err}"))?;
+    window
+        .set_size(tauri::PhysicalSize::new(width as u32, height as u32))
+        .map_err(|err| format!("could not size the confetti: {err}"))?;
+
+    crate::sleep::wake(&window);
+    window
+        .show()
+        .map_err(|err| format!("could not show the confetti: {err}"))?;
+
+    // To that window and no other: `emit` reaches every window, and the
+    // launcher has no use for this.
+    app.emit_to("confetti", "sill://confetti", ())
+        .map_err(|err| format!("could not start the confetti: {err}"))
+}
+
+/// The confetti window putting itself away once the last piece has fallen.
+#[tauri::command]
+pub(crate) async fn finish_confetti(app: AppHandle) -> Result<(), String> {
+    crate::lazy_windows::hide(&app, "confetti");
+    Ok(())
+}
+
+/// The cities the world clock shows, each with the name the widget's own
+/// clock understands.
+///
+/// Asked once when the widget is drawn and again when the list changes, and
+/// never on a tick: the ticking is the machine's own time formatted for a
+/// zone the browser already knows, so a minute passing asks Rust nothing.
+/// The zone table is read on the first ask and held for an hour.
+#[tauri::command]
+pub(crate) async fn world_clocks(
+    app: AppHandle,
+    zones: State<'_, crate::state::Fresh<std::sync::Arc<Vec<crate::zones::Zone>>>>,
+) -> Result<Vec<crate::zones::Shown>, String> {
+    let wanted = {
+        let prefs = app.state::<crate::state::PrefsState>();
+        let held = prefs.inner.lock().await;
+        held.widgets.clocks.clone()
+    };
+
+    if wanted.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let table = zones.get(|| std::sync::Arc::new(crate::zones::all()));
+
+    Ok(crate::zones::shown(&wanted, &table, crate::zones::iana_of))
 }
 
 /// The current conditions where the user said.

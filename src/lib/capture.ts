@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { orElse } from "$lib/status";
+import { orElse, silently } from "$lib/status";
 
 /**
  * Picking a piece of the screen, and copying it.
@@ -39,6 +39,43 @@ export function captureArea(
 /** Copies the whole of every screen at once. */
 export function captureScreen(): Promise<string> {
   return invoke<string>("capture_screen");
+}
+
+/**
+ * What the overlay is up for.
+ *
+ * Copying a picture is the ordinary case. The other three hand the rectangle
+ * back to whoever put the overlay up: a region for the model to read, a pixel
+ * to name the colour of, a code to decode.
+ */
+export type Purpose = "copy" | "choose" | "colour" | "qr";
+
+/**
+ * Asks Rust what the overlay is up for, once it is shown.
+ *
+ * Validated rather than trusted: a command Tauri denies resolves with nothing,
+ * and an overlay that then handed a rectangle nowhere would look like a
+ * capture that did nothing. Copying is the answer when the question fails,
+ * silently, because copying is what the overlay did before the question
+ * existed and nothing about it is worse for the question going unanswered.
+ */
+export async function capturePurpose(): Promise<Purpose> {
+  const said = await invoke<unknown>("capture_purpose").catch(silently(null));
+  return said === "choose" || said === "colour" || said === "qr" ? said : "copy";
+}
+
+/**
+ * Hands a rectangle back to whoever put the overlay up for one.
+ *
+ * Physical pixels, like `captureArea`, and for the same reason.
+ */
+export function choseArea(
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): Promise<void> {
+  return invoke("chose_area", { left, top, width, height });
 }
 
 /**

@@ -32,6 +32,18 @@ pub struct Quicklink {
     /// A path to an executable. The point is a link that always opens in the
     /// browser you meant, rather than whichever one is default this week.
     pub open_with: String,
+    /// One scheme this link may open beyond the ones Sill opens on its own:
+    /// `notion` for a `notion://` deep link into a page.
+    ///
+    /// Per link and typed by the person editing it, which is the reasoning
+    /// `games.rs` gives for never widening the global list: anything on that
+    /// list is reachable from an imported file, an extension row and the
+    /// model. An allowance here is reachable from this one link, and an
+    /// imported link arrives without it.
+    pub allowed_scheme: String,
+    /// Words of its own it is found by, and grouped under with `tag:`.
+    /// Carried into the index as `#name` keywords.
+    pub tags: Vec<String>,
     pub uses: u64,
     /// Unix seconds.
     pub created: i64,
@@ -45,6 +57,8 @@ impl Default for Quicklink {
             link: String::new(),
             keyword: String::new(),
             open_with: String::new(),
+            allowed_scheme: String::new(),
+            tags: Vec::new(),
             uses: 0,
             created: 0,
         }

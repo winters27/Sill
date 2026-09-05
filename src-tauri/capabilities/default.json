@@ -5,6 +5,7 @@
   "windows": [
     "ask",
     "capture",
+    "confetti",
     "dictation",
     "main",
     "markup",

@@ -367,6 +367,66 @@ fn is_local(host: &str) -> bool {
     false
 }
 
+/// The chosen provider, or the only one if only one is set up.
+///
+/// Falling back to the only one is not a guess: somebody who has configured
+/// exactly one provider and never opened the chooser means that one.
+pub(crate) fn chosen(settings: &crate::preferences::Ai) -> Option<Provider> {
+    if !settings.provider.is_empty() {
+        if let Some(found) = settings
+            .providers
+            .iter()
+            .find(|candidate| candidate.id == settings.provider)
+        {
+            return Some(found.clone());
+        }
+    }
+
+    match settings.providers.as_slice() {
+        [only] => Some(only.clone()),
+        _ => None,
+    }
+}
+
+/// What this provider still needs, if anything.
+pub(crate) fn what_is_missing(chosen: &Provider) -> Option<String> {
+    if chosen.wire == Wire::ClaudeCode {
+        return crate::ai::claude_code::locate().is_none().then(|| {
+            "Claude Code is not installed, or not somewhere Sill can find it.".to_string()
+        });
+    }
+
+    if chosen.base_url.trim().is_empty() {
+        return Some(format!("{} has no address.", chosen.name));
+    }
+
+    if let Err(refused) = check(&chosen.base_url) {
+        return Some(refused.message().to_string());
+    }
+
+    if chosen.model.trim().is_empty() {
+        return Some(format!("No model is chosen for {}.", chosen.name));
+    }
+
+    None
+}
+
+/// The provider that answers right now, or the sentence saying why none can.
+///
+/// One question asked from several places, the chat, a key bound to a text
+/// action, a dictation style, so it is answered once here rather than by each
+/// caller deciding what "set up" means. Here rather than in a command,
+/// because an action has an app handle and no `State` extractor.
+pub(crate) fn answering(settings: &crate::preferences::Ai) -> Result<Provider, String> {
+    let chosen = chosen(settings)
+        .ok_or_else(|| "No AI provider is set up. Add one in Settings, AI.".to_string())?;
+
+    match what_is_missing(&chosen) {
+        Some(missing) => Err(missing),
+        None => Ok(chosen),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

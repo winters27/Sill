@@ -358,7 +358,7 @@ impl Local {
  */
 
 /// Days since 1970-01-01 for a civil date.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let year = year - i64::from(month <= 2);
     let era = if year >= 0 { year } else { year - 399 } / 400;
     let year_of_era = year - era * 400;
@@ -368,8 +368,14 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
+/// The day of the week a count of days since 1970-01-01 lands on, Sunday
+/// being zero. The epoch was a Thursday, which is the four.
+pub(crate) fn weekday(days: i64) -> i64 {
+    (days + 4).rem_euclid(7)
+}
+
 /// The civil date a count of days since 1970-01-01 lands on.
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let days = days + 719_468;
     let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
     let day_of_era = days - era * 146_097;

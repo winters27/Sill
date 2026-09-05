@@ -92,6 +92,8 @@
    * moment it parsed, and a trailing comma would vanish as it was typed.
    */
   let onlyInText = $state("");
+  /** The tags as typed, comma or space separated, before they are a list. */
+  let tagsText = $state("");
 
   /** The formatted body, when there is one. */
   let richBody = $state<HTMLDivElement | null>(null);
@@ -166,8 +168,9 @@
 
   function edit(snippet: Snippet) {
     // A copy, so cancelling leaves the list untouched.
-    editing = { ...snippet, onlyIn: [...snippet.onlyIn] };
+    editing = { ...snippet, onlyIn: [...snippet.onlyIn], tags: [...(snippet.tags ?? [])] };
     onlyInText = snippet.onlyIn.join(", ");
+    tagsText = (snippet.tags ?? []).join(", ");
     // A different snippet, so the box has to be filled again.
     seeded = null;
     error = "";
@@ -344,6 +347,19 @@
         {:else}
           <textarea rows="7" bind:value={editing.content} spellcheck="false"></textarea>
         {/if}
+      </label>
+
+      <label class="field">
+        <span>Tags</span>
+        <input
+          bind:value={tagsText}
+          oninput={() => {
+            if (editing) editing.tags = parsePrograms(tagsText);
+          }}
+          placeholder="work, git"
+          spellcheck="false"
+          autocomplete="off"
+        />
       </label>
 
       <div class="pair">

@@ -190,7 +190,11 @@ export interface RankedCommand {
      * the action panel open. It is `text` to Rust; the mode survives so the
      * row can say where it came from.
      */
-    | "reminder-shown";
+    | "reminder-shown"
+    /** An installed font, built when `font` is typed. Enter copies its name. */
+    | "font"
+    /** A mode a display can be set to, built when `resolution` is typed. */
+    | "display-mode";
   entrypoint: string;
   /** A file to take an icon from, when it differs from the launch target. */
   icon?: string | null;
@@ -302,7 +306,9 @@ export interface LaunchedCommand {
      * still two lists, and the next thing added to one has to be added to the
      * other.
      */
-    | "system";
+    | "system"
+    | "font"
+    | "display-mode";
   /** What the action said it did, in one line. */
   message: string;
   /**

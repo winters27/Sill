@@ -34,6 +34,7 @@ struct Incoming {
     /// Another spelling of the same idea.
     shortcut: Option<String>,
     open_with: Option<String>,
+    tags: Option<Vec<String>>,
 }
 
 impl Incoming {
@@ -125,6 +126,18 @@ pub fn parse(text: &str) -> Result<Vec<Quicklink>, String> {
                 link,
                 keyword: row.trigger(),
                 open_with: row.open_with.clone().unwrap_or_default(),
+                // Never from a file. A scheme allowance is a decision the
+                // person makes in the editor, and a file anybody can write
+                // must not be able to make it for them.
+                allowed_scheme: String::new(),
+                tags: row
+                    .tags
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|tag| tag.trim().to_string())
+                    .filter(|tag| !tag.is_empty())
+                    .collect(),
                 uses: 0,
                 created: 0,
             })
@@ -236,6 +249,13 @@ pub fn to_json(links: &[Quicklink]) -> String {
                 }
             }
 
+            // Tags travel; they are words, not permissions.
+            if !link.tags.is_empty() {
+                if let Some(fields) = row.as_object_mut() {
+                    fields.insert("tags".into(), link.tags.clone().into());
+                }
+            }
+
             row
         })
         .collect();
@@ -256,6 +276,8 @@ mod tests {
             link: address.into(),
             keyword: keyword.into(),
             open_with: String::new(),
+            allowed_scheme: String::new(),
+            tags: Vec::new(),
             uses: 0,
             created: NOW,
         }
@@ -424,5 +446,59 @@ mod tests {
 
         assert_eq!(after.len(), 1);
         assert_eq!(summary.skipped, 1);
+    }
+}
+
+#[cfg(test)]
+mod allowances {
+    use super::*;
+
+    /// A file anybody can write must not be able to grant a scheme.
+    #[test]
+    fn an_imported_link_arrives_without_its_allowance() {
+        let read = parse(
+            r#"[{"name": "Page", "link": "notion://page/abc", "allowedScheme": "notion"}]"#,
+        )
+        .expect("reads");
+
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].link, "notion://page/abc");
+        assert_eq!(read[0].allowed_scheme, "");
+    }
+
+    /// Nor does an export carry one, so a file round-tripped through another
+    /// machine cannot bring it back.
+    #[test]
+    fn an_export_leaves_the_allowance_behind() {
+        let saved = vec![Quicklink {
+            name: "Page".into(),
+            link: "notion://page/abc".into(),
+            allowed_scheme: "notion".into(),
+            ..Quicklink::default()
+        }];
+
+        assert!(!to_json(&saved).contains("allowedScheme"));
+    }
+}
+
+#[cfg(test)]
+mod tags {
+    use super::*;
+
+    /// Tags are words, not permissions, so they travel both ways.
+    #[test]
+    fn tags_go_out_and_come_back() {
+        let saved = vec![Quicklink {
+            name: "Docs".into(),
+            link: "https://example.com".into(),
+            tags: vec!["work".into(), "docs".into()],
+            ..Quicklink::default()
+        }];
+
+        let read = parse(&to_json(&saved)).expect("reads what it wrote");
+        assert_eq!(read[0].tags, vec!["work", "docs"]);
+
+        let untagged = parse(r#"[{"name": "One", "link": "https://a.example"}]"#).expect("reads");
+        assert!(untagged[0].tags.is_empty());
     }
 }

@@ -15,6 +15,7 @@ pub mod chat;
 pub mod claude_code;
 pub mod files;
 pub mod mcp;
+pub mod oneshot;
 pub mod openai;
 pub mod provider;
 pub mod tools;

@@ -16,11 +16,14 @@ pub mod calculator;
 pub mod capture;
 pub mod catalog;
 pub mod clipboard;
+pub mod colour;
 pub mod commands;
 pub mod complete;
 pub mod controls;
+pub mod dates;
 pub mod desktops;
 pub mod dialog;
+pub mod displays;
 pub mod dictation;
 pub mod emoji;
 pub mod everything_ipc;
@@ -29,6 +32,7 @@ pub mod extension_install;
 pub mod exthost;
 pub mod files;
 pub mod files_ops;
+pub mod fonts;
 pub mod games;
 pub mod hello;
 pub mod hooks;
@@ -41,6 +45,7 @@ pub mod job;
 pub mod json_store;
 pub mod jumplists;
 pub mod keysheet;
+pub mod layouts;
 pub mod lazy_windows;
 pub mod leavings;
 pub mod live;
@@ -82,6 +87,7 @@ pub mod store;
 #[cfg(test)]
 mod suite;
 pub mod summon;
+pub mod sums;
 pub mod synthetic;
 pub mod system;
 pub mod taps;
@@ -97,6 +103,7 @@ pub mod weather;
 pub mod websearch;
 pub mod welcome;
 pub mod windowing;
+pub mod zones;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -909,6 +916,7 @@ pub(crate) fn reload_quicklinks(app: &AppHandle) {
                 &link.keyword,
                 &link.link,
                 link.needs_argument(),
+                &link.tags,
             )
         })
         .collect();
@@ -1591,6 +1599,12 @@ fn manage_before_windows(app: &tauri::App) {
     app.manage(state::Fresh::<Vec<processes::Process>>::new(
         processes::FRESH_FOR,
     ));
+    // Windows' own time zone table, read the first time a city is asked
+    // about and held for an hour. Nothing reads it before then.
+    app.manage(state::Fresh::<Arc<Vec<zones::Zone>>>::new(zones::FRESH_FOR));
+    // The installed fonts, read the first time `font` is typed and held ten
+    // minutes. Nothing reads them before then.
+    app.manage(state::Fresh::<Arc<Vec<String>>>::new(fonts::FRESH_FOR));
     /*
      * What is playing, which is read only when somebody asks about it.
      *
@@ -1718,6 +1732,8 @@ pub fn run() {
         // to Claude Code, which on most days is never.
         .manage(ai::mcp::link::Link::new())
         .manage(commands::system::Marking::default())
+        .manage(commands::system::Choosing::default())
+        .manage(sums::Sums::default())
         // Nothing is asked at rest: a lock around a `None` until somebody
         // presses Enter on a row that would end the session.
         .manage(system::Asked::default())
@@ -2146,6 +2162,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             quicklinks::commands::list_quicklinks,
             quicklinks::commands::save_quicklink,
+            quicklinks::commands::quicklink_scheme_to_allow,
             quicklinks::commands::delete_quicklink,
             quicklinks::commands::open_quicklink,
             quicklinks::commands::export_quicklinks,
@@ -2175,6 +2192,8 @@ pub fn run() {
             commands::launch::extract_text_from_last_image,
             commands::system::begin_capture,
             commands::system::cancel_capture,
+            commands::system::capture_purpose,
+            commands::system::chose_area,
             commands::system::capture_area,
             commands::system::capture_screen,
             commands::system::capture_targets,
@@ -2293,6 +2312,9 @@ pub fn run() {
             commands::system::machine_reading,
             commands::system::find_place,
             commands::system::weather_now,
+            commands::system::world_clocks,
+            commands::system::throw_confetti,
+            commands::system::finish_confetti,
             commands::system::forget_machine_reading,
             commands::system::activity,
             commands::system::undo_activity,

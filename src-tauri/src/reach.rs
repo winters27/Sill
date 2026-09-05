@@ -68,6 +68,67 @@ const OPENABLE: &[&str] = &[
 ];
 
 /**
+Schemes no allowance opens, ever.
+
+The ones that run code or read the machine rather than opening something:
+`javascript:` and `data:` run in the browser, `vbscript:` in the shell,
+`file:` reads anything, and the two Windows ones have a history of taking
+arguments they should not have. A quicklink may allow its own scheme past
+[`OPENABLE`], and this is the list that allowance cannot reach.
+*/
+const NEVER: &[&str] = &[
+    "javascript",
+    "data",
+    "vbscript",
+    "file",
+    "about",
+    "blob",
+    "ms-msdt",
+    "search-ms",
+];
+
+/// Whether a scheme is one a quicklink may be allowed to open.
+///
+/// `None` for anything Sill opens anyway or refuses outright; the scheme
+/// itself for the ones an allowance would open. The editor asks this so it
+/// can offer the switch only when it means something.
+pub fn scheme_to_allow(target: &str) -> Option<String> {
+    let scheme = scheme_of(target.trim())?;
+
+    if OPENABLE.contains(&scheme.as_str()) || NEVER.contains(&scheme.as_str()) {
+        return None;
+    }
+
+    Some(scheme)
+}
+
+/**
+The target, if Sill may open it, with one more scheme allowed for this call.
+
+[`target`] with the allowance a quicklink carries. The allowance opens exactly
+the scheme it names and nothing on [`NEVER`], so a link allowed for `notion`
+still cannot be edited into a `javascript:` address later.
+*/
+pub fn target_allowing(target: &str, also: Option<&str>) -> Result<String, String> {
+    let target = printable(target)?;
+
+    let Some(scheme) = scheme_of(&target) else {
+        return Ok(target);
+    };
+
+    if OPENABLE.contains(&scheme.as_str()) {
+        return Ok(target);
+    }
+
+    match also {
+        Some(allowed) if allowed.eq_ignore_ascii_case(&scheme) && !NEVER.contains(&scheme.as_str()) => {
+            Ok(target)
+        }
+        _ => Err(refusal(&scheme)),
+    }
+}
+
+/**
 The scheme of `target`, if it has one at all.
 
 RFC 3986 exactly: a letter, then letters, digits and `+-.`, then a colon.
@@ -140,8 +201,9 @@ pub fn target(target: &str) -> Result<String, String> {
 /// Said the same way wherever the refusal comes from.
 fn refusal(scheme: &str) -> String {
     format!(
-        "Sill will not open a {scheme}: address. Only http, https, mailto and \
-         ms-settings addresses are opened."
+        "Sill will not open a {scheme}: address. Web, mail and settings \
+         addresses open on their own; a quicklink can allow one more scheme \
+         of its own in Settings."
     )
 }
 
@@ -1294,5 +1356,47 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod allowances {
+    use super::*;
+
+    #[test]
+    fn an_allowance_opens_exactly_that_scheme() {
+        assert!(target_allowing("notion://page/abc", Some("notion")).is_ok());
+        assert!(target_allowing("NOTION://page/abc", Some("notion")).is_ok());
+
+        // The allowance names one scheme and opens no other.
+        assert!(target_allowing("steam://rungameid/730", Some("notion")).is_err());
+        assert!(target_allowing("notion://page/abc", None).is_err());
+
+        // What Sill opens anyway still opens, allowance or not.
+        assert!(target_allowing("https://example.com", None).is_ok());
+        assert!(target_allowing(r"C:\Users\me\Notes", Some("notion")).is_ok());
+    }
+
+    #[test]
+    fn an_allowance_never_opens_the_ones_that_run_code() {
+        for scheme in NEVER {
+            let address = format!("{scheme}:something");
+            assert!(
+                target_allowing(&address, Some(scheme)).is_err(),
+                "{scheme}: was opened on its own allowance"
+            );
+        }
+    }
+
+    #[test]
+    fn the_editor_is_told_only_what_needs_allowing() {
+        assert_eq!(scheme_to_allow("notion://page").as_deref(), Some("notion"));
+        assert_eq!(scheme_to_allow("  Steam://run  ").as_deref(), Some("steam"));
+
+        // Nothing to allow: opened anyway, refused forever, or not an address.
+        assert_eq!(scheme_to_allow("https://example.com"), None);
+        assert_eq!(scheme_to_allow("javascript:alert(1)"), None);
+        assert_eq!(scheme_to_allow(r"C:\Users\me"), None);
+        assert_eq!(scheme_to_allow("no scheme here"), None);
     }
 }

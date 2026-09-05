@@ -24,6 +24,66 @@ differently.
 The first build with an installer. Everything before this was cloned and
 compiled.
 
+**Dates add up.** `today + 3 weeks`, `days until 2026-12-25` and one date
+minus another are answered in the list the way a sum is. A date typed on its
+own is still a search, and a date that used to reach the calculator as a
+subtraction, `2024-08-28` answering 1988, no longer does.
+
+**Past sums come back.** Every answer you press Enter on is kept, fifty at
+most, and `sums` lists them with Enter copying the answer again. Nothing is
+read until the word is typed.
+
+**A colour typed in one form is offered in the others.** `#ff8800`, `rgb()`
+and `hsl()` each answer with the two forms they are not, drawn as a swatch,
+and Enter copies. `Pick a Colour` reads one pixel off the screen through the
+capture overlay and copies it as hex.
+
+**Ask what time it is somewhere.** `tokyo time` answers with the clock there
+and how far ahead it is, from the time zone table Windows already keeps. A
+World clock widget shows the cities you choose, and its ticking is the
+machine's own clock, so a pinned one costs nothing while the launcher is
+hidden.
+
+**One row asks everything to close.** `Quit All Applications` sends every
+program with a window the close its own button sends, after saying how many
+that is and asking. Anything with unsaved work puts up its own question, and
+nothing is terminated. The desktop and Sill are left alone.
+
+**Confetti.** Because it is Friday.
+
+**A quicklink can open a program's own address once you say so.** A link to
+`notion://` or another app scheme shows a switch in its editor; turned on, that
+one link opens that one scheme. Web, mail and settings addresses never needed
+it, the schemes that run code can never have it, and a file you import arrives
+with every switch off.
+
+**A clipboard entry can be named, and its text corrected.** Name This Entry
+puts a name on a row in place of its first line, and Edit Text fixes the typo
+in the thing you copied three times. Both can be taken back with Undo, and an
+edit that would turn one entry into another is refused rather than merged.
+
+**The model can be shown a corner of the screen instead of all of it.** A
+request to read the screen can name a region, or ask you to drag one out on
+the capture overlay, and the approval card says which it is about to read.
+
+**Fonts, with a line set in each.** `font mono` lists the installed faces
+whose names hold those words, each row drawn in itself, and Enter copies the
+name. The list is read the first time it is asked for and held ten minutes.
+
+**A display's resolution and refresh rate, from the list.** `resolution`
+lists the modes the display can be in, `display 2 resolution` the second
+display's, and Enter sets one. It asks whether to keep it and goes back by
+itself after fifteen seconds if nobody answers, and Undo puts it back later.
+
+**Draw your own window positions and put a key on each.** Settings, under
+Shortcuts, takes layouts as fractions of the display: left 0, top 0, width
+0.5, height 1 is the left half. Every layout is in the action panel on any
+window, and a key sends the window in front to it.
+
+**Tags.** Snippets and quicklinks take tags, a plain word finds a tagged
+row, and `tag:work` keeps only those rows. On the clipboard `tag:work` is the
+collection of that name.
+
 **Search knows what changed instead of looking again.** A file created,
 renamed or deleted patches the index in place, so a folder somebody is working
 in stays current without the walk that used to follow every change. The index

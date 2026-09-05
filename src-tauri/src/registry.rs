@@ -594,6 +594,40 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "answer",
             ],
         ),
+        builtin_wearing(
+            "quit-all",
+            &task_manager_icon(),
+            "Quit All Applications",
+            "Ask every open program to close, the way its own close button does",
+            &[
+                "quit", "close", "all", "everything", "apps", "programs", "windows", "exit",
+            ],
+        ),
+        builtin(
+            "confetti",
+            "general",
+            "Confetti",
+            "Because it is Friday",
+            &["confetti", "celebrate", "party", "hooray", "yay"],
+        ),
+        builtin(
+            "pick-colour",
+            "screenshot",
+            "Pick a Colour",
+            "Click any pixel on screen and copy it as hex",
+            &[
+                "colour",
+                "color",
+                "pick",
+                "picker",
+                "eyedropper",
+                "dropper",
+                "hex",
+                "pixel",
+                "sample",
+                "swatch",
+            ],
+        ),
         builtin(
             "capture-area",
             "clipboard",
@@ -1474,6 +1508,7 @@ pub fn quicklink_record(
     keyword: &str,
     link: &str,
     needs_argument: bool,
+    tags: &[String],
 ) -> CommandRecord {
     CommandRecord {
         id: format!("quicklink:{id}"),
@@ -1491,11 +1526,15 @@ pub fn quicklink_record(
             "quicklink".to_string()
         },
         entrypoint: id.to_string(),
-        keywords: if keyword.is_empty() {
-            Vec::new()
-        } else {
-            vec![keyword.to_string()]
-        },
+        // The keyword, and each tag as a `#name` keyword so a plain word finds
+        // a tagged link and `tag:name` keeps only those.
+        keywords: keyword
+            .is_empty()
+            .then(Vec::new)
+            .unwrap_or_else(|| vec![keyword.to_string()])
+            .into_iter()
+            .chain(tags.iter().map(|tag| tag_keyword(tag)))
+            .collect(),
         icon: None,
         toggle: None,
         panel: Some("quicklinks".to_string()),
@@ -1535,13 +1574,16 @@ pub fn snippet_record(snippet: &crate::snippets::store::Snippet) -> CommandRecor
         description: String::new(),
         mode: "snippet".to_string(),
         entrypoint: id.to_string(),
-        // Searchable by what is in it and by the group it is in, not only by
-        // what it is called.
+        // Searchable by what is in it, by the group it is in and by its tags,
+        // not only by what it is called.
         keywords: vec![
             keyword.to_string(),
             preview.to_string(),
             collection.to_string(),
-        ],
+        ]
+        .into_iter()
+        .chain(snippet.tags.iter().map(|tag| tag_keyword(tag)))
+        .collect(),
         icon: None,
         toggle: None,
         panel: None,
@@ -1864,6 +1906,196 @@ pub fn answer_record(text: &str, input: &str) -> RankedCommand {
         score: i64::MAX,
         matched: Vec::new(),
     }
+}
+
+/// A sum answered earlier, shaped as the answer row it was.
+///
+/// The same mode as a fresh answer, so Enter copies it the same way and the
+/// same action remembers it again, which moves it back to the top. The index
+/// is in the id because two past sums can have the same text, and a list
+/// with two rows of one id draws one of them.
+pub fn past_answer_record(at: usize, past: &crate::sums::Past) -> RankedCommand {
+    RankedCommand {
+        // Not found by matching: the query was the word that asks for the
+        // list, and anything after it was a filter. The same reasoning
+        // `jumplist_record` uses.
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            id: format!("sill:past-answer:{at}"),
+            extension: "sill".to_string(),
+            extension_title: "Calculator".to_string(),
+            command: "answer".to_string(),
+            title: past.text.clone(),
+            subtitle: past.input.clone(),
+            description: String::new(),
+            mode: "answer".to_string(),
+            entrypoint: past.text.clone(),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
+/// A colour in one of the forms it was not typed in, shaped as an answer row.
+///
+/// The same mode as a sum's answer, so Enter copies it the same way. The hex
+/// rides in `icon`, which is what the window draws the swatch from: a colour
+/// is its own icon, and a lettered tile beside it would be a worse drawing
+/// of the same thing.
+pub fn colour_record(which: &str, text: &str, input: &str, hex: &str) -> RankedCommand {
+    RankedCommand {
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            id: format!("sill:colour:{which}"),
+            extension: "sill".to_string(),
+            extension_title: "Colour".to_string(),
+            command: "answer".to_string(),
+            title: text.to_string(),
+            subtitle: input.to_string(),
+            description: String::new(),
+            mode: "answer".to_string(),
+            entrypoint: text.to_string(),
+            keywords: Vec::new(),
+            icon: Some(hex.to_string()),
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
+/// The time somewhere, shaped as an answer row: Enter copies the clock.
+pub fn clock_record(reading: &crate::zones::Reading) -> RankedCommand {
+    RankedCommand {
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            id: format!("sill:clock:{}", reading.key),
+            extension: "sill".to_string(),
+            extension_title: "Time".to_string(),
+            command: "answer".to_string(),
+            title: format!("{} in {}", reading.clock, reading.city),
+            subtitle: format!(
+                "{}, {}",
+                crate::zones::said(reading.offset_minutes),
+                reading.weekday
+            ),
+            description: String::new(),
+            mode: "answer".to_string(),
+            entrypoint: reading.clock.clone(),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
+/// An installed font, shaped as a row: Enter copies its name, and the window
+/// sets the row's sample line in the face itself.
+pub fn font_record(name: &str) -> RankedCommand {
+    RankedCommand {
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            id: format!("font:{name}"),
+            extension: "sill".to_string(),
+            extension_title: "Fonts".to_string(),
+            command: "font".to_string(),
+            title: name.to_string(),
+            subtitle: "Installed font".to_string(),
+            description: String::new(),
+            mode: "font".to_string(),
+            entrypoint: name.to_string(),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
+/// A mode a display can be in, shaped as a row: Enter sets it.
+pub fn display_mode_record(mode: &crate::displays::Mode) -> RankedCommand {
+    RankedCommand {
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            id: format!(
+                "display-mode:{}:{}x{}@{}",
+                mode.device, mode.width, mode.height, mode.hz
+            ),
+            extension: "sill".to_string(),
+            extension_title: "Displays".to_string(),
+            command: "display-mode".to_string(),
+            title: crate::displays::said(mode),
+            subtitle: if mode.current {
+                format!("Display {}, current", mode.display)
+            } else {
+                format!("Display {}", mode.display)
+            },
+            description: String::new(),
+            mode: "display-mode".to_string(),
+            entrypoint: crate::displays::target_of(mode),
+            keywords: Vec::new(),
+            icon: None,
+            toggle: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
+/// Splits a `tag:name` out of a query, leaving the rest to match as usual.
+///
+/// One tag, the first; a second is left in the query as a word. Nothing else
+/// about the query changes, so a search with no tag in it costs one pass
+/// over its words.
+pub fn tag_operator(query: &str) -> (String, Option<String>) {
+    let mut rest: Vec<&str> = Vec::new();
+    let mut tag = None;
+
+    for word in query.split_whitespace() {
+        match word.strip_prefix("tag:") {
+            Some(name) if !name.is_empty() && tag.is_none() => {
+                tag = Some(name.to_ascii_lowercase());
+            }
+            _ => rest.push(word),
+        }
+    }
+
+    (rest.join(" "), tag)
+}
+
+/// The keyword a tag is carried as, so a plain word finds a tagged row.
+pub fn tag_keyword(tag: &str) -> String {
+    format!("#{}", tag.trim())
+}
+
+/// Whether a record carries a tag, case not mattering.
+pub fn tagged(record: &CommandRecord, tag: &str) -> bool {
+    record.keywords.iter().any(|keyword| {
+        keyword
+            .strip_prefix('#')
+            .is_some_and(|name| name.eq_ignore_ascii_case(tag.trim()))
+    })
 }
 
 pub fn load_index(path: &Path) -> Vec<CommandRecord> {
@@ -3717,5 +3949,61 @@ mod pinned_rows {
         let plain = ranked("", &Frecency::default(), &[]);
         let haunted = ranked("", &Frecency::default(), &["uninstalled".to_string()]);
         assert_eq!(plain, haunted);
+    }
+}
+
+#[cfg(test)]
+mod tags {
+    use super::*;
+
+    #[test]
+    fn a_tag_operator_is_taken_out_of_the_query() {
+        assert_eq!(tag_operator("gh tag:work"), ("gh".to_string(), Some("work".to_string())));
+        assert_eq!(tag_operator("tag:Work"), (String::new(), Some("work".to_string())));
+        assert_eq!(tag_operator("notepad"), ("notepad".to_string(), None));
+        // A bare `tag:` is a word, and a second tag stays a word.
+        assert_eq!(tag_operator("tag: gh"), ("tag: gh".to_string(), None));
+        assert_eq!(
+            tag_operator("tag:a tag:b x"),
+            ("tag:b x".to_string(), Some("a".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_tag_is_also_an_ordinary_keyword() {
+        let snippet = crate::snippets::store::Snippet {
+            name: "Signature".into(),
+            content: "Regards".into(),
+            tags: vec!["work".into(), "Email".into()],
+            ..Default::default()
+        };
+
+        let record = snippet_record(&snippet);
+        assert!(record.keywords.iter().any(|k| k == "#work"));
+        assert!(record.keywords.iter().any(|k| k == "#Email"));
+        assert!(tagged(&record, "work"));
+        assert!(tagged(&record, "EMAIL"));
+        assert!(!tagged(&record, "home"));
+    }
+
+    #[test]
+    fn a_quicklink_carries_its_tags_the_same_way() {
+        let link = crate::quicklinks::store::Quicklink {
+            name: "Docs".into(),
+            link: "https://example.com/{query}".into(),
+            tags: vec!["docs".into()],
+            ..Default::default()
+        };
+
+        let record = quicklink_record(
+            &link.id,
+            &link.name,
+            &link.keyword,
+            &link.link,
+            link.needs_argument(),
+            &link.tags,
+        );
+        assert!(tagged(&record, "docs"));
+        assert!(!tagged(&record, "work"));
     }
 }

@@ -40,6 +40,12 @@ pub(crate) async fn search_commands(
 ) -> Result<Vec<registry::SearchResult>, String> {
     let _timing = timings.inner().timing("commands");
 
+    // `tag:work` is taken out of the query before ranking and applied after
+    // it: the words that are left match as they always did, and only the rows
+    // carrying that tag survive. A tag is a `#name` keyword, so a plain word
+    // finds a tagged row too; the operator is for wanting only those.
+    let (query, tag) = registry::tag_operator(&query);
+
     let (excluded, hidden, pinned, tone, notes_on) = {
         let prefs = prefs.inner.lock().await;
         (
@@ -112,6 +118,10 @@ pub(crate) async fn search_commands(
         },
         &pinned,
     );
+
+    if let Some(tag) = &tag {
+        results.retain(|hit| registry::tagged(&hit.command, tag));
+    }
 
     /*
      * A switch says which way it is set.
@@ -306,6 +316,88 @@ pub(crate) async fn search_commands(
     }
 
     /*
+     * Sums answered earlier, when the query asks for them by name.
+     *
+     * `sums::matched` holds its own gate on the first word and takes the
+     * reading as a closure, so a query that is not the word never opens the
+     * file. The rows are the answer rows they were, so Enter copies again and
+     * the same action moves the sum back to the top.
+     */
+    /*
+     * The time somewhere, when the query names a city.
+     *
+     * `zones::matched` holds its own gate on the first or last word and takes
+     * the table as a closure, so a keystroke that is not a question about
+     * time never enumerates a zone. The table is Windows' own, read at most
+     * once an hour.
+     */
+    let clocks = crate::zones::matched(&query, || {
+        app.state::<crate::state::Fresh<std::sync::Arc<Vec<crate::zones::Zone>>>>()
+            .get(|| std::sync::Arc::new(crate::zones::all()))
+    });
+
+    if !clocks.is_empty() {
+        let rows = clocks.iter().map(registry::clock_record).collect();
+        splice_suggestions(&mut results, rows);
+    }
+
+    /*
+     * Installed fonts, when the query asks for them by name.
+     *
+     * `fonts::matched` holds its own gate on the first word and takes the
+     * reading as a closure, held ten minutes once taken, so no keystroke
+     * that is not the word enumerates a font.
+     */
+    let faces = crate::fonts::matched(&query, || {
+        app.state::<crate::state::Fresh<std::sync::Arc<Vec<String>>>>()
+            .get(|| std::sync::Arc::new(crate::fonts::installed()))
+    });
+
+    if !faces.is_empty() {
+        let rows = faces
+            .iter()
+            .map(|name| registry::font_record(name))
+            .collect();
+        splice_suggestions(&mut results, rows);
+    }
+
+    /*
+     * The modes a display can be set to, when the query asks.
+     *
+     * Enumerated on the ask, which is one word, and not cached: a display
+     * list is short and a mode list is a millisecond, and both are wrong the
+     * moment a monitor is plugged in.
+     */
+    if let Some(asked) = crate::displays::asked(&query) {
+        let devices = crate::displays::devices();
+        let chosen = match asked.display {
+            Some(number) => devices.iter().find(|(index, _)| *index == number),
+            None => devices.first(),
+        };
+
+        if let Some((index, device)) = chosen {
+            let modes = crate::displays::matched(&asked, crate::displays::modes(device, *index));
+            let rows = modes.iter().map(registry::display_mode_record).collect();
+            splice_suggestions(&mut results, rows);
+        }
+    }
+
+    let past = crate::sums::matched(&query, || {
+        app.state::<crate::sums::Sums>()
+            .recall(&crate::sums::path(&crate::state::data_dir(&app)))
+    });
+
+    if !past.is_empty() {
+        let rows = past
+            .iter()
+            .enumerate()
+            .map(|(at, one)| registry::past_answer_record(at, one))
+            .collect();
+
+        splice_suggestions(&mut results, rows);
+    }
+
+    /*
      * The timer somebody has just described, before it is set.
      *
      * `timers::matched` holds its own gate on the first word, so a query that
@@ -336,7 +428,27 @@ pub(crate) async fn search_commands(
      * because its gate is the stricter of the two: it has to guess whether a
      * string is arithmetic at all, while a utility is asked for by name.
      */
-    let answer = calculator::evaluate(&query).or_else(|| crate::utilities::evaluate(&query));
+    // Dates go first: `today + 3 weeks` and `2026-03-01 - 2026-01-15` are
+    // both things the calculator would otherwise hand to fend as arithmetic
+    // on integers, and its gate is the one place a date sum cannot be told
+    // from a sum.
+    // A colour written one way is offered in the others, above everything,
+    // the way a sum's answer is. The gate is the first character, so a
+    // search that is not a colour pays one comparison.
+    if let Some(colour) = crate::colour::parse(&query) {
+        let hex = colour.hex();
+        let rows: Vec<registry::RankedCommand> = colour
+            .other_forms(&query)
+            .into_iter()
+            .map(|(which, text)| registry::colour_record(which, &text, &query, &hex))
+            .collect();
+
+        results.splice(0..0, rows);
+    }
+
+    let answer = crate::dates::evaluate(&query, crate::dates::today())
+        .or_else(|| calculator::evaluate(&query))
+        .or_else(|| crate::utilities::evaluate(&query));
 
     if let Some(answer) = answer {
         results.insert(0, registry::answer_record(&answer.text, &answer.input));

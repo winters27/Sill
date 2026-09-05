@@ -315,6 +315,26 @@ export interface Binding {
   source: BindingSource;
   /** Put the result back over the selection rather than only copying it. */
   replace: boolean;
+  /**
+   * The one answer the action would otherwise ask for, recorded with the
+   * key: the layout a window key sends its window to.
+   */
+  argument?: string;
+}
+
+/**
+ * A window position of your own, as fractions of the display's work area.
+ *
+ * Fractions rather than pixels so one layout means the same thing on every
+ * display it is used on. Rust clamps and applies them.
+ */
+export interface Layout {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export type TtsEngine = "system" | "http" | "piper";
@@ -350,6 +370,8 @@ export interface WidgetSettings {
   place: Place;
   fahrenheit: boolean;
   seconds: boolean;
+  /** Cities the world clock shows, by name. Rust resolves them to zones. */
+  clocks: string[];
 }
 
 /** Script commands: files somebody keeps that the launcher can run. */
@@ -405,6 +427,8 @@ export interface Preferences {
   emoji: EmojiSettings;
   privacy: PrivacySettings;
   mcp: import("$lib/mcp").McpSettings;
+  /** Window positions of your own, each bindable to a key. */
+  layouts: Layout[];
 }
 
 /**

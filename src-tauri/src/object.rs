@@ -163,6 +163,12 @@ pub enum ObjectKind {
     /// identifier **and** the name it was read under, and refuses when either
     /// has moved. See [`crate::controls`].
     ScreenControl,
+    /// A font family installed on this machine, carried by name. See
+    /// [`crate::fonts`].
+    Font,
+    /// A resolution and refresh rate one display can be set to, carried as
+    /// the device and the numbers. See [`crate::displays`].
+    DisplayMode,
 }
 
 impl ObjectKind {
@@ -207,6 +213,8 @@ impl ObjectKind {
         Self::Note,
         Self::Reminder,
         Self::ScreenControl,
+        Self::Font,
+        Self::DisplayMode,
     ];
 
     /**
@@ -255,6 +263,8 @@ impl ObjectKind {
             Self::Note => "note",
             Self::Reminder => "reminder",
             Self::ScreenControl => "control on screen",
+            Self::Font => "installed font",
+            Self::DisplayMode => "display mode",
         }
     }
 
@@ -295,6 +305,8 @@ impl ObjectKind {
             Self::Quicklink => "quicklink",
             Self::TerminalProfile => "terminalProfile",
             Self::ScreenControl => "screenControl",
+            Self::Font => "font",
+            Self::DisplayMode => "displayMode",
             Self::Script => "script",
             Self::Answer => "answer",
             Self::ClipboardEntry => "clipboardEntry",
@@ -397,6 +409,8 @@ impl ObjectKind {
             // open the view that lists them and never held between two
             // keystrokes. No index has one and none ever will.
             "control" => Self::ScreenControl,
+            "font" => Self::Font,
+            "display-mode" => Self::DisplayMode,
             _ => return None,
         })
     }
@@ -735,12 +749,14 @@ mod tests {
                 ObjectKind::Note => 26,
                 ObjectKind::Reminder => 27,
                 ObjectKind::ScreenControl => 28,
+                ObjectKind::Font => 29,
+                ObjectKind::DisplayMode => 30,
             }
         }
 
         assert_eq!(
             ObjectKind::ALL.len(),
-            29,
+            31,
             "a kind was added or removed without `ALL` being told",
         );
 

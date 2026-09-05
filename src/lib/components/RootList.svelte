@@ -401,6 +401,10 @@
       case "reminder":
       case "reminder-shown":
         return "Reminder";
+      case "font":
+        return "Font";
+      case "display-mode":
+        return "Display Mode";
       // Something in the store, which is not installed and so is not yet a
       // command. Saying "Extension" would claim it was.
       case "store-listing":
@@ -592,6 +596,10 @@
           <!-- The emoji is its own icon. A lettered tile beside the character
                it stands for would be a worse drawing of the same thing. -->
           <span class="emoji" aria-hidden="true">{command.subtitle}</span>
+        {:else if command.mode === "answer" && command.icon}
+          <!-- A colour is its own icon: the swatch is the answer, drawn.
+               The value is the row's data, not a colour chosen here. -->
+          <span class="swatch" aria-hidden="true" style:background={command.icon}></span>
         {:else if command.mode === "answer"}
           <!-- A lettered tile would show the first digit of the result,
                which means nothing. -->
@@ -629,6 +637,14 @@
                    there. A name kept out of sight is a name nobody remembers
                    setting. -->
               <span class="alias">{command.alias}</span>
+            {/if}
+            {#if command.mode === "font"}
+              <!-- A line set in the face itself, which is the one thing a
+                   font's row can say that its name cannot. The family is the
+                   row's own data, not a face chosen here. -->
+              <span class="sample" style:font-family={`"${command.title}"`}>
+                Sphinx of black quartz, judge my vow
+              </span>
             {/if}
           </span>
           {#if sourceOf(command)}
@@ -813,6 +829,23 @@
   .path .extension {
     direction: rtl;
     text-align: left;
+  }
+
+  .sample {
+    margin-left: var(--space-2);
+    color: var(--text-3);
+    font-size: var(--text-body);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .swatch {
+    width: var(--icon-tile);
+    height: var(--icon-tile);
+    flex: none;
+    border-radius: var(--radius-sm);
+    box-shadow: var(--ring-outside);
   }
 
   .equals {

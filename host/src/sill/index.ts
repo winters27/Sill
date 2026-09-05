@@ -68,6 +68,8 @@ export type SillObjectKind =
   | "nowPlaying"
   | "process"
   | "screenControl"
+  | "font"
+  | "displayMode"
   | "workspace"
   | "conversation"
   | "storeListing"

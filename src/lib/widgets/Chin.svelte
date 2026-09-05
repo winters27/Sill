@@ -1,5 +1,6 @@
 <script lang="ts">
   import Clock from "./Clock.svelte";
+  import WorldClock from "./WorldClock.svelte";
   import Weather from "./Weather.svelte";
   import Machine from "./Machine.svelte";
   import { widget } from "./registry";
@@ -29,6 +30,8 @@
       <span class="one">
         {#if id === "clock"}
           <Clock compact seconds={prefs?.widgets.seconds ?? false} />
+        {:else if id === "worldclock"}
+          <WorldClock compact clocks={prefs?.widgets.clocks ?? []} />
         {:else if id === "weather"}
           <Weather compact />
         {:else if id === "machine"}

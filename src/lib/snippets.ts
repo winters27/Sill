@@ -18,6 +18,8 @@ export interface Snippet {
   created: number;
   /** Only fire when the keyword stands as a whole word. */
   wholeWord: boolean;
+  /** Words of your own it is found by, and grouped under with `tag:`. */
+  tags: string[];
   /**
    * The group it is in. Empty means it is in none.
    *
@@ -128,6 +130,7 @@ export function emptySnippet(): Snippet {
     uses: 0,
     created: 0,
     wholeWord: true,
+    tags: [],
     collection: "",
     onlyIn: [],
     html: "",

@@ -130,6 +130,8 @@ const HEADINGS: Record<string, string> = {
    * one presses it where it is.
    */
   control: "On Screen",
+  font: "Fonts",
+  "display-mode": "Displays",
   websearch: "Web Search",
   emoji: "Emoji",
   "audio-session": "Playing Now",

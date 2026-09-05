@@ -193,8 +193,30 @@ pub const CATALOGUE: &[Tool] = &[
                       the others, and it stops and asks first because it reads every \
                       window on every display. Worth it only when the answer is somewhere \
                       no other tool can reach, such as inside an image or an application \
-                      that keeps its text to itself.",
-        schema: || json!({ "type": "object", "properties": {} }),
+                      that keeps its text to itself. Give a region to read only part of \
+                      the screen, or set choose to have the person drag out the part.",
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "region": {
+                        "type": "object",
+                        "description": "A rectangle of the screen in physical pixels, when only part of it is wanted.",
+                        "properties": {
+                            "left": { "type": "integer" },
+                            "top": { "type": "integer" },
+                            "width": { "type": "integer" },
+                            "height": { "type": "integer" }
+                        },
+                        "required": ["left", "top", "width", "height"]
+                    },
+                    "choose": {
+                        "type": "boolean",
+                        "description": "Ask the person to drag out the part of the screen to read, instead of reading all of it."
+                    }
+                }
+            })
+        },
     },
     Tool {
         name: "what_can_be_done",
@@ -343,7 +365,7 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value) -> Value {
         "list_windows" => list_windows(),
         "system_state" => system_state(app),
         "read_selection" => read_selection(app).await,
-        "read_screen" => read_screen(app).await,
+        "read_screen" => read_screen(app, args).await,
         "what_can_be_done" => what_can_be_done(app, &text("target"), &text("kind")),
         "run_action" => {
             run_action(
@@ -670,23 +692,44 @@ to be gated it should have been this one: a selection is one thing somebody
 chose to highlight, and this is every pixel of every monitor put through OCR,
 including the window in front of Sill and whatever is open behind it.
 */
-async fn read_screen(app: &AppHandle) -> Value {
-    if let Some(refused) = ask(
-        app,
-        "Read the screen",
-        "everything on your screens",
-        "reads what is on screen",
-    )
-    .await
-    {
+async fn read_screen(app: &AppHandle, args: &Value) -> Value {
+    let screen = crate::capture::virtual_screen();
+    if screen.2 <= 0 || screen.3 <= 0 {
+        return json!({ "error": "No screens were found." });
+    }
+
+    let choose = args.get("choose").and_then(Value::as_bool).unwrap_or(false);
+    let named = match region_of(args, screen) {
+        Ok(named) => named,
+        Err(why) => return json!({ "error": why }),
+    };
+
+    // The card says how much of the screen is about to be read, because
+    // "a corner you choose" and "everything" are different questions.
+    let subject = if choose {
+        "the part of your screen you choose"
+    } else if named.is_some() {
+        "a region of your screen"
+    } else {
+        "everything on your screens"
+    };
+
+    if let Some(refused) = ask(app, "Read the screen", subject, "reads what is on screen").await {
         return refused;
     }
 
-    let (left, top, width, height) = crate::capture::virtual_screen();
-
-    if width <= 0 || height <= 0 {
-        return json!({ "error": "No screens were found." });
-    }
+    let (left, top, width, height) = if choose {
+        // The overlay hands back where to look; the reading below is still
+        // this tool's own, under the same check as ever.
+        match crate::commands::system::choose_region(app, crate::commands::system::Purpose::Choose)
+            .await
+        {
+            Ok(region) => (region.left, region.top, region.width, region.height),
+            Err(why) => return json!({ "error": why }),
+        }
+    } else {
+        named.unwrap_or(screen)
+    };
 
     // The model reads the screen through the same permission a screenshot
     // does, which is the point of there being one: private mode did not have
@@ -1346,5 +1389,86 @@ mod tests {
                 MOST_ROWS
             );
         }
+    }
+}
+
+/// The region the model named, clamped to the screens there are.
+///
+/// `None` when it named none, which is the whole screen. A region with no
+/// area, or one entirely off every display, is refused rather than read as
+/// nothing: a tool that answers "no text" about a rectangle that was never on
+/// screen has told the model something false.
+fn region_of(
+    args: &Value,
+    screen: (i32, i32, i32, i32),
+) -> Result<Option<(i32, i32, i32, i32)>, String> {
+    let Some(region) = args.get("region").filter(|region| !region.is_null()) else {
+        return Ok(None);
+    };
+
+    let int = |key: &str| {
+        region
+            .get(key)
+            .and_then(Value::as_i64)
+            .ok_or_else(|| format!("region.{key} is missing or not a whole number"))
+    };
+    let (left, top, width, height) = (int("left")?, int("top")?, int("width")?, int("height")?);
+
+    if width <= 0 || height <= 0 {
+        return Err("a region needs a positive width and height".to_string());
+    }
+
+    let (screen_left, screen_top, screen_width, screen_height) = screen;
+    let screen_right = i64::from(screen_left) + i64::from(screen_width);
+    let screen_bottom = i64::from(screen_top) + i64::from(screen_height);
+
+    let clamped_left = left.max(i64::from(screen_left));
+    let clamped_top = top.max(i64::from(screen_top));
+    let clamped_right = (left + width).min(screen_right);
+    let clamped_bottom = (top + height).min(screen_bottom);
+
+    if clamped_right <= clamped_left || clamped_bottom <= clamped_top {
+        return Err("that region is outside every screen".to_string());
+    }
+
+    Ok(Some((
+        clamped_left as i32,
+        clamped_top as i32,
+        (clamped_right - clamped_left) as i32,
+        (clamped_bottom - clamped_top) as i32,
+    )))
+}
+
+#[cfg(test)]
+mod reading_a_region {
+    use super::*;
+
+    const SCREEN: (i32, i32, i32, i32) = (-1920, 0, 3840, 1080);
+
+    #[test]
+    fn read_screen_without_arguments_still_reads_everything() {
+        assert_eq!(region_of(&json!({}), SCREEN), Ok(None));
+        assert_eq!(region_of(&json!({ "region": null }), SCREEN), Ok(None));
+    }
+
+    #[test]
+    fn a_region_is_clamped_to_the_virtual_screen() {
+        let named = json!({ "region": { "left": -2000, "top": -50, "width": 500, "height": 200 } });
+        assert_eq!(region_of(&named, SCREEN), Ok(Some((-1920, 0, 420, 150))));
+
+        let inside = json!({ "region": { "left": 10, "top": 20, "width": 30, "height": 40 } });
+        assert_eq!(region_of(&inside, SCREEN), Ok(Some((10, 20, 30, 40))));
+    }
+
+    #[test]
+    fn a_region_outside_every_screen_is_refused() {
+        let off = json!({ "region": { "left": 5000, "top": 0, "width": 100, "height": 100 } });
+        assert!(region_of(&off, SCREEN).is_err());
+
+        let flat = json!({ "region": { "left": 0, "top": 0, "width": 0, "height": 100 } });
+        assert!(region_of(&flat, SCREEN).is_err());
+
+        let half = json!({ "region": { "left": 0, "top": 0, "width": 100 } });
+        assert!(region_of(&half, SCREEN).is_err());
     }
 }

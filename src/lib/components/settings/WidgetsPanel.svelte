@@ -6,6 +6,7 @@
   import Toggle from "../Toggle.svelte";
   import TextField from "./TextField.svelte";
   import Segmented from "./Segmented.svelte";
+  import TermList from "./TermList.svelte";
   import { WIDGETS } from "$lib/widgets/registry";
   import type { Place, Preferences } from "$lib/settings";
 
@@ -183,6 +184,24 @@
   {#if said}
     <p class="said">{said}</p>
   {/if}
+</Section>
+
+<Section
+  label="World clock"
+  description="Cities by the names Windows lists them under: Tokyo, Paris, Eastern. Their clocks tick on this machine's own time, so nothing is asked of anything while they are shown."
+>
+  <Row
+    title="World clock cities"
+    description="Type a city and press Enter. One that Windows does not list shows a dash rather than a guess."
+  >
+    <TermList
+      bind:terms={prefs.widgets.clocks}
+      onchange={() => commit()}
+      placeholder="A city, then Enter"
+      ariaLabel="A city for the world clock"
+      removeLabel={(city) => `Remove ${city}`}
+    />
+  </Row>
 </Section>
 
 <Section label="Clock">

@@ -3,6 +3,7 @@
   import Section from "./Section.svelte";
   import Row from "./Row.svelte";
   import Button from "./Button.svelte";
+  import Toggle from "../Toggle.svelte";
   import Instead from "../Instead.svelte";
   import { standing } from "$lib/instead";
   import { hint } from "$lib/hint";
@@ -13,6 +14,7 @@
     importQuicklinks,
     listQuicklinks,
     needsArgument,
+    quicklinkSchemeToAllow,
     saveQuicklink,
     type Quicklink,
   } from "$lib/quicklinks";
@@ -98,10 +100,35 @@
     links = await listQuicklinks();
   }
 
+  /**
+   * The scheme the link being edited would need allowing for, or nothing.
+   *
+   * Asked of Rust when the link field is left rather than on every
+   * keystroke: a half-typed address is not worth a round trip, and Rust is
+   * the only side that knows which schemes it opens on its own.
+   */
+  let schemeToAllow = $state<string | null>(null);
+
+  /** The tags as typed, comma or space separated, before they are a list. */
+  let tagsText = $state("");
+
+  function parseTags(text: string): string[] {
+    return text
+      .split(/[,\s]+/)
+      .map((one) => one.trim())
+      .filter(Boolean);
+  }
+
+  async function askScheme() {
+    schemeToAllow = editing ? await quicklinkSchemeToAllow(editing.link) : null;
+  }
+
   function edit(link: Quicklink) {
     // A copy, so cancelling leaves the list untouched.
-    editing = { ...link };
+    editing = { ...link, tags: [...(link.tags ?? [])] };
+    tagsText = (link.tags ?? []).join(", ");
     error = "";
+    void askScheme();
   }
 
   async function save() {
@@ -179,12 +206,26 @@
       </div>
 
       <label class="field">
+        <span>Tags</span>
+        <input
+          bind:value={tagsText}
+          oninput={() => {
+            if (editing) editing.tags = parseTags(tagsText);
+          }}
+          placeholder="work, docs"
+          spellcheck="false"
+          autocomplete="off"
+        />
+      </label>
+
+      <label class="field">
         <span>Link</span>
         <input
           bind:value={editing.link}
           placeholder={EXAMPLE}
           spellcheck="false"
           autocomplete="off"
+          onblur={askScheme}
         />
       </label>
 
@@ -223,6 +264,27 @@
           autocomplete="off"
         />
       </label>
+
+      {#if schemeToAllow}
+        <!-- Only for a link whose address Sill would otherwise refuse. Web,
+             mail and settings addresses never show this, and the schemes
+             that run code never can. -->
+        <div class="allow">
+          <Toggle
+            checked={editing.allowedScheme === schemeToAllow}
+            onchange={(on) => {
+              if (editing) editing.allowedScheme = on ? (schemeToAllow ?? "") : "";
+            }}
+            label={`Open ${schemeToAllow}: addresses`}
+          />
+          <p class="note">
+            Open <code>{schemeToAllow}:</code> addresses. Sill opens web, mail and settings
+            addresses on its own; anything else is handed to whichever program owns that
+            scheme, with the whole address as its argument, only once you allow it here.
+            An imported link never carries this.
+          </p>
+        </div>
+      {/if}
 
       {#if error}<p class="error">{error}</p>{/if}
 

@@ -23,7 +23,7 @@
     type ActionShortcut,
     type NavigationKey,
   } from "$lib/settings";
-  import type { Binding, BindingSource, Preferences, TapModifier } from "$lib/settings";
+  import type { Binding, BindingSource, Layout, Preferences, TapModifier } from "$lib/settings";
 
   interface Props {
     prefs: Preferences;
@@ -347,6 +347,67 @@
   }
 
   /**
+   * Window layouts of your own, kept in preferences and applied by Rust.
+   *
+   * The fields are fractions of the work area and the panel only holds them:
+   * clamping, tiling and the move itself belong to the layout action, so a
+   * layout typed here and one named by the model are applied the same way.
+   */
+  const layouts = $derived(prefs.layouts ?? []);
+
+  const FRACTIONS = ["x", "y", "width", "height"] as const;
+
+  function saveLayouts(next: Layout[]) {
+    commit({ ...prefs, layouts: next });
+  }
+
+  function addLayout() {
+    saveLayouts([
+      ...layouts,
+      {
+        id: crypto.randomUUID(),
+        name: `Layout ${layouts.length + 1}`,
+        x: 0,
+        y: 0,
+        width: 0.5,
+        height: 1,
+      },
+    ]);
+  }
+
+  function updateLayout(at: number, patch: Partial<Layout>) {
+    saveLayouts(layouts.map((layout, i) => (i === at ? { ...layout, ...patch } : layout)));
+  }
+
+  function removeLayout(at: number) {
+    saveLayouts(layouts.filter((_, i) => i !== at));
+  }
+
+  /**
+   * A key for one layout: a binding on the window in front, carrying the
+   * layout's name as the answer the action would otherwise ask for.
+   */
+  function bindLayout(layout: Layout) {
+    save([
+      ...bindings,
+      {
+        accelerator: "",
+        action: "sill.window.layout",
+        source: { from: "foregroundWindow" },
+        replace: false,
+        argument: layout.name,
+      },
+    ]);
+    recording = bindings.length;
+  }
+
+  /** A typed fraction, or nothing while it is half typed. */
+  function fraction(text: string): number | null {
+    const value = Number(text.trim());
+    return text.trim() === "" || Number.isNaN(value) ? null : value;
+  }
+
+  /**
    * Turns a key press into an accelerator string.
    *
    * A modifier on its own is not a shortcut, and binding one would swallow
@@ -511,6 +572,50 @@
 </Section>
 
 <Section
+  label="Window layouts"
+  description="Positions of your own, as fractions of the display's work area: left 0, top 0, width 0.5, height 1 is the left half. Each can have a key, which sends the window in front there, and every one is in the action panel on any window."
+>
+  {#each layouts as layout, at (layout.id)}
+    <Row title={layout.name || "Unnamed layout"} description="Left, top, width, height">
+      <div class="controls">
+        <input
+          class="name"
+          value={layout.name}
+          placeholder="Name"
+          aria-label="Layout name"
+          spellcheck="false"
+          onchange={(e) => updateLayout(at, { name: e.currentTarget.value.trim() })}
+        />
+        {#each FRACTIONS as field (field)}
+          <input
+            class="fraction"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
+            value={layout[field]}
+            aria-label={field}
+            onchange={(e) => {
+              const value = fraction(e.currentTarget.value);
+              if (value !== null) updateLayout(at, { [field]: value });
+            }}
+          />
+        {/each}
+        <Button label="Set a key" onclick={() => bindLayout(layout)} />
+        <Button label="Remove" tone="danger" onclick={() => removeLayout(at)} />
+      </div>
+    </Row>
+  {/each}
+
+  <Row
+    title="Custom layouts"
+    description="Halves, thirds and quarters are built in. This is for the rest."
+  >
+    <Button label="Add a layout" onclick={addLayout} />
+  </Row>
+</Section>
+
+<Section
   label="Double-tap"
   description="Tapping a modifier twice opens the launcher. It needs no chord and no key anything else wants: the modifier keeps doing its own job, and doing it twice quickly is a thing nothing else listens for."
 >
@@ -642,6 +747,28 @@
     align-items: center;
     gap: var(--space-2);
     flex-wrap: wrap;
+  }
+
+  /* The layout fields: a name and four fractions, sized to what they hold. */
+  .name,
+  .fraction {
+    padding: var(--space-1) var(--space-2);
+    font: inherit;
+    font-size: var(--text-meta);
+    color: var(--text-1);
+    background: var(--fill-1);
+    border: 0;
+    border-radius: var(--radius-sm);
+    box-shadow: var(--ring);
+  }
+
+  .name {
+    inline-size: 12ch;
+  }
+
+  .fraction {
+    inline-size: 6ch;
+    font-variant-numeric: tabular-nums;
   }
 
   .key {

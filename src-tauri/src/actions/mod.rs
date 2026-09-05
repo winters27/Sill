@@ -106,6 +106,11 @@ pub fn builtins() -> ActionRegistry {
         // order and the entry that removes something should not be the one
         // under the cursor when it opens.
         Box::new(RemoveExtension),
+        Box::new(RenameClipboardEntry),
+        Box::new(EditClipboardEntry),
+        Box::new(CopyFontName),
+        Box::new(SetDisplayMode),
+        Box::new(PlaceInLayout),
         Box::new(ReadAloud),
         Box::new(StopReading),
         // Notes and reminders, both behind their own gates rather than this
@@ -513,6 +518,82 @@ impl Action for RunBuiltin {
             "settings" => crate::commands::settings::open_settings(app.clone(), None).await?,
             "ask" => crate::commands::ai::open_ask(app.clone()).await?,
             "reload" => crate::reload_index(app),
+            // The overlay hands back one pixel, read once it is gone, and the
+            // hex lands on the clipboard. Typing that hex into the launcher
+            // then offers the other forms. The privacy check is the picture's
+            // own, taken here, because the overlay only chose where to look.
+            "pick-colour" => {
+                use crate::commands::system::{choose_region, Purpose};
+
+                let region = choose_region(app, Purpose::Colour).await?;
+                let allowed = crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
+                let shot = tokio::task::spawn_blocking(move || {
+                    crate::capture::region(&allowed, region.left, region.top, 1, 1)
+                })
+                .await
+                .map_err(|err| format!("the pixel could not be read: {err}"))??;
+
+                let colour = crate::colour::Colour::from_bgra(&shot.pixels)
+                    .ok_or_else(|| "nothing was under the pointer".to_string())?;
+                let hex = colour.hex();
+
+                return copy_with_undo(ctx, &hex, &format!("Copied {hex}"));
+            }
+            // Asks first, because there is no undo. Every program with a
+            // window gets the close its own button sends, and any with
+            // unsaved work puts up its own question; nothing is terminated.
+            // The count is said before anything happens, so "everything"
+            // means a number rather than a surprise.
+            "quit-all" => {
+                let targets = crate::processes::quit_all_targets(
+                    &crate::processes::running(),
+                    std::process::id(),
+                )
+                .len();
+
+                if targets == 0 {
+                    return Ok(Outcome::done("Nothing is open to close"));
+                }
+
+                crate::dismiss_main(app);
+
+                let asked = app.clone();
+                let agreed = tokio::task::spawn_blocking(move || {
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+                    asked
+                        .dialog()
+                        .message(format!(
+                            "Ask {targets} {} to close? Any with unsaved work will ask you first.",
+                            if targets == 1 { "program" } else { "programs" }
+                        ))
+                        .title("Quit All Applications")
+                        .buttons(MessageDialogButtons::OkCancelCustom(
+                            "Close them".to_string(),
+                            "Cancel".to_string(),
+                        ))
+                        .kind(MessageDialogKind::Warning)
+                        .blocking_show()
+                })
+                .await
+                .map_err(|err| format!("the question was not asked: {err}"))?;
+
+                if !agreed {
+                    return Ok(Outcome::done("Left everything open"));
+                }
+
+                let said = tokio::task::spawn_blocking(crate::processes::quit_all)
+                    .await
+                    .map_err(|err| format!("could not ask programs to close: {err}"))??;
+
+                return Ok(Outcome::done(said));
+            }
+            // The launcher goes away first, or the confetti lands on it.
+            "confetti" => {
+                crate::dismiss_main(app);
+                crate::commands::system::throw_confetti(app.clone()).await?;
+                return Ok(Outcome::done("Confetti"));
+            }
             // Dismissed first: the launcher is frontmost right now, and a
             // dictation started here has to land in whatever was in front of
             // it, not in Sill.
@@ -1591,6 +1672,22 @@ impl Action for CopyAnswer {
         // The target is the result itself. Nothing is spawned and nothing is
         // indexed; the answer exists only while it is on screen.
         let outcome = copy_with_undo(ctx, &object.target, "Copied the answer")?;
+
+        // Remembered once it has been wanted, which pressing Enter is. The
+        // sum comes as the argument because the object carries only the
+        // answer, and a list of answers with no questions is not a history.
+        // A history that could not be written is said, not failed over: the
+        // answer is already on the clipboard, which is what was asked for.
+        if let Some(input) = ctx.argument() {
+            let path = crate::sums::path(&crate::state::data_dir(&ctx.app));
+            let sums = ctx.app.state::<crate::sums::Sums>();
+            if let Err(why) =
+                sums.remember(&path, input, &object.target, crate::state::now_seconds())
+            {
+                crate::say!("could not remember the sum: {why}");
+            }
+        }
+
         crate::dismiss_main(&ctx.app);
         Ok(outcome)
     }
@@ -2694,6 +2791,62 @@ fn window_undo(id: isize) -> Option<Undo> {
     })
 }
 
+/// Sends a window to a layout of the person's own, by the layout's name.
+///
+/// The name comes as the argument: a key records it, the panel asks for it,
+/// and the model names it. The rectangle is worked out from the display the
+/// window is on, so a layout means the same thing on every display.
+struct PlaceInLayout;
+
+#[async_trait]
+impl Action for PlaceInLayout {
+    fn id(&self) -> &str {
+        "sill.window.layout"
+    }
+
+    fn title(&self) -> &str {
+        "Place in Layout"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Window
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::WindowControl]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let wanted = ctx
+            .argument()
+            .ok_or("a layout needs a name, which the launcher asks for")?
+            .to_string();
+
+        let layouts = {
+            let prefs = ctx.app.state::<crate::state::PrefsState>();
+            let held = prefs.inner.lock().await;
+            held.layouts.clone()
+        };
+
+        let layout = crate::layouts::find(&layouts, &wanted)
+            .ok_or_else(|| format!("there is no layout called {wanted}"))?;
+
+        let id = window_handle(object)?;
+        let monitor = crate::windowing::monitor_of(id)
+            .ok_or_else(|| format!("{} is on no display", object.title))?;
+
+        // Read before the move. Afterwards the old rectangle is gone.
+        let undo = window_undo(id);
+        crate::windowing::place(id, crate::layouts::rect_of(layout, monitor.work))?;
+
+        let message = format!("{} sent to {}", object.title, layout.name);
+        Ok(match undo {
+            Some(undo) => Outcome::undoable(message, undo),
+            None => Outcome::done(message),
+        })
+    }
+}
+
 /// Brings a window to the front.
 struct FocusWindow;
 
@@ -3414,6 +3567,285 @@ impl Action for CompressFile {
 /// something **only the page could do**: no key could be bound to it, the model
 /// could not run it, and it appeared in no activity log, because none of those
 /// go anywhere near a command the window calls.
+/// The clipboard entry an action was pointed at, and the store holding it.
+///
+/// The row carries its own row number in `id`; the target is the text, which
+/// is what every other clipboard action wants and not what these two do.
+fn clipboard_entry_of(
+    ctx: &ActionCtx,
+    object: &Object,
+) -> Result<(i64, crate::clipboard::store::Entry), String> {
+    let id: i64 = object
+        .id
+        .parse()
+        .map_err(|_| "that clipboard row cannot be looked up".to_string())?;
+
+    let clipboard = ctx
+        .app
+        .try_state::<crate::clipboard::monitor::Clipboard>()
+        .ok_or_else(|| "clipboard history is not running".to_string())?;
+
+    let entry = clipboard
+        .store()
+        .get(id)
+        .map_err(|err| format!("could not read that entry: {err}"))?
+        .ok_or_else(|| "that entry is no longer in the history".to_string())?;
+
+    Ok((id, entry))
+}
+
+/// Gives a clipboard entry a name of its own.
+///
+/// The text is untouched: a name is how a row is recognised in a list of
+/// four hundred, and what is pasted stays what was copied. An empty name
+/// takes the name away.
+struct RenameClipboardEntry;
+
+#[async_trait]
+impl Action for RenameClipboardEntry {
+    fn id(&self) -> &str {
+        "sill.clipboard.rename"
+    }
+
+    fn title(&self) -> &str {
+        "Name This Entry"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::ClipboardEntry
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardWrite]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let (id, entry) = clipboard_entry_of(ctx, object)?;
+        let name = ctx.argument().map(str::trim).unwrap_or_default();
+
+        let clipboard = ctx.app.state::<crate::clipboard::monitor::Clipboard>();
+        clipboard
+            .store()
+            .set_title(id, Some(name).filter(|name| !name.is_empty()))
+            .map_err(|err| format!("could not name that entry: {err}"))?;
+
+        let said = if name.is_empty() {
+            "Name taken away".to_string()
+        } else {
+            format!("Named it {name}")
+        };
+
+        Ok(Outcome::undoable(
+            said,
+            Undo::RestoreClipboardEntry {
+                id,
+                title: entry.title,
+                text: entry.text,
+            },
+        ))
+    }
+}
+
+/// Corrects a clipboard entry's text in place.
+///
+/// For the typo in the thing that was copied three times. Text only: a
+/// picture's text is a caption Sill wrote, and editing it would edit a
+/// description rather than the thing described. Refused when the new text is
+/// already another entry, rather than merged, because the two may sit in
+/// different collections with different names.
+struct EditClipboardEntry;
+
+#[async_trait]
+impl Action for EditClipboardEntry {
+    fn id(&self) -> &str {
+        "sill.clipboard.edit"
+    }
+
+    fn title(&self) -> &str {
+        "Edit Text"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::ClipboardEntry
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardWrite]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let (id, entry) = clipboard_entry_of(ctx, object)?;
+
+        if entry.kind == crate::clipboard::kind::Kind::Image {
+            return Err("a picture has no text to edit".to_string());
+        }
+
+        let text = ctx
+            .argument()
+            .ok_or("editing needs the new text, which the launcher asks for")?
+            .to_string();
+
+        if text.trim().is_empty() {
+            return Err("the text cannot be empty; delete the entry instead".to_string());
+        }
+
+        let clipboard = ctx.app.state::<crate::clipboard::monitor::Clipboard>();
+        clipboard
+            .store()
+            .set_text(id, &text, crate::state::now_seconds())
+            .map_err(|why| format!("could not edit that entry: {why}"))?;
+
+        Ok(Outcome::undoable(
+            "Text edited",
+            Undo::RestoreClipboardEntry {
+                id,
+                title: entry.title,
+                text: entry.text,
+            },
+        ))
+    }
+}
+
+/// Copies an installed font's family name, which is what a stylesheet or a
+/// settings page wants typed exactly.
+struct CopyFontName;
+
+#[async_trait]
+impl Action for CopyFontName {
+    fn id(&self) -> &str {
+        "sill.font.copyName"
+    }
+
+    fn title(&self) -> &str {
+        "Copy Font Name"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::Font
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardRead, Capability::ClipboardWrite]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let outcome = copy_with_undo(ctx, &object.target, &format!("Copied {}", object.target))?;
+        crate::dismiss_main(&ctx.app);
+        Ok(outcome)
+    }
+}
+
+/// Sets a display's resolution and refresh rate from its row.
+///
+/// Applied, then asked about, then put back unless kept: a mode the driver
+/// accepts and the monitor does not is a black screen, and an undo nobody
+/// can see is no undo. The question is a native dialog raced against
+/// fifteen seconds. A "Keep" that arrives after the revert applies the mode
+/// again rather than being ignored, so the button on screen never lies.
+struct SetDisplayMode;
+
+#[async_trait]
+impl Action for SetDisplayMode {
+    fn id(&self) -> &str {
+        "sill.display.setMode"
+    }
+
+    fn title(&self) -> &str {
+        "Use This Mode"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::DisplayMode
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::SystemControl]
+    }
+
+    fn is_primary(&self, kind: ObjectKind) -> bool {
+        self.accepts(kind)
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+        let wanted = crate::displays::mode_from(&object.target)?;
+        let said = crate::displays::said(&wanted);
+
+        let applying = wanted.clone();
+        let was = tokio::task::spawn_blocking(move || {
+            crate::displays::set(&applying.device, &applying)
+        })
+        .await
+        .map_err(|err| format!("could not change the display: {err}"))??;
+
+        // The launcher goes away so the question is what is on screen.
+        crate::dismiss_main(&ctx.app);
+
+        let asked = ctx.app.clone();
+        let question = said.clone();
+        let (answered, answer) = tokio::sync::oneshot::channel::<bool>();
+        tokio::task::spawn_blocking(move || {
+            let kept = asked
+                .dialog()
+                .message(format!(
+                    "{question}. It goes back in fifteen seconds unless you keep it."
+                ))
+                .title("Keep these display settings?")
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Keep".to_string(),
+                    "Revert".to_string(),
+                ))
+                .kind(MessageDialogKind::Info)
+                .blocking_show();
+            let _ = answered.send(kept);
+        });
+
+        let mut answer = answer;
+        let kept = match tokio::time::timeout(crate::displays::KEEP_WITHIN, &mut answer).await {
+            Ok(Ok(kept)) => kept,
+            Ok(Err(_)) => false,
+            Err(_) => {
+                // No answer in time. The dialog is still on screen, and a
+                // late "Keep" is honoured by applying the mode again.
+                let again = wanted.clone();
+                tokio::spawn(async move {
+                    if let Ok(true) = answer.await {
+                        let _ = tokio::task::spawn_blocking(move || {
+                            crate::displays::set(&again.device, &again)
+                        })
+                        .await;
+                    }
+                });
+                false
+            }
+        };
+
+        if !kept {
+            let back = was.clone();
+            tokio::task::spawn_blocking(move || crate::displays::set(&back.device, &back))
+                .await
+                .map_err(|err| format!("could not put the display back: {err}"))??;
+            return Ok(Outcome::done(format!("Put back {}", crate::displays::said(&was))));
+        }
+
+        Ok(Outcome::undoable(
+            format!("Set {said}"),
+            Undo::RestoreDisplayMode {
+                device: was.device,
+                display: was.display,
+                width: was.width,
+                height: was.height,
+                hz: was.hz,
+            },
+        ))
+    }
+}
+
 struct RenameFile;
 
 #[async_trait]

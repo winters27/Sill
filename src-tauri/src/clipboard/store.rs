@@ -47,6 +47,35 @@ pub struct Entry {
     /// of the text. Whoever needs the markup asks for the entry by id.
     #[serde(default)]
     pub rich: bool,
+    /// A name somebody gave it, shown in place of the text's first line.
+    ///
+    /// Only ever set by hand. The text is still what is pasted and what
+    /// search reads first; the name is how a row is recognised in a list of
+    /// four hundred.
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// Why an edit was not made.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Edit {
+    /// The new text is one the history already holds, on another row.
+    ///
+    /// Refused rather than merged, because the two rows may sit in different
+    /// collections with different names, and quietly folding one into the
+    /// other loses whichever arrangement the person made.
+    Collides,
+    /// The database said no.
+    Failed(String),
+}
+
+impl std::fmt::Display for Edit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Edit::Collides => write!(f, "the history already holds that text on another entry"),
+            Edit::Failed(why) => write!(f, "{why}"),
+        }
+    }
 }
 
 /// How much of an entry a listing carries.
@@ -281,6 +310,12 @@ impl Store {
             .connection
             .execute("ALTER TABLE entries ADD COLUMN html TEXT", []);
 
+        // A name somebody gave an entry. Beside the text rather than instead
+        // of it, so pasting is unchanged and only the row's first line is.
+        let _ = self
+            .connection
+            .execute("ALTER TABLE entries ADD COLUMN title TEXT", []);
+
         // Off by default in SQLite, and the blobs table depends on it.
         self.connection.pragma_update(None, "foreign_keys", true)?;
 
@@ -497,7 +532,7 @@ impl Store {
         let mut rows = if trimmed.is_empty() {
             let mut statement = self.connection.prepare(
                 r#"
-                SELECT id, kind, text, first_seen, last_seen, uses, pinned, app, bytes, app_path, html
+                SELECT id, kind, text, first_seen, last_seen, uses, pinned, app, bytes, app_path, html, title
                 FROM entries
                 WHERE (?1 IS NULL OR kind = ?1)
                 ORDER BY pinned DESC, last_seen DESC
@@ -511,7 +546,7 @@ impl Store {
         } else {
             let mut statement = self.connection.prepare(
                 r#"
-                SELECT e.id, e.kind, e.text, e.first_seen, e.last_seen, e.uses, e.pinned, e.app, e.bytes, e.app_path, e.html
+                SELECT e.id, e.kind, e.text, e.first_seen, e.last_seen, e.uses, e.pinned, e.app, e.bytes, e.app_path, e.html, e.title
                 FROM entries_fts f
                 JOIN entries e ON e.id = f.rowid
                 WHERE entries_fts MATCH ?1 AND (?2 IS NULL OR e.kind = ?2)
@@ -519,12 +554,22 @@ impl Store {
                 LIMIT ?3
                 "#,
             )?;
-            let mapped = statement
+            let mut mapped = statement
                 .query_map(
                     params![fts_query(trimmed), filter, limit as i64],
                     read_entry,
                 )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            // Names first, because a name was given to be found by. The
+            // text search may have found the same row; one copy is kept.
+            let named = self.named_like(trimmed, kind, limit)?;
+            if !named.is_empty() {
+                mapped.retain(|entry| !named.iter().any(|one| one.id == entry.id));
+                mapped.splice(0..0, named);
+                mapped.truncate(limit);
+            }
+
             mapped
         };
 
@@ -554,7 +599,7 @@ impl Store {
         self.connection
             .query_row(
                 r#"
-                SELECT id, kind, text, first_seen, last_seen, uses, pinned, app, bytes, app_path, html
+                SELECT id, kind, text, first_seen, last_seen, uses, pinned, app, bytes, app_path, html, title
                 FROM entries WHERE id = ?1
                 "#,
                 [id],
@@ -570,6 +615,83 @@ impl Store {
             params![id, now],
         )?;
         Ok(())
+    }
+
+    /// Names an entry, or takes the name away with `None`.
+    pub fn set_title(&self, id: i64, title: Option<&str>) -> rusqlite::Result<()> {
+        let title = title.map(str::trim).filter(|title| !title.is_empty());
+        self.connection.execute(
+            "UPDATE entries SET title = ?2 WHERE id = ?1",
+            params![id, title],
+        )?;
+        Ok(())
+    }
+
+    /// Replaces an entry's text, moving its hash with it.
+    ///
+    /// The hash is what keeps the same copy from appearing twice, so the new
+    /// text's hash is checked against every other row first. The full-text
+    /// index follows through the `entries_au` trigger, which was written for
+    /// exactly this and had never fired.
+    pub fn set_text(&self, id: i64, text: &str, now: i64) -> Result<(), Edit> {
+        let hash = crate::clipboard::monitor::hash(text.as_bytes());
+
+        let other: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT id FROM entries WHERE hash = ?1 AND id != ?2",
+                params![hash, id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|err| Edit::Failed(err.to_string()))?;
+
+        if other.is_some() {
+            return Err(Edit::Collides);
+        }
+
+        self.connection
+            .execute(
+                "UPDATE entries SET text = ?2, hash = ?3, bytes = ?4, last_seen = ?5 WHERE id = ?1",
+                params![id, text, hash, text.len() as i64, now],
+            )
+            .map_err(|err| Edit::Failed(err.to_string()))?;
+
+        Ok(())
+    }
+
+    /// The entries whose given name holds the words, for a search that the
+    /// full-text index cannot answer because names are not in it.
+    pub fn named_like(&self, query: &str, kind: Option<Kind>, limit: usize) -> rusqlite::Result<Vec<Entry>> {
+        let filter = kind.map(Kind::as_str);
+        let pattern = format!("%{}%", query.trim().replace('%', "\\%").replace('_', "\\_"));
+
+        let mut statement = self.connection.prepare(
+            r#"
+            SELECT id, kind, text, first_seen, last_seen, uses, pinned, app, bytes, app_path, html, title
+            FROM entries
+            WHERE title LIKE ?1 ESCAPE '\' AND (?2 IS NULL OR kind = ?2)
+            ORDER BY pinned DESC, last_seen DESC
+            LIMIT ?3
+            "#,
+        )?;
+
+        let named = statement
+            .query_map(params![pattern, filter, limit as i64], read_entry)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok(named)
+    }
+
+    /// A collection's id by its name, case not mattering, for a `tag:` filter.
+    pub fn collection_named(&self, name: &str) -> rusqlite::Result<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT id FROM collections WHERE name = ?1 COLLATE NOCASE",
+                [name.trim()],
+                |row| row.get(0),
+            )
+            .optional()
     }
 
     pub fn set_pinned(&self, id: i64, pinned: bool) -> rusqlite::Result<()> {
@@ -761,7 +883,7 @@ impl Store {
     pub fn collection_entries(&self, collection: i64) -> rusqlite::Result<Vec<Entry>> {
         let mut statement = self.connection.prepare(
             r#"
-            SELECT e.id, e.kind, e.text, e.first_seen, e.last_seen, e.uses, e.pinned, e.app, e.bytes, e.app_path, e.html
+            SELECT e.id, e.kind, e.text, e.first_seen, e.last_seen, e.uses, e.pinned, e.app, e.bytes, e.app_path, e.html, e.title
             FROM entries e
             JOIN collection_entries m ON m.entry_id = e.id
             WHERE m.collection_id = ?1
@@ -833,6 +955,7 @@ fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
         bytes: row.get(8)?,
         app_path: row.get(9)?,
         rich: row.get::<_, Option<String>>(10)?.is_some(),
+        title: row.get(11)?,
     })
 }
 
