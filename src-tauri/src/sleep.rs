@@ -29,6 +29,14 @@
 //! controller is already invisible, which is why the two calls belong
 //! together and in that order.
 //!
+//! # Why it no longer suspends
+//!
+//! Only the visibility half survives. `TrySuspend` was removed on 2026-09-05
+//! after it was traced to a visible flash on summon, and the note beside
+//! `suspend` carries the measurements. Everything below about suspension
+//! describes what the call did, and is kept because it is the argument for
+//! bringing it back if the memory ever matters more than the flash.
+//!
 //! # Why it waits
 //!
 //! Summoning again a second later is the ordinary way this launcher is used,
@@ -52,9 +60,7 @@ use std::time::Duration;
 use tauri::WebviewWindow;
 
 #[cfg(windows)]
-use webview2_com::{Microsoft::Web::WebView2::Win32::ICoreWebView2_3, TrySuspendCompletedHandler};
 #[cfg(windows)]
-use webview2_core::Interface;
 
 /// How long a dismissal has to stand before the renderer is put to sleep.
 ///
@@ -202,15 +208,9 @@ pub fn wake(window: &WebviewWindow) {
         let controller = webview.controller();
 
         unsafe {
-            // Resume first. Made visible while still suspended, the renderer
-            // would resume on its own, but explicitly is one less thing that
-            // depends on a documented side effect.
-            if let Ok(core) = controller.CoreWebView2() {
-                if let Ok(suspendable) = core.cast::<ICoreWebView2_3>() {
-                    let _ = suspendable.Resume();
-                }
-            }
-
+            // Nothing to resume: this module stopped suspending, so the
+            // renderer was only ever made invisible. Undoing that is the whole
+            // of waking now.
             let _ = controller.SetIsVisible(true);
         }
     });
@@ -260,33 +260,15 @@ fn suspend(label: &str, window: &WebviewWindow, armed: u64) {
                 return;
             }
 
-            let Ok(core) = controller.CoreWebView2() else {
-                return;
-            };
-            let Ok(suspendable) = core.cast::<ICoreWebView2_3>() else {
-                return;
-            };
-
-            // Best effort by design. A page still running script suspends when
-            // that script finishes, and one holding something Edge will not
-            // sleep through never suspends at all. Both report through this
-            // handler and neither is worth acting on: the window is hidden and
-            // invisible either way, which is most of the saving.
-            let handler =
-                TrySuspendCompletedHandler::create(Box::new(move |_result, suspended| {
-                    if suspended {
-                        crate::say!("{label} suspended");
-                    } else {
-                        // Not a failure. The page was busy, and it will be asked
-                        // again the next time it is put away.
-                        crate::say!("{label} would not suspend, the page is busy");
-                    }
-                    Ok(())
-                }));
-            let _ = suspendable.TrySuspend(&handler);
+            /*
+             * And that is as far as it goes. `TrySuspend` is deliberately not
+             * called; see this module's header for the whole argument.
+             */
+            crate::say!("{label} hidden, renderer left resident");
         }
     });
 }
+
 
 #[cfg(not(windows))]
 fn suspend(_label: &str, _window: &WebviewWindow, _armed: u64) {}
