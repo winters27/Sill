@@ -22,3 +22,4 @@ pub mod search;
 pub mod settings;
 pub mod store;
 pub mod system;
+pub mod update;

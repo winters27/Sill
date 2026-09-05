@@ -889,6 +889,12 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "about",
         "About",
+        "Updates",
+        "update updating upgrade newer version check for updates release",
+    ),
+    s(
+        "about",
+        "About",
         "Licence",
         "mit open source licence licensing",
     ),

@@ -28,6 +28,15 @@
     toast: { title: string; style: string; actions: ActionEntry[] } | null;
     /** What the launcher itself last had to say. */
     status: string;
+    /**
+     * A newer Sill, when there is one and there is something to press.
+     *
+     * Already reduced to words and a button label by `chinLine`, so this
+     * component holds no opinion about which states deserve a line. Most do
+     * not: being current is not news and a failed check belongs in settings,
+     * and both arrive here as `null`.
+     */
+    update: { words: string; button: string | null } | null;
     prefs: Preferences | null;
     /** The tag of a running command's view, so a form says Submit. */
     viewTag: string | undefined;
@@ -41,6 +50,8 @@
     onactions: () => void;
     /** A button on the toast was pressed. */
     ontoastaction: (action: ActionEntry) => void;
+    /** The update button was pressed. */
+    onupdate: () => void;
   }
 
   let {
@@ -54,6 +65,8 @@
     onrun,
     onactions,
     ontoastaction,
+    update,
+    onupdate,
   }: Props = $props();
 </script>
 
@@ -99,6 +112,27 @@
     {/each}
   {:else if status}
     <span class="toast">{status}</span>
+  {:else if update}
+    <!--
+      Third in line, behind the toast and the status.
+
+      Both of those are about what the person is doing this second. A newer
+      Sill is about the application and can wait for the line to be free. It
+      is held in Rust rather than here, so it returns when the line frees up
+      rather than being lost.
+    -->
+    <span class="toast" data-style="info">{update.words}</span>
+    {#if update.button}
+      <button
+        type="button"
+        class="toast-action"
+        tabindex="-1"
+        onmousedown={(e) => e.preventDefault()}
+        onclick={onupdate}
+      >
+        {update.button}
+      </button>
+    {/if}
   {/if}
   <span class="spacer"></span>
 
@@ -277,6 +311,11 @@
     color: var(--danger);
   }
   .toast[data-style="animated"] {
+    color: var(--info);
+  }
+  /* The same blue as an extension's own running message. A newer Sill is
+     information: not a success, and not a failure. */
+  .toast[data-style="info"] {
     color: var(--info);
   }
 </style>

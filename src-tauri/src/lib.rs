@@ -91,6 +91,7 @@ pub mod timers;
 pub mod timing;
 pub mod tts;
 pub mod uia;
+pub mod update;
 pub mod utilities;
 pub mod weather;
 pub mod websearch;
@@ -1699,7 +1700,14 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // Nothing happens here at startup: no socket is opened until a summon
+        // asks, and then at most once a day. The restart afterwards is
+        // `AppHandle::restart`, which is core, so there is no second plugin.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(actions::builtins())
+        // A mutex around a small enum. Nothing is checked, downloaded or timed
+        // until a summon asks, and then at most once a day.
+        .manage(update::Updates::default())
         .manage(commands::scripts::Running::new())
         .manage(timing::Timings::new())
         .manage(previews::Previews::new())
@@ -2219,6 +2227,10 @@ pub fn run() {
             commands::search::start_everything,
             commands::search::index_building,
             commands::settings::hotkey_conflicts,
+            commands::update::update_state,
+            commands::update::check_for_update,
+            commands::update::install_update,
+            commands::update::restart_for_update,
             commands::settings::status_troubles,
             commands::settings::note_unreadable,
             commands::settings::forget_unreadable,

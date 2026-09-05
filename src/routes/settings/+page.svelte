@@ -2,6 +2,16 @@
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import {
+    checkForUpdate,
+    installUpdate,
+    restartForUpdate,
+    updateState,
+    updateWords,
+    whenUpdateChanges,
+    NOTHING_KNOWN,
+    type UpdateState,
+  } from "$lib/update";
   import SettingsIcon, { type IconName } from "$lib/components/SettingsIcon.svelte";
   import LaunchIcon from "$lib/components/LaunchIcon.svelte";
   import { COLOURS as MARKUP_COLOURS } from "$lib/markup";
@@ -757,12 +767,37 @@
     }
   }
 
+  /**
+   * Whether there is a newer Sill, as Rust last said.
+   *
+   * Starts at "nothing known" rather than "up to date", so a window that
+   * cannot reach Rust says it does not know instead of claiming to be current.
+   */
+  let update = $state<UpdateState>(NOTHING_KNOWN);
+
+  /**
+   * Installs the newer Sill, or restarts into one already downloaded.
+   *
+   * Two presses behind one button, decided by the state the row just drew, so
+   * the label and the action cannot disagree. The failure is left to the
+   * update row itself, which shows it in words on the next event: this window
+   * has somewhere to say it, which is exactly why the launcher does not.
+   */
+  async function applyUpdate() {
+    if (update.progress.kind === "ready") {
+      void restartForUpdate();
+      return;
+    }
+    await installUpdate().catch(() => {});
+  }
+
   onMount(() => {
     void showOnceDrawn();
 
     let unlisten: UnlistenFn | undefined;
     let changed: UnlistenFn | undefined;
     let wrong: UnlistenFn | undefined;
+    let updating: UnlistenFn | undefined;
 
     (async () => {
       // A deep link opens straight at its panel: "About Sill" landing on
@@ -773,6 +808,20 @@
       unlisten = await listen<string>("sill://settings-section", ({ payload }) =>
         jumpTo(payload),
       );
+
+      /*
+       * Whether there is a newer Sill.
+       *
+       * Read, then watched. The launcher may have found one already, and this
+       * window opening is not a reason to ask again: `checkForUpdate` without
+       * `force` does nothing unless a day has passed, and the button below is
+       * how somebody asks on purpose.
+       */
+      update = await updateState("settings");
+      updating = await whenUpdateChanges((progress) => {
+        update = { ...update, progress };
+      });
+      void checkForUpdate();
 
       /*
        * Settings written anywhere else.
@@ -839,6 +888,7 @@
       unlisten?.();
       changed?.();
       wrong?.();
+      updating?.();
     };
   });
 </script>
@@ -2081,6 +2131,32 @@
             <Row title="Version" description="The running build.">
               {#snippet control()}
                 <span class="fact">{info?.version ?? "unknown"}</span>
+              {/snippet}
+            </Row>
+            <!--
+              The one place a failed check is said out loud.
+
+              The launcher stays quiet about it on purpose: somebody who opened
+              a launcher to run a command is not the audience for "the update
+              server did not answer". This is where they came to ask, so this
+              is where it is answered, in the words `updateWords` gives both
+              surfaces.
+            -->
+            <Row title="Updates" description={updateWords(update.progress)}>
+              {#snippet control()}
+                {#if update.progress.kind === "available" || update.progress.kind === "ready"}
+                  <Button
+                    label={update.progress.kind === "ready" ? "Restart now" : "Update and restart"}
+                    busy={false}
+                    onclick={() => void applyUpdate()}
+                  />
+                {:else}
+                  <Button
+                    label="Check now"
+                    busy={update.progress.kind === "downloading"}
+                    onclick={() => void checkForUpdate(true)}
+                  />
+                {/if}
               {/snippet}
             </Row>
             <Row title="Licence" description="Sill's own code, including the extension host.">

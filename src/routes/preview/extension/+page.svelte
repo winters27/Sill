@@ -316,6 +316,8 @@ npm run dev
       onrun={() => {}}
       onactions={() => {}}
       ontoastaction={() => {}}
+    update={null}
+    onupdate={() => {}}
     />
   </section>
   <section class="chin">
@@ -337,6 +339,8 @@ npm run dev
       onrun={() => {}}
       onactions={() => {}}
       ontoastaction={() => {}}
+    update={null}
+    onupdate={() => {}}
     />
   </section>
 

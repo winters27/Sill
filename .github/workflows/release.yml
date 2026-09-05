@@ -215,6 +215,18 @@ jobs:
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs `latest.json` and each bundle, so an installed Sill will
+          # accept them. The public half is compiled into the application from
+          # `tauri.conf.json`; this half exists only here. Whatever can answer
+          # for the update URL gets to run code on somebody's machine, and this
+          # signature is the only thing standing in the way: a checksum would
+          # not do, because it would come from the same host as the download.
+          #
+          # Missing on a fork, and a fork should not be able to sign anything
+          # an installed Sill trusts. The build still produces installers; it
+          # just produces no manifest, which is the safe half to lose.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           # Empty on a rehearsal, which is what makes it build and stop.
           tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
@@ -222,10 +234,11 @@ jobs:
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
-          # Off until P7-02. The updater needs a signed manifest and a key
-          # Sill does not have yet, and a `latest.json` pointing at artifacts
-          # nothing can verify is worse than no manifest at all.
-          uploadUpdaterJson: false
+          # On as of P7-02. `latest.json` is what an installed Sill reads to
+          # learn there is a newer one, and it is uploaded to the release the
+          # updater's endpoint points at. Signed, or the application refuses
+          # it, which is the whole design.
+          uploadUpdaterJson: true
           # So a rehearsal has something to download, and so a failed upload to
           # a release still leaves the installers somewhere.
           uploadWorkflowArtifacts: true

@@ -10,6 +10,15 @@
   import { whenHidden, whenVisible } from "$lib/visible";
   import { Latency, aroundPaint, type Painted } from "$lib/latency";
   import { forgetUnreadable } from "$lib/status";
+  import {
+    chinLine,
+    checkForUpdate,
+    installUpdate,
+    restartForUpdate,
+    updateState,
+    whenUpdateChanges,
+    type Progress,
+  } from "$lib/update";
   import ListView from "$lib/components/ListView.svelte";
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
@@ -544,6 +553,46 @@
     // emptying the row first would be a flicker on the way.
   }
   let version = $state(0);
+
+  /**
+   * Whether there is a newer Sill.
+   *
+   * Held rather than derived, because Rust owns the answer and pushes it here
+   * through `sill://update-changed`. The chin decides what, if anything, to
+   * draw from it, and for most states the answer is nothing.
+   */
+  let updateProgress = $state<Progress>({ kind: "unknown" });
+
+  /**
+   * Downloads the newer Sill and lets its installer take over.
+   *
+   * The failure is put on the status line rather than swallowed. This is a
+   * button somebody pressed on purpose, so silence would be the interface
+   * lying about having done something, which is the one case `status.ts` says
+   * must always be reported.
+   *
+   * On success this call usually never returns: the installer closes Sill.
+   */
+  async function startUpdate() {
+    /*
+     * Two different presses behind one button.
+     *
+     * Before the download the button installs; after it, if the installer
+     * handed control back rather than taking the process down, it restarts.
+     * The chin says which one it is, and this reads the same state the chin
+     * drew from, so the two cannot disagree.
+     */
+    if (updateProgress.kind === "ready") {
+      void restartForUpdate();
+      return;
+    }
+
+    try {
+      await installUpdate();
+    } catch (err) {
+      status = `the update could not be installed: ${err}`;
+    }
+  }
   /**
    * The extension's toast, and the buttons it put on it.
    *
@@ -3828,6 +3877,7 @@
 
   onMount(() => {
     let unlisten: UnlistenFn | undefined;
+    let updating: UnlistenFn | undefined;
     let shown: UnlistenFn | undefined;
     let switcher: UnlistenFn | undefined;
     let selecting: UnlistenFn | undefined;
@@ -3854,6 +3904,19 @@
     searchInput?.focus();
 
     (async () => {
+      /*
+       * A newer Sill, whenever Rust finds one or gets further along.
+       *
+       * Read once on mount as well as listened for, because the settings
+       * window may have found it while this page was closed, and a chin that
+       * only learns from events would sit empty until the next check a day
+       * later.
+       */
+      updateProgress = (await updateState("launcher")).progress;
+      updating = await whenUpdateChanges((progress) => {
+        updateProgress = progress;
+      });
+
       unlisten = await listen<UiEvent>("sill://ui", ({ payload }) => {
         // A late message from a command the user already left would otherwise
         // redraw a view that is no longer on screen.
@@ -4096,6 +4159,17 @@
          */
         void forgetUnreadable("launcher");
 
+        /*
+         * Whether there is a newer Sill.
+         *
+         * On the summon because that is a moment somebody created, which is
+         * the question the constitution asks of anything that wakes up. Rust
+         * throttles it to once a day, so calling this on every single summon
+         * opens a socket about once a day and does nothing the rest of the
+         * time. There is no timer anywhere in this feature.
+         */
+        void checkForUpdate();
+
         // Re-asked on every summon. A file indexer can be started or stopped
         // between two uses of the launcher, and the alternative to asking here
         // is asking on every keystroke.
@@ -4279,6 +4353,7 @@
       // And a measurement has nobody to show it to.
       stopTicking();
       unlisten?.();
+      updating?.();
       shown?.();
       hidden?.();
       finishedScript?.();
@@ -4588,6 +4663,8 @@
       panelSelected = 0;
     }}
     ontoastaction={(action) => void runExtensionAction(action)}
+    update={chinLine(updateProgress)}
+    onupdate={() => void startUpdate()}
   />
 </main>
 
