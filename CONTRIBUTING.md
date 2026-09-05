@@ -178,6 +178,16 @@ Tests are worth more when you have watched them fail. If you add one,
 break the thing it covers and check that it goes red. A test written
 after a fix has a habit of asserting nothing.
 
+## Planning a feature
+
+For anything substantial, `/feature` in Claude Code walks the planning
+this project expects: what the capability is independent of its UI, what
+Sill already has that should be reused, which operations belong in Rust
+rather than Svelte, what the thing costs at rest, and how it stops.
+
+Small revisions do not need it. It exists so the thinking happens before
+the code, not as paperwork afterwards.
+
 ## A note for AI agents
 
 If you are an assistant working in this repository, the same rules
