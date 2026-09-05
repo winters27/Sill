@@ -134,6 +134,7 @@ fn describe(pid: u32) -> Option<(String, Option<String>, u64)> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::ProcessStatus::{
         GetProcessMemoryInfo, K32GetModuleFileNameExW, PROCESS_MEMORY_COUNTERS,
+        PROCESS_MEMORY_COUNTERS_EX2,
     };
     use windows::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
@@ -158,18 +159,34 @@ fn describe(pid: u32) -> Option<(String, Option<String>, u64)> {
 
     let path = (written > 0).then(|| String::from_utf16_lossy(&wide[..written]));
 
-    let mut counters = PROCESS_MEMORY_COUNTERS {
-        cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+    /*
+     * The **private** working set, not the working set.
+     *
+     * `WorkingSetSize` includes pages shared with other processes, and a
+     * browser engine shares a great deal of its code. Adding it up across the
+     * seven processes one application runs counts the shared half seven times:
+     * this readout claimed 561 MB for a tree that Task Manager, which shows
+     * the private figure, put at 142.6 MB. It was reported as the widget
+     * reading the wrong amount, and it was.
+     *
+     * `PROCESS_MEMORY_COUNTERS_EX2` carries exactly the number Task Manager
+     * shows. It needs Windows 10 2004 or newer, and the call says which
+     * version it was handed through `cb`, so an older one simply fails and is
+     * fallen back on below rather than being guessed at.
+     */
+    let mut counters = PROCESS_MEMORY_COUNTERS_EX2 {
+        cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32,
         ..Default::default()
     };
 
     // SAFETY: the struct declares its own size, which is what the call reads
-    // to know which version it was handed.
+    // to know which version it was handed. The pointer cast is what the API
+    // asks for: every version of these counters begins with the same header.
     let measured = unsafe {
         GetProcessMemoryInfo(
             handle,
-            &mut counters,
-            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+            &mut counters as *mut PROCESS_MEMORY_COUNTERS_EX2 as *mut PROCESS_MEMORY_COUNTERS,
+            std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32,
         )
     };
 
@@ -187,7 +204,20 @@ fn describe(pid: u32) -> Option<(String, Option<String>, u64)> {
         .and_then(file_name_of)
         .unwrap_or_else(|| format!("pid {pid}"));
 
-    Some((name, path, counters.WorkingSetSize as u64))
+    /*
+     * The working set is the fallback, not the answer.
+     *
+     * `PrivateWorkingSetSize` is zero on a Windows older than 2004, where the
+     * call filled in only the part it understood. Over-reporting is better
+     * than reporting nothing, and the header is always there.
+     */
+    let bytes = if counters.PrivateWorkingSetSize > 0 {
+        counters.PrivateWorkingSetSize as u64
+    } else {
+        counters.WorkingSetSize as u64
+    };
+
+    Some((name, path, bytes))
 }
 
 /// Who started whom, for every process on the machine.
