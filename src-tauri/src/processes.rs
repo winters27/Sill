@@ -238,6 +238,77 @@ fn parents() -> std::collections::HashMap<u32, u32> {
 /// convenient lie: the renderers, the GPU process and the crash handler are
 /// all there because Sill is running, and they go when it does.
 #[cfg(windows)]
+/// Names that are an engine rather than a program.
+///
+/// A row saying `msedgewebview2.exe` tells a reader nothing. The same name
+/// covers this launcher, every other application on the machine built the same
+/// way, and parts of Windows, so several of them at once read as one enormous
+/// anonymous consumer. That is how it was reported: 1,367 MB of "WebView2" on
+/// one machine, most of it somebody else's application.
+const ENGINES: &[&str] = &["msedgewebview2.exe", "chrome_crashpad_handler.exe"];
+
+fn is_engine(name: &str) -> bool {
+    ENGINES.iter().any(|one| name.eq_ignore_ascii_case(one))
+}
+
+/// Which program each process belongs to, as a map from one to the other.
+///
+/// A process that is a program in its own right owns itself. One that is an
+/// engine is walked up its parent chain until something that is not an engine
+/// is found, so a renderer is counted under the application that started it.
+///
+/// Built once for a whole reading rather than asked per process, because the
+/// parent map costs a pass over every process on the machine and asking five
+/// hundred times would be five hundred of those.
+///
+/// Bounded like `tree_of` is: a reused process id can point a chain at itself,
+/// and a walk with no bound would not come back.
+#[cfg(windows)]
+pub fn owners(of: &[Process]) -> std::collections::HashMap<u32, u32> {
+    use std::collections::HashMap;
+
+    let parents = parents();
+    let named: HashMap<u32, &str> = of.iter().map(|p| (p.pid, p.name.as_str())).collect();
+    let mut out = HashMap::with_capacity(of.len());
+
+    for process in of {
+        let mut at = process.pid;
+
+        if !is_engine(&process.name) {
+            out.insert(process.pid, at);
+            continue;
+        }
+
+        for _ in 0..64 {
+            let Some(&parent) = parents.get(&at) else {
+                break;
+            };
+
+            match named.get(&parent) {
+                // The program. This is the name somebody recognises.
+                Some(name) if !is_engine(name) => {
+                    at = parent;
+                    break;
+                }
+                // Another engine process: keep going up.
+                Some(_) => at = parent,
+                // The parent would not open, which is most of the system's
+                // own. Nothing better is available than where we started.
+                None => break,
+            }
+        }
+
+        out.insert(process.pid, at);
+    }
+
+    out
+}
+
+#[cfg(not(windows))]
+pub fn owners(of: &[Process]) -> std::collections::HashMap<u32, u32> {
+    of.iter().map(|p| (p.pid, p.pid)).collect()
+}
+
 pub fn tree_of(root: u32) -> std::collections::HashSet<u32> {
     use std::collections::HashSet;
 

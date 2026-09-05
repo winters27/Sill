@@ -53,6 +53,83 @@ pub struct Consumer {
     pub path: Option<String>,
 }
 
+/// The heaviest programs, with every process counted against its own.
+///
+/// Grouped rather than listed. A launcher built on a webview is not one
+/// process, so a list of processes shows several rows called
+/// `msedgewebview2.exe` with nothing saying which application each belongs to,
+/// and the reader has no way to tell one application's renderers from
+/// another's. Reported from a machine where that added up to 1,367 MB of
+/// apparent "WebView2", most of it a different program entirely.
+///
+/// Naming each row after its owner without also summing them would be worse:
+/// seven rows that all say the same application, none of them its real cost.
+///
+/// The name and the icon come from the owning process when it is in the list.
+/// It usually is, being the largest thing in its own tree, but a program whose
+/// main process would not open still gets a row under whatever its heaviest
+/// part is called, which is the honest fallback rather than dropping it.
+fn consumers(
+    running: &[crate::processes::Process],
+    // Passed in rather than looked up here, so the grouping can be tested
+    // against a machine that does not exist. Working out who owns what needs
+    // Windows; deciding what to do about it does not.
+    owners: &std::collections::HashMap<u32, u32>,
+    share: impl Fn(u32) -> f32,
+) -> Vec<Consumer> {
+    use std::collections::HashMap;
+
+    let by_pid: HashMap<u32, &crate::processes::Process> =
+        running.iter().map(|p| (p.pid, p)).collect();
+
+    // The heaviest member is carried alongside the totals, because the owning
+    // process is not always in the list: anything running as another user or
+    // as the system refuses to open, and its renderers are then a group whose
+    // owner cannot be named. Naming that group after its largest part is the
+    // honest answer. The first version printed the raw process id, which would
+    // have put a row called `4060` in the readout.
+    let mut totals: HashMap<u32, (u64, f32, u32)> = HashMap::new();
+    for process in running {
+        let owner = owners.get(&process.pid).copied().unwrap_or(process.pid);
+        let entry = totals.entry(owner).or_insert((0, 0.0, process.pid));
+        entry.0 += process.bytes;
+        entry.1 += share(process.pid);
+
+        if by_pid
+            .get(&entry.2)
+            .is_none_or(|heaviest| process.bytes > heaviest.bytes)
+        {
+            entry.2 = process.pid;
+        }
+    }
+
+    let mut out: Vec<Consumer> = totals
+        .into_iter()
+        .map(|(owner, (bytes, cpu, heaviest))| {
+            // The owner when it is there, its largest part when it is not.
+            let named = by_pid
+                .get(&owner)
+                .or_else(|| by_pid.get(&heaviest))
+                .copied();
+
+            Consumer {
+                name: named.map_or_else(|| String::from("something that would not open"), |p| {
+                    p.name.clone()
+                }),
+                bytes,
+                cpu,
+                path: named.and_then(|p| p.path.clone()),
+            }
+        })
+        .collect();
+
+    // Heaviest first, and the name breaks a tie so the order does not shuffle
+    // between two readings that happen to match.
+    out.sort_by(|a, b| b.bytes.cmp(&a.bytes).then(a.name.cmp(&b.name)));
+    out.truncate(NAMED);
+    out
+}
+
 /// How many programs the readout names.
 ///
 /// A widget, not an audit. Five is enough to see what is unusual and few
@@ -170,16 +247,7 @@ impl Meter {
             memory_used: used,
             memory_total: total,
             count: running.len(),
-            top: running
-                .iter()
-                .take(NAMED)
-                .map(|process| Consumer {
-                    name: process.name.clone(),
-                    bytes: process.bytes,
-                    cpu: share(process.pid),
-                    path: process.path.clone(),
-                })
-                .collect(),
+            top: consumers(&running, &crate::processes::owners(&running), &share),
             sill: running
                 .iter()
                 .filter(|p| mine.contains(&p.pid))
@@ -270,6 +338,119 @@ fn memory() -> (u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A machine with two applications, each behind several engine processes.
+    ///
+    /// Deliberately shaped like the report that caused this: the engine
+    /// processes are the heaviest things running, so a list of processes would
+    /// be nothing but rows called `msedgewebview2.exe`, and the two
+    /// applications would be indistinguishable.
+    fn two_applications() -> (Vec<crate::processes::Process>, std::collections::HashMap<u32, u32>) {
+        let at = |pid: u32, name: &str, bytes: u64| crate::processes::Process {
+            pid,
+            name: name.to_string(),
+            path: Some(format!("C:/{name}")),
+            bytes,
+            visible: false,
+        };
+
+        let running = vec![
+            at(1, "sill.exe", 30),
+            at(2, "msedgewebview2.exe", 100),
+            at(3, "msedgewebview2.exe", 40),
+            at(10, "Other.exe", 20),
+            at(11, "msedgewebview2.exe", 300),
+            at(20, "notepad.exe", 5),
+        ];
+
+        // What `processes::owners` works out on a real machine.
+        let owners = std::collections::HashMap::from([
+            (1, 1),
+            (2, 1),
+            (3, 1),
+            (10, 10),
+            (11, 10),
+            (20, 20),
+        ]);
+
+        (running, owners)
+    }
+
+    #[test]
+    fn every_process_is_counted_against_the_program_that_owns_it() {
+        let (running, owners) = two_applications();
+        let top = consumers(&running, &owners, |_| 0.0);
+
+        // Heaviest first: Other.exe with 320 over sill.exe with 170, even
+        // though sill.exe owns more processes and the single largest process
+        // on the machine belongs to Other.
+        let named: Vec<(&str, u64)> = top.iter().map(|c| (c.name.as_str(), c.bytes)).collect();
+        assert_eq!(
+            named,
+            vec![("Other.exe", 320), ("sill.exe", 170), ("notepad.exe", 5)],
+        );
+    }
+
+    #[test]
+    fn no_row_is_named_after_an_engine() {
+        // The whole complaint. A reader must never be shown a row whose name
+        // is the engine rather than the application.
+        let (running, owners) = two_applications();
+
+        for one in consumers(&running, &owners, |_| 0.0) {
+            assert!(
+                !one.name.contains("msedgewebview2"),
+                "a row was named after the engine: {}",
+                one.name,
+            );
+        }
+    }
+
+    #[test]
+    fn the_cost_of_every_process_reaches_its_program() {
+        // Summed, not sampled. Naming each row after its owner but showing one
+        // process's figure would be a quieter version of the same bug.
+        let (running, owners) = two_applications();
+        let top = consumers(&running, &owners, |pid| if pid == 11 { 40.0 } else { 1.0 });
+
+        let other = top.iter().find(|c| c.name == "Other.exe").expect("Other.exe");
+        // 40 for the engine plus 1 for the application itself.
+        assert_eq!(other.cpu, 41.0);
+        assert_eq!(other.bytes, 320);
+
+        let sill = top.iter().find(|c| c.name == "sill.exe").expect("sill.exe");
+        assert_eq!(sill.cpu, 3.0);
+    }
+
+    #[test]
+    fn a_program_that_would_not_open_still_gets_a_row() {
+        // Its main process is missing from the list, which is ordinary for
+        // anything running as another user. Dropping the row would hide real
+        // memory; naming it after its heaviest part is the honest fallback.
+        let running = vec![crate::processes::Process {
+            pid: 2,
+            name: "msedgewebview2.exe".to_string(),
+            path: None,
+            bytes: 100,
+            visible: false,
+        }];
+        let owners = std::collections::HashMap::from([(2, 999)]);
+
+        let top = consumers(&running, &owners, |_| 0.0);
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].bytes, 100);
+
+        // Named after its largest part. The first version printed the owner's
+        // process id here, which would have put a row called `999` on screen,
+        // and the original version of this test could not tell the difference
+        // because it only counted rows.
+        assert_eq!(top[0].name, "msedgewebview2.exe");
+        assert!(
+            top[0].name.parse::<u32>().is_err(),
+            "a row was named after a process id: {}",
+            top[0].name,
+        );
+    }
 
     #[test]
     fn a_half_busy_interval_reads_as_half() {
