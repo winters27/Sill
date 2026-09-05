@@ -72,3 +72,25 @@ requested from a font host at runtime, but they arrive by different routes, one
 named in `package.json` and one fetched by a script. Arriving through
 node_modules rather than through this repository does not shorten the licence,
 so the notice lives here with the others.
+
+--------------------------------------------------------------------------
+
+rqrr, an ordinary dependency
+
+rqrr, by Wolfgang Ziegler (https://github.com/WanzenBug/rqrr), which reads
+QR codes and is what `src-tauri/src/qr.rs` is written around.
+
+Licensed "(MIT OR Apache-2.0) AND ISC". The ISC half covers the detection and
+decoding routines it carries from quirc, by Daniel Beer, so the choice the
+first half offers does not extend to the whole crate and the ISC terms apply
+alongside whichever of MIT or Apache-2.0 is taken.
+
+Named here for that reason rather than because it is unusual: every other
+Rust dependency is plain MIT or Apache-2.0 and needs no notice, and this one
+would look like them in a licence scan that read only the first clause.
+
+Taken with `default-features = false`, which drops its `img` feature. That
+feature exists to read a picture out of a file, and Sill already has the
+pixels in hand from a screen capture or from the clipboard, so the default
+would have pulled in a whole image-decoding crate to do work that is already
+done.

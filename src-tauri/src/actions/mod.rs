@@ -38,6 +38,13 @@ pub fn builtins() -> ActionRegistry {
         Box::new(OpenQuicklink),
         Box::new(RunScript),
         Box::new(ExtractText),
+        Box::new(ReadQr),
+        Box::new(ConvertImage {
+            to: crate::images::Format::Png,
+        }),
+        Box::new(ConvertImage {
+            to: crate::images::Format::Jpeg,
+        }),
         Box::new(MarkUp),
         Box::new(SearchWeb),
         Box::new(OpenUrl),
@@ -538,6 +545,29 @@ impl Action for RunBuiltin {
                 let hex = colour.hex();
 
                 return copy_with_undo(ctx, &hex, &format!("Copied {hex}"));
+            }
+            // A box dragged over whatever is on screen, read once the overlay
+            // is gone. The privacy check is the picture's own, taken here,
+            // because the overlay only chose where to look.
+            "read-qr" => {
+                use crate::commands::system::{choose_region, Purpose};
+
+                let region = choose_region(app, Purpose::Qr).await?;
+                let allowed = crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
+                let found = tokio::task::spawn_blocking(move || {
+                    let shot = crate::capture::region(
+                        &allowed,
+                        region.left,
+                        region.top,
+                        region.width,
+                        region.height,
+                    )?;
+                    crate::qr::decode_bgra(&shot.pixels, shot.width, shot.height)
+                })
+                .await
+                .map_err(|err| format!("reading that part of the screen failed: {err}"))??;
+
+                return copy_codes(ctx, found);
             }
             // Asks first, because there is no undo. Every program with a
             // window gets the close its own button sends, and any with
@@ -3335,6 +3365,93 @@ impl Action for ExtractText {
     }
 }
 
+/// Reads the QR codes in a picture already in the history.
+///
+/// The same shape as reading its words, and for the same reason: a picture
+/// that has been copied is a picture, whether it arrived from a screenshot
+/// or from somewhere else.
+///
+/// **What it finds is copied, never opened.** A code is put there by whoever
+/// made the page it is on, so the payload is text until somebody decides
+/// otherwise, and deciding otherwise goes through the ordinary rules for an
+/// address a stranger wrote.
+struct ReadQr;
+
+#[async_trait]
+impl Action for ReadQr {
+    fn id(&self) -> &str {
+        "sill.clipboard.readQr"
+    }
+
+    fn title(&self) -> &str {
+        "Read QR Code"
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        kind == ObjectKind::ClipboardEntry
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::ClipboardRead, Capability::ClipboardWrite]
+    }
+
+    async fn run(&self, ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let entry: i64 = object
+            .id
+            .parse()
+            .map_err(|_| "that clipboard row cannot be looked up".to_string())?;
+
+        let clipboard = ctx
+            .app
+            .try_state::<crate::clipboard::monitor::Clipboard>()
+            .ok_or_else(|| "clipboard history is not running".to_string())?;
+
+        let png = clipboard
+            .store()
+            .blob(entry)
+            .map_err(|err| format!("could not read that entry: {err}"))?
+            .ok_or_else(|| "there is no picture on that row to read".to_string())?;
+
+        // Off the async worker: decoding a picture is a solid chunk of
+        // blocking work, as reading its words is.
+        let found = tokio::task::spawn_blocking(move || {
+            let (pixels, width, height) = crate::ocr::bgra_from_png(&png)?;
+            crate::qr::decode_bgra(&pixels, width, height)
+        })
+        .await
+        .map_err(|err| format!("reading that picture failed: {err}"))??;
+
+        copy_codes(ctx, found)
+    }
+}
+
+/// What a decoded picture amounts to, said and copied the same way wherever
+/// the picture came from.
+fn copy_codes(ctx: &ActionCtx, found: Vec<String>) -> Result<Outcome, String> {
+    match found.len() {
+        // Not an error. Most pictures have no code in them.
+        0 => Ok(Outcome::done("No QR code in that picture")),
+        1 => {
+            let one = &found[0];
+            // Named rather than pasted into the message: a payload is often a
+            // long address, and a status line is one line.
+            let said = if one.chars().count() > 60 {
+                "Copied the code's address".to_string()
+            } else {
+                format!("Copied {one}")
+            };
+            copy_with_undo(ctx, one, &said)
+        }
+        many => {
+            // One per line, in the order they were found, because a picture
+            // with several codes in it is a page of them and the order is the
+            // only thing that distinguishes one row from the next.
+            let all = found.join("\n");
+            copy_with_undo(ctx, &all, &format!("Copied {many} codes"))
+        }
+    }
+}
+
 /// Looks words up on the web.
 ///
 /// The address is built here rather than by whatever offered the row, because
@@ -3548,6 +3665,72 @@ impl Action for CompressFile {
         // nothing else was touched. Deleting it puts things back exactly.
         Ok(Outcome::undoable(
             format!("Compressed {name} into {into}"),
+            Undo::DeleteFile {
+                path: made.to_string_lossy().into_owned(),
+                name: into,
+            },
+        ))
+    }
+}
+
+/// Writes a picture out again in another format.
+///
+/// One struct, one instance per format, the way the fifteen window slots are
+/// one struct: the difference between PNG and JPEG is a name and an encoder
+/// id, and two near-identical impls would be two places to fix anything
+/// learned about either.
+///
+/// **The original is never touched.** The new file goes beside it under a
+/// free name, which is what makes deleting that file an honest undo.
+struct ConvertImage {
+    to: crate::images::Format,
+}
+
+#[async_trait]
+impl Action for ConvertImage {
+    fn id(&self) -> &str {
+        match self.to {
+            crate::images::Format::Png => "sill.image.toPng",
+            crate::images::Format::Jpeg => "sill.image.toJpeg",
+        }
+    }
+
+    fn title(&self) -> &str {
+        self.to.title()
+    }
+
+    fn accepts(&self, kind: ObjectKind) -> bool {
+        // A folder holds pictures rather than being one, and the kind is all
+        // this can see. Whether the file really is a picture, and whether
+        // converting it would only rename it, are decided in `run`.
+        kind == ObjectKind::File
+    }
+
+    fn capabilities(&self) -> &'static [Capability] {
+        &[Capability::FileRead, Capability::FileWrite]
+    }
+
+    async fn run(&self, _ctx: &ActionCtx, object: &Object) -> Result<Outcome, String> {
+        let path = std::path::PathBuf::from(&object.target);
+        let name = crate::files_ops::name_of(&path);
+
+        if !crate::images::is_image(&path) {
+            return Err(format!("{name} is not a picture"));
+        }
+
+        if crate::images::already(&path, self.to) {
+            return Err(format!("{name} is already {}", self.to.extension()));
+        }
+
+        let to = self.to;
+        let made = tokio::task::spawn_blocking(move || crate::images::convert(&path, to))
+            .await
+            .map_err(|err| format!("could not convert that picture: {err}"))??;
+
+        let into = crate::files_ops::name_of(&made);
+
+        Ok(Outcome::undoable(
+            format!("Wrote {into}"),
             Undo::DeleteFile {
                 path: made.to_string_lossy().into_owned(),
                 name: into,

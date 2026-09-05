@@ -71,6 +71,7 @@ mod real_dialog;
 mod real_displays;
 mod real_explorer;
 mod real_fonts;
+mod real_images;
 mod real_games;
 mod real_hello;
 mod real_jumplists;

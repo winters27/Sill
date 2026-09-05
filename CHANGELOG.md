@@ -84,6 +84,16 @@ window, and a key sends the window in front to it.
 row, and `tag:work` keeps only those rows. On the clipboard `tag:work` is the
 collection of that name.
 
+**QR codes are read off the screen.** `Read a QR Code` drags a box over one
+and copies what it says, and any picture in the clipboard history offers the
+same from its action panel. What a code holds is copied and named, never
+opened: a code on somebody else's page is an address nobody chose to follow.
+
+**Convert a picture from its row.** Convert to PNG and Convert to JPEG write
+a new file beside the original, so nothing is replaced and Undo simply
+removes what was made. Sill reads whatever Windows reads, WebP included, and
+HEIC once its two free Store extensions are installed.
+
 **Search knows what changed instead of looking again.** A file created,
 renamed or deleted patches the index in place, so a folder somebody is working
 in stays current without the walk that used to follow every change. The index

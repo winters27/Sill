@@ -611,6 +611,15 @@ pub fn builtins() -> Vec<CommandRecord> {
             &["confetti", "celebrate", "party", "hooray", "yay"],
         ),
         builtin(
+            "read-qr",
+            "screenshot",
+            "Read a QR Code",
+            "Drag a box over a code on screen and copy what it says",
+            &[
+                "qr", "code", "barcode", "scan", "decode", "read", "square",
+            ],
+        ),
+        builtin(
             "pick-colour",
             "screenshot",
             "Pick a Colour",

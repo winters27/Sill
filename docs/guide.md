@@ -63,6 +63,12 @@ shows the rest of them along with the key each one answers to. It also
 appears in the pill at the bottom right of the window, which always names the
 key that opens it.
 
+A picture also offers to become another kind of picture: Convert to PNG or to
+JPEG, written beside the original under a free name so nothing is replaced.
+Sill reads whatever Windows reads, which includes WebP, and HEIC once the
+free HEIF and HEVC extensions are installed. It writes PNG and JPEG only,
+because Windows ships no WebP encoder.
+
 Actions that can be taken back offer to be. After one that can, Ctrl+Z undoes
 it. Most cannot, and the key does nothing rather than claiming to have undone
 something.
@@ -209,6 +215,12 @@ however much you have drawn.
 
 It also reads text off the screen using the one Windows already has, so
 nothing is downloaded and nothing is sent anywhere.
+
+`Read a QR Code` drags a box over a code on screen and copies what it says.
+Any picture in your clipboard history offers the same thing from its action
+panel. What a code holds is copied and named, never opened: a code on a page
+was put there by whoever made the page, so following it stays a separate,
+deliberate keystroke.
 
 ## Speaking, and being read to
 
