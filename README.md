@@ -227,6 +227,14 @@ third secret and nothing about a certificate is committed.
 or an inline accent colour in a component fails `npm run verify:source`. The
 accent is for selection, matches, focus and affirmative state, and nothing else.
 
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is how Sill is built rather than how
+to build it: where a piece of work belongs, why the launcher stays quiet
+when nobody is using it, and what to run before opening a pull request.
+Assistants working in the repository should read
+[CLAUDE.md](CLAUDE.md) as well.
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
