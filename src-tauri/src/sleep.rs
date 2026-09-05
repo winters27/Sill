@@ -298,11 +298,17 @@ mod tests {
     /// window somebody is looking at.
     #[test]
     fn waking_disarms_a_pending_sleep() {
-        let armed = generation("main");
-        bump("main");
+        // Its own label. `GENERATIONS` is one map for the whole process, so
+        // two tests using "main" are two threads writing the same counter, and
+        // the suite fails intermittently in whichever one reads it twice. That
+        // happened: this test bumping "main" cancelled the read below.
+        let window = "test:waking-disarms";
+
+        let armed = generation(window);
+        bump(window);
 
         assert_ne!(
-            generation("main"),
+            generation(window),
             armed,
             "a timer armed earlier would still fire"
         );
@@ -313,11 +319,16 @@ mod tests {
     /// which holds the larger renderer, never suspended at all.
     #[test]
     fn one_window_waking_leaves_another_windows_sleep_armed() {
-        let armed = generation("main");
-        bump("traymenu");
+        // Two labels of this test's own, for the reason above. What matters
+        // here is that they are different windows, not what they are called.
+        let launcher = "test:independent-launcher";
+        let other = "test:independent-other";
+
+        let armed = generation(launcher);
+        bump(other);
 
         assert_eq!(
-            generation("main"),
+            generation(launcher),
             armed,
             "the launcher's pending sleep was cancelled"
         );
