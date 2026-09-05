@@ -602,7 +602,7 @@ async function untilDrawn({
   // the renderer, which is where I looked first and it was not there.
   waits.push(
     arrived
-      ? `never reached ${called} in ${patience}ms`
+      ? `never reached ${called} in ${patience}ms (${renders - before} render(s) meanwhile)`
       : renders > before
         ? `${renders - before} render(s), still drawing after ${patience}ms`
         : `nothing drew in ${patience}ms`,

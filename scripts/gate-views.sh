@@ -145,6 +145,15 @@ drew search-npm
 echo
 echo "--- Toast actions of a real extension: visual-studio-code-recent-projects ---"
 node scripts/build-extension.mjs extensions/raycast-src/extensions/visual-studio-code-recent-projects index > /dev/null
+# Reading a state database this script wrote, not whatever VS Code left on
+# this machine. Without it the extension finds no `state.vscdb`, throws
+# before rendering, and the gate reports `root view is <undefined>` with zero
+# of everything: identical to the timing bug next door and not the same thing
+# at all. It passed here and failed on every build agent, which is what an
+# assertion that depends on installed software looks like.
+VSCODE_APPDATA="$(mktemp -d)/appdata"
+node scripts/seed-vscode.mjs "$VSCODE_APPDATA" > /dev/null
+APPDATA="$VSCODE_APPDATA" \
 node scripts/run-extension.mjs extensions/build/visual-studio-code/index.js visual-studio-code \
   --grant fileRead,fileWrite,network,processLaunch \
   --expect-root List --expect-dropdown 5 --expect-toast-actions 1
