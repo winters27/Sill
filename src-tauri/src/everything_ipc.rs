@@ -436,6 +436,7 @@ fn parse_list(bytes: &[u8]) -> Vec<FileHit> {
             name,
             path,
             is_dir: flags & ITEM_FOLDER != 0,
+            snippet: None,
         });
     }
 

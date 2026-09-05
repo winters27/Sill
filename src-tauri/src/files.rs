@@ -26,6 +26,13 @@ pub struct FileHit {
     pub path: String,
     /// Directories are worth showing differently from documents.
     pub is_dir: bool,
+    /// The line inside the file that answered a `content:` search.
+    ///
+    /// Absent for every other search, which is nearly all of them, and left
+    /// out of the payload entirely when it is: this row goes to the window
+    /// once per keystroke and a field of nulls is bytes for nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
 }
 
 /// Where `es.exe` lives.
@@ -311,6 +318,7 @@ fn parse_line(line: &str) -> Option<FileHit> {
         path: path.to_string(),
         // "D" is the directory attribute in Everything's output.
         is_dir: attributes.contains('D'),
+        snippet: None,
     })
 }
 
@@ -484,6 +492,7 @@ pub fn from_recent(
             name: crate::files_ops::name_of(path),
             path: target,
             is_dir,
+            snippet: None,
         });
     }
 

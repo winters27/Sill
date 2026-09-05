@@ -12,6 +12,7 @@ fn hit(path: &str) -> FileHit {
         name: path.rsplit('\\').next().unwrap_or(path).to_string(),
         path: path.to_string(),
         is_dir: false,
+        snippet: None,
     }
 }
 

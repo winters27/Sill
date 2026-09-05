@@ -1051,6 +1051,13 @@ export function listDrives(): Promise<Drive[]> {
     orElse("settings", "which drives are on this machine", [], "files"),
   );
 }
+  /**
+   * The line inside the file that answered a `content:` search.
+   *
+   * Absent for every other search. Rust leaves the field out rather than
+   * sending a null, because this row crosses the boundary once per keystroke.
+   */
+  snippet?: string;
 
 /**
  * Starts or stops indexing one folder.
@@ -1153,7 +1160,10 @@ export function fileAsCommand(hit: FileHit): RankedCommand {
     extension: "file",
     extensionTitle: hit.isDir ? "Folder" : "File",
     title: hit.name,
-    subtitle: hit.path,
+    // The line it was found on, when it was found by looking inside: that is
+    // what says whether this is the right file, and the path is what every
+    // other file row already shows.
+    subtitle: hit.snippet ?? hit.path,
     mode: "file",
     entrypoint: hit.path,
     icon: hit.path,

@@ -89,6 +89,11 @@ and copies what it says, and any picture in the clipboard history offers the
 same from its action panel. What a code holds is copied and named, never
 opened: a code on somebody else's page is an address nobody chose to follow.
 
+**`content:` looks inside files.** `notes content:invoice` keeps the notes
+that mention it, and each row shows the line rather than the path. Bounded on
+purpose at two hundred files, half a megabyte of each and a third of a
+second, and it stops the moment you type another letter.
+
 **Convert a picture from its row.** Convert to PNG and Convert to JPEG write
 a new file beside the original, so nothing is replaced and Undo simply
 removes what was made. Sill reads whatever Windows reads, WebP included, and

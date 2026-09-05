@@ -63,6 +63,16 @@ agent as well as they hold here.
 | Reading last run's file index | 24 to 77 ms | under 500 ms | `scripts/device-tests.ps1` |
 | What a summon leaves behind, over 500 of them | nothing; the ring and the two headings stay their own size | no growth | `timing.rs`, `five_hundred_summons_leave_nothing_behind` |
 | A repeating timer in the window that calls into Rust | 2, both accounted for | 0 unaccounted | `scripts/verify-source.mjs` |
+| Looking inside files for `content:` | stops at whichever bound runs out first | 200 files, 512 KiB of each, 300 ms | `content.rs`, `grep_stops_at_its_file_bound` and `grep_stops_at_its_deadline` |
+
+`content:` is the one search that reads files rather than an index, so its
+bounds are the budget: there is no honest millisecond figure for it, because
+what it costs depends entirely on the disk it is asked about. Each of the
+three has a bad case the other two do not cover. A deadline alone opens
+unbounded files on a fast disk; a file count alone waits out a slow network
+drive; a byte cap alone does neither. It also stops between files the moment
+another letter is typed, which is the fourth bound and the one that matters
+while somebody is still typing.
 
 The ranking budgets are measured against a corpus deliberately worse than a
 real index: every title is built from the same sixteen words, so a query

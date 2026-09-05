@@ -19,6 +19,7 @@ pub mod clipboard;
 pub mod colour;
 pub mod commands;
 pub mod complete;
+pub mod content;
 pub mod controls;
 pub mod dates;
 pub mod desktops;

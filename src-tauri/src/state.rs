@@ -731,7 +731,7 @@ keystroke: when a newer one starts, everything the older one was going to do is
 equally stale.
 */
 #[derive(Default)]
-pub(crate) struct Searching(std::sync::atomic::AtomicU64);
+pub(crate) struct Searching(Arc<std::sync::atomic::AtomicU64>);
 
 impl Searching {
     /// Claims the newest search, and hands back the token to check against.
@@ -744,6 +744,35 @@ impl Searching {
     /// Whether this is still the search anybody is waiting for.
     pub(crate) fn is_current(&self, token: u64) -> bool {
         self.0.load(std::sync::atomic::Ordering::Relaxed) == token
+    }
+
+    /// The same question, in a form a blocking task can keep asking.
+    ///
+    /// The state itself is borrowed from the application for the length of a
+    /// command, so it cannot go to a worker thread. Work that runs long
+    /// enough to be worth abandoning half way is exactly the work that has to
+    /// happen off the async runtime, so it carries one of these instead.
+    pub(crate) fn claim(&self, token: u64) -> Claim {
+        Claim {
+            at: Arc::clone(&self.0),
+            token,
+        }
+    }
+}
+
+/// A search's own claim to still being the one anybody wants.
+///
+/// Named apart from `Watching`, which watches the filesystem: this watches
+/// nothing and only answers one question about a search already under way.
+#[derive(Clone)]
+pub(crate) struct Claim {
+    at: Arc<std::sync::atomic::AtomicU64>,
+    token: u64,
+}
+
+impl Claim {
+    pub(crate) fn still_wanted(&self) -> bool {
+        self.at.load(std::sync::atomic::Ordering::Relaxed) == self.token
     }
 }
 

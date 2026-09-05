@@ -41,6 +41,13 @@ picked recently, climbs; something you never pick sinks. You can also give
 anything a name of your own, and an exact match on a name you chose beats
 every kind of guess.
 
+`content:` looks inside files rather than at their names, so
+`notes content:invoice` narrows the notes to the ones that mention it and
+each row shows the line it was found on. It is deliberately bounded: two
+hundred files, half a megabyte of each, and a third of a second, whichever
+runs out first. Sill indexes names, not contents, and this is the question
+people actually ask rather than a second index of everything on the disk.
+
 A few words open lists of their own. `font mono` lists the installed fonts
 whose names hold those words, each drawn in itself, and Enter copies the
 name. `resolution` lists the modes your display can be in. `tag:work` keeps

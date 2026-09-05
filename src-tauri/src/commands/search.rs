@@ -1455,6 +1455,22 @@ async fn matching_files(
 
     let wanted = settings.max_results as usize;
 
+    /*
+     * What the query asked to look for inside the files themselves.
+     *
+     * Taken out here rather than inside the index, because it is the one
+     * operator the index cannot answer: it holds names. What it does instead
+     * is narrow the field to something worth opening, so the candidate list
+     * is asked to be as wide as the content search is allowed to read rather
+     * than as wide as the window will draw.
+     */
+    let bounds = crate::content::Bounds::default();
+    let content = catalog::operators(&query).1.content().map(str::to_string);
+    let looking_at = match content {
+        Some(_) => wanted.max(bounds.files),
+        None => wanted,
+    };
+
     // Sill's own index first. It knows the folders somebody actually works in
     // and it answers in a few milliseconds without a second program being
     // installed, so it is the answer rather than the fallback.
@@ -1463,7 +1479,7 @@ async fn matching_files(
     // "only show results in", and a filter that only applied to one of two
     // sources would be a setting that half worked, which is worse than one
     // that does not exist.
-    let ours = catalog.search(query.trim(), wanted, &settings.only_in);
+    let ours = catalog.search(query.trim(), looking_at, &settings.only_in);
 
     /*
      * Then what was open lately, which is a different question.
@@ -1487,6 +1503,52 @@ async fn matching_files(
         blend(ours, lately, query.trim(), wanted)
     } else {
         ours
+    };
+
+    /*
+     * Then, only when asked, what is inside them.
+     *
+     * On a worker thread because it reads files, and carrying its own claim
+     * to still being wanted so a query overtaken while it reads stops within
+     * one file rather than finishing its two hundred. The bounds are in
+     * `content`; what is decided here is only which files it looks at.
+     */
+    let ours = match content {
+        None => ours,
+        Some(needle) => {
+            let claim = searching.claim(token);
+            let paths: Vec<String> = ours.iter().map(|hit| hit.path.clone()).collect();
+
+            let found = tokio::task::spawn_blocking(move || {
+                crate::content::matching(
+                    &paths,
+                    &needle,
+                    bounds,
+                    |path, most| crate::content::head_of(path, most),
+                    || claim.still_wanted(),
+                )
+            })
+            .await
+            .map_err(|err| format!("looking inside those files failed: {err}"))?;
+
+            /*
+             * In the order the content search found them, which is the order
+             * the index offered them, so a name that matched well stays above
+             * one that matched poorly. The line goes on the row: it is what
+             * says whether this is the right file, and the path is already
+             * the thing every other file row shows.
+             */
+            let mut lines: std::collections::HashMap<String, String> =
+                found.into_iter().map(|one| (one.path, one.line)).collect();
+
+            ours.into_iter()
+                .filter_map(|mut hit| {
+                    let line = lines.remove(&hit.path)?;
+                    hit.snippet = Some(line);
+                    Some(hit)
+                })
+                .collect()
+        }
     };
 
     /*

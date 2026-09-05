@@ -828,7 +828,21 @@ impl Catalog {
             }
 
             if needle.is_empty() {
-                scored.push((None, name.chars().count(), at));
+                /*
+                 * Nothing to match on, so the order is whatever the operator
+                 * makes sensible.
+                 *
+                 * `content:` with no name is "somewhere in what I have been
+                 * working on", and the files worth opening for that are the
+                 * ones touched most recently. Every other operator-only query
+                 * keeps the order it had, which is the shortest name first.
+                 */
+                let rank = match filters.content() {
+                    Some(_) => (u32::MAX - slot.modified) as usize,
+                    None => name.chars().count(),
+                };
+
+                scored.push((None, rank, at));
                 continue;
             }
 
@@ -856,6 +870,7 @@ impl Catalog {
                     name: self.name(&slot).to_string(),
                     path: self.path(&slot).to_string(),
                     is_dir: slot.is_dir,
+                    snippet: None,
                 }
             })
             .collect()
@@ -1147,6 +1162,13 @@ pub struct Filters {
     size: Option<Between>,
     /// Last written, in seconds since the epoch.
     modified: Option<Between>,
+    /// Words to look for inside the file itself.
+    ///
+    /// Unlike the three above, this cannot be answered from the index: the
+    /// index holds names. It is carried here so one parser reads every
+    /// operator, and applied by [`crate::content`] after the name search has
+    /// narrowed the field to something worth opening.
+    content: Option<String>,
 }
 
 impl Filters {
@@ -1155,7 +1177,20 @@ impl Filters {
     /// Hoisted out of the per-candidate loop by the caller: typing does not pay
     /// for operators beyond one bool.
     pub fn asked_for_nothing(&self) -> bool {
-        self.ext.is_empty() && self.size.is_none() && self.modified.is_none()
+        self.ext.is_empty()
+            && self.size.is_none()
+            && self.modified.is_none()
+            && self.content.is_none()
+    }
+
+    /// What to look for inside a file, when the query asked for that.
+    ///
+    /// Deliberately not part of [`Self::allows`], which runs once per
+    /// candidate against numbers the index already holds. Opening a file is
+    /// not that, and doing it there would put a disk read on the keystroke
+    /// path for every entry in the index.
+    pub fn content(&self) -> Option<&str> {
+        self.content.as_deref()
     }
 
     /// Whether one indexed file answers what was asked.
@@ -1293,6 +1328,16 @@ fn read_operator(term: &str, now: u32, into: &mut Filters) -> bool {
                 true
             }
             None => false,
+        },
+        // The first one wins. A second is left in the query as text, which is
+        // the same answer the others give to a value they cannot read: a word
+        // that was not taken out is a word to match names on.
+        "content" => match into.content {
+            Some(_) => false,
+            None => {
+                into.content = Some(value.to_string());
+                true
+            }
         },
         _ => false,
     }
