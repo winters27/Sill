@@ -3,24 +3,12 @@
 # most of what the suite checks is Win32.
 name: verify
 
-# Not on every push. This is a private repo on a Windows runner, which bills at
-# twice the Linux rate, and a run is about 16 minutes. Eighty-seven pushes over
-# four days came to roughly 2,384 billed minutes against a 2,000-minute monthly
-# allowance, and green runs would have cost exactly the same as the red ones.
-#
-# What this catches that a developer's machine cannot is whether Sill builds on
-# a computer that has never seen it: a dependency missing from the lockfile, a
-# file nobody committed, a step that only works because of something already
-# installed. Those are release questions. They do not change between two pushes
-# on the same afternoon, and `npm run verify` locally is the identical command.
-#
-# So: on a tag, which is when the answer is worth paying for, and on the button,
-# which is when somebody wants it.
-on:
-  push:
-    tags:
-      - "v*"
-  workflow_dispatch:
+# On every push again. This ran on tags only for about an hour, because the
+# repo was private and a windows-latest runner bills at twice the Linux rate:
+# 87 runs over four days came to roughly 2,384 billed minutes against a
+# 2,000-minute allowance. Sill is public as of 2026-09-04, Actions are free on
+# public repos, and the reason to hold back went with it.
+on: [push, pull_request, workflow_dispatch]
 
 # A second push while the first is still running makes the first answer a
 # question nobody is asking any more, and these are paid minutes.
