@@ -7,6 +7,7 @@
   import { couldNot, noMatch, standing } from "$lib/instead";
   import { LISTBOX, optionId } from "$lib/results";
   import { hint } from "$lib/hint";
+  import { rovingTo } from "$lib/roving";
   import {
     clipboardDelete,
     clipboardEntry,
@@ -93,7 +94,45 @@
    */
   const fetched = new Map<number, ClipDetail>();
 
-  let filterOpen = $state(false);
+  /**
+   * Which of the two bar menus is open.
+   *
+   * One state rather than a boolean each: with two, the scrim of the open
+   * menu swallowed the first click on the other trigger, so switching menus
+   * took two clicks.
+   */
+  let open = $state<"collections" | "kind" | null>(null);
+
+  /** A menu takes focus when it opens, so the arrows and Escape reach it. */
+  function focusFirst(node: HTMLElement): void {
+    (node.querySelector<HTMLElement>(".option") ?? node).focus();
+  }
+
+  /**
+   * Arrows walk the items, Escape closes and hands focus back to the trigger.
+   *
+   * Stopped here, because the launcher's own key handler is one element up
+   * and its Escape pops the whole clipboard view rather than this menu.
+   */
+  function menuKeys(event: KeyboardEvent): void {
+    const menu = event.currentTarget as HTMLElement;
+    const options = Array.from(menu.querySelectorAll<HTMLElement>(".option"));
+    const at = options.indexOf(document.activeElement as HTMLElement);
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      open = null;
+      menu.parentElement?.querySelector<HTMLElement>(".trigger")?.focus();
+      return;
+    }
+
+    const next = rovingTo(event.key, Math.max(at, 0), options.length, "column");
+    if (next === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    options[next]?.focus();
+  }
   let listEl = $state<HTMLDivElement | null>(null);
 
   /**
@@ -293,7 +332,6 @@
    * copy arriving underneath it.
    */
   let picked = $state<number[]>([]);
-  let collectionsOpen = $state(false);
 
   const pickedCount = $derived(picked.length);
 
@@ -555,7 +593,7 @@
       <div class="filter">
         <button
           class="trigger"
-          onclick={() => (collectionsOpen = !collectionsOpen)}
+          onclick={() => (open = open === "collections" ? null : "collections")}
           aria-haspopup="menu"
         >
           Collections
@@ -571,25 +609,25 @@
           </svg>
         </button>
 
-        {#if collectionsOpen}
+        {#if open === "collections"}
           <div
             class="scrim"
             role="presentation"
-            onclick={() => (collectionsOpen = false)}
+            onclick={() => (open = null)}
           ></div>
           <!-- `sill-menu` is the surface. Without it this popover was
                transparent and the clipboard rows showed through the collection
                names, while the kind popover four lines below had it and looked
                correct, which is how a menu can be wrong for months without
                anybody deciding it should be. -->
-          <div class="menu sill-menu" role="menu">
+          <div class="menu sill-menu" role="menu" tabindex="-1" use:focusFirst onkeydown={menuKeys}>
             {#each collections as collection (collection.id)}
               <button
                 class="option"
                 role="menuitem"
                 onclick={() => {
                   inside = collection;
-                  collectionsOpen = false;
+                  open = null;
                   onselect(0);
                 }}
               >
@@ -603,7 +641,7 @@
     {/if}
 
     <div class="filter">
-      <button class="trigger" onclick={() => (filterOpen = !filterOpen)} aria-haspopup="menu">
+      <button class="trigger" onclick={() => (open = open === "kind" ? null : "kind")} aria-haspopup="menu">
         {KIND_FILTERS.find((f) => f.id === kind)?.label}
         <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true">
           <path
@@ -617,9 +655,9 @@
         </svg>
       </button>
 
-      {#if filterOpen}
-        <div class="scrim" role="presentation" onclick={() => (filterOpen = false)}></div>
-        <div class="menu sill-menu" role="menu">
+      {#if open === "kind"}
+        <div class="scrim" role="presentation" onclick={() => (open = null)}></div>
+        <div class="menu sill-menu" role="menu" tabindex="-1" use:focusFirst onkeydown={menuKeys}>
           {#each KIND_FILTERS as option (option.id)}
             <button
               class="option"
@@ -628,7 +666,7 @@
               aria-checked={option.id === kind}
               onclick={() => {
                 kind = option.id;
-                filterOpen = false;
+                open = null;
                 onselect(0);
               }}
             >
@@ -823,7 +861,16 @@
     color: var(--accent-bright);
   }
 
+  /* The collection's name gives way; the count beside it does not. */
+  .label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .tally {
+    flex: none;
     margin-left: auto;
     padding-left: var(--space-3);
     font-size: var(--text-micro);
@@ -902,9 +949,11 @@
     z-index: var(--z-menu-scrim);
   }
 
+  /* Hangs off the trigger's own bottom edge, so a change to the trigger's
+     height moves the menu with it. */
   .menu {
     position: absolute;
-    top: 30px;
+    top: calc(100% + var(--space-1));
     right: 0;
     z-index: var(--z-menu);
     width: 168px;

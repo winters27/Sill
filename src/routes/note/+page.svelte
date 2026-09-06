@@ -148,7 +148,15 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
-    background: var(--core-background);
+    /* The same surface every other window paints, so a note is recognisably
+       Sill's and the themes with a wash show it here too. It was the flat
+       primary background, which no other window uses. */
+    background-color: color-mix(
+      in srgb,
+      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
+      var(--surface-base)
+    );
+    background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
     color: var(--text-1);
   }
 
@@ -179,6 +187,11 @@
   }
 
   .standing {
+    /* One line beside the button, at the window's 360px minimum too. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-3);
     font-size: var(--text-meta);
   }
@@ -191,7 +204,9 @@
     background: transparent;
     border: none;
     border-radius: var(--radius-sm);
-    color: var(--text-2);
+    /* Destructive at rest, not only under the pointer: somebody tabbing to
+       it has to be told the same thing the mouse is. */
+    color: var(--danger);
     cursor: pointer;
     font-family: var(--font);
     font-size: var(--text-meta);
@@ -199,8 +214,7 @@
   }
 
   button:hover:not(:disabled) {
-    background: var(--fill-2);
-    color: var(--danger);
+    background: var(--danger-fill);
   }
 
   button:disabled {

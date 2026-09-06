@@ -15,7 +15,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { applyAppearance, getPreferences, openSettings, quitApp } from "$lib/settings";
-  import { summonWith } from "$lib/exthost/commands";
+  import { keyboardReference, summonWith } from "$lib/exthost/commands";
   import { itemId } from "$lib/results";
   import "$lib/theme/theme.css";
 
@@ -33,7 +33,7 @@
     run: () => Promise<void> | void;
   }
 
-  /** Set from Rust, so the row shows the hotkey actually bound. */
+  /** From the keyboard reference, so the row shows the key that registered. */
   let summonHotkey = $state("");
   let selected = $state(0);
   let menu = $state<HTMLDivElement | null>(null);
@@ -111,7 +111,13 @@
     try {
       const prefs = await getPreferences();
       applyAppearance(prefs);
-      summonHotkey = prefs.hotkey.summon.replaceAll("+", " ");
+      // The key Windows actually registered, not the one the settings file
+      // asked for. `keyboard_reference` leaves a refused summon out, which is
+      // the rule the welcome and the key sheet already follow: a surface that
+      // names a key that does nothing is worse than one that names none.
+      const sections = await keyboardReference();
+      const summon = sections.find((s) => s.title === "Opening Sill")?.keys[0]?.chord ?? "";
+      summonHotkey = summon.replaceAll("+", " ");
     } catch {
       // A menu that will not open because it could not read a hint is worse
       // than one that shows the row without it.

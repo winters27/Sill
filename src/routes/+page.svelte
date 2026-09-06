@@ -4829,13 +4829,13 @@
     update={chinLine(updateProgress)}
     onupdate={() => void startUpdate()}
   />
+  <!--
+    An extension's permission card, in front of whatever mode is up. The AI
+    conversation draws its own, so this stands down there. Inside `main`
+    rather than beside it, so the window's rounded corners clip its scrim.
+  -->
+  <PermissionAsk hidden={mode === "ai"} />
 </main>
-
-<!--
-  An extension's permission card, in front of whatever mode is up. The AI
-  conversation draws its own, so this stands down there.
--->
-<PermissionAsk hidden={mode === "ai"} />
 
 <style>
   /*
@@ -4858,6 +4858,8 @@
   }
 
   main {
+    /* The containing block for anything laid over the whole window. */
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100vh;

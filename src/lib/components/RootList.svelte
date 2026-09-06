@@ -76,30 +76,14 @@
 
 
   /**
-   * Row and header heights, measured rather than assumed.
+   * The list's own bottom padding, read from the stylesheet.
    *
-   * Hardcoding was wrong twice over: `box-sizing: border-box` is global, so a
-   * row with `height: 38px` and a 1px border is 38px tall and not 40, and any
-   * hardcoded value silently drifts the moment the CSS changes. A window
-   * computed from the wrong height stops lining up with the scroll position
-   * and renders blank space where rows should be.
-   *
-   * These are only what is used before the first measurement lands, but they
-   * still track `--row-height` and `.sill-group`.
-   *
-   * They no longer decide which rows are drawn, because every row is. What
-   * they still do is tell the fade how deep into the chin each row has sunk,
-   * where being a pixel or two out means a slightly wrong blur rather than a
-   * screen of nothing.
+   * Read rather than copied so the scroll maths clears whatever the CSS says.
+   * This used to sit beside four more measurements (scroll offset, viewport
+   * height, row and header heights) kept current for a chin overlay and a
+   * fade that no longer exist: the chin is in flow below the list. Nothing
+   * read them, so they are gone.
    */
-  const FALLBACK_ROW = 40;
-  const FALLBACK_HEADER = 30;
-
-  let scrollTop = $state(0);
-  let height = $state(600);
-  let rowHeight = $state(FALLBACK_ROW);
-  let headerHeight = $state(FALLBACK_HEADER);
-  /** The list's own bottom padding, which the chin sits over. */
   let inset = $state(0);
 
   /**
@@ -187,11 +171,9 @@
         : 0;
 
     /*
-     * The chin is laid OVER the bottom of this list, not beside it, so the
-     * visible height is not the whole of `clientHeight`: the last stretch is
-     * where rows dissolve into the fade and the controls sit. The list's own
-     * bottom padding is already sized to clear it, so it is read rather than
-     * copied.
+     * The list's bottom padding is not somewhere a row can rest, so the
+     * height a row has to land inside is `clientHeight` less that padding.
+     * The chin itself is in flow below this element and takes no part here.
      */
     const usable = viewport.clientHeight - inset;
 
@@ -208,36 +190,21 @@
   });
 
 
-  function onScroll() {
-    if (!viewport) return;
-    scrollTop = viewport.scrollTop;
-    height = viewport.clientHeight;
-  }
-
   /**
-   * Keeps the measurements the chin needs current.
+   * Keeps the padding current.
    *
-   * Nothing about row positions is measured any more: every row is drawn, so
-   * where each one sits is asked of the element at the moment it matters.
-   * What is still read here is the padding and the fade, because those come
-   * from the stylesheet rather than from layout.
+   * Nothing about row positions is measured: every row is drawn, so where
+   * each one sits is asked of the element at the moment it matters. The one
+   * value read here comes from the stylesheet rather than from layout, and
+   * it is read on resize rather than per row because `getComputedStyle`
+   * forces a style recalculation and this is consulted every time the
+   * selection moves.
    */
   $effect(() => {
     if (!viewport) return;
 
     const sync = () => {
       if (!viewport) return;
-
-      height = viewport.clientHeight;
-      scrollTop = viewport.scrollTop;
-
-      const row = viewport.querySelector<HTMLElement>(".sill-row");
-      if (row && row.offsetHeight > 0) rowHeight = row.offsetHeight;
-      const header = viewport.querySelector<HTMLElement>(".sill-group");
-      if (header && header.offsetHeight > 0) headerHeight = header.offsetHeight;
-
-      // Read on layout rather than per row: `getComputedStyle` forces a style
-      // recalculation, and this is consulted every time the selection moves.
       inset = Number.parseFloat(getComputedStyle(viewport).paddingBottom) || 0;
     };
 
@@ -569,7 +536,6 @@
   tabindex="-1"
   aria-label="Results"
   bind:this={viewport}
-  onscroll={onScroll}
 >
   {#each lines as line, at (line.kind === "header" ? `h:${line.label}` : line.command.id)}
     {#if line.kind === "header"}

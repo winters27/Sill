@@ -84,14 +84,17 @@
 {/if}
 
 <style>
+  /* Inside the window's own box, so its rounded, transparent corners clip
+     this too. As a fixed sibling it painted square into all four corners of
+     a window DWM draws round, and sat under the launcher menu. No blur: see
+     theme.css on `backdrop-filter`. */
   .scrim {
-    position: fixed;
+    position: absolute;
     inset: 0;
-    z-index: var(--z-menu-scrim);
+    z-index: var(--z-dialog-scrim);
     display: grid;
     place-items: center;
     padding: var(--space-6);
-    background: var(--fill-1);
-    backdrop-filter: blur(6px);
+    background: var(--scrim);
   }
 </style>

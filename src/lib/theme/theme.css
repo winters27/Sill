@@ -315,6 +315,11 @@
    */
   --chin: rgba(0, 0, 0, 0.16);
 
+  /* What sits behind a modal card. A darkening rather than a blur, for the
+     reason given above: a backdrop-filter on this window costs more than it
+     shows. */
+  --scrim: rgba(0, 0, 0, 0.35);
+
   /*
    * The canonical Winters' Glass bevels, taken verbatim from StreamNook so the
    * recipe stays identical across both apps.
@@ -603,6 +608,11 @@
   --z-panel: 11;
   --z-menu-scrim: 20;
   --z-menu: 21;
+  /* A modal card, such as an extension asking for a permission. Above the
+     menu, because a question the launcher is waiting on cannot be drawn
+     under a popover somebody happened to leave open. */
+  --z-dialog-scrim: 30;
+  --z-dialog: 31;
 
   /*
    * ---- Spacing ----------------------------------------------------------
@@ -1330,6 +1340,9 @@ body {
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
   box-shadow: var(--elevation-menu);
+  /* Nothing inside a popover paints past its corner. A collection name
+     longer than the menu used to carry its count out over the rows. */
+  overflow: hidden;
 }
 
 /*

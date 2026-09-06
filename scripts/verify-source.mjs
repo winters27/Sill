@@ -318,6 +318,29 @@ for (const file of sources(".")) {
     for (const m of text.matchAll(/font-size:\s*[\d.]+px/g)) {
       fail(file, lineOf(text, m.index), `${m[0]} is a literal; use a --text-* or --glyph-* token`);
     }
+    // The shorthand is the same literal wearing a different property name.
+    // Two of them survived the rule above for a month in the capture overlay.
+    for (const m of text.matchAll(/\bfont:\s*[\d.]+px/g)) {
+      fail(file, lineOf(text, m.index), `${m[0]} is a literal font size; use font-size with a --text-* token`);
+    }
+    /*
+     * The chin's height is `--chin-height`, and a popover that clears it
+     * has to say so. Two of them had `bottom: 44px` with a comment restating
+     * the 40 the token holds, which is the number Rust sizes the window with.
+     * Change the token and both would have detached from the chin.
+     */
+    const parts = file.split(/[/\u005c]/);
+    const overTheChin =
+      parts.at(-2) === "components" || (parts.at(-2) === "routes" && parts.at(-1) === "+page.svelte");
+    if (overTheChin) {
+      for (const m of text.matchAll(/\bbottom:\s*4[0-9]px/g)) {
+        fail(
+          file,
+          lineOf(text, m.index),
+          `${m[0]} is the chin's height written out; use calc(var(--chin-height) + …)`,
+        );
+      }
+    }
     for (const m of text.matchAll(/rgba\(var\(--accent-rgb\)/g)) {
       fail(
         file,
@@ -556,6 +579,28 @@ for (const file of sources(".")) {
     if (SETTINGS_SURFACE.test(file) && !OWNS_A_CONTROL.test(file)) {
       for (const m of text.matchAll(/<select\b/g)) {
         fail(file, lineOf(text, m.index), "a bare <select> in settings; use Select.svelte");
+      }
+    }
+
+    /*
+     * Outside settings a native `<select>` is allowed, because the launcher
+     * and the extension surfaces draw their own chrome. What is not allowed
+     * is the failure Select.svelte exists to fix: Windows opens the list as
+     * its own white window, the light text colour is inherited onto it, and
+     * every option but the highlighted one is unreadable. Two pickers had
+     * exactly that, and every extension with a dropdown opened one of them.
+     * A `<select>` anywhere has to carry an `option {}` rule.
+     */
+    if (!HARNESS.test(file) && !OWNS_A_CONTROL.test(file)) {
+      const selects = Array.from(text.matchAll(/<select\b/g));
+      const answered = styled(text).some(([, css]) => /\boption\s*\{/.test(css));
+      if (selects.length > 0 && !answered) {
+        fail(
+          file,
+          lineOf(text, selects[0].index),
+          "a <select> with no `option {}` rule; Windows draws its list white, so " +
+            "give the options a background and colour (see settings/Select.svelte)",
+        );
       }
     }
 
@@ -4903,6 +4948,48 @@ if (tracked.status !== 0) {
         ART_DIR,
         null,
         `${file} is a width WIDTHS does not offer, so no browser will ever pick it`,
+      );
+    }
+  }
+}
+
+/*
+ * The tray menu window is sized by hand and its contents are sized by tokens.
+ *
+ * `tauri.conf.json` gives the window a fixed height and the menu inside it is
+ * `overflow: hidden`, so the item that would be cut off is the last one, which
+ * is Quit. It was sized to the pixel: six items at `--control-height`, two
+ * rules, the padding, and not one pixel over. A seventh item, a change to the
+ * token, or fractional scaling would have clipped it with nothing to say so.
+ * This adds the arithmetic and asks for eight pixels of slack.
+ */
+{
+  const TRAY = "src/routes/traymenu/+page.svelte";
+  const CONF = "src-tauri/tauri.conf.json";
+  const tray = readFileSync(TRAY, "utf8");
+  const theme = readFileSync(THEME, "utf8");
+  const token = (name) =>
+    Number(theme.match(new RegExp(name + ":[ ]*([0-9.]+)px"))?.[1] ?? Number.NaN);
+  const control = token("--control-height");
+  const step = token("--space-1");
+  const items = (tray.match(/^\s*\{ label: /gm) ?? []).length;
+  const breaks = (tray.match(/breaks: true/g) ?? []).length;
+  const window = JSON.parse(readFileSync(CONF, "utf8")).app?.windows?.find(
+    (w) => w.label === "traymenu",
+  );
+
+  if (!window || items === 0 || Number.isNaN(control) || Number.isNaN(step)) {
+    fail(TRAY, null, "could not measure the tray menu against its window; the check is broken");
+  } else {
+    // Items, a hairline plus a step above and below it per rule, and the
+    // menu's own padding top and bottom.
+    const content = items * control + breaks * (1 + 2 * step) + 2 * step;
+    if (window.height < content + 8) {
+      fail(
+        CONF,
+        null,
+        `traymenu is ${window.height}px tall for ${content}px of menu, so Quit is the ` +
+          "first thing to clip; give it at least eight pixels of slack",
       );
     }
   }

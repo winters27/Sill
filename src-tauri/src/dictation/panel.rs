@@ -23,7 +23,9 @@ pub const PANEL_WINDOW_LABEL: &str = "dictation";
 /// that has never been shown, and this one is built hidden. The HUD hardcodes
 /// its own dimensions for exactly this reason.
 const PANEL_WIDTH: f64 = 240.0;
-const PANEL_HEIGHT: f64 = 84.0;
+/// Mirrors the `dictation` window in lazy_windows.rs, which explains the
+/// number. Change both or the panel resizes itself on first show.
+const PANEL_HEIGHT: f64 = 96.0;
 
 /// Gap from the bottom of the monitor. Clear of the taskbar, and low enough
 /// that it never covers what is being dictated into.

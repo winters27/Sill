@@ -204,6 +204,18 @@
     color: var(--text-3);
   }
 
+  /* The line an error lands on. One line, and it stays one line: a path or
+     a stack frame here used to push the action pill off the window, and a
+     wrapped one painted over the last row. The full text still reaches the
+     log and the settings window's trouble list. */
+  .toast {
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   /* Outside the pill and quieter than it. Escape is the key nobody needs
      reminding of, so it does not get to sit in the affordance. */
   .escape {

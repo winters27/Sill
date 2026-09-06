@@ -132,7 +132,7 @@
   <div
     id={MENU}
     bind:this={menu}
-    class="menu sill-menu"
+    class="menu sill-menu sill-scrolls"
     role="menu"
     tabindex="-1"
     aria-label="Sill menu"
@@ -296,13 +296,17 @@
   }
 
   /* Rises out of its own button, so it is anchored to the bottom left.
-     `bottom` clears the 40px footer. */
+     `bottom` clears the chin by one step, from the token Rust sizes the
+     window with. Capped so that at four visible rows, the smallest window
+     there is, the menu scrolls rather than covering the search field. */
   .menu {
     position: fixed;
     left: var(--space-2);
-    bottom: 44px;
+    bottom: calc(var(--chin-height) + var(--space-1));
     z-index: var(--z-menu);
     width: 208px;
+    max-height: calc(100vh - var(--chin-height) - var(--space-8));
+    overflow-y: auto;
     padding: var(--space-1);
   }
 

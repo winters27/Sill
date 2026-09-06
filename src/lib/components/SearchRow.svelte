@@ -335,6 +335,11 @@
      reads as a raised object; this is a label saying where you are. */
   .crumb {
     flex: none;
+    /* An extension's or a file's name, so it is bounded the way `.who`
+       below is; otherwise a long one squeezes the field to nothing. */
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
     padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
     background: var(--fill-2);

@@ -183,12 +183,13 @@
   }
 
   /* Anchored bottom right, above the footer, the way a launcher's action
-     menu rises out of its own affordance. `bottom` clears the 40px footer
-     and lands the panel on the same right edge as the action pill. */
+     menu rises out of its own affordance. `bottom` clears the chin by one
+     step, from the same token Rust sizes the window with, and lands the
+     panel on the same right edge as the action pill. */
   .panel {
     position: fixed;
     right: var(--space-2);
-    bottom: 44px;
+    bottom: calc(var(--chin-height) + var(--space-1));
     z-index: var(--z-panel);
     width: 320px;
     max-height: 60vh;
@@ -244,7 +245,11 @@
     text-overflow: ellipsis;
   }
 
+  /* Sits between a title that truncates and keys that do not, so it must
+     not be the thing that wraps a 32px row. */
   .inert {
+    flex: none;
+    white-space: nowrap;
     font-size: var(--text-meta);
     color: var(--text-3);
   }

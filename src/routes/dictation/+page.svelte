@@ -29,9 +29,24 @@
    *  reached 22px and the row stayed a dotted line however hard you spoke. */
   const PILL_HEIGHT = 38;
 
-  /** Canvas fills take a literal colour, not a CSS variable. This is
-   *  `--accent-bright`, the one token bright enough to read at 1.5px. */
-  const ACCENT = "200, 224, 232";
+  /**
+   * Canvas fills take a literal colour, not a CSS variable, so the token is
+   * read out of the stylesheet each time the panel shows: `--accent-bright`,
+   * the one token bright enough to read at 1.5px, in whichever theme is on.
+   * The literal is only the value before the first read, and it is the
+   * Winters' Glass one; five other themes define their own.
+   */
+  let ACCENT = "200, 224, 232";
+
+  function readAccent(): void {
+    const hex = getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent-bright")
+      .trim();
+    const m = /^#([0-9a-f]{6})$/i.exec(hex);
+    if (!m) return;
+    const n = Number.parseInt(m[1], 16);
+    ACCENT = `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+  }
 
   let status = $state<PanelStatus>("listening");
   let visible = $state(false);
@@ -145,6 +160,7 @@
       // and has to ask for it.
       try {
         applyAppearance(await getPreferences());
+        readAccent();
       } catch {
         // The bundled default is fine; a panel that refuses to draw because
         // it could not read a font setting would be worse.

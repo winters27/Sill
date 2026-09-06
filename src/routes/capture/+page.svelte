@@ -41,6 +41,15 @@
   let targets = $state<CaptureTarget[]>([]);
   /** Whichever of them the pointer is over, in this window's own pixels. */
   let hovering = $state<{ target: CaptureTarget; box: Box } | null>(null);
+  /** The screen's width and the readout's own, so the readout stays on screen. */
+  let innerWidth = $state(0);
+  let chipWidth = $state(160);
+  const CHIP_GAP = 8;
+
+  /** Where the readout's left edge goes: with the selection, until the edge. */
+  function chipLeft(left: number): number {
+    return Math.max(0, Math.min(left, innerWidth - chipWidth - CHIP_GAP));
+  }
   let clickAWindow = $state(true);
   /** The scale and origin needed to convert both ways. Read once on show. */
   let frame = $state({ scale: 1, x: 0, y: 0 });
@@ -279,7 +288,7 @@
   });
 </script>
 
-<svelte:window onkeydown={key} />
+<svelte:window onkeydown={key} bind:innerWidth />
 
 <!--
   One surface covering every screen. `pointerdown` starts a drag anywhere on
@@ -321,11 +330,13 @@
       style:height="{picked.height}px"
     ></div>
 
-    <!-- The size, put on whichever side of the selection has room, so it is
-         never off the screen at the edges. -->
+    <!-- The size, above the selection when there is room and below it when
+         there is not, and pulled back from the right edge so it is never
+         off the screen. -->
     <div
       class="size"
-      style:left="{picked.left}px"
+      bind:clientWidth={chipWidth}
+      style:left="{chipLeft(picked.left)}px"
       style:top="{picked.top > 28 ? picked.top - 24 : picked.top + picked.height + 6}px"
     >
       {picked.width} x {picked.height}
@@ -365,7 +376,8 @@
 
     <div
       class="size"
-      style:left="{hovering.box.left}px"
+      bind:clientWidth={chipWidth}
+      style:left="{chipLeft(hovering.box.left)}px"
       style:top={hovering.box.top > 28
         ? `${hovering.box.top - 24}px`
         : `${hovering.box.top + hovering.box.height + 6}px`}
@@ -420,8 +432,15 @@
     border-radius: var(--radius-sm);
     background: var(--shade-4);
     color: var(--text-1);
-    font: 12px/1.4 system-ui, sans-serif;
+    font-family: var(--font);
+    font-size: var(--text-meta);
+    line-height: 1.4;
     font-variant-numeric: tabular-nums;
+    /* A window title can be anything; the readout stays one line. */
+    max-width: 40ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     pointer-events: none;
   }
 
@@ -435,7 +454,9 @@
     border-radius: var(--radius-md);
     background: var(--shade-4);
     color: var(--text-1);
-    font: 13px/1.4 system-ui, sans-serif;
+    font-family: var(--font);
+    font-size: var(--text-body);
+    line-height: 1.4;
     pointer-events: none;
   }
 

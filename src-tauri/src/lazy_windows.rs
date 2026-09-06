@@ -76,7 +76,10 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
 
         "dictation" => builder("dictation")
             .title("Dictation")
-            .inner_size(240.0, 84.0)
+            // Tall enough for the pill's shadow. The pill is 54px and
+            // `--elevation-pill` reaches 17px below it, so 84 cut the shadow
+            // off flat. Mirrored by `PANEL_HEIGHT` in dictation/panel.rs.
+            .inner_size(240.0, 96.0)
             .resizable(false)
             .transparent(true)
             .always_on_top(true)

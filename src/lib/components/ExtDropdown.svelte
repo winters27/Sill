@@ -181,4 +181,12 @@
   .ext-dropdown:focus-visible {
     border-color: var(--accent-line);
   }
+
+  /* The list Windows opens is its own window and starts white. Without this
+     the light labels above are inherited onto it and only the highlighted
+     row can be read. The same rule settings/Select carries. */
+  .ext-dropdown option {
+    background: var(--core-secondary-background);
+    color: var(--text-1);
+  }
 </style>

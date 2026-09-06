@@ -416,6 +416,14 @@
     user-select: text;
   }
 
+  /* The list Windows opens for a dropdown is its own window and starts
+     white; without this the light text above is inherited onto it and the
+     options are unreadable. The same rule settings/Select carries. */
+  select option {
+    background: var(--core-secondary-background);
+    color: var(--text-1);
+  }
+
   textarea {
     resize: vertical;
     line-height: 1.5;
