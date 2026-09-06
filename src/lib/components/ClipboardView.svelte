@@ -1061,7 +1061,7 @@
 
   .pin {
     flex: none;
-    color: var(--core-accent);
+    color: var(--accent);
   }
 
   .detail {

@@ -777,6 +777,6 @@
 
   .chosen {
     font-size: var(--text-meta);
-    color: var(--core-accent);
+    color: var(--accent);
   }
 </style>

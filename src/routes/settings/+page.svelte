@@ -2443,7 +2443,7 @@
   }
 
   .result-panel {
-    font-size: var(--text-label);
+    font-size: var(--text-meta);
     color: var(--text-3);
   }
 
@@ -2480,6 +2480,10 @@
     font-weight: var(--weight-strong);
     letter-spacing: var(--track-title);
     line-height: 1.2;
+    /* The row it shares with the status and a button is one line tall. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   header p {
@@ -2504,8 +2508,11 @@
   .status {
     margin-left: auto;
     flex: none;
+    /* One line, like `.reading` above it. "Could not save: <error>" used to
+       wrap and grow the whole header. */
+    white-space: nowrap;
     font-size: var(--text-meta);
-    color: var(--core-accent);
+    color: var(--accent);
   }
 
   /*
@@ -2521,8 +2528,8 @@
   .wrong {
     margin: 0 var(--space-8) var(--space-5);
     padding: var(--space-3) var(--space-4);
-    border-left: 1px solid var(--accent-red);
-    background: rgba(var(--accent-red-rgb), 0.08);
+    border-left: 1px solid var(--danger);
+    background: var(--danger-fill);
     border-radius: var(--radius-sm);
     display: grid;
     gap: var(--space-2);
@@ -2543,7 +2550,7 @@
     padding: 0;
     margin-left: var(--space-1);
     font: inherit;
-    color: var(--core-accent);
+    color: var(--accent);
     cursor: pointer;
     text-decoration: underline;
     text-underline-offset: 2px;
@@ -2557,6 +2564,10 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    /* `overflow-y: auto` alone computes overflow-x to auto as well, and a
+       control wider than the panel then puts a horizontal scrollbar under a
+       vertical one. Controls wrap instead; see Segmented. */
+    overflow-x: hidden;
     padding: 0 var(--space-8) var(--space-8);
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
@@ -2592,7 +2603,7 @@
      is a hint and the description above says what happened. */
   .recorder.taken {
     color: var(--danger);
-    border-color: var(--danger);
+    box-shadow: var(--ring-danger);
   }
 
   .recorder.recording {
@@ -2628,7 +2639,9 @@
   .stat-label {
     display: block;
     margin-top: var(--space-half);
-    font-size: var(--text-label);
+    /* Sentence case, so the meta step: `--text-label` is the tracked-caps
+       size and reads as an undersized line without the tracking. */
+    font-size: var(--text-meta);
     color: var(--text-3);
   }
 

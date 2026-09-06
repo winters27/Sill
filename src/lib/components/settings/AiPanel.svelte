@@ -568,7 +568,7 @@
      * clear the same width, and while both said 68px the second was a copy
      * waiting to be left behind by the first.
      */
-    --label-column: 68px;
+    --label-column: 96px;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
     gap: var(--space-2);
@@ -742,6 +742,11 @@
   }
 
   .what {
+    /* One line against a baseline-aligned control; a wrapped label hung its
+       second line under the field. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: var(--text-2);
     font-size: var(--text-meta);
   }

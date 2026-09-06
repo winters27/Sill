@@ -750,7 +750,7 @@
 
   .title mark {
     background: none;
-    color: var(--core-accent);
+    color: var(--accent);
     font-weight: var(--weight-strong);
   }
 

@@ -72,8 +72,10 @@
     transition: box-shadow var(--motion-state) var(--ease);
   }
 
+  /* Focus is one of the four things the accent is for, and the sidebar's
+     search field already says so; every other field disagreed with it. */
   input:focus {
-    box-shadow: var(--ring-strong);
+    box-shadow: var(--ring-accent-faint);
   }
 
   input:disabled {

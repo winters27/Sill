@@ -531,6 +531,6 @@
   .checkbox input {
     width: 16px;
     height: 16px;
-    accent-color: var(--core-accent);
+    accent-color: var(--accent);
   }
 </style>

@@ -62,7 +62,7 @@
     width: 14px;
     height: 14px;
     border-radius: 50%;
-    background: var(--core-accent);
+    background: var(--accent);
     box-shadow: var(--elevation-2), var(--bevel-top);
     transition: transform var(--motion-state) var(--ease);
   }

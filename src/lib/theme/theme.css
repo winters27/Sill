@@ -381,6 +381,8 @@
   --ring-shade: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
   --ring-accent: inset 0 0 0 1px var(--accent);
   --ring-accent-faint: inset 0 0 0 1px var(--accent-line);
+  /* A control whose value Windows or another key refused. */
+  --ring-danger: inset 0 0 0 1px var(--danger);
   --ring-fill: inset 0 0 0 1px var(--fill-3);
   --ring-fill-soft: inset 0 0 0 1px var(--fill-2);
   --ring-outside: 0 0 0 1px var(--hairline);

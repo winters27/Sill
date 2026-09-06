@@ -341,6 +341,25 @@ for (const file of sources(".")) {
         );
       }
     }
+    /*
+     * The danger fill had the same history in miniature: written inline at
+     * 0.08, 0.14, 0.15 and 0.2 because nothing named the one that was meant.
+     * `--danger-fill` names it.
+     */
+    for (const m of text.matchAll(/rgba\(var\(--accent-red-rgb\)/g)) {
+      fail(file, lineOf(text, m.index), "inline danger alpha; use --danger-fill");
+    }
+    /*
+     * `--accent` is the alias components read; `--core-accent` is the theme's
+     * slot behind it. Twelve components read the slot directly, which is
+     * twelve places an alias change would not reach. The theme cards are the
+     * exception, because a swatch is a picture of the slot itself.
+     */
+    if (!/ThemeCards\.svelte$/.test(file)) {
+      for (const m of text.matchAll(/var\(--core-accent\)/g)) {
+        fail(file, lineOf(text, m.index), "reads --core-accent; components read the --accent alias");
+      }
+    }
     for (const m of text.matchAll(/rgba\(var\(--accent-rgb\)/g)) {
       fail(
         file,

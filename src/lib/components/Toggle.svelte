@@ -61,7 +61,7 @@
   }
 
   .switch.on {
-    background-color: var(--core-accent);
+    background-color: var(--accent);
     border-color: transparent;
   }
 
@@ -82,7 +82,7 @@
   }
 
   .switch:focus-visible {
-    outline: 2px solid var(--core-accent);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
 </style>

@@ -387,20 +387,23 @@
     max-width: 180px;
   }
 
+  /* The same field the Snippets editor draws, one panel up. The two were
+     copied from each other and drifted: this one had wider text and
+     tighter padding, so the two editors read as two designs. */
   input {
-    padding: var(--space-2) var(--space-2);
+    padding: var(--space-2) var(--space-3);
     border: 0;
     border-radius: var(--radius-sm);
     background: var(--fill-1);
     box-shadow: var(--ring);
     color: var(--text-1);
     font: inherit;
-    font-size: var(--text-body);
+    font-size: var(--text-meta);
     outline: none;
     user-select: text;
   }
 
-  input:focus-visible {
+  input:focus {
     box-shadow: var(--ring-strong);
   }
 
@@ -413,16 +416,19 @@
   .token {
     padding: var(--space-half) var(--space-2);
     border: 0;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-pill);
     background: var(--fill-2);
     color: var(--text-2);
     font-family: var(--font-mono);
-    font-size: var(--text-group);
+    font-size: var(--text-label);
     cursor: pointer;
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
   }
 
   .token:hover {
-    background: var(--fill-3);
+    background: var(--hairline-strong);
     color: var(--text-1);
   }
 
@@ -458,11 +464,11 @@
 
   .keyword-tag {
     padding: var(--space-half) var(--space-2);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-pill);
     background: var(--fill-2);
-    color: var(--text-2);
+    color: var(--text-1);
     font-family: var(--font-mono);
-    font-size: var(--text-group);
+    font-size: var(--text-label);
   }
 
   .asks {
@@ -472,7 +478,7 @@
 
   code {
     font-family: var(--font-mono);
-    font-size: 0.94em;
-    color: var(--text-2);
+    font-size: var(--text-group);
+    color: var(--text-1);
   }
 </style>

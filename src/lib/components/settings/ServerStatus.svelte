@@ -170,7 +170,7 @@
   }
 
   .card[data-state="ready"] .beacon {
-    background: var(--core-accent);
+    background: var(--accent);
   }
 
   .card[data-state="running"] .beacon,
@@ -248,7 +248,7 @@
   .fill {
     height: 100%;
     border-radius: var(--radius-pill);
-    background: var(--core-accent);
+    background: var(--accent);
     transition: width var(--motion-travel) linear;
   }
 

@@ -109,6 +109,10 @@
   .track {
     position: relative;
     display: inline-flex;
+    /* Wraps rather than widening past the panel, which would otherwise be
+       the one control that summons a horizontal scrollbar. */
+    max-width: 100%;
+    flex-wrap: wrap;
     gap: var(--space-half);
     padding: var(--space-half);
     border-radius: var(--radius-md);
