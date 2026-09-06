@@ -10,7 +10,7 @@
  * screen while the rest is still being written.
  */
 
-import type { AiAsking, AiFinished, AiPart, AiStep, AiUsed } from "$lib/exthost/commands";
+import type { AiAsking, AiFinished, AiPart, AiSpent, AiStep, AiUsed } from "$lib/exthost/commands";
 import type { Shown } from "./parts";
 
 export interface Live {
@@ -24,10 +24,37 @@ export interface Live {
   trouble: string;
   /** What the last turn cost, once it was over. */
   finished: AiFinished | null;
+  /**
+   * What the conversation has cost so far, as Rust last said.
+   *
+   * Null until Rust has been asked or a turn has finished. A copy for
+   * drawing: Rust holds the total and hands it over on every done event.
+   */
+  spent: AiSpent | null;
+  /**
+   * Pieces of the answer in flight, and when the first one came.
+   *
+   * A stand-in for the token count Rust cannot know until the service says
+   * at the end: a streamed chunk is usually a token, so the pill can tick
+   * while the answer arrives and settle on the real number when it is over.
+   * Reset with the turn, and never read once `spent` has the truth.
+   */
+  streamed: number;
+  /** `performance.now()` at the first piece; zero before one has come. */
+  streamBegan: number;
 }
 
 export function fresh(): Live {
-  return { parts: [], asking: false, asked: null, trouble: "", finished: null };
+  return {
+    parts: [],
+    asking: false,
+    asked: null,
+    trouble: "",
+    finished: null,
+    spent: null,
+    streamed: 0,
+    streamBegan: 0,
+  };
 }
 
 /** Every word so far, which is what the answer is. */
@@ -45,6 +72,14 @@ export function begin(live: Live) {
   live.asked = null;
   live.trouble = "";
   live.finished = null;
+  live.streamed = 0;
+  live.streamBegan = 0;
+}
+
+/** One more piece has come, for the count that ticks while it arrives. */
+function stream(live: Live) {
+  if (!live.streamBegan) live.streamBegan = performance.now();
+  live.streamed += 1;
 }
 
 /**
@@ -69,6 +104,7 @@ function closeThinking(live: Live) {
 
 /** Words arriving. Whitespace on its own starts nothing. */
 export function said(live: Live, piece: string) {
+  stream(live);
   closeThinking(live);
   const last = live.parts[live.parts.length - 1];
   if (last?.kind === "text") {
@@ -80,6 +116,7 @@ export function said(live: Live, piece: string) {
 
 /** Thinking arriving, before the words. */
 export function thought(live: Live, piece: string) {
+  stream(live);
   const last = live.parts[live.parts.length - 1];
   if (last?.kind === "thinking") {
     last.text += piece;
@@ -119,16 +156,27 @@ export function settle(live: Live): Shown | null {
 
   live.parts = [];
   live.asking = false;
+  live.streamed = 0;
+  live.streamBegan = 0;
 
   if (parts.length === 0) return null;
   return { role: "assistant", text, parts, attachments: [] };
 }
 
-/** Everything of the turn in flight, and the card with it. */
+/**
+ * Everything of the turn in flight, and the card with it.
+ *
+ * The total goes too: this is what a resumed or fresh conversation calls,
+ * and the number belongs to the one just left. Whoever resumes asks Rust
+ * for the right one.
+ */
 export function reset(live: Live) {
   live.parts = [];
   live.asking = false;
   live.asked = null;
   live.trouble = "";
   live.finished = null;
+  live.spent = null;
+  live.streamed = 0;
+  live.streamBegan = 0;
 }

@@ -3,6 +3,33 @@ import { describe, expect, it } from "vitest";
 import { begin, fresh, reset, said, settle, textOf, thought, used, using } from "./live";
 
 describe("the turn being written", () => {
+  it("counts the pieces as they come, and lets them go with the turn", () => {
+    const live = fresh();
+    begin(live);
+    expect(live.streamed).toBe(0);
+    expect(live.streamBegan).toBe(0);
+
+    thought(live, "hm");
+    said(live, "Hel");
+    said(live, "lo");
+    expect(live.streamed).toBe(3);
+    expect(live.streamBegan).toBeGreaterThan(0);
+
+    settle(live);
+    expect(live.streamed).toBe(0);
+    expect(live.streamBegan).toBe(0);
+  });
+
+  it("forgets the total with the turn, but not on settling", () => {
+    const live = fresh();
+    live.spent = { input: 1, output: 1, cost: null, unpriced: 0, rate: null, answers: 1 };
+    settle(live);
+    expect(live.spent).not.toBeNull();
+
+    reset(live);
+    expect(live.spent).toBeNull();
+  });
+
   it("joins words that arrive in pieces into one paragraph", () => {
     const live = fresh();
     begin(live);

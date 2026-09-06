@@ -40,6 +40,8 @@ export async function listenToChat(live: Live, on: OnChat): Promise<UnlistenFn> 
     }),
     listen<AiFinished>("sill://ai-done", ({ payload }) => {
       live.finished = payload;
+      // The total with this turn in it, from the one place that adds up.
+      live.spent = payload.spent;
       on.done(settle(live), payload);
     }),
     listen<string>("sill://ai-failed", ({ payload }) => {
