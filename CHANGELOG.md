@@ -19,6 +19,23 @@ IPC surface, the dependencies added, and every commit body in full. What goes
 in a section here is the subset of that which somebody would notice, said
 differently.
 
+## 0.1.2
+
+**No console window flashes any more.** Starting Sill ran a PowerShell query
+while it built its index, and running an extension started Node, and neither
+asked Windows to keep its console hidden. Both flashed a black window over
+whatever you were doing. Nothing about either was ever meant to be looked at.
+
+**Updates download from a link that is not rate limited.** The manifest pointed
+at GitHub's API, which allows sixty unauthenticated requests an hour for a whole
+address, so an update could fail with a 403 that explained nothing. It uses the
+ordinary download link now.
+
+**About says what is Sill's and what is not.** It credited the framework for the
+index and the ranking, which are written here, and implied file search would
+fall back to something if Everything were missing. Sill indexes the folders you
+point it at; searching the whole disk is Everything's, and needs it running.
+
 ## 0.1.1
 
 **Updating works.** An installed Sill can now see that a newer one exists.
