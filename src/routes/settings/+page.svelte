@@ -1328,6 +1328,7 @@
             label="What Sill scans"
             description="Turning one off takes its entries out. Turning one on goes and looks for them, which takes a few seconds and happens in the background."
           >
+            <!-- indexed as "Start Menu, Desktop and taskbar", "Store and packaged applications", "Registered executables", "Installed programs", "Executables on PATH", "Windows settings pages", "Installed games" -->
             {#each SOURCES as source (source.key)}
               <Row title={source.title} description={source.hint}>
                 {#snippet control()}

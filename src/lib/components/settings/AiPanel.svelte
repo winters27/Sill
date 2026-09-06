@@ -396,6 +396,7 @@
                 <p class="intro">{noteFor(one.id)}</p>
               {/if}
 
+              <!-- indexed as "Address", "Key", "Model" -->
               {#if open.wire !== "claudeCode"}
                 <div class="field">
                   <span class="what">Address</span>

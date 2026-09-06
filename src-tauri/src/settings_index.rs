@@ -230,12 +230,10 @@ pub const SETTINGS: &[Setting] = &[
         "activity history undo revert log recent took back reverse",
     ),
     // ------------------------------------------------------------- widgets
-    s(
-        "widgets",
-        "Widgets",
-        "Pin a widget to the launcher",
-        "widget pin chin clock weather glance dashboard",
-    ),
+    s("widgets", "Widgets", "Clock", "pin widget launcher time date clock"),
+    s("widgets", "Widgets", "World clock", "pin widget launcher cities time zones world clock"),
+    s("widgets", "Widgets", "Weather", "pin widget launcher weather temperature forecast"),
+    s("widgets", "Widgets", "This machine", "pin widget launcher processor memory cpu ram cost programs"),
     s(
         "widgets",
         "Widgets",
@@ -259,7 +257,7 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "tts",
         "Text to Speech",
-        "Read aloud",
+        "Which voice reads",
         "voice speak talk text to speech tts narrate out loud say",
     ),
     s(
@@ -289,7 +287,7 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "tts",
         "Text to Speech",
-        "Download an offline voice",
+        "Offline voices",
         "piper neural offline local model amy ryan alba lessac free no key",
     ),
     // ----------------------------------------------------------- dictation
@@ -411,7 +409,7 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "dictation",
         "Dictation",
-        "Dictation transcripts",
+        "Transcripts",
         "history past search transcript",
     ),
     s(
@@ -436,7 +434,7 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "snippets",
         "Snippets",
-        "Snippets",
+        "Add a snippet",
         "template saved text signature placeholder",
     ),
     s(
@@ -516,7 +514,7 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "shortcuts",
         "Shortcuts",
-        "Shortcuts",
+        "From anywhere",
         "hotkey key global selection transform text case",
     ),
     // --------------------------------------------------------- automations
@@ -549,7 +547,7 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "quicklinks",
         "Quicklinks",
-        "Quicklinks",
+        "Add a quicklink",
         "link url bookmark search open",
     ),
     s(
@@ -1046,7 +1044,7 @@ mod tests {
         assert!(
             SETTINGS
                 .iter()
-                .any(|s| s.title == "Dictation transcripts" && s.panel == "dictation"),
+                .any(|s| s.title == "Transcripts" && s.panel == "dictation"),
             "and they should still be findable"
         );
     }

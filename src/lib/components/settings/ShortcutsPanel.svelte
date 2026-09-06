@@ -457,6 +457,7 @@
     label="From anywhere"
     description="Keys that work whatever application is in front. The first three open one of Sill's own surfaces; the rest run an action on something without the launcher appearing: highlight some text, press the key, and the text changes where it sits."
   >
+    <!-- indexed as "Window switcher hotkey", "Screenshot hotkey", "Whole screen hotkey" -->
     {#each GLOBAL as key (key.id)}
       <Row title={key.title} description={key.description}>
         {#snippet control()}

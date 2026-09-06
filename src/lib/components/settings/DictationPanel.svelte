@@ -568,6 +568,7 @@
       section of their own three sections down, so the reader chooses the
       engine and its size in one place.
     -->
+    <!-- indexed as "Speech model" -->
     {#each models as model (model.id)}
       <Row
         title={model.label}

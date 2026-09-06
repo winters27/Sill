@@ -4,6 +4,7 @@
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import Section from "./Section.svelte";
   import Button from "./Button.svelte";
+  import Row from "./Row.svelte";
   import Instead from "../Instead.svelte";
   import { noMatch } from "$lib/instead";
   import {
@@ -115,15 +116,6 @@
     </div>
 
     {#if status}<span class="status">{status}</span>{/if}
-    <span class="spacer"></span>
-
-    {#if entries.length}
-      <Button
-        label={confirmingClear ? "Delete everything?" : "Clear history"}
-        tone="danger"
-        onclick={clearAll}
-      />
-    {/if}
   </div>
 
   {#if shown.length === 0}
@@ -150,6 +142,22 @@
         </div>
       {/each}
     </div>
+  {/if}
+
+  {#if entries.length}
+    <!-- not a setting: the one thing this list can be told to do -->
+    <Row
+      title="Clear dictation history"
+      description="Deletes every transcript kept on this machine, and the statistics with them."
+    >
+      {#snippet control()}
+        <Button
+          label={confirmingClear ? "Delete everything?" : "Clear"}
+          tone="danger"
+          onclick={clearAll}
+        />
+      {/snippet}
+    </Row>
   {/if}
 </Section>
 

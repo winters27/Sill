@@ -81,6 +81,7 @@
   sections, and "This machine" had none, which could only be learned by
   looking for it.
 -->
+<!-- indexed as "Clock", "World clock", "Weather", "This machine" -->
 {#each WIDGETS as widget (widget.id)}
   <Section
     label={widget.name}
@@ -135,9 +136,8 @@
         {/snippet}
       </Row>
     {:else if widget.id === "weather"}
-      <!-- not a setting: one pinned widget, drawn again for every other one -->
       <Row
-        title="Where"
+        title="Where the weather is for"
         description={place.name
           ? `Currently ${place.name}${place.region ? `, ${place.region}` : ""}.`
           : "Nothing set yet, so the weather widget has nowhere to report on."}

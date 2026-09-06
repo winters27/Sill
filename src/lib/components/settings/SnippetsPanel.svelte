@@ -501,13 +501,20 @@
       headline="No snippets yet"
       hint="One with a keyword expands wherever you type it; one without is still reachable from the launcher."
     />
+
+    <!-- not a setting: the one thing this list can be told to do -->
+    <Row
+      title="Add a snippet"
+      description="One with a keyword expands wherever you type it; one without is still reachable from the launcher."
+    >
+      {#snippet control()}
+        <Button label="New" onclick={() => edit(emptySnippet())} />
+      {/snippet}
+    </Row>
   {/if}
 </Section>
 
 {#if !editing}
-  <Section label="Add" bare>
-    <Button label="New snippet" onclick={() => edit(emptySnippet())} />
-  </Section>
 
   <Section
     label="Moving them around"

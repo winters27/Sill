@@ -255,6 +255,7 @@
         </p>
       {/if}
 
+      <!-- indexed as "Open with" -->
       <label class="field">
         <span>Open with</span>
         <input
@@ -326,13 +327,20 @@
       A good first one is your search engine, with the query placeholder where the words go:
       <code>{EXAMPLE}</code>
     </Instead>
+
+    <!-- not a setting: the one thing this list can be told to do -->
+    <Row
+      title="Add a quicklink"
+      description="A saved address that takes what you type and goes straight there."
+    >
+      {#snippet control()}
+        <Button label="New" onclick={() => edit(blankQuicklink())} />
+      {/snippet}
+    </Row>
   {/if}
 </Section>
 
 {#if !editing}
-  <Section label="Add" bare>
-    <Button label="New quicklink" onclick={() => edit(blankQuicklink())} />
-  </Section>
 
   <Section
     label="Moving them around"

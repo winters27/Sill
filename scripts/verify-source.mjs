@@ -5017,6 +5017,60 @@ if (tracked.status !== 0) {
 }
 
 /*
+ * Every indexed setting is drawn under the title the index gives it.
+ *
+ * The search box in the sidebar and the launcher's own results both come from
+ * `settings_index.rs`, and clicking one lands on the panel. If nothing on that
+ * panel is titled what the result said, the person is left hunting for their
+ * own words: twelve entries were like that, pointing at a button label, a
+ * `<span>`, a section that had been renamed, or a row that only exists inside
+ * a collapsed drawer.
+ *
+ * A title counts as drawn when a `<Row title="…">` or a `<Section label="…">`
+ * carries it literally. A row whose title is computed says which titles it
+ * stands for in a comment: `<!-- indexed as "Clock", "Weather" -->`, so the
+ * exemption is beside the row and reads as a claim rather than a loophole.
+ */
+{
+  const INDEX = "src-tauri/src/settings_index.rs";
+  const index = readFileSync(INDEX, "utf8");
+  const entries = [...index.matchAll(/s\(\s*"([a-z]+)",\s*"[^"]+",\s*"([^"]+)",/g)].map((m) => ({
+    panel: m[1],
+    title: m[2],
+    at: m.index,
+  }));
+
+  if (entries.length < 50) {
+    fail(INDEX, null, "fewer than fifty settings were read, so this is parsing rather than checking");
+  }
+
+  const drawn = new Set();
+  const surfaces = [SETTINGS_PAGE, ...sources("src/lib/components/settings")];
+  for (const file of surfaces) {
+    const text = readFileSync(file, "utf8");
+    for (const m of text.matchAll(/<Row\b[\s\S]{0,400}?\btitle="([^"]+)"/g)) drawn.add(m[1]);
+    for (const m of text.matchAll(/<Section\b[\s\S]{0,400}?\blabel="([^"]+)"/g)) drawn.add(m[1]);
+    for (const m of text.matchAll(/<!--\s*indexed as ((?:"[^"]+"[,\s]*)+)-->/g)) {
+      for (const one of m[1].matchAll(/"([^"]+)"/g)) drawn.add(one[1]);
+    }
+  }
+
+  if (drawn.size < 50) {
+    fail(SETTINGS_PAGE, null, "fewer than fifty row titles were read, so this is parsing rather than checking");
+  }
+
+  for (const entry of entries) {
+    if (drawn.has(entry.title)) continue;
+    fail(
+      INDEX,
+      lineOf(index, entry.at),
+      `"${entry.title}" is indexed for ${entry.panel} and nothing draws a row or section with ` +
+        "that title, so a search result lands somewhere the words are absent",
+    );
+  }
+}
+
+/*
  * The tray menu window is sized by hand and its contents are sized by tokens.
  *
  * `tauri.conf.json` gives the window a fixed height and the menu inside it is

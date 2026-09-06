@@ -191,58 +191,22 @@
   </Row>
 </Section>
 
-<Section label="Stored now" bare>
-  <div class="stored">
-    <div>
-      <span class="figure">{count.toLocaleString()}</span>
-      <span class="unit">{count === 1 ? "entry" : "entries"}</span>
-    </div>
-    <span class="spacer"></span>
-    {#if status}<span class="status">{status}</span>{/if}
-    <Button
-      label={confirming ? "Delete them all?" : "Clear history"}
-      tone="danger"
-      onclick={clearAll}
-    />
-  </div>
-  <p class="note">Pinned entries are kept.</p>
+<Section label="Stored now">
+  <!-- not a setting: the one thing this list can be told to do -->
+  <Row
+    title="Clear clipboard history"
+    description={status ||
+      `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"} stored. Pinned entries are kept.`}
+  >
+    {#snippet control()}
+      <Button
+        label={confirming ? "Delete them all?" : "Clear"}
+        tone="danger"
+        onclick={clearAll}
+      />
+    {/snippet}
+  </Row>
 </Section>
 
 <style>
-  .stored {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-4) var(--space-4);
-    border-radius: var(--radius-lg);
-    background: var(--fill-0);
-    box-shadow: var(--bevel-tile);
-  }
-
-  .figure {
-    font-size: var(--text-display);
-    font-weight: var(--weight-strong);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .unit {
-    margin-left: var(--space-1);
-    font-size: var(--text-meta);
-    color: var(--text-3);
-  }
-
-  .spacer {
-    flex: 1;
-  }
-
-  .status {
-    font-size: var(--text-meta);
-    color: var(--accent);
-  }
-
-  .note {
-    margin: var(--space-2) var(--space-half) 0;
-    font-size: var(--text-meta);
-    color: var(--text-3);
-  }
 </style>

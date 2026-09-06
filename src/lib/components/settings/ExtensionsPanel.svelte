@@ -218,7 +218,7 @@
 {/if}
 
 {#if installed.length === 0}
-  <Section label="Installed" bare>
+  <Section label="Installed extensions" bare>
     <Instead
       tone={standing({ failed: false, loading, count: installed.length })}
       inline
@@ -312,6 +312,7 @@
       the thing somebody comes here to do is turn one ON: they were told to,
       by a refusal they could not otherwise act on.
     -->
+    <!-- indexed as "What an extension is allowed to reach" -->
     {#each one.permissions as permission (permission.capability)}
       <Row title={permission.plainly}>
         {#snippet control()}
