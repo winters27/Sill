@@ -5185,6 +5185,78 @@ if (tracked.status !== 0) {
   }
 }
 
+/*
+ * Nothing committed imports something that was never committed.
+ *
+ * A file left untracked is present on the machine that wrote it, so the build
+ * runs, the tests pass and the gate goes green. It is absent everywhere else,
+ * and the first clean checkout stops at `Could not load .../Thing.svelte` with
+ * nothing downstream of it running.
+ *
+ * It has happened here: `src/routes/+page.svelte` and two chat components
+ * imported `chat/tally`, which was never added, and every push failed on a
+ * build that had succeeded locally.
+ *
+ * Resolution follows the bundler's: `$lib/` is `src/lib/`, a relative path is
+ * relative to the importer, and an extensionless path may be a `.ts`, a `.js`,
+ * a `.svelte` or a directory with an index. A bare specifier is a package and
+ * is not this check's business.
+ */
+{
+  const listed = spawnSync("git", ["ls-files", "-z"], { encoding: "utf8" });
+
+  // No git, no answer. A source tarball is a legitimate way to have this tree,
+  // and failing there would be reporting on the packaging rather than the code.
+  if (listed.status === 0 && listed.stdout) {
+    const tracked = new Set(
+      listed.stdout.split("\0").filter(Boolean).map((one) => one.split(sep).join("/")),
+    );
+
+    const ENDINGS = ["", ".ts", ".js", ".svelte", "/index.ts", "/index.js", "/index.svelte"];
+
+    for (const file of tracked) {
+      if (!/\.(svelte|ts|mjs|js)$/.test(file)) continue;
+      if (!existsSync(file)) continue;
+
+      const text = readFileSync(file, "utf8");
+      const from = file.split("/").slice(0, -1);
+
+      for (const hit of text.matchAll(/(?:from|import)\s+["']([^"']+)["']/g)) {
+        const spec = hit[1];
+
+        let target;
+        if (spec.startsWith("$lib/")) {
+          target = "src/lib/" + spec.slice("$lib/".length);
+        } else if (spec.startsWith("./") || spec.startsWith("../")) {
+          const parts = [...from];
+          for (const step of spec.split("/")) {
+            if (step === ".") continue;
+            else if (step === "..") parts.pop();
+            else parts.push(step);
+          }
+          target = parts.join("/");
+        } else {
+          continue;
+        }
+
+        // A path into a dependency is a dependency, not a missing source file.
+        if (target.includes("node_modules/")) continue;
+        if (ENDINGS.some((end) => tracked.has(target + end))) continue;
+
+        const onDisk = ENDINGS.map((end) => target + end).find((one) => existsSync(one));
+        fail(
+          file,
+          lineOf(text, hit.index),
+          onDisk
+            ? `imports "${spec}", and ${onDisk} is on this machine but not committed, ` +
+                "so this builds here and nowhere else"
+            : `imports "${spec}", which is neither committed nor on this machine`,
+        );
+      }
+    }
+  }
+}
+
 console.log(
   failures === 0 ? "source verification passed" : `\n${failures} problem(s) found`,
 );
