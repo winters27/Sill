@@ -10,7 +10,6 @@ each window with the backdrop around it. It scales the feature pictures to one
 width, cuts the logo out of the icon master, and lays out the social preview.
 """
 
-import math
 import sys
 from pathlib import Path
 
@@ -183,22 +182,6 @@ AI_WARM = (255, 146, 52)
 AI_COOL = (233, 78, 190)
 
 
-def _sparkle(draw: ImageDraw.ImageDraw, cx: float, cy: float, r: float, fill) -> None:
-    """A four-pointed star, drawn concave so it reads as a glint.
-
-    The waist is what makes it a sparkle rather than a diamond: points on the
-    axes at the full radius, and the corners between them pulled most of the
-    way back in.
-    """
-    waist = r * 0.26
-    points = []
-    for i in range(8):
-        reach = r if i % 2 == 0 else waist
-        angle = math.radians(i * 45)
-        points.append((cx + reach * math.sin(angle), cy - reach * math.cos(angle)))
-    draw.polygon(points, fill=fill)
-
-
 def _gradient_text(text: str, font_: ImageFont.FreeTypeFont) -> Image.Image:
     """The text as an image, its letters filled with the warm-to-cool wash."""
     box = font_.getbbox(text)
@@ -252,44 +235,40 @@ def social(mark: Image.Image) -> Image.Image:
     draw.text(((w - (hbox[2] - hbox[0])) / 2 - hbox[0], y - hbox[1]), headline[0], font=headline[1], fill=headline[2])
     y += (hbox[3] - hbox[1]) + 48
 
-    # The row underneath: three claims on one line, divided by hairlines. No
-    # fill and no border. A bordered pill reads as a button somebody forgot to
-    # make clickable, and this is a caption, not a control.
+    # The row underneath: three claims of two words each, divided by hairlines.
+    # No fill and no border, and no ornament: the wash on one word is the whole
+    # decoration, and it stays legible by being the only one.
     row_font = font(22, "regular")
-    ai_font = font(27)
+    ai_font = font(24)
     dim = (150, 156, 167)
 
-    lead_glint, trail_glint, after_ai = 21, 15, 9
-    ai_w = int(draw.textlength("AI", font=ai_font))
+    lead = "Local "
+    lead_w = int(draw.textlength(lead, font=row_font))
+    ai_w = _gradient_text("AI", ai_font).width
     items = [
         ("Built in Rust", int(draw.textlength("Built in Rust", font=row_font))),
-        ("AI", lead_glint + ai_w + trail_glint + after_ai
-              + int(draw.textlength("on your machine", font=row_font))),
+        ("AI", lead_w + ai_w),
         ("Open source", int(draw.textlength("Open source", font=row_font))),
     ]
 
     rule = 34
-    total = sum(w for _, w in items) + rule * (len(items) - 1)
-    x = (w - total) // 2
+    x = (w - (sum(width for _, width in items) + rule * (len(items) - 1))) // 2
     mid = y + 22
-
     box = row_font.getbbox("Hg")
     baseline = mid - (box[3] - box[1]) // 2 - box[1]
 
     for i, (kind, width) in enumerate(items):
         if kind == "AI":
-            _sparkle(draw, x + 8, mid + 1, 8.5, AI_WARM)
+            draw.text((x, baseline), lead, font=row_font, fill=dim)
+            # `_gradient_text` returns the ink alone, so it sits on the row's
+            # baseline by being offset the way the glyphs would have been.
             letters = _gradient_text("AI", ai_font)
-            lx = x + lead_glint
-            card.paste(letters, (lx, mid - letters.height // 2), letters)
-            _sparkle(draw, lx + letters.width + 6, mid - 12, 5, AI_COOL)
-            draw.text((lx + letters.width + trail_glint + after_ai, baseline),
-                      "on your machine", font=row_font, fill=dim)
+            card.paste(letters, (x + lead_w, baseline + ai_font.getbbox("AI")[1]), letters)
         else:
             draw.text((x, baseline), kind, font=row_font, fill=dim)
         x += width
         if i < len(items) - 1:
-            # A hairline, the same one every separator in the launcher is.
+            # The same 1px rule the launcher separates things with.
             draw.line([(x + rule // 2, mid - 7), (x + rule // 2, mid + 7)], fill=(68, 66, 78), width=1)
             x += rule
 
