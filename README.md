@@ -162,11 +162,13 @@ licensed.
     <td width="50%" valign="top">
       <img src="docs/media/themes.png" alt="Seven themes in Settings">
       <p><b>Glass, seven ways.</b> The window is transparent and the desktop
-      shows through it. Themes change the tint and the accent and nothing
-      else, so every one of them is as readable as the last. Snippets,
-      quicklinks, web search, reminders, workspaces, screenshots with a markup
-      editor, text read off the screen, and text read aloud are all in there
-      too.</p>
+      shows through it. Themes change the tint and the accent and nothing else,
+      so every one of them is as readable as the last. The strip along the
+      bottom of every picture on this page is yours as well: pin a clock, a
+      second time zone, the weather, or this machine's own processor, memory
+      and temperature to it. Snippets, quicklinks, web search, reminders,
+      workspaces, screenshots with a markup editor, and text read off the
+      screen or aloud are in there too.</p>
     </td>
     <td width="50%" valign="top">
       <img src="docs/media/permission.png"
