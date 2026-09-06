@@ -242,6 +242,8 @@ export interface PermissionState {
 export interface InstalledExtension {
   extension: string;
   title: string;
+  /** The picture beside its bundle, when the manifest named one. */
+  icon: string | null;
   commands: InstalledCommand[];
   /** `store`, `folder`, or empty when nothing recorded it. */
   source: string;

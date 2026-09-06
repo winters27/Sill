@@ -1320,6 +1320,50 @@ else if (Number(css[1]) !== Number(rust[1])) {
 }
 
 /*
+ * Every mode a row can carry is in the window's `RankedCommand["mode"]` union.
+ *
+ * The check above holds every mode to a heading. This holds every mode to the
+ * type, because `kindOf` in RootList is an exhaustive switch whose `default`
+ * takes `never`: the compiler names a mode nobody labelled, but only for modes
+ * the union knows about. Saved arrangements have been rows since the profiles
+ * store existed and the union never named them, so every one wore the raw word
+ * `workspace` on its right edge and nothing said so.
+ */
+{
+  const COMMANDS = "src/lib/exthost/commands.ts";
+  const source = readFileSync(COMMANDS, "utf8");
+  const start = source.indexOf("interface RankedCommand");
+  const union = source.slice(source.indexOf("mode:", start), source.indexOf("entrypoint:", start));
+  const known = new Set([...union.matchAll(/"([a-z][a-z-]*)"/g)].map((m) => m[1]));
+
+  if (known.size < 20) {
+    fail(COMMANDS, null, "fewer than twenty modes were read from RankedCommand, so this is parsing rather than checking");
+  }
+
+  const BUILDERS = [
+    "src/lib/exthost/commands.ts",
+    "src/lib/results.ts",
+    "src/lib/conversations.ts",
+    "src/routes/+page.svelte",
+  ];
+
+  for (const file of [...sources("src-tauri/src"), ...BUILDERS.filter((one) => existsSync(one))]) {
+    const text = readFileSync(file, "utf8");
+
+    for (const found of text.matchAll(/\bmode:\s*"([a-z][a-z-]*)"/g)) {
+      if (known.has(found[1])) continue;
+
+      fail(
+        file,
+        lineOf(text, found.index),
+        `mode "${found[1]}" is not in RankedCommand["mode"] in ${COMMANDS}, so kindOf's ` +
+          "exhaustive switch cannot see it and the row wears the raw word",
+      );
+    }
+  }
+}
+
+/*
  * Private mode is not a check anybody has to remember.
  *
  * Two things it stops are enforced by the compiler already: a screen capture
@@ -5011,6 +5055,43 @@ if (tracked.status !== 0) {
           "first thing to clip; give it at least eight pixels of slack",
       );
     }
+  }
+}
+
+/*
+ * Every `mark:<name>` a row builder names is a mark SettingsIcon can draw.
+ *
+ * A row with no file and no panel wears one of Sill's own marks by naming it
+ * in `icon`. The name is a string in Rust and a string in the window, and a
+ * misspelling would take the `<img>` path for a name with no art, which is a
+ * broken image on every row of that kind. The set is the same `PANEL_ICONS`
+ * the panel check above reads, so a mark added there is drawable here.
+ */
+{
+  const ICON = "src/lib/components/SettingsIcon.svelte";
+  const icon = readFileSync(ICON, "utf8");
+  const names = new Set(
+    [
+      ...(icon.match(/PANEL_ICONS = \[([\s\S]*?)\] as const/)?.[1] ?? "").matchAll(/"([a-z-]+)"/g),
+    ].map((m) => m[1]),
+  );
+
+  let seen = 0;
+  for (const file of [...sources("src-tauri/src"), ...sources("src/lib")]) {
+    const text = readFileSync(file, "utf8");
+    for (const found of text.matchAll(/"mark:([a-z-]+)"/g)) {
+      seen += 1;
+      if (names.has(found[1])) continue;
+      fail(
+        file,
+        lineOf(text, found.index),
+        `names the mark "${found[1]}", which PANEL_ICONS in ${ICON} does not draw`,
+      );
+    }
+  }
+
+  if (seen === 0) {
+    fail(ICON, null, "no `mark:` literal was found anywhere, so this is parsing rather than checking");
   }
 }
 

@@ -1459,6 +1459,106 @@ pub fn audio_session_record(session: &crate::app_volume::Session) -> CommandReco
     }
 }
 
+/// What a script's `@raycast.icon` header amounts to, as something the row can
+/// wear.
+///
+/// The header is free text and three kinds of thing get written in it. An
+/// emoji is kept as it is: the row draws a character. A file name or a path
+/// is resolved beside the script, the way an extension's icon is resolved
+/// beside its bundle, and a path that climbs out of that folder is refused for
+/// the same reason. A Raycast icon name (`Icon.Terminal`, `terminal-16`) is
+/// dropped, because the launcher has no picture for it in this context and
+/// the scripts panel mark says more than a letter would.
+///
+/// `None` means "wear the scripts panel's mark". The raw header used to be
+/// handed to the shell as a file path, which failed for all three kinds and
+/// left a script that declared an icon with a worse mark than one that did
+/// not.
+fn script_mark(header: Option<&str>, script: &std::path::Path) -> Option<String> {
+    let named = header.map(str::trim).filter(|named| !named.is_empty())?;
+
+    // The rule the extension host uses for an icon prop: one or two code
+    // points that are not a word is a character to print.
+    let is_glyph = named.chars().count() <= 2
+        && !named
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if is_glyph {
+        return Some(named.to_string());
+    }
+
+    let lower = named.to_ascii_lowercase();
+    let looks_like_a_picture = [".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico"]
+        .iter()
+        .any(|ext| lower.ends_with(ext));
+    if !looks_like_a_picture {
+        return None;
+    }
+
+    let relative = std::path::Path::new(named);
+    if !relative
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+
+    // Forward slashes, as every other path the window reads back is written.
+    Some(
+        script
+            .parent()?
+            .join(relative)
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/"),
+    )
+}
+
+#[cfg(test)]
+mod script_marks {
+    use super::script_mark;
+    use std::path::Path;
+
+    const SCRIPT: &str = "C:/scripts/deploy.sh";
+
+    #[test]
+    fn no_header_means_the_panel_mark() {
+        assert_eq!(script_mark(None, Path::new(SCRIPT)), None);
+        assert_eq!(script_mark(Some("  "), Path::new(SCRIPT)), None);
+    }
+
+    #[test]
+    fn an_emoji_is_kept_as_the_character() {
+        assert_eq!(script_mark(Some("👋"), Path::new(SCRIPT)).as_deref(), Some("👋"));
+        // A flag is two code points and one character.
+        assert_eq!(script_mark(Some("🇬🇧"), Path::new(SCRIPT)).as_deref(), Some("🇬🇧"));
+    }
+
+    #[test]
+    fn a_picture_is_resolved_beside_the_script() {
+        assert_eq!(
+            script_mark(Some("icon.png"), Path::new(SCRIPT)).as_deref(),
+            Some("C:/scripts/icon.png")
+        );
+        assert_eq!(
+            script_mark(Some("assets/deploy.svg"), Path::new(SCRIPT)).as_deref(),
+            Some("C:/scripts/assets/deploy.svg")
+        );
+    }
+
+    #[test]
+    fn a_raycast_icon_name_falls_back_to_the_panel() {
+        assert_eq!(script_mark(Some("Icon.Terminal"), Path::new(SCRIPT)), None);
+        assert_eq!(script_mark(Some("terminal-16"), Path::new(SCRIPT)), None);
+    }
+
+    #[test]
+    fn a_path_that_climbs_out_of_the_folder_is_refused() {
+        assert_eq!(script_mark(Some("../secret.png"), Path::new(SCRIPT)), None);
+        assert_eq!(script_mark(Some("/etc/x.png"), Path::new(SCRIPT)), None);
+        assert_eq!(script_mark(Some("C:/x.png"), Path::new(SCRIPT)), None);
+    }
+}
+
 /// A script command, shaped as a command like everything else.
 ///
 /// The package name is the subtitle when there is one, because a folder of
@@ -1466,6 +1566,7 @@ pub fn audio_session_record(session: &crate::app_volume::Session) -> CommandReco
 /// scripts called "Deploy" apart.
 pub fn script_record(script: &crate::scripts::Script) -> CommandRecord {
     let id = script.path.to_string_lossy().to_string();
+    let script_icon = script_mark(script.icon.as_deref(), &script.path);
 
     CommandRecord {
         id: format!("script:{id}"),
@@ -1497,9 +1598,9 @@ pub fn script_record(script: &crate::scripts::Script) -> CommandRecord {
         // One or the other, never both. A row that carries an icon and a
         // panel leaves the launcher guessing which mark to wear, and a script
         // that named an emoji in its header meant that one.
-        icon: script.icon.clone(),
+        icon: script_icon.clone(),
         toggle: None,
-        panel: script.icon.is_none().then(|| "scripts".to_string()),
+        panel: script_icon.is_none().then(|| "scripts".to_string()),
         preferences: serde_json::Value::Null,
         manifest: None,
     }
@@ -1655,9 +1756,10 @@ pub fn conversation_record(id: &str, title: &str, said: &str) -> CommandRecord {
 /// this, and it is what puts the row among the strong matches rather than
 /// below the weak ones.
 ///
-/// No icon. The only thing naming the player is an app user model id, which is
-/// not a file the shell can be asked to draw, so the row wears the lettered
-/// tile every row without an icon wears rather than a wrong one.
+/// No file to draw. The only thing naming the player is an app user model id,
+/// which is not a file the shell can be asked to draw, so the row wears
+/// Sill's own mark for what is playing rather than a lettered tile or a
+/// borrowed program.
 pub fn now_playing_record(now: &crate::media::NowPlaying) -> RankedCommand {
     RankedCommand {
         class: MatchClass::ExactTitle,
@@ -1681,7 +1783,7 @@ pub fn now_playing_record(now: &crate::media::NowPlaying) -> RankedCommand {
             // carried to say what was on screen rather than to find anything.
             entrypoint: now.source.clone(),
             keywords: Vec::new(),
-            icon: None,
+            icon: Some("mark:media".to_string()),
             toggle: None,
             panel: None,
             preferences: serde_json::Value::Null,
@@ -1753,11 +1855,11 @@ pub fn jumplist_record(one: &crate::jumplists::Recent) -> RankedCommand {
 /// it back through `terminals::profile_from`, and the pair is round-tripped by
 /// a test so a row cannot be built one way and read another.
 ///
-/// No icon, and it was looked for. What is on `%PATH%` as `wt.exe` is a
-/// **zero-byte execution alias** with nothing in it to draw, and the program it
-/// stands for lives under `WindowsApps`, which Windows does not let a program
-/// read. So these rows wear the lettered tile every row without an icon wears,
-/// rather than something borrowed from a different program.
+/// No file to draw, and it was looked for. What is on `%PATH%` as `wt.exe` is
+/// a **zero-byte execution alias** with nothing in it to draw, and the program
+/// it stands for lives under `WindowsApps`, which Windows does not let a
+/// program read. So these rows wear Sill's own mark for a terminal, rather
+/// than a lettered tile or something borrowed from a different program.
 pub fn terminal_record(profile: &crate::terminals::Profile) -> RankedCommand {
     RankedCommand {
         // Not found by matching: the query was one of the words that ask for
@@ -1781,7 +1883,7 @@ pub fn terminal_record(profile: &crate::terminals::Profile) -> RankedCommand {
             mode: "terminal-profile".to_string(),
             entrypoint: crate::terminals::target_of(profile).to_string(),
             keywords: Vec::new(),
-            icon: None,
+            icon: Some("mark:terminals".to_string()),
             toggle: None,
             panel: None,
             preferences: serde_json::Value::Null,
@@ -1814,7 +1916,7 @@ pub fn note_record(note: &crate::notes::Note) -> RankedCommand {
             mode: "note".to_string(),
             entrypoint: note.id.clone(),
             keywords: Vec::new(),
-            icon: None,
+            icon: Some("mark:notes".to_string()),
             toggle: None,
             panel: None,
             preferences: serde_json::Value::Null,
@@ -1845,7 +1947,7 @@ pub fn new_note_record() -> RankedCommand {
             mode: "note".to_string(),
             entrypoint: String::new(),
             keywords: Vec::new(),
-            icon: None,
+            icon: Some("mark:notes".to_string()),
             toggle: None,
             panel: None,
             preferences: serde_json::Value::Null,
@@ -1884,7 +1986,7 @@ pub fn reminder_record(
             mode: "reminder".to_string(),
             entrypoint: query.trim().to_string(),
             keywords: Vec::new(),
-            icon: None,
+            icon: Some("mark:reminders".to_string()),
             toggle: None,
             panel: None,
             preferences: serde_json::Value::Null,
@@ -2035,7 +2137,7 @@ pub fn font_record(name: &str) -> RankedCommand {
             mode: "font".to_string(),
             entrypoint: name.to_string(),
             keywords: Vec::new(),
-            icon: None,
+            icon: Some("mark:fonts".to_string()),
             toggle: None,
             panel: None,
             preferences: serde_json::Value::Null,
@@ -2068,7 +2170,7 @@ pub fn display_mode_record(mode: &crate::displays::Mode) -> RankedCommand {
             mode: "display-mode".to_string(),
             entrypoint: crate::displays::target_of(mode),
             keywords: Vec::new(),
-            icon: None,
+            icon: Some("mark:displays".to_string()),
             toggle: None,
             panel: None,
             preferences: serde_json::Value::Null,
@@ -2118,7 +2220,12 @@ pub fn load_index(path: &Path) -> Vec<CommandRecord> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    serde_json::from_str(&text).unwrap_or_default()
+    let mut records: Vec<CommandRecord> = serde_json::from_str(&text).unwrap_or_default();
+    // An index written by an earlier build left `panel` empty on a command
+    // with no picture. Dressed on the way in, so what was installed last
+    // month wears the same mark as what is installed today.
+    crate::extension_install::dress_old_index(&mut records);
+    records
 }
 
 // ---------------------------------------------------------------- matching

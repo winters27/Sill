@@ -145,6 +145,9 @@ export function fileSearchRow(why: FileSearchMissing): RankedCommand {
     subtitle: said.subtitle,
     mode: "file-setup",
     entrypoint: "",
+    // Sill's own row, about the Files panel, so it wears that panel's mark
+    // the way the panel's settings do rather than a lettered "R".
+    panel: "files",
     matched: [],
   };
 }

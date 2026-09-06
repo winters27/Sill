@@ -104,9 +104,12 @@ function readable(src: string): string {
  * print. Counted with the spread, so a flag or a family emoji made of several
  * code units is one character rather than four.
  */
-function printable(value: string): boolean {
+export function isGlyph(value: string): boolean {
   return [...value].length <= 2 && !/^[A-Za-z0-9._-]+$/.test(value);
 }
+
+/** The name this rule went by inside this file. */
+const printable = isGlyph;
 
 /**
  * Reads whatever an extension put in an `icon` prop.

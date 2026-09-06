@@ -32,6 +32,7 @@
   import TextField from "./TextField.svelte";
   import Instead from "../Instead.svelte";
   import ExtensionCosts from "./ExtensionCosts.svelte";
+  import LaunchIcon from "../LaunchIcon.svelte";
   import { standing } from "$lib/instead";
   import type { CostRow } from "$lib/costs";
   import {
@@ -236,6 +237,11 @@
       one,
     )} · {held(one)} of {one.permissions.length} permissions"
   >
+    {#snippet icon()}
+      <!-- The same picture its rows wear in the launcher, so what is
+           installed is recognisable here and not only by name. -->
+      <LaunchIcon path={one.icon ?? ""} label={one.title} resolvable={Boolean(one.icon)} />
+    {/snippet}
     <!--
       The commands, so this answers "what did installing this actually add"
       without going to the launcher and typing a guess.
@@ -245,7 +251,7 @@
         title={command.title}
         description={command.runnable
           ? command.subtitle
-          : `${command.mode}, which Sill has nowhere to run`}
+          : `A ${command.mode} command, which Sill has nowhere to run`}
       />
     {/each}
 

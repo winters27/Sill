@@ -10,6 +10,7 @@ import { orElse, silently } from "$lib/status";
 import type { Painted } from "$lib/latency";
 // The one shape a chord is written in, shared with the matcher that reads it.
 import type { Shortcut } from "./actions";
+import { isGlyph } from "./present";
 
 export interface RankedCommand {
   id: string;
@@ -194,9 +195,30 @@ export interface RankedCommand {
     /** An installed font, built when `font` is typed. Enter copies its name. */
     | "font"
     /** A mode a display can be set to, built when `resolution` is typed. */
-    | "display-mode";
+    | "display-mode"
+    /**
+     * A saved arrangement of windows, put back where they were.
+     *
+     * Rust has produced these since the profiles store existed; the union did
+     * not name them, so `kindOf`'s exhaustive switch could not see them and
+     * every arrangement wore the raw word `workspace` on its right edge.
+     */
+    | "workspace"
+    /**
+     * The last picture copied, as the one row a universal key can act on.
+     *
+     * Never from the index: a binding whose source is the clipboard image
+     * builds it and opens the action panel on it.
+     */
+    | "clipboard";
   entrypoint: string;
-  /** A file to take an icon from, when it differs from the launch target. */
+  /**
+   * What the row wears on the left, when it is not the launch target.
+   *
+   * A file to take an icon from, or `mark:<name>` for one of Sill's own
+   * marks, drawn by `SettingsIcon`, for a kind of row that has no file and no
+   * settings panel to inherit from: an arrangement, a note, a font.
+   */
   icon?: string | null;
   /**
    * The settings panel this belongs to, for anything Sill owns.
@@ -1003,7 +1025,14 @@ const iconCache = new Map<string, Held>();
  * lettered tile on the first frame rather than after a refusal.
  */
 export function hasShellIcon(path: string, resolvable: boolean): boolean {
-  return resolvable && Boolean(path) && !path.startsWith("shell:AppsFolder");
+  return (
+    resolvable &&
+    Boolean(path) &&
+    !path.startsWith("shell:AppsFolder") &&
+    // One of Sill's own marks, or a character to print: neither is a file.
+    !path.startsWith("mark:") &&
+    !isGlyph(path)
+  );
 }
 
 export function knownIcon(path: string): { uri: string | null } | undefined {
@@ -1362,7 +1391,9 @@ export function webSearchRow(query: string, browser?: string): RankedCommand {
     subtitle: "",
     mode: "websearch",
     entrypoint: query,
-    icon: browser,
+    // With no default browser to name, the search mark: otherwise the row
+    // was handed the typed words as a path and lettered itself "S".
+    icon: browser ?? "mark:websearch",
     matched: [],
   };
 }
@@ -1387,7 +1418,7 @@ export function urlRow(address: string, browser?: string): RankedCommand {
     subtitle: "",
     mode: "url",
     entrypoint: address,
-    icon: browser,
+    icon: browser ?? "mark:browsers",
     matched: [],
   };
 }

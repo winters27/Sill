@@ -20,15 +20,50 @@ import * as sill from "../sill";
 const INTEROP_KEYS = new Set(["__esModule", "default", "then", "module.exports"]);
 
 /**
- * Unimplemented APIs throw on access rather than reading as `undefined`.
- * Undefined propagates silently and surfaces as a confusing failure much later;
- * a throw names the missing symbol at the moment it is touched.
+ * Parts of the surface Sill is not going to cover, and why.
+ *
+ * Separate from the rest, which is "not yet". An extension reaching one of
+ * these has met a decision rather than a gap, and asking somebody to report it
+ * spends their time on a bug that will be closed as working as intended.
+ *
+ * `OAuth` is here because the useful half of it is not ours to build. The
+ * extensions that want it authorise against `linear.oauth.raycast.com` and its
+ * siblings, which is a proxy Raycast runs and which holds the client secret,
+ * and `RedirectMethod.Web` requires the provider's OAuth app to name
+ * `raycast.com/redirect`. A faithful `PKCEClient` here would still be handed
+ * nothing.
+ */
+const DECLINED: Record<string, string> = {
+  OAuth:
+    "Extensions that use it authorise through Raycast's own servers, which " +
+    "issue tokens to Raycast and to nothing else, so there is no version of " +
+    "this Sill can implement on its own. Extensions that take a key you paste " +
+    "in are unaffected.",
+};
+
+/**
+ * A missing API throws on access rather than reading as `undefined`.
+ *
+ * Undefined propagates silently and surfaces as a confusing failure much
+ * later; a throw names the missing symbol at the moment it is touched.
+ *
+ * **The first line is the whole message the launcher shows.** `headline` in
+ * `src-tauri/src/exthost/mod.rs` takes the first non-empty line of a crash and
+ * draws that in the chin, so the sentence somebody reads has to fit on one
+ * line and mean something alone. Everything after it is for the log, which is
+ * where there is room for a reason.
  */
 function unsupported(name: string): never {
+  const decided = DECLINED[name];
+
   throw new Error(
-    `sill: "${name}" is not implemented yet. ` +
-      `It is part of the Raycast API surface Sill has not covered. ` +
-      `Please report which extension needed it.`,
+    decided
+      ? `sill: "${name}" is not supported.
+${decided}`
+      : `sill: "${name}" is not implemented yet.
+` +
+          `It is part of the Raycast API surface Sill has not covered. ` +
+          `Please report which extension needed it.`,
   );
 }
 

@@ -6,6 +6,7 @@
   import { rootEmpty, standing } from "$lib/instead";
   import LaunchIcon from "./LaunchIcon.svelte";
   import SettingsIcon, { type IconName } from "./SettingsIcon.svelte";
+  import { isGlyph } from "$lib/exthost/present";
 
   interface Props {
     commands: RankedCommand[];
@@ -270,8 +271,9 @@
       command.mode === "exe" ||
       command.mode === "setting" ||
       command.mode === "file" ||
-      // A folder offered as somewhere to move something. Real on disk, and
-      // the shell draws it as a folder.
+      // A folder, whether highlighted in Explorer or offered as somewhere to
+      // move something. Real on disk, and the shell draws it as a folder.
+      command.mode === "folder" ||
       command.mode === "destination"
     );
   }
@@ -378,6 +380,14 @@
         return "Font";
       case "display-mode":
         return "Display Mode";
+      // One saved arrangement. Singular, like a process: the heading says
+      // "Arrangements".
+      case "workspace":
+        return "Arrangement";
+      // The last picture copied, reached through a key rather than the
+      // history, so the row says what it is rather than where it came from.
+      case "clipboard":
+        return "Picture";
       // Something in the store, which is not installed and so is not yet a
       // command. Saying "Extension" would claim it was.
       case "store-listing":
@@ -506,10 +516,11 @@
     const measured = live?.[command.id];
     if (measured) return measured;
 
-    // An extension is worth naming, and it is not in the subtitle.
-    if (command.mode === "view" || command.mode === "no-view") {
-      return command.extensionTitle;
-    }
+    // An extension command's subtitle already names its extension: Rust
+    // defaults it to the extension's title when the manifest declares none
+    // (`extension_install::record_for`). This used to overwrite it here, so
+    // the one case that changed anything was an extension that had written a
+    // subtitle, which then never showed.
 
     // The subtitle is the character itself, drawn as the mark on the left.
     // Writing it here as well would put the emoji on the row twice.
@@ -576,6 +587,17 @@
           <!-- A lettered tile would show the first digit of the result,
                which means nothing. -->
           <span class="equals" aria-hidden="true">=</span>
+        {:else if command.icon?.startsWith("mark:")}
+          <!-- A kind of row with no file and no panel wears one of Sill's own
+               marks, named by whatever built the row: an arrangement, a note,
+               a font. The set is the settings icon set, so the gallery and the
+               guards that hold it together cover these too. -->
+          <SettingsIcon name={command.icon.slice(5) as IconName} size={26} />
+        {:else if command.icon && isGlyph(command.icon)}
+          <!-- A character rather than a file, which is what a script's
+               `@raycast.icon 👋` header is. Drawn the way an emoji row draws
+               its own character. -->
+          <span class="emoji" aria-hidden="true">{command.icon}</span>
         {:else if command.panel}
           <!-- Anything Sill owns wears its panel's mark, so a setting and the
                command that opens it are recognisably the same family. -->

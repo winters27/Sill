@@ -6,10 +6,12 @@
     description?: string;
     /** Rows lay themselves out; use for controls that are not settings rows. */
     bare?: boolean;
+    /** A mark beside the label, for a section that is about one thing with a picture. */
+    icon?: Snippet;
     children: Snippet;
   }
 
-  let { label, description, bare = false, children }: Props = $props();
+  let { label, description, bare = false, icon, children }: Props = $props();
 </script>
 
 <!--
@@ -21,8 +23,11 @@
 -->
 <section>
   <div class="head">
-    <h3>{label}</h3>
-    {#if description}<p>{description}</p>{/if}
+    {#if icon}<span class="mark">{@render icon()}</span>{/if}
+    <div class="words">
+      <h3>{label}</h3>
+      {#if description}<p>{description}</p>{/if}
+    </div>
   </div>
 
   {#if bare}
@@ -38,7 +43,20 @@
   }
 
   .head {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
     padding: 0 var(--space-half) var(--space-2);
+  }
+
+  .words {
+    min-width: 0;
+  }
+
+  .mark {
+    flex: none;
+    display: grid;
+    place-items: center;
   }
 
   /*

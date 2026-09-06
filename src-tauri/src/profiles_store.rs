@@ -89,7 +89,9 @@ pub fn records(file: &Path) -> Vec<crate::registry::CommandRecord> {
                     "arrange".to_string(),
                     "restore".to_string(),
                 ],
-                icon: None,
+                // No file and no panel: an arrangement is its own kind of
+                // thing, so it wears Sill's mark for one.
+                icon: Some("mark:arrangements".to_string()),
                 toggle: None,
                 panel: None,
                 preferences: serde_json::Value::Null,

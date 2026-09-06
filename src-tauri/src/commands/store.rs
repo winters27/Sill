@@ -381,6 +381,9 @@ pub(crate) struct PermissionState {
 pub(crate) struct Installed {
     pub extension: String,
     pub title: String,
+    /// The picture beside its bundle, when the manifest named one: the same
+    /// file the launcher row draws, so the settings panel can wear it too.
+    pub icon: Option<String>,
     pub commands: Vec<InstalledCommand>,
     /// `store`, `folder`, or empty when nothing recorded it.
     pub source: String,
@@ -411,6 +414,9 @@ pub(crate) async fn installed_extensions(
     let mut order: Vec<String> = Vec::new();
     let mut by_extension: std::collections::HashMap<String, Vec<InstalledCommand>> =
         std::collections::HashMap::new();
+    // The first command's picture stands for the extension; a manifest's own
+    // icon reaches every command, so for most this is that.
+    let mut icons: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     for record in index {
         // Only what a host would run. The same test `diagnostics` uses, so the
@@ -423,6 +429,10 @@ pub(crate) async fn installed_extensions(
 
         if !by_extension.contains_key(&record.extension) {
             order.push(record.extension.clone());
+        }
+
+        if let Some(icon) = record.icon.as_ref() {
+            icons.entry(record.extension.clone()).or_insert_with(|| icon.clone());
         }
 
         by_extension
@@ -450,6 +460,7 @@ pub(crate) async fn installed_extensions(
                     .as_ref()
                     .map(|_| extension.clone())
                     .unwrap_or_else(|| extension.clone()),
+                icon: icons.remove(&extension),
                 commands: by_extension.remove(&extension).unwrap_or_default(),
                 source: origin
                     .as_ref()

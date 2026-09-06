@@ -412,6 +412,12 @@ fn image_file(path: &str) -> Option<String> {
         "image/jpeg"
     } else if lower.ends_with(".gif") {
         "image/gif"
+    } else if lower.ends_with(".svg") {
+        // Common in Raycast extensions. Without this branch a real `.svg` on
+        // disk fell through to the shell, which answered with whatever
+        // program opens SVGs here, so the row wore a browser's icon and
+        // nothing downstream could tell that from a right answer.
+        "image/svg+xml"
     } else {
         return None;
     };

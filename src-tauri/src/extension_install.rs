@@ -475,6 +475,29 @@ fn icon_beside(
     )
 }
 
+/// The panel mark an extension command wears when it has no picture of its own.
+///
+/// Also applied when records are read back, because the index on disk was
+/// written by earlier builds that left `panel` empty; see `merged_index`'s
+/// caller.
+pub fn extensions_mark(has_no_icon: bool) -> Option<String> {
+    has_no_icon.then(|| "extensions".to_string())
+}
+
+/// Gives records from an older index the mark `record_for` now writes.
+///
+/// Only extension commands, only when they carry neither a picture nor a
+/// panel already: everything else in the index is left exactly as written.
+pub fn dress_old_index(records: &mut [CommandRecord]) {
+    for record in records {
+        let is_extension_command =
+            crate::exthost::CommandMode::from_manifest(&record.mode).is_some();
+        if is_extension_command && record.icon.is_none() && record.panel.is_none() {
+            record.panel = extensions_mark(true);
+        }
+    }
+}
+
 pub fn record_for(
     manifest: &Manifest,
     command: &ManifestCommand,
@@ -502,7 +525,11 @@ pub fn record_for(
         keywords: command.keywords.clone(),
         icon: icon_beside(entrypoint, manifest, command),
         toggle: None,
-        panel: None,
+        // A command whose manifest names no picture wears the Extensions
+        // panel's mark, so it still says where it came from. `panel` on an
+        // extension row is only ever read for the icon: its entrypoint is
+        // the bundle, so nothing deep-links to the panel.
+        panel: extensions_mark(icon_beside(entrypoint, manifest, command).is_none()),
         preferences: default_preferences(manifest, command),
         manifest: Some(Box::new(crate::registry::Declared {
             preferences: declared_preferences(manifest, command),
@@ -1258,6 +1285,55 @@ mod tests {
             manifest(r#"{ "name": "demo", "commands": [{ "name": "run", "mode": "view" }] }"#);
 
         assert!(record_for(&parsed, &parsed.commands[0], Path::new("ext/demo/run.js")).icon.is_none());
+    }
+
+    /// A row with nothing to draw still has to say it came from an extension.
+    #[test]
+    fn an_extension_that_names_no_picture_wears_the_extensions_mark() {
+        let parsed =
+            manifest(r#"{ "name": "demo", "commands": [{ "name": "run", "mode": "view" }] }"#);
+        let record = record_for(&parsed, &parsed.commands[0], Path::new("ext/demo/run.js"));
+
+        assert_eq!(record.panel.as_deref(), Some("extensions"));
+    }
+
+    /// An index written before the mark existed is dressed on the way in,
+    /// and nothing else in it is touched.
+    #[test]
+    fn an_old_index_is_given_the_mark_and_nothing_else_changes() {
+        let parsed =
+            manifest(r#"{ "name": "demo", "commands": [{ "name": "run", "mode": "view" }] }"#);
+        let mut old = record_for(&parsed, &parsed.commands[0], Path::new("ext/demo/run.js"));
+        old.panel = None;
+
+        let mut pictured = record_for(&parsed, &parsed.commands[0], Path::new("ext/demo/run.js"));
+        pictured.panel = None;
+        pictured.icon = Some("ext/demo/assets/icon.png".to_string());
+
+        let mut not_a_command = record_for(&parsed, &parsed.commands[0], Path::new("ext/demo/run.js"));
+        not_a_command.panel = None;
+        not_a_command.mode = "app".to_string();
+
+        let mut records = vec![old, pictured, not_a_command];
+        dress_old_index(&mut records);
+
+        assert_eq!(records[0].panel.as_deref(), Some("extensions"));
+        assert!(records[1].panel.is_none(), "a pictured command keeps its picture alone");
+        assert!(records[2].panel.is_none(), "only extension commands are dressed");
+    }
+
+    /// And one with a picture wears the picture alone: a row carrying both
+    /// leaves the launcher guessing which to draw.
+    #[test]
+    fn an_extension_with_a_picture_wears_no_panel_mark() {
+        let parsed = manifest(
+            r#"{ "name": "demo", "icon": "icon.png",
+                 "commands": [{ "name": "run", "mode": "view" }] }"#,
+        );
+        let record = record_for(&parsed, &parsed.commands[0], Path::new("ext/demo/run.js"));
+
+        assert!(record.icon.is_some());
+        assert!(record.panel.is_none());
     }
 
     /// A manifest is somebody else's file, and this value reaches a loader

@@ -30,6 +30,22 @@
     "scripts",
     "advanced",
     "about",
+    /*
+     * Row marks: kinds of launcher row that have no file to take an icon from
+     * and no settings panel to inherit one. Rust names one with
+     * `icon: "mark:<name>"` and the row draws it from here, so the gallery
+     * shows it and the guards that hold panels to glyphs hold these too.
+     * Hairline glyphs until art is drawn for them; see `ART`.
+     */
+    "arrangements",
+    "notes",
+    "reminders",
+    "fonts",
+    "displays",
+    "terminals",
+    "media",
+    "text",
+    "picture",
   ] as const;
 
   export type IconName = (typeof PANEL_ICONS)[number];
@@ -42,10 +58,11 @@
    *
    * ## Two kinds, and this is not a transition
    *
-   * All twenty panels have art. The three names that are not panels
-   * (`history`, `browsers`, `websearch`) are drawn here instead, so both
-   * paths are permanently live and neither is a placeholder waiting to be
-   * replaced. Which one is used depends only on whether art exists.
+   * All twenty panels have art. The names that are not panels, three
+   * sources (`history`, `browsers`, `websearch`) and nine row marks, are
+   * drawn here instead, so both paths are permanently live and neither is
+   * a placeholder waiting to be replaced. Which one is used depends only on
+   * whether art exists.
    *
    * The set before this one was seventeen coloured plaques, and it went for
    * reasons worth not repeating: it did not cover every panel, two of its
@@ -99,8 +116,9 @@
    * Panels with drawn artwork. Everything else uses the etched glyph above.
    *
    * The two kinds are not a transition: the twenty panels have art and the
-   * three names that are not panels (`history`, `browsers`, `websearch`) do
-   * not, so both paths are live and neither is waiting to be finished.
+   * names that are not panels (three sources and nine row marks) do not, so
+   * both paths are live and neither is waiting to be finished. When art for
+   * a row mark lands, its name joins this set and nothing else changes.
    *
    * A name in here with nothing on disk is worse than a name left out. It
    * takes the `<img>` path, 404s, and skips the fallback that exists to stop
@@ -298,6 +316,56 @@
     <!-- The one panel a generic mark is the right answer for. -->
     <circle cx="12" cy="12" r="8.6" />
     <path d="M12 11v5.4M12 7.5v1.1" />
+  {:else if name === "arrangements"}
+    <!-- Three windows tiled: a tall one and two stacked, which is what a
+         saved arrangement is a picture of. -->
+    <rect x="3.5" y="3.5" width="7.4" height="17" rx="1.3" />
+    <rect x="13.1" y="3.5" width="7.4" height="7.4" rx="1.3" />
+    <rect x="13.1" y="13.1" width="7.4" height="7.4" rx="1.3" />
+  {:else if name === "notes"}
+    <!-- A page with a turned corner and two lines on it. Not `snippets`,
+         which is scissors: a note is a page, a snippet is a cutting. -->
+    <path d="M6 3.5h8.4l4.1 4.1v12.9H6Z" />
+    <path d="M14.4 3.5v4.1h4.1" />
+    <path d="M8.7 12.3h6.6M8.7 15.8h6.6" />
+  {:else if name === "reminders"}
+    <!-- A bell. The one glyph that says "later, and it will tell you". -->
+    <path d="M6.2 16.6c1.3-1.4 1.8-3 1.8-5.1V10a4 4 0 0 1 8 0v1.5c0 2.1.5 3.7 1.8 5.1Z" />
+    <path d="M10.3 19.3a1.7 1.7 0 0 0 3.4 0" />
+    <path d="M12 3.6v1.6" />
+  {:else if name === "fonts"}
+    <!-- A capital A over its baseline: the letter is what a font row is a
+         sample of, and the rule under it is what makes it type rather than a
+         tent. -->
+    <path d="M6.2 17.4 11.1 5.2h1.8l4.9 12.2" />
+    <path d="M8.3 13.2h7.4" />
+    <path d="M4 20.5h16" />
+  {:else if name === "displays"}
+    <!-- A monitor on its stand. -->
+    <rect x="3.5" y="4.5" width="17" height="11.5" rx="1.6" />
+    <path d="M12 16v3.5M8.5 19.5h7" />
+  {:else if name === "terminals"}
+    <!-- A prompt and a cursor block with no window around them, because
+         `scripts` is a page with a prompt and `advanced` is a window with one,
+         and the three sit near each other in the launcher. -->
+    <path d="m5 7.5 5.2 4.5L5 16.5" />
+    <rect x="12.5" y="15" width="6.5" height="1.6" rx="0.8" />
+  {:else if name === "media"}
+    <!-- A play mark in a rounded square: what is playing, as a control. -->
+    <rect x="3.5" y="3.5" width="17" height="17" rx="4" />
+    <path d="M10 8.4v7.2l6-3.6Z" />
+  {:else if name === "text"}
+    <!-- Three lines of text with the middle one selected: it is the
+         highlighted paragraph itself, so the mark is a selection. -->
+    <path d="M5 6.5h14M5 17.5h9" />
+    <rect x="4" y="9.6" width="16" height="4.8" rx="1" />
+    <path d="M6.5 12h11" />
+  {:else if name === "picture"}
+    <!-- A framed picture: sun and hills. The last thing copied, when it was
+         a picture rather than words. -->
+    <rect x="3.5" y="4.5" width="17" height="15" rx="1.8" />
+    <circle cx="9" cy="9.3" r="1.6" />
+    <path d="m3.8 17.4 5.2-5.1 3.4 3.3 3-2.9 4.8 4.7" />
   {:else}
     <!--
       A name with no drawing, which is a panel added before its glyph was.

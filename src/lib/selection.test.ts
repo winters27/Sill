@@ -48,7 +48,9 @@ describe("rows for whatever was selected", () => {
 
     expect(row.extensionTitle).toBe("Reminder");
     expect(row.title).toBe("Take the bread out");
-    expect(row.icon).toBeNull();
+    // A reminder has no file, so it wears Sill's mark for one rather than
+    // asking the shell about a path that does not exist.
+    expect(row.icon).toBe("mark:reminders");
     // The mode survives, because it is what the action panel asks Rust about
     // and Rust answers it with the actions for text.
     expect(row.mode).toBe("reminder-shown");
@@ -90,16 +92,17 @@ describe("rows for whatever was selected", () => {
   });
 
   /**
-   * Text has no file to take an icon from.
+   * Text has no file to take an icon from, so it wears Sill's mark for text.
    *
-   * Passing the text as the icon path asks the icon loader to extract one from
-   * a paragraph, which is a failed shell call per row for a picture that could
-   * never exist.
+   * Passing the text itself as the icon path would ask the icon loader to
+   * extract one from a paragraph, which is a failed shell call per row for a
+   * picture that could never exist; the mark is not a path and is never asked
+   * about.
    */
-  it("asks for no icon for a piece of text", () => {
+  it("wears the text mark for a piece of text, not a shell icon", () => {
     const [row] = selectionRows([text]);
 
-    expect(row.icon).toBeNull();
+    expect(row.icon).toBe("mark:text");
   });
 
   /**

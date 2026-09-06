@@ -57,6 +57,7 @@ function glance(text: string): string {
 const HEADED: Record<string, string> = {
   folder: "Folder",
   file: "File",
+  clipboard: "Clipboard",
   text: "Selection",
   // A reminder Windows started, which is text with a reason for being here.
   // It is `text` to Rust and to the action panel; only the heading differs.
@@ -65,6 +66,17 @@ const HEADED: Record<string, string> = {
 
 /** The modes whose target is words rather than a path. */
 const WORDS = new Set(["text", "reminder-shown"]);
+
+/**
+ * The mark a row with no file wears. Beside `HEADED` for the same reason that
+ * table is here: Rust's `Object` carries no icon, and these are the three
+ * kinds a binding can produce that have nothing on disk to draw.
+ */
+const MARKED: Record<string, string> = {
+  text: "mark:text",
+  "reminder-shown": "mark:reminders",
+  clipboard: "mark:picture",
+};
 
 /**
  * The rows for a resolved selection.
@@ -89,9 +101,9 @@ export function selectionRows(objects: SelectedObject[]): RankedCommand[] {
       subtitle: words ? glance(object.target) : object.target,
       mode: object.mode as RankedCommand["mode"],
       entrypoint: object.target,
-      // A path is its own icon. Words have no file to take one from, and an
-      // icon guessed for them would be an icon for the wrong thing.
-      icon: words ? null : object.target,
+      // A path is its own icon. Words and a picture have no file to take one
+      // from, so they wear the mark for what they are.
+      icon: MARKED[object.mode] ?? object.target,
       matched: [],
     };
   });

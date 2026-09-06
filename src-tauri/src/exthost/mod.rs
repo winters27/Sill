@@ -872,6 +872,22 @@ mod what_the_window_is_told {
         );
     }
 
+    /// A refusal by decision says so on its first line, and only there.
+    ///
+    /// The module gate puts the reason on the lines after it, because this is
+    /// what draws the chin and a paragraph there covers the rows. `OAuth` is
+    /// the case that made it worth splitting: the sentence explaining that
+    /// those extensions authorise through Raycast's own servers is worth
+    /// keeping and is far too long to draw.
+    #[test]
+    fn a_refusal_by_decision_draws_its_first_line_only() {
+        let reason = "Error: sill: \"OAuth\" is not supported.
+Extensions that use it authorise through Raycast's own servers, which issue tokens to Raycast and to nothing else, so there is no version of this Sill can implement on its own.
+    at unsupported (C:/Sill/host/dist/host.js:23834:9)";
+
+        assert_eq!(headline(reason), "\"OAuth\" is not supported.");
+    }
+
     #[test]
     fn a_reason_with_nothing_in_it_still_says_something() {
         assert_eq!(headline(""), "unknown");
