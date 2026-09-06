@@ -286,8 +286,8 @@
  * default `min-width: auto`, which means it could not be made narrower than
  * its own sentence. A long one ate the spacer, and then the only item in the
  * row that *could* give was the widget chin, which is set to hide what does
- * not fit: "Hacker News closed: the launcher was put away" cut the clock and
- * the weather in half against the edge of the window.
+ * not fit: "Hacker News stopped: the worker exited" cut the clock and the
+ * weather in half against the edge of the window.
  *
  * Prose is the right thing to shorten. It is the one item here that still
  * says something with its tail missing, and the ellipsis says a tail is

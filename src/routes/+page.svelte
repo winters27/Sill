@@ -4262,19 +4262,21 @@
              * A view is a worker holding a React tree, and Sill lets one go
              * once nobody can see it: when the launcher has been put away long
              * enough to sleep, and when the host has sat idle for minutes.
-             * Both happen while the window is hidden, and neither is a
-             * failure, so this says what happened rather than that something
-             * went wrong.
+             * Both happen while the window is hidden.
              *
              * Left alone, the window comes back showing the view it had. It
              * looks like a working command and it is not: nothing renders into
              * it again and every action on it fails with "no such session".
+             *
+             * Going back is the whole answer, and it is silent. The reasons
+             * are Sill's own housekeeping, they happen where nobody is
+             * looking, and there is nothing to do about either one, so a line
+             * in the chin describes machinery to somebody who came to run a
+             * command. The root list is on screen before they read it anyway.
              */
             if (session !== payload.session) break;
 
-            const closed = running?.title ?? "That command";
             void goBack();
-            status = `${closed} closed: ${payload.reason}`;
             break;
           }
         }
