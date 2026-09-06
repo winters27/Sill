@@ -19,6 +19,19 @@ IPC surface, the dependencies added, and every commit body in full. What goes
 in a section here is the subset of that which somebody would notice, said
 differently.
 
+## 0.1.3
+
+**An update that fails to download can be tried again.** A download that did
+not finish left Sill with nothing to press and no way to look again until it
+was restarted, and settings described it as a failed check when the check had
+worked. The update stays on offer, the button stays where it was, and settings
+says what actually went wrong.
+
+**The launcher stops narrating its own housekeeping.** Sill lets a command's
+view go once nobody can see it, and the next time the window opened it said so
+on the bottom line. It happens while the window is hidden, there is nothing to
+do about it, and the list is already back on screen.
+
 ## 0.1.2
 
 **No console window flashes any more.** Starting Sill ran a PowerShell query
