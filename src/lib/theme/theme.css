@@ -1312,13 +1312,14 @@ body {
  */
 .sill-card {
   /*
-   * No slab. The rows sit on the window itself, full width, separated by
-   * hairlines, which is how a settings window reads as one document rather
-   * than as a stack of boxes. The class stays as the hook for the row rules
-   * below, and a section that is `bare` opts out of them.
+   * One flat slab per section. It was taken out once for a fully flat page
+   * and put back the same day: without it a section is a heading floating
+   * over rows and the groups run into each other. The slab is what says
+   * "these belong together"; the space between slabs does the rest.
    */
-  background: transparent;
-  border-radius: 0;
+  background: var(--fill-1);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
 .sill-setting {
@@ -1333,11 +1334,12 @@ body {
 }
 
 /*
- * A hairline under every row. Each row is one line of a document, and the
- * line under it is what separates it from the next without a box.
+ * A hairline BETWEEN adjacent settings only. The adjacent-sibling selector
+ * skips the first row, so the slab's own edge does the work at the top and
+ * the bottom, and a setting's dependent controls stay inside its row.
  */
-.sill-card .sill-setting {
-  border-bottom: 1px solid var(--hairline);
+.sill-card .sill-setting + .sill-setting {
+  border-top: 1px solid var(--hairline);
 }
 
 /*

@@ -1102,7 +1102,7 @@
 
             <Row
               title="Import settings"
-              description={transfer ??
+              description={transfer ||
                 "A Sill export, a preferences.json, PowerToys Run's settings, or a Raycast .rayconfig. Anything the file does not mention keeps what it has."}
             >
               {#snippet control()}
