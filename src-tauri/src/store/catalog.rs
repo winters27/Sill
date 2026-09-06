@@ -83,7 +83,7 @@ pub const FRESH_FOR: i64 = 6 * 60 * 60;
 /// deserialises perfectly and every row draws a lettered tile, which is the
 /// quietest kind of wrong: nothing fails, the store just looks unfinished
 /// until the six hours are up.
-const FORMAT: u32 = 2;
+const FORMAT: u32 = 3;
 
 /// Statuses that are not offered.
 ///
@@ -167,6 +167,8 @@ struct RawIcons {
 struct RawAuthor {
     handle: Option<String>,
     name: Option<String>,
+    /// The picture on the store's profile, on Raycast's asset host.
+    avatar: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -252,9 +254,20 @@ fn reduce(raw: Raw) -> Option<Listing> {
         return None;
     }
 
-    let author = raw
+    // The handle is what the store shows beside a title; the name and the
+    // picture are what a row shows on hover, so a face is not a face nobody
+    // can put a name to.
+    let (author, author_name, author_avatar) = raw
         .author
-        .and_then(|it| it.handle.or(it.name))
+        .map(|it| {
+            let handle = it.handle.clone().or_else(|| it.name.clone()).unwrap_or_default();
+            let name = it.name.unwrap_or_default();
+            let avatar = it
+                .avatar
+                .filter(|url| url.starts_with("https://"))
+                .unwrap_or_default();
+            (handle, name, avatar)
+        })
         .unwrap_or_default();
 
     // The dark variant first, falling back to the light one. Every theme Sill
@@ -277,6 +290,8 @@ fn reduce(raw: Raw) -> Option<Listing> {
         folder,
         description: raw.description.unwrap_or_default(),
         author,
+        author_name,
+        author_avatar,
         categories: raw.categories.unwrap_or_default(),
         platforms,
         revision,
@@ -512,7 +527,7 @@ mod tests {
             "status": "active",
             "categories": ["Web", "Productivity"],
             "platforms": ["macOS", "Windows"],
-            "author": { "handle": "someone", "name": "Some One" },
+            "author": { "handle": "someone", "name": "Some One", "avatar": "https://files.raycast.com/face" },
             "icons": { "light": "https://files.raycast.com/light-one", "dark": null },
             "commands": [
                 { "name": "translate", "title": "Translate", "mode": "view", "description": "d" }
@@ -532,6 +547,8 @@ mod tests {
             "no trailing slash"
         );
         assert_eq!(one.author, "someone", "the handle, which is what is shown");
+        assert_eq!(one.author_name, "Some One");
+        assert_eq!(one.author_avatar, "https://files.raycast.com/face");
         assert_eq!(one.revision, "abc123");
         assert_eq!(one.commands.len(), 1);
     }

@@ -53,6 +53,16 @@
 
   // ------------------------------------------------------------- the fixture
 
+  /** A stand-in profile picture: initials on the colour the store would use. */
+  function portrait(fill: string, initials: string): string {
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">` +
+      `<rect width="64" height="64" fill="${fill}"/>` +
+      `<text x="50%" y="54%" fill="#fff" font-family="sans-serif" font-size="26" font-weight="600" text-anchor="middle" dominant-baseline="middle">${initials}</text>` +
+      `</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
+
   function row(over: Partial<StoreRow>): StoreRow {
     return {
       name: "demo",
@@ -60,6 +70,8 @@
       title: "Demo",
       description: "",
       author: "someone",
+      authorName: "Some One",
+      authorAvatar: "",
       categories: ["Productivity"],
       platforms: ["macOS", "Windows"],
       downloads: 1000,
@@ -84,6 +96,8 @@
       description:
         "Bring Linear to every corner of your desktop. Create, search, and modify your issues.",
       author: "thomaslombart",
+      authorName: "Thomas Lombart",
+      authorAvatar: portrait("#70920F", "TL"),
       icon: "https://files.raycast.com/l8syncnql5n6vwoxo019qsnvuwkf",
       categories: ["Developer Tools", "Productivity", "AI Extensions"],
       downloads: 356834,
@@ -117,6 +131,8 @@
       title: "Spotify Player",
       description: "Control Spotify: search, play, queue, and see what is playing.",
       author: "mattisssa",
+      authorName: "Artem Konovalov",
+      authorAvatar: portrait("#DC829A", "AK"),
       icon: "https://files.raycast.com/4iollyf69hyyzvxfzz8zpqfqncp0",
       categories: ["Media", "Productivity"],
       downloads: 1240000,
@@ -133,6 +149,7 @@
       categories: ["Developer Tools"],
       downloads: 0,
       installed: { revision: "", source: "folder", outdated: false },
+      native: true,
     }),
     // Says nothing about Windows: kept, marked, hidden by the switch.
     row({

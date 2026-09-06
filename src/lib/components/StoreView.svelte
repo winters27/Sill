@@ -35,6 +35,7 @@
   import StoreIcon from "./StoreIcon.svelte";
   import Chord from "./Chord.svelte";
   import { storeGallery } from "$lib/store";
+  import { GLYPHS } from "./marks";
   import Instead from "./Instead.svelte";
   import { couldNot, noMatch, standing } from "$lib/instead";
   import { LISTBOX, optionId } from "$lib/results";
@@ -863,7 +864,6 @@
             <div class="body">
               <div class="line">
                 <span class="title">{row.title}</span>
-                <span class="author">{row.author}</span>
               </div>
               <div class="line">
                 <span class="desc">{row.description}</span>
@@ -892,12 +892,11 @@
                     </span>
                   {/if}
                 {:else}
-                  <!--
-                    A row the store does not carry has no download count, and
-                    "0 installs" about an extension somebody built themselves
-                    reads as a store listing nobody wanted.
-                  -->
-                  <span>{row.native ? "Built here" : `${installs(row.downloads)} installs`}</span>
+                  {#if row.native}
+                    <!-- A row the store does not carry has no count and no
+                         author; it says where it came from instead. -->
+                    <span>Built here</span>
+                  {/if}
                   {#if row.installed?.outdated}
                     <span class="state update">Update</span>
                   {:else if row.installed}
@@ -912,6 +911,33 @@
                 {/if}
               </div>
             </div>
+
+            {#if !row.native}
+              <!--
+                What the store knows about the listing that is not the
+                listing: how many have it, and who made it. On the right,
+                where the eye goes after the title, and as marks rather than
+                sentences: the count with the download mark, the author as
+                their picture with their name on hover.
+              -->
+              <div class="aside">
+                <span class="installs" use:hint={`${installs(row.downloads)} installs`}>
+                  <svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+                    <path d={GLYPHS["arrow-circle-down"]} />
+                  </svg>
+                  {installs(row.downloads)}
+                </span>
+                <span class="who" use:hint={row.authorName || row.author}>
+                  {#if row.authorAvatar}
+                    <img src={row.authorAvatar} alt={row.authorName || row.author} loading="lazy" />
+                  {:else}
+                    <span class="initial" aria-label={row.authorName || row.author}>
+                      {(row.authorName || row.author).trim()[0]?.toUpperCase() ?? "?"}
+                    </span>
+                  {/if}
+                </span>
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -1129,7 +1155,6 @@
     font-weight: var(--weight-medium);
   }
 
-  .author,
   .desc,
   .meta {
     color: var(--text-3);
@@ -1137,11 +1162,60 @@
   }
 
   .desc,
-  .title,
-  .author {
+  .title {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* The right-hand side of a row: a count and a face, on one line with the
+     title, so a row's first line reads title, count, author. */
+  .aside {
+    display: flex;
+    flex: none;
+    gap: var(--space-3);
+    align-items: center;
+    align-self: flex-start;
+    height: var(--icon-tile-sm);
+    color: var(--text-3);
+    font-size: var(--text-meta);
+  }
+
+  .installs {
+    display: inline-flex;
+    gap: var(--space-1);
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .installs svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .who {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: var(--icon-tile-sm);
+    height: var(--icon-tile-sm);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+    background: var(--fill-2);
+    box-shadow: var(--ring);
+  }
+
+  .who img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .initial {
+    color: var(--text-2);
+    font-size: var(--text-label);
+    font-weight: var(--weight-medium);
+    line-height: 1;
   }
 
   .meta {

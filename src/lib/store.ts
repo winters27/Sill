@@ -36,6 +36,10 @@ export interface StoreRow {
   title: string;
   description: string;
   author: string;
+  /** The author's name, for a hover over their picture; empty when unknown. */
+  authorName: string;
+  /** The author's picture on Raycast's asset host, or empty. */
+  authorAvatar: string;
   categories: string[];
   platforms: string[];
   downloads: number;

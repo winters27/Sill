@@ -92,6 +92,13 @@ pub struct Listing {
     pub description: String,
     /// The author's handle, which is what the store shows.
     pub author: String,
+    /// The author's name, for a hover over their picture. Empty when the
+    /// store has none; a catalogue cached before this field reads as empty.
+    #[serde(default)]
+    pub author_name: String,
+    /// The author's picture on Raycast's asset host, or empty.
+    #[serde(default)]
+    pub author_avatar: String,
     pub categories: Vec<String>,
     /// The platforms it says it runs on.
     ///
@@ -241,6 +248,8 @@ impl Listing {
             title: title.to_string(),
             description: String::new(),
             author: String::new(),
+            author_name: String::new(),
+            author_avatar: String::new(),
             categories: Vec::new(),
             // Not "it does not run on Windows". It is running on this one.
             platforms: vec!["Windows".to_string()],
@@ -520,6 +529,8 @@ pub struct Row {
     pub title: String,
     pub description: String,
     pub author: String,
+    pub author_name: String,
+    pub author_avatar: String,
     pub categories: Vec<String>,
     pub platforms: Vec<String>,
     pub downloads: u64,
@@ -713,6 +724,8 @@ pub fn browse(
             title: listing.title.clone(),
             description: listing.description.clone(),
             author: listing.author.clone(),
+            author_name: listing.author_name.clone(),
+            author_avatar: listing.author_avatar.clone(),
             categories: listing.categories.clone(),
             platforms: listing.platforms.clone(),
             downloads: listing.downloads,
@@ -943,6 +956,8 @@ mod tests {
             title: title.to_string(),
             description: String::new(),
             author: "someone".to_string(),
+            author_name: "Some One".to_string(),
+            author_avatar: String::new(),
             categories: vec!["Productivity".to_string()],
             platforms: vec!["macOS".to_string(), "Windows".to_string()],
             revision: "aaaa".to_string(),

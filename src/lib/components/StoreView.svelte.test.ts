@@ -60,6 +60,8 @@ function listing(
     title: name,
     description: `about ${name}`,
     author: "someone",
+    authorName: "Some One",
+    authorAvatar: "",
     categories: [],
     platforms: ["windows"],
     downloads: 10,
