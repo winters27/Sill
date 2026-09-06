@@ -3708,10 +3708,40 @@ pub fn search_excluding<'a>(
             .unwrap_or(usize::MAX)
     };
 
+    /*
+     * An extension's command before the application it is about.
+     *
+     * Typing "local" with LocalSend installed as a program and as an
+     * extension put the program first: it had been launched before and the
+     * extension had not, so frecency decided. But the extension is there
+     * because somebody wanted LocalSend *inside Sill*, and an extension that
+     * can only be reached after the program it wraps has been pushed aside
+     * is an extension that never gets used. So within one match class an
+     * extension command leads, and frecency orders what is left.
+     *
+     * Within a class only: a program whose title is the query still beats an
+     * extension command that merely mentions it. And only with something
+     * typed; the empty list is what you reach for, and an installed
+     * extension is not a claim about that.
+     *
+     * A two-valued key rather than a rule about applications specifically,
+     * because a comparator that orders one pair and leaves the rest to
+     * frecency is not a total order, and `sort_by` is entitled to a total
+     * order.
+     */
+    let reach_of = |command: &CommandRecord| {
+        if typed && from_an_extension(command) {
+            0
+        } else {
+            1
+        }
+    };
+
     scored.sort_by(|(a_class, a_weight, a, _), (b_class, b_weight, b, _)| {
         pin_of(&a.id)
             .cmp(&pin_of(&b.id))
             .then_with(|| a_class.cmp(b_class))
+            .then_with(|| reach_of(a).cmp(&reach_of(b)))
             .then_with(|| b_weight.cmp(a_weight))
             .then_with(|| {
                 if typed {
@@ -3733,6 +3763,15 @@ pub fn search_excluding<'a>(
             matched,
         })
         .collect()
+}
+
+/// Whether this row is a command an installed extension provides.
+///
+/// By mode, which is what the manifest declared: a view or a command with no
+/// view. Scripts, quicklinks and snippets are Sill's own kinds and are not
+/// this, whatever they were installed from.
+fn from_an_extension(command: &CommandRecord) -> bool {
+    matches!(command.mode.as_str(), "view" | "no-view")
 }
 
 /// Whether an entry matches any exclusion term, by title or by path.
@@ -3952,6 +3991,93 @@ mod on_disk {
 
 /// Pins: the rows somebody keeps at the top of an empty list.
 ///
+#[cfg(test)]
+mod extensions_first {
+    use super::*;
+
+    const NOW: i64 = 1_700_000_000;
+
+    fn record(id: &str, title: &str, mode: &str) -> CommandRecord {
+        CommandRecord {
+            id: id.to_string(),
+            extension: "test".into(),
+            extension_title: "Test".into(),
+            command: "run".into(),
+            title: title.to_string(),
+            subtitle: String::new(),
+            description: String::new(),
+            mode: mode.into(),
+            entrypoint: String::new(),
+            keywords: Vec::new(),
+            icon: None,
+            panel: None,
+            preferences: serde_json::Value::Null,
+            manifest: None,
+            toggle: None,
+        }
+    }
+
+    /// A program launched every day, and an extension about it that never
+    /// has been.
+    fn corpus() -> Vec<CommandRecord> {
+        vec![
+            record("app:localsend", "LocalSend", "app"),
+            record("ext:localsend", "LocalSend", "view"),
+            record("app:localhost", "Localhost Tools", "app"),
+        ]
+    }
+
+    fn ranked(query: &str, frecency: &Frecency) -> Vec<String> {
+        search_excluding(
+            &corpus(),
+            query,
+            frecency,
+            &Aliases::default(),
+            NOW,
+            50,
+            Excluded::none(),
+            &[],
+        )
+        .into_iter()
+        .map(|one| one.command.id)
+        .collect()
+    }
+
+    /// The case that started this: the same name, and the program had been
+    /// used and the extension had not.
+    #[test]
+    fn the_extension_leads_the_program_it_is_about() {
+        let mut frecency = Frecency::default();
+        for _ in 0..30 {
+            frecency.record("app:localsend", NOW);
+        }
+
+        let order = ranked("local", &frecency);
+        assert_eq!(order[0], "ext:localsend", "thirty launches of the program outranked the extension");
+        assert_eq!(order[1], "app:localsend");
+    }
+
+    /// Only within a match class: a program whose title *is* the query is
+    /// not pushed under an extension the query merely reaches.
+    #[test]
+    fn a_better_match_still_wins() {
+        let order = ranked("localhost tools", &Frecency::default());
+        assert_eq!(order[0], "app:localhost");
+    }
+
+    /// The empty list is what you reach for; an extension is not that.
+    #[test]
+    fn nothing_typed_is_still_ordered_by_reaching() {
+        let mut frecency = Frecency::default();
+        for _ in 0..30 {
+            frecency.record("app:localsend", NOW);
+        }
+
+        let order = ranked("", &frecency);
+        assert_eq!(order[0], "app:localsend");
+    }
+}
+
 /// In the library's own tests rather than `tests/registry.rs`, so running them
 /// costs one test binary instead of linking a second executable of the whole
 /// application.

@@ -278,6 +278,13 @@ Be clear-eyed about what that is: it is a permission boundary, not a cage. An
 extension that sets out to get around it can. What you are protected from is
 an ordinary extension quietly doing something you did not agree to.
 
+An installed extension ranks above the program it is about. Type the name of
+something you have both as a program and as an extension and the extension
+comes first, because it is the one that works inside Sill; the program is the
+next row down. That holds within one quality of match only: a program whose
+name is exactly what you typed still beats an extension that merely mentions
+it.
+
 ## MCP servers
 
 An MCP server you already have can put its tools in Sill's action panel, so a

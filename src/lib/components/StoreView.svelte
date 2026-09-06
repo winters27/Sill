@@ -33,6 +33,7 @@
     type StoreRow,
   } from "$lib/store";
   import StoreIcon from "./StoreIcon.svelte";
+  import Chord from "./Chord.svelte";
   import Instead from "./Instead.svelte";
   import { couldNot, noMatch, standing } from "$lib/instead";
   import { LISTBOX, optionId } from "$lib/results";
@@ -481,6 +482,16 @@
     if (row.installed) return "Installed";
     return "Install";
   }
+
+  /**
+   * Whether Enter does anything to this row. An extension that is installed
+   * and current has no verb, and a hint reading "Enter Installed" was the
+   * hint strip saying a state as if it were a thing to do.
+   */
+  function acts(row: StoreRow | null): boolean {
+    if (!row || row.native) return false;
+    return !row.installed || Boolean(row.installed.outdated);
+  }
 </script>
 
 <div class="store">
@@ -746,9 +757,14 @@
                   -->
                   <span>{row.native ? "Built here" : `${installs(row.downloads)} installs`}</span>
                   {#if row.installed?.outdated}
-                    <span class="update">Update</span>
+                    <span class="state update">Update</span>
                   {:else if row.installed}
-                    <span class="have">Installed</span>
+                    <span class="state have">
+                      <svg viewBox="0 0 12 12" aria-hidden="true">
+                        <path d="M2.5 6.4 5 8.8l4.6-5.4" />
+                      </svg>
+                      Installed
+                    </span>
                   {/if}
                   {#if row.blocked}
                     <span class="blocked">{row.blocked}</span>
@@ -803,11 +819,21 @@
 
           {#if current.native}
             <p class="cta">
-              Built here rather than installed from the store, so there is nothing to fetch. Ctrl
-              Shift X removes it.
+              Built here rather than installed from the store, so there is nothing to fetch.
+              <Chord chord="Ctrl+Shift+X" /> removes it.
             </p>
+          {:else if acts(current)}
+            <p class="cta act"><kbd class="sill-key">↵</kbd> {verb(current)}</p>
           {:else}
-            <p class="cta">{verb(current)} with Enter</p>
+            <p class="cta">
+              <span class="state have">
+                <svg viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M2.5 6.4 5 8.8l4.6-5.4" />
+                </svg>
+                Installed
+              </span>
+              <Chord chord="Ctrl+Shift+X" /> removes it.
+            </p>
           {/if}
         {/if}
       </div>
@@ -839,14 +865,17 @@
             </span>
           {/if}
         {:else}
-          {#if !current?.native}
-            <span><b>Enter</b> {current ? verb(current) : "install"}</span>
+          {#if !current || acts(current)}
+            <span class="key"><Chord chord="Enter" /> {current ? verb(current) : "Install"}</span>
           {/if}
           {#if current?.installed}
-            <span><b>Ctrl Shift X</b> remove</span>
+            <span class="key"><Chord chord="Ctrl+Shift+X" /> Remove</span>
           {/if}
-          <span><b>Ctrl T</b> {scope === "all" ? "installed" : scope === "installed" ? "updates" : "all"}</span>
-          <span><b>Ctrl R</b> refresh</span>
+          <span class="key">
+            <Chord chord="Ctrl+T" />
+            {scope === "all" ? "Installed" : scope === "installed" ? "Updates" : "All"}
+          </span>
+          <span class="key"><Chord chord="Ctrl+R" /> Refresh</span>
         {/if}
       </span>
 
@@ -1011,11 +1040,46 @@
     margin-top: var(--space-half);
   }
 
+  /*
+   * The row's mark: a pill, not a word.
+   *
+   * "Installed" in the meta colour was the one fact on the row somebody most
+   * wants at a glance, drawn at the size of the download count. The accent is
+   * for affirmative state, and an extension that is on this machine is
+   * exactly that; "Update" wears the accent as a line rather than a fill,
+   * because it is a thing to do rather than a thing that is done.
+   */
+  .state {
+    display: inline-flex;
+    flex: none;
+    gap: var(--space-1);
+    align-items: center;
+    height: 18px;
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-pill);
+    font-size: var(--text-label);
+    font-weight: var(--weight-medium);
+    line-height: 1;
+  }
+
+  .state svg {
+    width: 10px;
+    height: 10px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   .have {
-    color: var(--text-2);
+    background: var(--accent-fill-strong);
+    box-shadow: var(--ring-accent-faint);
+    color: var(--accent-bright);
   }
 
   .update {
+    box-shadow: var(--ring-accent-faint);
     color: var(--accent);
   }
 
@@ -1069,9 +1133,20 @@
   }
 
   .cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+    align-items: center;
     margin: var(--space-4) 0 0;
     color: var(--text-2);
     font-size: var(--text-meta);
+  }
+
+  /* The one thing Enter does here, drawn as the key and the verb. */
+  .cta.act {
+    color: var(--text-1);
+    font-size: var(--text-body);
+    font-weight: var(--weight-medium);
   }
 
   ul {
@@ -1110,29 +1185,34 @@
     gap: var(--space-3);
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-1) var(--space-3);
+    padding: var(--space-2) var(--space-3);
     border-top: 1px solid var(--hairline);
-    /* The keys this screen answers to. The quietest step that is still meant
-       to be read, rather than the one that is not. */
-    color: var(--text-3);
-    font-size: var(--text-micro);
+    /* The keys this screen answers to. They were the quietest text in the
+       window, one size below the description of a row, and a capability
+       nobody notices is a capability nobody has. Keycaps and the meta size,
+       the same as the launcher's own chin. */
+    color: var(--text-2);
+    font-size: var(--text-meta);
   }
 
   .keys {
     display: flex;
-    gap: var(--space-3);
+    gap: var(--space-4);
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
   }
 
-  .keys b {
-    color: var(--text-3);
-    font-weight: var(--weight-medium);
+  .key {
+    display: inline-flex;
+    gap: var(--space-1);
+    align-items: center;
   }
 
   .counts {
     flex: none;
+    color: var(--text-3);
+    font-size: var(--text-micro);
   }
 
   /* The accent means "this one is chosen" everywhere else in Sill; here it is
