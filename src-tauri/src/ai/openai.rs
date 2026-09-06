@@ -268,7 +268,7 @@ pub struct CallPiece {
 }
 
 /// What one line of the response said.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// More of the answer.
     Text(String),
@@ -277,7 +277,10 @@ pub enum Event {
     /// More of what the model is thinking before it answers.
     Thinking(String),
     /// What the request cost, which arrives once at the very end.
-    Usage(Usage),
+    ///
+    /// In tokens always, and in dollars when the service does the sum
+    /// itself, which today is OpenRouter once it has been asked to.
+    Usage { usage: Usage, cost: Option<f64> },
     /// Which model actually answered, which can differ from the one asked
     /// for when the name was an alias or a gateway chose.
     Model(String),
@@ -324,7 +327,24 @@ pub fn body(
         body["tools"] = tools.clone();
     }
 
+    // OpenRouter does the sum itself, in dollars, when asked with a field of
+    // its own. Only sent to it: OpenAI refuses a request carrying a field it
+    // does not know, and nothing else has a cost to report.
+    if sums_the_cost(&provider.base_url) {
+        body["usage"] = serde_json::json!({ "include": true });
+    }
+
     body
+}
+
+/// Whether this address names the dollars on its usage chunk when asked.
+///
+/// A gateway that bills for many models knows the rate for each, and the
+/// number it names is the one that appears on the bill, which beats any table
+/// Sill could keep. The host is matched rather than the provider id because
+/// somebody can add OpenRouter as a custom entry under any name.
+fn sums_the_cost(base_url: &str) -> bool {
+    base_url.to_ascii_lowercase().contains("openrouter.ai")
 }
 
 /// Reads one line of the event stream.
@@ -385,7 +405,11 @@ pub fn parse_line(line: &str) -> Event {
 
     // The cost, which comes on its own line at the end once it was asked for.
     if let Some(usage) = value.get("usage").and_then(read_usage) {
-        return Event::Usage(usage);
+        let cost = value
+            .pointer("/usage/cost")
+            .and_then(serde_json::Value::as_f64)
+            .filter(|cost| cost.is_finite() && *cost >= 0.0);
+        return Event::Usage { usage, cost };
     }
 
     // A chunk with nothing else to say still names the model. Read last, so a
@@ -585,12 +609,18 @@ pub async fn ask(
     // pieces as they go past.
     let mut said = Said::default();
     let mut calls = Calls::default();
+    // When the first piece arrived, so the answer can be timed from there.
+    // Measured from the first piece rather than from the request, because
+    // what comes before it is the service reading the prompt, and a rate that
+    // included that would fall as the conversation grew.
+    let mut first: Option<std::time::Instant> = None;
 
     while let Some(chunk) = stream.next().await {
         // Checked before the chunk is read rather than after, so a stop takes
         // effect on the next thing to arrive rather than one thing later.
         if give_up() {
             said.stopped = true;
+            said.generating_ms = since(first);
             return Ok(said);
         }
 
@@ -604,18 +634,27 @@ pub async fn ask(
 
             match parse_line(&line) {
                 Event::Text(text) => {
+                    first.get_or_insert_with(std::time::Instant::now);
                     said.text.push_str(&text);
                     on_piece(Piece::Text(text));
                 }
                 Event::Thinking(thought) => {
+                    first.get_or_insert_with(std::time::Instant::now);
                     said.thinking.push_str(&thought);
                     on_piece(Piece::Thinking(thought));
                 }
-                Event::Calling(piece) => calls.take(piece),
-                Event::Usage(usage) => said.usage = Some(usage),
+                Event::Calling(piece) => {
+                    first.get_or_insert_with(std::time::Instant::now);
+                    calls.take(piece);
+                }
+                Event::Usage { usage, cost } => {
+                    said.usage = Some(usage);
+                    said.cost = cost;
+                }
                 Event::Model(model) => said.model = model,
                 Event::Done => {
                     said.calls = calls.finish();
+                    said.generating_ms = since(first);
                     return Ok(said);
                 }
                 Event::Ignored => {}
@@ -626,7 +665,13 @@ pub async fn ask(
     // The stream ended without a `[DONE]`, which several services do. The
     // answer still arrived.
     said.calls = calls.finish();
+    said.generating_ms = since(first);
     Ok(said)
+}
+
+/// Milliseconds since the first piece, or nothing if none came.
+fn since(first: Option<std::time::Instant>) -> u64 {
+    first.map_or(0, |at| at.elapsed().as_millis() as u64)
 }
 
 /// What one exchange produced.
@@ -643,6 +688,11 @@ pub struct Said {
     pub model: String,
     /// What the request cost, when the service said.
     pub usage: Option<Usage>,
+    /// In dollars, for the one service that says. See `Event::Usage`.
+    pub cost: Option<f64>,
+    /// From the first piece to the last, in milliseconds. Zero when nothing
+    /// arrived, and what a local model's speed is read from.
+    pub generating_ms: u64,
     /// Whether it was told to stop rather than finishing.
     ///
     /// Not an error. What arrived is still an answer and is still worth
@@ -1475,15 +1525,63 @@ mod tests {
             let line = r#"data: {"choices":[],"model":"m","usage":{"prompt_tokens":12,"completion_tokens":34,"total_tokens":46}}"#;
             assert_eq!(
                 parse_line(line),
-                Event::Usage(Usage {
-                    input: 12,
-                    output: 34
-                })
+                Event::Usage {
+                    usage: Usage {
+                        input: 12,
+                        output: 34
+                    },
+                    cost: None,
+                }
             );
 
             // The other spelling, from a gateway in front of Anthropic.
             let line = r#"data: {"choices":[],"usage":{"input_tokens":1,"output_tokens":2}}"#;
-            assert_eq!(parse_line(line), Event::Usage(Usage { input: 1, output: 2 }));
+            assert_eq!(
+                parse_line(line),
+                Event::Usage {
+                    usage: Usage {
+                        input: 1,
+                        output: 2
+                    },
+                    cost: None,
+                }
+            );
+        }
+
+        /// OpenRouter's usage chunk, once asked for, carries the dollars.
+        #[test]
+        fn a_usage_chunk_naming_the_dollars_is_read_with_them() {
+            let line = r#"data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20,"cost":0.00042}}"#;
+            assert_eq!(
+                parse_line(line),
+                Event::Usage {
+                    usage: Usage {
+                        input: 10,
+                        output: 20
+                    },
+                    cost: Some(0.00042),
+                }
+            );
+
+            // A cost that cannot be a cost is no cost at all.
+            let line = r#"data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20,"cost":-1}}"#;
+            assert!(matches!(parse_line(line), Event::Usage { cost: None, .. }));
+        }
+
+        /// The sum is asked of the one service that does it, and of nobody
+        /// else: OpenAI refuses a request carrying a field it does not know.
+        #[test]
+        fn the_dollars_are_asked_for_only_where_they_are_answered() {
+            let mut provider = Provider::default();
+            provider.model = "m".to_string();
+
+            provider.base_url = "https://openrouter.ai/api/v1".to_string();
+            let sent = body(&provider, &[], None);
+            assert_eq!(sent["usage"]["include"], true);
+
+            provider.base_url = "https://api.openai.com/v1".to_string();
+            let sent = body(&provider, &[], None);
+            assert!(sent.get("usage").is_none(), "{sent}");
         }
 
         /// The first chunk carries the role and the model and nothing else.

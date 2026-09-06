@@ -145,8 +145,20 @@ impl Default for Hotkey {
 pub enum Theme {
     /// Neutral near-black with a desaturated blue-grey accent. The default,
     /// and the palette Sill shares with StreamNook.
+    ///
+    /// The alias is a rename, not a spare spelling. This was called
+    /// `winters-glass` and is written `frost` now, and every preferences file
+    /// that already exists still says the old word. `load` replaces a file it
+    /// cannot parse with defaults, so without the alias renaming this would
+    /// not reset somebody's theme, it would reset **every preference they
+    /// have**. It is read for as long as files written before the rename can
+    /// still be around, which is longer than it feels like.
     #[default]
-    WintersGlass,
+    #[serde(alias = "winters-glass")]
+    Frost,
+    /// The same glass on a pale ground. The only theme that is not dark, and
+    /// the only one whose neutral ramp is black-alpha rather than white.
+    FrostLight,
     /// The same restraint with a faint iridescent wash across the window.
     /// The only theme that paints anything beyond a flat tint.
     Oilslick,
@@ -162,6 +174,60 @@ pub enum Theme {
     /// wash, and the only one whose colour lives at the edges rather than
     /// the middle.
     Aberration,
+}
+
+impl Theme {
+    /// The colour Windows tints the acrylic sheet with, behind the page.
+    ///
+    /// The one piece of a theme's palette that cannot live in `theme.css`.
+    /// The sheet is drawn by DWM outside the window, so the page cannot reach
+    /// it and Rust has to hand the colour over at the moment the backdrop is
+    /// applied.
+    ///
+    /// > [!IMPORTANT] This has to agree with `--core-background`
+    /// > The tint is what the desktop is blurred *through* and the token is
+    /// > what the page paints on top; a mismatch is not a wrong colour, it is
+    /// > a visible seam between the sheet and the page at the window's edge.
+    /// > Two values that must match and cannot be derived from one another is
+    /// > a real cost, and it is the price of the sheet being the compositor's
+    /// > rather than the page's.
+    ///
+    /// One arm rather than six because five of the themes are the same near
+    /// black: they differ in accent and in chroma washes the page paints, and
+    /// neither of those is the canvas.
+    pub fn tint(self) -> (u8, u8, u8) {
+        match self {
+            // Matches `--core-background: #c9cacd`.
+            Theme::FrostLight => (201, 202, 205),
+            // Matches `--core-background: #0c0c0d`.
+            _ => (10, 10, 11),
+        }
+    }
+
+    /// The tint's opacity, given what the person asked for.
+    ///
+    /// The preference is a straight 0 to 255 and it means "how solid", but the
+    /// same number does not buy the same glass at both polarities, and this is
+    /// the whole reason a first attempt at a light theme reads as flat white.
+    ///
+    /// The sheet is a colour laid over a blur of the desktop. A DARK tint at
+    /// 232 of 255 still shows what is behind it, because the nine per cent
+    /// getting through is lighter than the tint and every bright thing on the
+    /// desktop reads as a smudge of light. A PALE tint at the same 232 shows
+    /// nothing: almost everything behind it is darker than the tint, so the
+    /// nine per cent that arrives has nowhere to go and the window is just
+    /// white.
+    ///
+    /// So the light theme spends less of the range. The slider keeps its whole
+    /// travel and keeps meaning "more solid"; it simply lands somewhere the
+    /// material is still visible. Scaled rather than capped so that moving it
+    /// always does something.
+    pub fn tint_alpha(self, asked: u8) -> u8 {
+        match self {
+            Theme::FrostLight => (u16::from(asked) * 7 / 10) as u8,
+            _ => asked,
+        }
+    }
 }
 
 /// Which face the interface is set in.
@@ -264,7 +330,7 @@ impl Default for Appearance {
     fn default() -> Self {
         Self {
             backdrop: Backdrop::Acrylic,
-            theme: Theme::WintersGlass,
+            theme: Theme::Frost,
             chroma_strength: 1.0,
             font: InterfaceFont::Satoshi,
             glass_strength: 1.0,

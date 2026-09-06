@@ -244,10 +244,23 @@ pub(crate) async fn set_preferences(
         blur.set(prefs.hotkey.dismiss_on_blur);
     }
 
+    // The theme belongs in this condition, not only in the call: the acrylic
+    // sheet is tinted from the theme's canvas colour (see `Theme::tint`), so
+    // picking a theme whose canvas differs has to re-apply the sheet. Left
+    // out, switching between a dark theme and the light one would repaint the
+    // page and leave the desktop still blurred through the old colour, which
+    // reads as the window having a wrongly coloured halo until the next
+    // restart.
     if previous.appearance.backdrop != prefs.appearance.backdrop
         || previous.appearance.tint_alpha != prefs.appearance.tint_alpha
+        || previous.appearance.theme.tint() != prefs.appearance.theme.tint()
     {
-        crate::apply_backdrops(&app, prefs.appearance.backdrop, prefs.appearance.tint_alpha);
+        crate::apply_backdrops(
+            &app,
+            prefs.appearance.backdrop,
+            prefs.appearance.tint_alpha,
+            prefs.appearance.theme,
+        );
     }
 
     // Everything that decides what is *in* the index, rather than how the
@@ -359,10 +372,14 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
     let appearance = {
         let prefs = app.state::<PrefsState>();
         let guard = prefs.inner.lock().await;
-        (guard.appearance.backdrop, guard.appearance.tint_alpha)
+        (
+            guard.appearance.backdrop,
+            guard.appearance.tint_alpha,
+            guard.appearance.theme,
+        )
     };
 
-    summon::apply_backdrop(&window, appearance.0, appearance.1);
+    summon::apply_backdrop(&window, appearance.0, appearance.1, appearance.2);
 
     Ok(())
 }

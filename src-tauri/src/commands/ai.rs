@@ -357,10 +357,14 @@ pub(crate) async fn open_ask(app: AppHandle) -> Result<(), String> {
     let appearance = {
         let prefs = app.state::<PrefsState>();
         let guard = prefs.inner.lock().await;
-        (guard.appearance.backdrop, guard.appearance.tint_alpha)
+        (
+            guard.appearance.backdrop,
+            guard.appearance.tint_alpha,
+            guard.appearance.theme,
+        )
     };
 
-    crate::summon::apply_backdrop(&window, appearance.0, appearance.1);
+    crate::summon::apply_backdrop(&window, appearance.0, appearance.1, appearance.2);
 
     Ok(())
 }

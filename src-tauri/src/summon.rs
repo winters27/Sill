@@ -43,7 +43,12 @@ static PREVIOUS_FOREGROUND: Mutex<Option<isize>> = Mutex::new(None);
 ///
 /// Failure is not fatal. On a machine or build without it, the window simply
 /// renders on its solid background.
-pub fn apply_backdrop(window: &WebviewWindow, backdrop: Backdrop, tint_alpha: u8) {
+pub fn apply_backdrop(
+    window: &WebviewWindow,
+    backdrop: Backdrop,
+    tint_alpha: u8,
+    theme: crate::preferences::Theme,
+) {
     #[cfg(windows)]
     {
         // Rounding comes first. The backdrop sheet and the drop shadow are
@@ -57,7 +62,14 @@ pub fn apply_backdrop(window: &WebviewWindow, backdrop: Backdrop, tint_alpha: u8
         let _ = window_vibrancy::clear_acrylic(window);
         let _ = window_vibrancy::clear_blur(window);
 
-        let tint = (10, 10, 11, tint_alpha);
+        // The canvas colour belongs to the theme, and the sheet is the only
+        // part of it the page cannot paint. See `Theme::tint`.
+        let (r, g, b) = theme.tint();
+        // Both halves come from the theme. The alpha is not the preference
+        // straight through: a pale tint hides the blur at an opacity a dark
+        // one still shows it at. See `Theme::tint_alpha`.
+        let alpha = theme.tint_alpha(tint_alpha);
+        let tint = (r, g, b, alpha);
 
         let result = match backdrop {
             Backdrop::Acrylic => window_vibrancy::apply_acrylic(window, Some(tint)),
@@ -69,7 +81,7 @@ pub fn apply_backdrop(window: &WebviewWindow, backdrop: Backdrop, tint_alpha: u8
         };
 
         match result {
-            Ok(()) => println!("[sill] {backdrop:?} backdrop applied, tint alpha {tint_alpha}"),
+            Ok(()) => println!("[sill] {backdrop:?} backdrop applied, tint alpha {alpha}"),
             Err(err) => crate::say!("no {backdrop:?} backdrop: {err}"),
         }
     }

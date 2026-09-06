@@ -1482,10 +1482,15 @@ fn watch_focus(app: &AppHandle, dismiss_on_blur: bool) {
 ///
 /// `apply_backdrop` rounds the corners first, so this is also what keeps DWM's
 /// clip in agreement with each page's own radius.
-pub(crate) fn apply_backdrops(app: &AppHandle, backdrop: preferences::Backdrop, tint_alpha: u8) {
+pub(crate) fn apply_backdrops(
+    app: &AppHandle,
+    backdrop: preferences::Backdrop,
+    tint_alpha: u8,
+    theme: preferences::Theme,
+) {
     for label in ["main", "traymenu"] {
         if let Some(window) = app.get_webview_window(label) {
-            summon::apply_backdrop(&window, backdrop, tint_alpha);
+            summon::apply_backdrop(&window, backdrop, tint_alpha, theme);
         }
     }
 }
@@ -1813,6 +1818,7 @@ pub fn run() {
         .manage(timing::Timings::new())
         .manage(previews::Previews::new())
         .manage(ai::chat::Chat::new())
+        .manage(ai::ledger::Ledger::new())
         .manage(ai::approval::Pending::new())
         .manage(ai::approval::Halt::new())
         // Nothing is bound yet. The port opens the first time a question goes
@@ -1873,6 +1879,8 @@ pub fn run() {
             // yesterday's conversation is somewhere to go back to rather than
             // somewhere to be when the launcher appears.
             app.state::<ai::chat::Chat>().load(&data_dir);
+            // And what each provider has cost so far, which outlives them.
+            app.state::<ai::ledger::Ledger>().load(&data_dir);
 
             // The host itself is not started here. Nothing has asked for an
             // extension yet, and starting Node on the chance that something
@@ -1942,6 +1950,7 @@ pub fn run() {
                 &handle,
                 prefs.appearance.backdrop,
                 prefs.appearance.tint_alpha,
+                prefs.appearance.theme,
             );
 
             apply_window_size(&handle, &prefs.appearance);
@@ -2320,6 +2329,9 @@ pub fn run() {
             commands::ai::ai_forget_all,
             commands::ai::ai_resume,
             commands::ai::ai_transcript,
+            commands::ai::ai_spent,
+            commands::ai::ai_usage,
+            commands::ai::ai_usage_reset,
             commands::ai::ai_clear,
             commands::ai::ai_known,
             commands::ai::ai_named,

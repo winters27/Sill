@@ -68,8 +68,110 @@ pub struct Finished {
     pub model: String,
     pub usage: Option<Usage>,
     pub duration_ms: u64,
-    /// In dollars, when the service says. Only Claude Code does.
+    /// From the first piece to the last, over every request in the turn.
+    /// Zero when the transport could not say. What a local model's speed is
+    /// read from, since the wait before the first piece is the prompt being
+    /// read rather than the answer being written.
+    pub generating_ms: u64,
+    /// In dollars. Named by Claude Code and OpenRouter; worked out from the
+    /// published rate for everybody else with a known model, and absent for
+    /// a model on this machine or one nobody has priced.
     pub cost: Option<f64>,
+    /// The conversation's running total once this turn is counted in.
+    pub spent: Spent,
+}
+
+/// What a conversation has cost so far.
+///
+/// Kept with the conversation rather than added up by the window, so a
+/// reopened conversation still knows and two windows drawing it agree. Every
+/// answer is counted; what could not be priced is counted as tokens alone and
+/// said so, because a total that quietly left a turn out would read as
+/// smaller than the bill.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Spent {
+    pub input: u64,
+    pub output: u64,
+    /// Dollars over the answers that could be priced. Absent until one could.
+    pub cost: Option<f64>,
+    /// Answers whose tokens were counted but which no rate was known for.
+    pub unpriced: u32,
+    /// Output tokens a second over the last answer, when it could be timed.
+    /// The number a model on this machine is judged by.
+    pub rate: Option<f64>,
+    /// How many answers this counts.
+    pub answers: u32,
+    /// Every timed millisecond, so a total can also say its mean speed.
+    pub generating_ms: u64,
+}
+
+impl Spent {
+    /// Counts one more answer in.
+    pub fn add(&mut self, finished: &Finished) {
+        self.answers += 1;
+        self.generating_ms += finished.generating_ms;
+
+        if let Some(cost) = finished.cost {
+            self.cost = Some(self.cost.unwrap_or(0.0) + cost);
+        }
+
+        match finished.usage {
+            Some(usage) => {
+                self.input += usage.input;
+                self.output += usage.output;
+                if finished.cost.is_none() {
+                    self.unpriced += 1;
+                }
+                self.rate = (finished.generating_ms > 0 && usage.output > 0)
+                    .then(|| usage.output as f64 * 1000.0 / finished.generating_ms as f64);
+            }
+            // Nothing to time it by, and the last rate is not this one.
+            None => self.rate = None,
+        }
+    }
+
+    /// Adds another total into this one, for summing days into a month.
+    ///
+    /// The rate is the other's when it has one, so summing in date order
+    /// leaves the newest day's speed, which is the one worth showing.
+    pub fn merge(&mut self, other: &Spent) {
+        self.input += other.input;
+        self.output += other.output;
+        self.unpriced += other.unpriced;
+        self.answers += other.answers;
+        self.generating_ms += other.generating_ms;
+        if let Some(cost) = other.cost {
+            self.cost = Some(self.cost.unwrap_or(0.0) + cost);
+        }
+        if other.rate.is_some() {
+            self.rate = other.rate;
+        }
+    }
+}
+
+/// Prices a turn the service did not price.
+///
+/// A model on this machine costs nothing, whatever it is called: somebody
+/// running gpt-oss under Ollama is not paying OpenAI for it. Everybody else
+/// is priced from the model that answered, or the one asked for when the
+/// service did not say which.
+pub fn price(finished: &mut Finished, asked_for: &str, local: bool) {
+    if local || finished.cost.is_some() {
+        return;
+    }
+
+    let Some(usage) = finished.usage else {
+        return;
+    };
+
+    let model = if finished.model.is_empty() {
+        asked_for
+    } else {
+        &finished.model
+    };
+
+    finished.cost = super::pricing::cost(model, usage);
 }
 
 /// One exchange, as the window draws it.
@@ -382,6 +484,10 @@ pub struct Conversation {
     /// When it was last spoken to.
     pub last: i64,
     messages: Vec<Message>,
+    /// What it has cost so far. A file from before this was counted reads
+    /// as nothing spent, which is the only honest number for it.
+    #[serde(default)]
+    spent: Spent,
     /// Claude Code's own session, when that is who is answering.
     ///
     /// Not written out. A session id belongs to a running CLI and means
@@ -465,6 +571,7 @@ impl Held {
             title: shorten(title),
             last: now,
             messages: Vec::new(),
+            spent: Spent::default(),
             session: None,
         });
     }
@@ -796,6 +903,31 @@ impl Chat {
             }
         }
     }
+
+    /// What the open conversation has cost so far. Nothing, when none is.
+    pub fn spent(&self) -> Spent {
+        self.held
+            .lock()
+            .ok()
+            .and_then(|held| held.open.as_ref().map(|open| open.spent))
+            .unwrap_or_default()
+    }
+
+    /// Counts a finished turn into the open conversation, and answers with
+    /// the total once it is in.
+    fn spend(&self, finished: &Finished) -> Spent {
+        let Ok(mut held) = self.held.lock() else {
+            return Spent::default();
+        };
+
+        match held.open.as_mut() {
+            Some(open) => {
+                open.spent.add(finished);
+                open.spent
+            }
+            None => Spent::default(),
+        }
+    }
 }
 
 /// A question, cut down to something a row can carry.
@@ -876,10 +1008,37 @@ pub async fn ask(
             // it, which is the number somebody waited through.
             answer.finished.duration_ms = began.elapsed().as_millis() as u64;
 
+            // Priced here, once, whichever way it came; then counted into the
+            // conversation, so what the window is told is the total and not
+            // something it has to add up for itself.
+            price(
+                &mut answer.finished,
+                &provider.model,
+                super::provider::is_on_this_network(&provider.base_url),
+            );
+
             chat.said(
                 Message::assistant(&answer.text).with_parts(answer.parts),
                 crate::state::now_seconds(),
             );
+            answer.finished.spent = chat.spend(&answer.finished);
+
+            // And against the provider, which outlives the conversation.
+            let answered_by = if answer.finished.model.is_empty() {
+                provider.model.as_str()
+            } else {
+                answer.finished.model.as_str()
+            };
+            let ledger = app.state::<super::ledger::Ledger>();
+            ledger.record(
+                &provider.id,
+                answered_by,
+                &answer.finished,
+                crate::state::now_seconds(),
+                &super::ledger::day_key(crate::dates::today()),
+            );
+            ledger.save(app);
+
             let _ = app.emit(DONE, &answer.finished);
             Ok(answer.text)
         }
@@ -950,6 +1109,10 @@ async fn over_http(
                 output: so_far.output + usage.output,
             });
         }
+        if let Some(cost) = said.cost {
+            finished.cost = Some(finished.cost.unwrap_or(0.0) + cost);
+        }
+        finished.generating_ms += said.generating_ms;
     };
 
     let done = |telling: Telling, finished: Finished| Answer {
@@ -1282,6 +1445,143 @@ mod tests {
     fn said(chat: &Chat, question: &str, answer: &str, at: i64) {
         chat.said(Message::user(question), at);
         chat.said(Message::assistant(answer), at);
+    }
+
+    mod what_it_costs {
+        use super::*;
+
+        fn turn(input: u64, output: u64, cost: Option<f64>, generating_ms: u64) -> Finished {
+            Finished {
+                usage: Some(Usage { input, output }),
+                cost,
+                generating_ms,
+                ..Finished::default()
+            }
+        }
+
+        /// Every answer counts, and the ones that could not be priced are
+        /// counted as tokens and named, so the total never reads as smaller
+        /// than the bill.
+        #[test]
+        fn answers_add_up_and_the_unpriced_are_named() {
+            let mut spent = Spent::default();
+            spent.add(&turn(100, 50, Some(0.01), 1000));
+            spent.add(&turn(200, 25, None, 500));
+            spent.add(&turn(10, 10, Some(0.02), 0));
+
+            assert_eq!((spent.input, spent.output), (310, 85));
+            assert_eq!(spent.answers, 3);
+            assert_eq!(spent.unpriced, 1);
+            assert!((spent.cost.expect("priced") - 0.03).abs() < 1e-12);
+        }
+
+        /// The rate is the last answer's, not an average: the number a local
+        /// model is judged by is how fast it is writing now.
+        #[test]
+        fn the_rate_is_the_last_answers() {
+            let mut spent = Spent::default();
+            spent.add(&turn(0, 100, None, 2000));
+            assert_eq!(spent.rate, Some(50.0));
+
+            spent.add(&turn(0, 30, None, 1000));
+            assert_eq!(spent.rate, Some(30.0));
+
+            // Untimed, or unanswered, and there is no rate to show.
+            spent.add(&turn(0, 30, None, 0));
+            assert_eq!(spent.rate, None);
+            spent.add(&Finished::default());
+            assert_eq!(spent.rate, None);
+        }
+
+        /// Days summed into a month keep every count and the newest speed.
+        #[test]
+        fn totals_merge_and_keep_the_newest_rate() {
+            let mut month = Spent::default();
+            let mut monday = Spent::default();
+            monday.add(&turn(10, 100, Some(0.01), 2000));
+            let mut tuesday = Spent::default();
+            tuesday.add(&turn(10, 30, None, 1000));
+
+            month.merge(&monday);
+            month.merge(&tuesday);
+
+            assert_eq!((month.input, month.output, month.answers), (20, 130, 2));
+            assert_eq!(month.unpriced, 1);
+            assert_eq!(month.cost, Some(0.01));
+            assert_eq!(month.generating_ms, 3000);
+            assert_eq!(month.rate, Some(30.0));
+
+            // A day with no rate does not erase the one before it.
+            month.merge(&Spent::default());
+            assert_eq!(month.rate, Some(30.0));
+        }
+
+        /// Nothing counted is still an answer counted.
+        #[test]
+        fn an_answer_with_no_numbers_still_counts_as_one() {
+            let mut spent = Spent::default();
+            spent.add(&Finished::default());
+            assert_eq!(spent.answers, 1);
+            assert_eq!(spent.unpriced, 0);
+            assert_eq!(spent.cost, None);
+        }
+
+        /// A service that named the dollars is believed over the table.
+        #[test]
+        fn a_price_the_service_named_is_kept() {
+            let mut finished = turn(1_000_000, 0, Some(0.25), 0);
+            finished.model = "gpt-5.2".to_string();
+            price(&mut finished, "gpt-5.2", false);
+            assert_eq!(finished.cost, Some(0.25));
+        }
+
+        /// The model that answered is priced, and the one asked for is only
+        /// a fallback: a gateway asked for an alias answers with the real
+        /// one, and that is what it bills.
+        #[test]
+        fn the_model_that_answered_is_the_one_priced() {
+            let mut finished = turn(1_000_000, 0, None, 0);
+            finished.model = "gpt-5-nano".to_string();
+            price(&mut finished, "gpt-5.2", false);
+            assert_eq!(finished.cost, Some(0.05));
+
+            let mut finished = turn(1_000_000, 0, None, 0);
+            price(&mut finished, "gpt-5.2", false);
+            assert_eq!(finished.cost, Some(1.75));
+        }
+
+        /// A model on this machine costs nothing whatever it is called.
+        #[test]
+        fn a_local_model_is_never_priced() {
+            let mut finished = turn(1_000_000, 1_000_000, None, 0);
+            finished.model = "gpt-5.2".to_string();
+            price(&mut finished, "gpt-5.2", true);
+            assert_eq!(finished.cost, None);
+        }
+
+        /// A model nobody has priced is left unpriced rather than guessed.
+        #[test]
+        fn an_unknown_model_is_left_unpriced() {
+            let mut finished = turn(1_000, 1_000, None, 0);
+            finished.model = "mystery-9b".to_string();
+            price(&mut finished, "mystery-9b", false);
+            assert_eq!(finished.cost, None);
+        }
+
+        /// Counting goes into the open conversation and nowhere else.
+        #[test]
+        fn spending_lands_on_the_open_conversation() {
+            let chat = Chat::new();
+            assert_eq!(chat.spend(&turn(1, 1, None, 0)), Spent::default());
+
+            chat.begin("first", 0);
+            let total = chat.spend(&turn(10, 5, Some(0.001), 0));
+            assert_eq!((total.input, total.output, total.answers), (10, 5, 1));
+            assert_eq!(chat.spent(), total);
+
+            chat.begin("second", 1);
+            assert_eq!(chat.spent(), Spent::default());
+        }
     }
 
     mod one_conversation_per_question {
@@ -1737,6 +2037,40 @@ mod tests {
             assert_eq!(all.len(), 1, "an older file was thrown away");
             assert_eq!(all[0].title, "what windows are open");
             assert_eq!(all[0].replies, 1);
+
+            // Nothing was counted back then, and nothing is the number.
+            assert!(chat.resume("chat:1", 1788201800));
+            assert_eq!(chat.spent(), Spent::default());
+        }
+
+        /// What a conversation cost goes to disk with it, so reopening one
+        /// tomorrow still says what it came to.
+        #[test]
+        fn what_was_spent_survives_a_restart() {
+            let dir = a_directory("spent");
+            let chat = Chat::new();
+            chat.load(&dir);
+            chat.begin("first", 0);
+            said(&chat, "first", "an answer", 0);
+            chat.spend(&Finished {
+                usage: Some(Usage {
+                    input: 100,
+                    output: 40,
+                }),
+                cost: Some(0.5),
+                generating_ms: 2000,
+                ..Finished::default()
+            });
+            chat.write_to(&dir).expect("written");
+
+            let again = Chat::new();
+            again.load(&dir);
+            assert!(again.resume("chat:1", 10));
+
+            let spent = again.spent();
+            assert_eq!((spent.input, spent.output, spent.answers), (100, 40, 1));
+            assert_eq!(spent.cost, Some(0.5));
+            assert_eq!(spent.rate, Some(20.0));
         }
 
         /*

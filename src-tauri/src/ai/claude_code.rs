@@ -267,7 +267,11 @@ pub fn outcome(line: &str) -> super::chat::Finished {
         model,
         usage,
         duration_ms: number("duration_ms").unwrap_or(0),
+        // The CLI does not say when the first token came, so its speed is
+        // not read; it is never local, and the rate is a local number.
+        generating_ms: 0,
         cost: value.get("total_cost_usd").and_then(serde_json::Value::as_f64),
+        spent: super::chat::Spent::default(),
     }
 }
 
