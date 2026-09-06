@@ -41,7 +41,7 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: var(--space-5);
+    gap: var(--space-6);
   }
 
   .label {
@@ -58,10 +58,10 @@
 
   .hint {
     display: block;
-    margin-top: var(--space-half);
+    margin-top: var(--space-1);
     /* Shorter than a section's, because a row's control sits at the end of
        the same line and prose running under it reads as a collision. */
-    max-width: 68ch;
+    max-width: 62ch;
     font-size: var(--text-meta);
     line-height: 1.55;
     color: var(--text-2);
@@ -75,6 +75,6 @@
   }
 
   .wide {
-    margin-top: var(--space-3);
+    margin-top: var(--space-4);
   }
 </style>

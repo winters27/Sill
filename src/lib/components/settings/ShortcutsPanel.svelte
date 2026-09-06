@@ -67,11 +67,9 @@
      * does nothing. The recorder says so, in the row that set it.
      */
     conflicts: string[];
-    /** How the keyboard hook is doing, from the diagnostics the page holds. */
-    hookStory: string;
   }
 
-  let { prefs, commit, conflicts, hookStory }: Props = $props();
+  let { prefs, commit, conflicts }: Props = $props();
 
   /**
    * The keys worth offering as a hyper key.
@@ -453,13 +451,6 @@
       {/snippet}
     </Row>
 
-    {#if prefs.hyper?.key || prefs.taps?.modifier}
-      <!-- not a setting: a reading of the hook both gestures run on -->
-      <Row
-        title="Keyboard hook"
-        description={hookStory}
-      />
-    {/if}
   </Section>
 
   <Section
@@ -542,17 +533,6 @@
       hint="One that upper-cases the selection is a good first one."
     />
 
-    <Row
-      title="Put the result back"
-      description="Replaces the selected text with what the action produced. Off means the result is only copied."
-    >
-      {#snippet control()}
-        <Toggle
-          checked={bindings.length > 0 && bindings.every((b) => b.replace)}
-          onchange={(on: boolean) => void saveBindings(bindings.map((b) => ({ ...b, replace: on })))}
-        />
-      {/snippet}
-    </Row>
 
     <!-- not a setting: the one thing this list can be told to do -->
     <Row
@@ -563,6 +543,20 @@
         <Button label="Add" onclick={() => void add()} />
       {/snippet}
     </Row>
+
+    {#if bindings.length > 0}
+      <Row
+        title="Put the result back"
+        description="Replaces the selected text with what the action produced. Off means the result is only copied."
+      >
+        {#snippet control()}
+          <Toggle
+            checked={bindings.every((b) => b.replace)}
+            onchange={(on: boolean) => void saveBindings(bindings.map((b) => ({ ...b, replace: on })))}
+          />
+        {/snippet}
+      </Row>
+    {/if}
   </Section>
 
   <Section

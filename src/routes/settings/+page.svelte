@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { groupOf } from "$lib/list";
+  import type { RankedCommand } from "$lib/exthost/commands";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import {
@@ -102,7 +104,7 @@
     {
       id: "general",
       name: "General",
-      blurb: "Startup, the tray icon and what Sill does when it opens",
+      blurb: "Startup, privacy, and what Sill does when it opens",
     },
     {
       id: "appearance",
@@ -152,9 +154,14 @@
     },
     {
       id: "sources",
-      name: "Sources",
-      blurb: "Where results come from: installed programs, browser pages and the web",
+      name: "Applications",
+      blurb: "What Sill scans for programs, and folders of your own",
       group: "Search",
+    },
+    {
+      id: "websearch",
+      name: "Web",
+      blurb: "Browser pages, open tabs and searching the web",
     },
     {
       id: "files",
@@ -197,7 +204,7 @@
     {
       id: "advanced",
       name: "Advanced",
-      blurb: "The index, usage history and where Sill keeps its data",
+      blurb: "The index, what Sill found, diagnostics and where it keeps its data",
       group: "System",
     },
     {
@@ -644,6 +651,17 @@
     return "Installed and seeing keys.";
   });
 
+  /**
+   * What a source is called on screen.
+   *
+   * The diagnostics answer with the index mode, which is a wire name. The
+   * launcher already has the heading for every mode, so the statistics say
+   * "Applications" where the wire says "app".
+   */
+  function sourceName(mode: string): string {
+    return groupOf({ mode, extensionTitle: mode } as RankedCommand);
+  }
+
   /** Only jump if the name is real, so a stale link cannot blank the page. */
   function jumpTo(name: string | null) {
     if (name && PANELS.some((p) => p.id === name)) {
@@ -994,48 +1012,6 @@
                 />
               {/snippet}
             </Row>
-            <!--
-              The row that says Sill is not recording, and the only place in
-              Settings that can say it. Every switch it overrides lives on
-              another panel and goes on reading "on" while it is: the Clipboard
-              panel's own toggle is about whether the history is wanted, not
-              about whether anything is being written right now.
-
-              The description carries the standing report while it is on, the
-              same way the two rows above carry theirs, so the panel says which
-              state it is in rather than only offering the switch.
-            -->
-            <Row
-              title="Private mode"
-              description={troubleOf("privacy")?.message ??
-                "Pauses the clipboard history, dictation and screen capture together. It stays on until you switch it off, restarts included."}
-            >
-              {#snippet control()}
-                <Toggle
-                  bind:checked={p.privacy.paused}
-                  onchange={commit}
-                  label="Private mode"
-                />
-              {/snippet}
-            </Row>
-          </Section>
-
-          <Section label="Unfinished">
-            <!--
-              A prototype, and the row says so rather than the release notes
-              doing it. Somebody who reads "Notes" in a launcher expects
-              folders, tags and formatting; what is behind this is one note at
-              a time in one window, and the honest place to say that is the
-              line under the switch they are about to press.
-            -->
-            <Row
-              title="Notes"
-              description="A prototype. One note at a time, in its own window. Type note in the launcher to find one. Off means Sill never opens the file at all."
-            >
-              {#snippet control()}
-                <Toggle bind:checked={p.general.notes} onchange={commit} label="Notes" />
-              {/snippet}
-            </Row>
           </Section>
 
           <Section label="Opening and closing">
@@ -1076,6 +1052,85 @@
               {/snippet}
             </Row>
           </Section>
+
+          <Section
+            label="Privacy"
+            description="One switch over everything Sill records. It stays where you put it, restarts included."
+          >
+            <!--
+              The row that says Sill is not recording, and the only place in
+              Settings that can say it. Every switch it overrides lives on
+              another panel and goes on reading "on" while it is: the Clipboard
+              panel's own toggle is about whether the history is wanted, not
+              about whether anything is being written right now.
+
+              The description carries the standing report while it is on, the
+              same way the startup rows carry theirs, so the panel says which
+              state it is in rather than only offering the switch.
+            -->
+            <Row
+              title="Private mode"
+              description={troubleOf("privacy")?.message ??
+                "Pauses the clipboard history, dictation and screen capture together."}
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.privacy.paused}
+                  onchange={commit}
+                  label="Private mode"
+                />
+              {/snippet}
+            </Row>
+          </Section>
+
+          <!--
+            Here rather than in Advanced, because it is about every setting in
+            this window and not about the index or the data folder.
+          -->
+          <Section
+            label="Settings file"
+            description="A copy to keep, to move to another machine, or to arrive with from another launcher."
+          >
+            <Row
+              title="Export settings"
+              description="Every setting in one file. No API keys and no tokens: they are locked to this Windows account, so a copy of one would both leak and not work."
+            >
+              {#snippet control()}
+                <Button label="Export" busy={transferring} onclick={() => void sendOut()} />
+              {/snippet}
+            </Row>
+
+            <Row
+              title="Import settings"
+              description={transfer ??
+                "A Sill export, a preferences.json, PowerToys Run's settings, or a Raycast .rayconfig. Anything the file does not mention keeps what it has."}
+            >
+              {#snippet control()}
+                <Button label="Import" busy={transferring} onclick={() => void bringIn()} />
+              {/snippet}
+            </Row>
+          </Section>
+
+          <Section
+            label="Extras"
+            description="Prototypes, off by default. Each row says what it is."
+          >
+            <!--
+              A prototype, and the row says so rather than the release notes
+              doing it. Somebody who reads "Notes" in a launcher expects
+              folders, tags and formatting; what is behind this is one note at
+              a time in one window, and the honest place to say that is the
+              line under the switch they are about to press.
+            -->
+            <Row
+              title="Notes"
+              description="One note at a time, in its own window. Type note in the launcher to find one. Off means Sill never opens the file at all."
+            >
+              {#snippet control()}
+                <Toggle bind:checked={p.general.notes} onchange={commit} label="Notes" />
+              {/snippet}
+            </Row>
+          </Section>
           {:else if active === "appearance"}
           <Section
             label="Theme"
@@ -1113,6 +1168,28 @@
                 {/snippet}
               </Row>
             {/if}
+
+            <Row
+              title="Interface font"
+              description="Satoshi and Inter are bundled and look the same on every machine; Segoe UI Variable is the one Windows ships. The window is transparent, so text is drawn without the display's subpixels whichever you pick, and Satoshi holds its weight best under that."
+            >
+              {#snippet control()}
+                <Segmented
+                  label="Interface font"
+                  value={p.appearance.font}
+                  options={[
+                    { value: "satoshi", label: "Satoshi" },
+                    { value: "inter", label: "Inter" },
+                    { value: "system", label: "Segoe UI" },
+                  ]}
+                  onchange={(next) => {
+                    if (!prefs) return;
+                    prefs.appearance.font = next as InterfaceFont;
+                    void commit();
+                  }}
+                />
+              {/snippet}
+            </Row>
           </Section>
 
           <Section
@@ -1140,28 +1217,6 @@
                 />
               {/snippet}
             </Row>
-            <Row
-              title="Interface font"
-              description="Satoshi and Inter are bundled, so they look the same on every machine; Segoe UI Variable is the one Windows ships. The window is transparent so the desktop can show through, and that means text is drawn without using the display's subpixels, whichever face you pick. Satoshi is the default because it holds its weight best under that. Judge them on your own screen."
-            >
-              {#snippet control()}
-                <Segmented
-                  label="Interface font"
-                  value={p.appearance.font}
-                  options={[
-                    { value: "satoshi", label: "Satoshi" },
-                    { value: "inter", label: "Inter" },
-                    { value: "system", label: "Segoe UI" },
-                  ]}
-                  onchange={(next) => {
-                    if (!prefs) return;
-                    prefs.appearance.font = next as InterfaceFont;
-                    void commit();
-                  }}
-                />
-              {/snippet}
-            </Row>
-
             <Row
               title="Backdrop depth"
               description="How dark the tint sits behind the glass. Higher hides more of the desktop."
@@ -1257,7 +1312,7 @@
           {:else if active === "snippets"}
             <SnippetsPanel prefs={p} {commit} />
           {:else if active === "shortcuts"}
-            <ShortcutsPanel prefs={p} commit={commitWith} {conflicts} {hookStory} />
+            <ShortcutsPanel prefs={p} commit={commitWith} {conflicts} />
           {:else if active === "quicklinks"}
             <QuicklinksPanel />
           {:else if active === "automations"}
@@ -1270,7 +1325,7 @@
             <ClipboardPanel prefs={p} {commit} />
           {:else if active === "sources"}
           <Section
-            label="What Sill indexes"
+            label="What Sill scans"
             description="Turning one off takes its entries out. Turning one on goes and looks for them, which takes a few seconds and happens in the background."
           >
             {#each SOURCES as source (source.key)}
@@ -1287,8 +1342,19 @@
           </Section>
 
           <Section
-            label="Browser search"
-            description="Pages your browsers remember, alongside everything else. Nothing is copied or read until you type, and it stays on this machine."
+            label="Your own folders"
+            description="Walked exactly as the Start Menu is, so a shortcut or a program in one of these appears with its own icon. For portable applications kept somewhere Windows does not list."
+          >
+            <Row title="Folders of your own">
+              {#snippet children()}
+                <PathList bind:paths={p.sources.folders} onchange={commit} />
+              {/snippet}
+            </Row>
+          </Section>
+          {:else if active === "websearch"}
+          <Section
+            label="Browser pages"
+            description="Pages your browsers remember, alongside everything else. Nothing is read until you type, and it stays on this machine."
           >
             <Row
               title="Search browser pages"
@@ -1346,31 +1412,6 @@
               {/snippet}
             </Row>
             <Row
-              title="Open browser tabs"
-              description="Tabs your browsers have open right now, so typing a page's name goes to the copy already on screen. Read from the running browsers when you type, and nothing is held between one search and the next."
-            >
-              {#snippet control()}
-                <Toggle
-                  bind:checked={p.browsers.tabs}
-                  onchange={commit}
-                  label="Open browser tabs"
-                />
-              {/snippet}
-            </Row>
-            <Row
-              title="Include Firefox and browsers built on it"
-              description="Firefox, Zen, LibreWolf and Waterfox keep their accessibility engine switched off until something asks, and reading tabs is the asking. Measured here, it costs that browser about 10 MB in its window's process and 85 MB across its pages, and stays until it is restarted. Chrome and Edge already expose their windows and cost nothing extra."
-              disabled={!p.browsers.tabs}
-            >
-              {#snippet control()}
-                <Toggle
-                  bind:checked={p.browsers.tabsFirefox}
-                  onchange={commit}
-                  label="Include Firefox and browsers built on it"
-                />
-              {/snippet}
-            </Row>
-            <Row
               title="Maximum browser results"
               description="These rank below commands and files, so a high number mostly costs scrolling."
               disabled={!p.browsers.enabled}
@@ -1390,7 +1431,38 @@
           </Section>
 
           <Section
-            label="Web search"
+            label="Open tabs"
+            description="Tabs your browsers have open right now, read when you type and held no longer than that."
+          >
+            <Row
+              title="Open browser tabs"
+              description="Typing a page's name goes to the copy already on screen."
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.browsers.tabs}
+                  onchange={commit}
+                  label="Open browser tabs"
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="Include Firefox and browsers built on it"
+              description="Firefox, Zen, LibreWolf and Waterfox switch on their accessibility engine when asked, which costs that browser about 10 MB plus 85 MB across its pages until it restarts. Chrome and Edge cost nothing extra."
+              disabled={!p.browsers.tabs}
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.browsers.tabsFirefox}
+                  onchange={commit}
+                  label="Include Firefox and browsers built on it"
+                />
+              {/snippet}
+            </Row>
+          </Section>
+
+          <Section
+            label="Searching the web"
             description="The last row Sill offers, after everything that actually matched. It reads nothing and sends nothing until you choose it."
           >
             <Row
@@ -1444,52 +1516,9 @@
               {/snippet}
             </Row>
           </Section>
-
-          <Section
-            label="Your own folders"
-            description="Walked exactly as the Start Menu is, so a shortcut or a program in one of these appears with its own icon. Useful if you keep portable applications somewhere Windows does not list."
-          >
-            <Row title="Folders of your own">
-              {#snippet children()}
-                <PathList bind:paths={p.sources.folders} onchange={commit} />
-              {/snippet}
-            </Row>
-          </Section>
-
-          <Section
-            label="Exclusions"
-            description="Matched against both the name and the path, so one folder name can hide a whole vendor at once. To switch off a single entry, use the list below instead."
-          >
-            <Row title="Hidden entries">
-              {#snippet children()}
-                <TermList bind:terms={p.sources.excluded} onchange={commit} />
-              {/snippet}
-            </Row>
-          </Section>
-
-          <Section
-            label="What Sill found"
-            description="An alias, a key and being in the list at all are the same question asked three ways, so they are three columns on one row. Setting an alias is also offered on the result itself in the launcher, which is where you usually notice you want one."
-            bare
-          >
-            <IndexList onchange={(next) => (prefs = next)} />
-          </Section>
-
-          {#if info}
-            <Section label="What is indexed now" bare>
-              <div class="stats">
-                {#each info.bySource as source (source.mode)}
-                  <div class="stat">
-                    <span class="stat-value">{source.count.toLocaleString()}</span>
-                    <span class="stat-label">{source.mode}</span>
-                  </div>
-                {/each}
-              </div>
-            </Section>
-          {/if}
           {:else if active === "files"}
           <Section
-            label="File search"
+            label="Searching"
             description="Sill keeps its own index of the folders below, so this works with nothing else installed. Where a whole-volume indexer is also running it is asked as well, and it sees the rest of the machine."
           >
             <Row
@@ -1521,10 +1550,7 @@
             </Row>
           </Section>
 
-          <Section
-            label="Matching"
-            description="Passed straight to Everything, where they mean exactly what they mean there."
-          >
+          <Section label="Matching" description="How the words you type are read.">
             <Row
               title="Match the whole path"
               description="Search the full path rather than only the file name."
@@ -1559,8 +1585,8 @@
           </Section>
 
           <Section
-            label="What Sill reads"
-            description="Sill keeps its own index so file search works without anything else installed. Build output and the folders listed in .gitignore are left out, which is what keeps it small: a home folder is 2.2 million files raw and 43,000 once they are."
+            label="Where it looks"
+            description="Build output and the folders listed in .gitignore are left out, which is what keeps the index small: a home folder is 2.2 million files raw and 43,000 once they are."
           >
             <Row
               title="Drives"
@@ -1580,13 +1606,11 @@
                 <PathList bind:paths={p.files.roots} onchange={commit} />
               {/snippet}
             </Row>
-          </Section>
-
-          <Section
-            label="Narrowing results"
-            description="A filter on what comes back, which is not the same as what gets read. With nothing listed, everything indexed can be found."
-          >
-            <Row title="Only show results in" disabled={!p.files.enabled}>
+            <Row
+              title="Only show results in"
+              description="A filter on what comes back, not on what gets read. With nothing listed, everything indexed can be found."
+              disabled={!p.files.enabled}
+            >
               {#snippet children()}
                 <PathList bind:paths={p.files.onlyIn} onchange={commit} />
               {/snippet}
@@ -1594,8 +1618,8 @@
           </Section>
           {:else if active === "screenshot"}
           <Section
-            label="Screenshots"
-            description="Pick an area, click a window, or take every screen at once. Whatever you take goes to the clipboard, and to the editor if you want it."
+            label="Taking one"
+            description="Pick an area, click a window, or take every screen at once. Whatever you take goes to the clipboard, and to the editor if you want it. The keys that take one are under Shortcuts."
           >
             <Row
               title="After taking one"
@@ -1716,58 +1740,75 @@
               title="Run script commands"
               description="Off scans nothing at all, rather than scanning and hiding the results. The folders below are kept either way."
             >
-              <Toggle
-                checked={p.scripts.enabled}
-                label="Run script commands"
-                onchange={(on) => {
-                  p.scripts.enabled = on;
-                  commit();
-                }}
-              />
+              {#snippet control()}
+                <Toggle
+                  checked={p.scripts.enabled}
+                  label="Run script commands"
+                  onchange={(on) => {
+                    p.scripts.enabled = on;
+                    commit();
+                  }}
+                />
+              {/snippet}
             </Row>
 
             <Row
               title="Stop a script after"
-              description="A script that waits on something that never arrives would otherwise wait for as long as Sill runs. Whatever it printed before it was stopped is still shown."
+              description="Seconds. A script that waits on something that never arrives would otherwise wait for as long as Sill runs. Whatever it printed before it was stopped is still shown."
             >
-              <input
-                class="number"
-                type="number"
-                min="1"
-                max="3600"
-                aria-label="Stop a script after, in seconds"
-                value={p.scripts.timeoutSeconds}
-                onchange={(event) => {
-                  const seconds = Number((event.currentTarget as HTMLInputElement).value);
-                  p.scripts.timeoutSeconds = Math.min(3600, Math.max(1, seconds || 60));
-                  commit();
-                }}
-              />
+              {#snippet control()}
+                <input
+                  class="number"
+                  type="number"
+                  min="1"
+                  max="3600"
+                  aria-label="Stop a script after, in seconds"
+                  value={p.scripts.timeoutSeconds}
+                  onchange={(event) => {
+                    const seconds = Number((event.currentTarget as HTMLInputElement).value);
+                    p.scripts.timeoutSeconds = Math.min(3600, Math.max(1, seconds || 60));
+                    commit();
+                  }}
+                />
+              {/snippet}
             </Row>
           </Section>
 
           <Section
-            label="Folders"
-            description="Scanned one level deep, so a folder with a project in it does not become a scan of the whole project. Nothing is scanned until a folder is named here: a launcher that went looking for runnable things on its own would find commands nobody put there to be found."
+            label="Where scripts live"
+            description="Nothing is scanned until a folder is named here: a launcher that went looking for runnable things on its own would find commands nobody put there to be found."
           >
-            <PathList bind:paths={p.scripts.folders} onchange={commit} />
+            <Row
+              title="Folders scanned for scripts"
+              description="One level deep, so a folder with a project in it does not become a scan of the whole project."
+            >
+              {#snippet children()}
+                <PathList bind:paths={p.scripts.folders} onchange={commit} />
+              {/snippet}
+            </Row>
           </Section>
 
           <Section
             label="Administrator rights"
-            description="A script can ask for administrator rights in its own header, and asking is all it can do. A script file arrives in a checkout, in a zip, in a folder somebody shares, and the prompt Windows shows names powershell.exe rather than the script, so there is nothing on that dialog to decide with. Naming one here is the deciding, made in advance, about one file. A script that asks and is not named does not run at all, rather than quietly running without the rights it said it needed."
+            description="A script can ask for them in its header, and asking is all it can do. The prompt Windows shows names powershell.exe rather than the script, so the deciding happens here, in advance, about one file at a time."
           >
-            <PathList
-              bind:paths={p.scripts.elevated}
-              onchange={commit}
-              files
-              headline="No script may run as administrator"
-              hint="A script asking for it in its header will say so and stop."
-              add="Allow a script…"
-              removes="Stop allowing"
-            />
+            <Row
+              title="Scripts allowed to run as administrator"
+              description="A script that asks and is not named here does not run at all, rather than quietly running without the rights it said it needed."
+            >
+              {#snippet children()}
+                <PathList
+                  bind:paths={p.scripts.elevated}
+                  onchange={commit}
+                  files
+                  headline="No script may run as administrator"
+                  hint="A script asking for it in its header will say so and stop."
+                  add="Allow a script…"
+                  removes="Stop allowing"
+                />
+              {/snippet}
+            </Row>
           </Section>
-
           {:else if active === "extensions"}
           <!-- The Store section stays here because it is a preference; what is
                installed, what it runs and what it may reach is a screen of its
@@ -1823,7 +1864,7 @@
 
           <Section
             label="Index"
-            description="Rebuilt in the background. Searching keeps working while it runs."
+            description="Everything the launcher can find. Rebuilt in the background, and searching keeps working while it runs."
           >
             <Row
               title="Rebuild the index"
@@ -1835,7 +1876,53 @@
                 <Button label="Rebuild" busy={rebuilding} onclick={rebuild} />
               {/snippet}
             </Row>
+
+            <Row
+              title="Usage history"
+              description={info
+                ? `Sill ranks by how often and how recently you launch something. ${info.launchedEntries.toLocaleString()} entries have been launched.`
+                : "Sill ranks by how often and how recently you launch something. Clearing it starts ranking over."}
+            >
+              {#snippet control()}
+                <Button
+                  label="Forget history"
+                  tone="danger"
+                  busy={clearing}
+                  onclick={forgetHistory}
+                />
+              {/snippet}
+            </Row>
+
+            <Row
+              title="Hidden entries"
+              description="Matched against both the name and the path, so one folder name can hide a whole vendor at once. To switch off a single entry, use the list below instead."
+            >
+              {#snippet children()}
+                <TermList bind:terms={p.sources.excluded} onchange={commit} />
+              {/snippet}
+            </Row>
           </Section>
+
+          <Section
+            label="What Sill found"
+            description="An alias, a key and being in the list at all are the same question asked three ways, so they are three columns on one row. Setting an alias is also offered on the result itself in the launcher, which is where you usually notice you want one."
+            bare
+          >
+            <IndexList onchange={(next) => (prefs = next)} />
+          </Section>
+
+          {#if info}
+            <Section label="What is indexed now" bare>
+              <div class="stats">
+                {#each info.bySource as source (source.mode)}
+                  <div class="stat">
+                    <span class="stat-value">{source.count.toLocaleString()}</span>
+                    <span class="stat-label">{sourceName(source.mode)}</span>
+                  </div>
+                {/each}
+              </div>
+            </Section>
+          {/if}
 
           <!--
             Measured rather than claimed, which is the whole point of it being
@@ -1843,15 +1930,15 @@
             statement about numbers: these are this machine's, this session.
           -->
           <Section
-            label="Reaching the launcher"
-            description="Timed by Sill itself, from the key being pressed to the moment you can type. The middle of the recent ones, because an occasional slow summon is a display waking rather than the launcher."
+            label="Diagnostics"
+            description="Readings, not settings. Timed by Sill itself on this machine, this session."
           >
             <!-- not a setting: a reading of how long the last summon took, not a control -->
             <Row
               title="Summon"
               description={timings?.summons.length
-                ? `The middle of the last ${timings.summons.length}.`
-                : "Nothing measured yet this session."}
+                ? `From the key being pressed to the moment you can type: the middle of the last ${timings.summons.length}, because an occasional slow summon is a display waking rather than the launcher.`
+                : "From the key being pressed to the moment you can type. Nothing measured yet this session."}
             >
               {#snippet control()}
                 <span class="reading">
@@ -1871,75 +1958,16 @@
                 </span>
               {/snippet}
             </Row>
-          </Section>
 
-          <Section
-            label="Keyboard"
-            description="Snippet expansion, the hyper key and double-tap all run on one low-level hook. Windows removes such a hook silently if it ever runs slow, and everything on it stops at once."
-          >
             <!-- not a setting: a reading of what the keyboard hook is costing, not a control -->
             <Row
               title="Keyboard hook"
-              description={hookStory}
+              description="Snippet expansion, the hyper key and double-tap all run on one low-level hook, which Windows removes silently if it ever runs slow. {hookStory}"
             >
               {#snippet control()}
                 <span class="fact">{info?.keyboardKeysSeen.toLocaleString() ?? "—"}</span>
               {/snippet}
             </Row>
-          </Section>
-
-          <Section
-            label="Ranking"
-            description="Sill ranks by how often and how recently you launch something, which is why the root list is usually right before you type."
-          >
-            <Row
-              title="Usage history"
-              description={info
-                ? `${info.launchedEntries.toLocaleString()} entries have been launched.`
-                : "Clearing it starts ranking over."}
-            >
-              {#snippet control()}
-                <Button
-                  label="Forget history"
-                  tone="danger"
-                  busy={clearing}
-                  onclick={forgetHistory}
-                />
-              {/snippet}
-            </Row>
-          </Section>
-
-          <!--
-            In Advanced rather than in a panel of its own, because it is about
-            the settings as a whole and the sidebar rule is that a thing with
-            no settings of its own folds into its parent.
-          -->
-          <Section
-            label="Settings file"
-            description="A copy to keep, to move to another machine, or to arrive with from another launcher."
-          >
-            <Row
-              title="Export settings"
-              description="Every setting in one file. No API keys and no tokens: they are locked to this Windows account, so a copy of one would both leak and not work."
-            >
-              {#snippet control()}
-                <Button label="Export" busy={transferring} onclick={() => void sendOut()} />
-              {/snippet}
-            </Row>
-
-            <Row
-              title="Import settings"
-              description="A Sill export, a preferences.json, PowerToys Run's settings, or a Raycast .rayconfig. Anything the file does not mention keeps what it has."
-            >
-              {#snippet control()}
-                <Button label="Import" busy={transferring} onclick={() => void bringIn()} />
-              {/snippet}
-            </Row>
-
-            {#if transfer}
-              <!-- not a setting: what the last export or import did, not a control -->
-              <Row title="Last transfer" description={transfer} />
-            {/if}
           </Section>
 
           <Section
@@ -1963,7 +1991,7 @@
 
             <Row
               title="Detailed logging"
-              description="Also writes what each search source and each extension cost, on every keystroke. Worth turning on while chasing a fault and worth turning off afterwards. It only ever adds: nothing here can stop a failure or a crash being written."
+              description="Also writes what each search source and each extension cost, on every keystroke. Worth turning on while chasing a fault and off afterwards."
             >
               {#snippet control()}
                 <Toggle
@@ -1977,7 +2005,7 @@
             <Row
               title="Export diagnostics"
               description={exported ||
-                "One file to send to somebody: the log, what is indexed, what each source cost, and anything not working. It leaves out your preferences, your keys, the clipboard and the file index, and it says so at the end so you can check before sending."}
+                "One file to send to somebody: the log, what is indexed, what each source cost, and anything not working. It leaves out your preferences, your keys, the clipboard and the file index, and says so at the end."}
             >
               {#snippet control()}
                 <Button label="Export" busy={exporting} onclick={exportBundle} />
@@ -1985,12 +2013,18 @@
             </Row>
           </Section>
           {:else if active === "about"}
-            <Section label="Sill" bare>
+          <Section label="Sill" bare>
             <div class="about">
               <img src="/sill.png" alt="" width="52" height="52" />
               <div>
                 <h3>Sill {info?.version ?? ""}</h3>
                 <p>A launcher for Windows that runs Raycast extensions.</p>
+                <p class="credits">
+                  Built on Tauri and Rust for the window, the Windows integration and the
+                  index; Svelte for everything drawn on screen; Node for the extension host,
+                  which runs each command in its own worker; and Everything, by voidtools,
+                  for file search when it is running.
+                </p>
               </div>
             </div>
           </Section>
@@ -2032,37 +2066,6 @@
                 <span class="fact">MIT</span>
               {/snippet}
             </Row>
-            <Row
-              title="Indexed entries"
-              description="Applications, commands, settings pages and executables."
-            >
-              {#snippet control()}
-                <span class="fact">{info?.indexedCommands.toLocaleString() ?? "—"}</span>
-              {/snippet}
-            </Row>
-          </Section>
-
-          <Section label="Built on">
-            <!-- not a setting: a credit, and the words mean other things in a search -->
-            <Row
-              title="Tauri and Rust"
-              description="The window, the Windows integration and the index."
-            />
-            <!-- not a setting: a credit, and the word means other things in a search -->
-            <Row
-              title="Svelte"
-              description="Everything drawn on screen, including a command's own views."
-            />
-            <!-- not a setting: a credit, and the word means other things in a search -->
-            <Row
-              title="Node"
-              description="The extension host, which runs each command in its own worker."
-            />
-            <!-- not a setting: a credit, and the word means other things in a search -->
-            <Row
-              title="Everything"
-              description="File search, by voidtools. Optional, and talked to over IPC."
-            />
           </Section>
         {/if}
           </div>
@@ -2140,7 +2143,7 @@
   aside {
     display: flex;
     flex-direction: column;
-    width: 244px;
+    width: 228px;
     flex: none;
     padding: var(--space-5) 0 var(--space-2);
     border-right: 1px solid var(--hairline);
@@ -2217,7 +2220,7 @@
      of items read as a group, and a gap at the top of the list is just a
      hole. */
   .nav-label {
-    margin-top: var(--space-5);
+    margin-top: var(--space-6);
   }
 
   nav {
@@ -2234,8 +2237,8 @@
     align-items: center;
     gap: var(--space-3);
     width: 100%;
-    padding: var(--space-1) var(--space-2);
-    margin-bottom: var(--space-half);
+    padding: var(--space-cozy) var(--space-3);
+    margin-bottom: var(--space-snug);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -2333,7 +2336,7 @@
     align-items: center;
     gap: var(--space-4);
     flex: none;
-    padding: var(--space-5) var(--space-8) var(--space-6);
+    padding: var(--space-6) var(--settings-gutter) var(--space-6);
   }
 
   .hero-text {
@@ -2394,7 +2397,7 @@
    * answer to a question somebody already has.
    */
   .wrong {
-    margin: 0 var(--space-8) var(--space-5);
+    margin: 0 var(--settings-gutter) var(--space-6);
     padding: var(--space-3) var(--space-4);
     border-left: 1px solid var(--danger);
     background: var(--danger-fill);
@@ -2436,7 +2439,7 @@
        control wider than the panel then puts a horizontal scrollbar under a
        vertical one. Controls wrap instead; see Segmented. */
     overflow-x: hidden;
-    padding: 0 var(--space-8) var(--space-8);
+    padding: var(--space-4) var(--settings-gutter) var(--space-10);
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
   }
@@ -2486,6 +2489,16 @@
     align-items: center;
     gap: var(--space-4);
     margin-bottom: var(--space-8);
+  }
+
+  /* What Sill is made of, said once in prose rather than as four rows that
+     look like settings. */
+  .credits {
+    max-width: 62ch;
+    margin-top: var(--space-2);
+    font-size: var(--text-meta);
+    line-height: 1.55;
+    color: var(--text-3);
   }
 
   .about h3 {

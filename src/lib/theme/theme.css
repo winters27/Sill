@@ -591,6 +591,11 @@
   --control-height: 30px;
   /* One row of the keyboard map in the shortcuts panel. */
   --keymap-row: 34px;
+  /* A settings row is never shorter than this, whatever it holds. Raycast
+     sits between 44 and 52; a 41px row read as cramped beside it. */
+  --settings-row-min: 48px;
+  /* The gutter both columns of the settings window keep from its edges. */
+  --settings-gutter: var(--space-10);
   --icon-tile: 26px;
   --icon-tile-sm: 20px;
   --icon-tile-xs: 16px;
@@ -1306,13 +1311,19 @@ body {
  * and the space between sections does the rest.
  */
 .sill-card {
-  background: var(--fill-1);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
+  /*
+   * No slab. The rows sit on the window itself, full width, separated by
+   * hairlines, which is how a settings window reads as one document rather
+   * than as a stack of boxes. The class stays as the hook for the row rules
+   * below, and a section that is `bare` opts out of them.
+   */
+  background: transparent;
+  border-radius: 0;
 }
 
 .sill-setting {
-  padding: var(--space-3) var(--space-4);
+  min-height: var(--settings-row-min);
+  padding: var(--space-4) var(--space-5);
   background: transparent;
   transition: background-color var(--motion-state) linear;
 }
@@ -1322,12 +1333,11 @@ body {
 }
 
 /*
- * A hairline BETWEEN adjacent settings only. The adjacent-sibling selector
- * skips the first row, and a setting's own dependent controls live inside its
- * row rather than beside it, so they stay grouped with no internal line.
+ * A hairline under every row. Each row is one line of a document, and the
+ * line under it is what separates it from the next without a box.
  */
-.sill-card .sill-setting + .sill-setting {
-  border-top: 1px solid var(--hairline);
+.sill-card .sill-setting {
+  border-bottom: 1px solid var(--hairline);
 }
 
 /*

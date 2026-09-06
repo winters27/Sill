@@ -314,9 +314,12 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
     let window =
         tauri::WebviewWindowBuilder::new(&app, "settings", tauri::WebviewUrl::App(route.into()))
             .title("Settings")
-            // Room for a 244px sidebar plus a settings pane that does not wrap its own
-            // descriptions. Anything narrower and the right pane reads as a column.
-            .inner_size(1180.0, 800.0)
+            // The size Raycast opens its settings at, measured on a 2560x1440
+            // display at 100%: about two thirds of the width and most of the
+            // height. A settings window is read slowly and wants air; 1180x800
+            // read as cramped beside it. The minimum below is where the right
+            // pane starts reading as a column.
+            .inner_size(1740.0, 1240.0)
             .min_inner_size(940.0, 620.0)
             .resizable(true)
             // Frameless and transparent, so the page draws its own title bar and the

@@ -85,7 +85,7 @@
 </script>
 
 <Section
-  label="History"
+  label="Recording"
   description="Everything copied is kept on this machine so it can be found and pasted again. Nothing is sent anywhere."
 >
   <Row
@@ -94,40 +94,6 @@
   >
     {#snippet control()}
       <Toggle bind:checked={prefs.clipboard.enabled} onchange={commit} label="Record what I copy" />
-    {/snippet}
-  </Row>
-
-  <Row
-    title="Keep history for"
-    description="Older unpinned entries are deleted on the next start. A clipboard collects one-time codes and whatever was typed near a password field, so an end date is a feature rather than a limitation."
-  >
-    {#snippet control()}
-      <Segmented
-        label="Keep history for"
-        value={String(prefs.clipboard.retainDays)}
-        options={RETENTION}
-        onchange={(next) => {
-          prefs.clipboard.retainDays = Number(next);
-          commit();
-        }}
-      />
-    {/snippet}
-  </Row>
-
-  <Row
-    title="Keep at most"
-    description="The oldest entries are deleted once there are more than this. Pinned entries, entries in a collection and whatever is open in the history are never counted or deleted."
-  >
-    {#snippet control()}
-      <Segmented
-        label="Keep at most"
-        value={String(prefs.clipboard.maxEntries)}
-        options={LIMIT}
-        onchange={(next) => {
-          prefs.clipboard.maxEntries = Number(next);
-          commit();
-        }}
-      />
     {/snippet}
   </Row>
 
@@ -161,7 +127,7 @@
 
   <Row
     title="Lock stored pictures"
-    description="Pictures are kept so that only your Windows account can open them. Another account on this PC cannot, and neither can anyone holding a copy of the history file from a backup, a synced folder or the drive itself. It does not hide them from programs already running as you, which can unlock them exactly the way Sill does. Pictures already in the history are converted whichever way you change this, so nothing is lost by turning it on or off again. Text is not covered, because searching it means keeping it readable."
+    description="Pictures are kept so that only your Windows account can open them: another account on this PC cannot, and neither can anyone holding a copy of the history file. It does not hide them from programs already running as you. Pictures already here are converted whichever way you change this. Text is not covered, because searching it means keeping it readable."
   >
     {#snippet control()}
       <Toggle
@@ -173,6 +139,44 @@
   </Row>
 </Section>
 
+<Section
+  label="Retention"
+  description="A clipboard collects one-time codes and whatever was typed near a password field, so an end date is a feature rather than a limitation."
+>
+  <Row
+    title="Keep history for"
+    description="Older unpinned entries are deleted on the next start."
+  >
+    {#snippet control()}
+      <Segmented
+        label="Keep history for"
+        value={String(prefs.clipboard.retainDays)}
+        options={RETENTION}
+        onchange={(next) => {
+          prefs.clipboard.retainDays = Number(next);
+          commit();
+        }}
+      />
+    {/snippet}
+  </Row>
+
+  <Row
+    title="Keep at most"
+    description="The oldest entries are deleted once there are more than this. Pinned entries, entries in a collection and whatever is open in the history are never counted or deleted."
+  >
+    {#snippet control()}
+      <Segmented
+        label="Keep at most"
+        value={String(prefs.clipboard.maxEntries)}
+        options={LIMIT}
+        onchange={(next) => {
+          prefs.clipboard.maxEntries = Number(next);
+          commit();
+        }}
+      />
+    {/snippet}
+  </Row>
+</Section>
 <Section
   label="Excluded applications"
   description="Copies made in these are never recorded. Matched loosely, so “chrome” covers every Chrome window. Password managers already exclude themselves through Windows, so this is for everything else worth keeping out."

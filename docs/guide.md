@@ -317,11 +317,17 @@ one that does nothing.
 
 ## Settings
 
-Settings opens from the launcher and covers, in its own words: startup and
-the tray icon, the window's size and material, snippets, quicklinks,
-clipboard history, emoji, every key, screenshots, where results come from,
-file search, extensions, scripts, the AI chat, dictation, text to speech,
-widgets, the index and where Sill keeps its data, and what version this is.
+Settings opens from the launcher and covers, in its own words: startup,
+privacy and the settings file, the window's size and material, snippets,
+quicklinks, clipboard history, emoji, every key, screenshots, which programs
+it scans, browser pages and the web, file search, extensions, scripts, the AI
+chat, dictation, text to speech, widgets, the index and what it found,
+diagnostics and where Sill keeps its data, and what version this is.
+
+It opens at the size Raycast opens its settings at, about two thirds of a
+2560 by 1440 display, because a settings window is read slowly and wants air.
+Rows sit on the window itself, full width, one idea each, with a hairline
+between them and a plain heading over each group.
 
 ## When something is not working
 

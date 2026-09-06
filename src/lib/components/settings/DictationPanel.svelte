@@ -243,7 +243,6 @@
 
 <svelte:window onkeydown={onRecord} />
 
-<DictationStats />
 
 <Section
   label="Trigger"
@@ -397,7 +396,7 @@
   </Row>
 </Section>
 
-<Section label="General">
+<Section label="Listening">
   <Row
     title="Language"
     description="Auto detects per dictation. Pinning one is faster and stops a strong accent being read as a neighbouring language."
@@ -464,9 +463,15 @@
     {/snippet}
   </Row>
 
+</Section>
+
+<Section
+  label="History"
+  description="Every transcript is kept on this machine so it can be found again. It is what the statistics below are counted from, and nothing is sent anywhere."
+>
   <Row
     title="Keep a history"
-    description="Every transcript is kept so it can be found again, and it is what the statistics above are counted from. Nothing is sent anywhere."
+    description="Every transcript is kept so it can be found again, and it is what the statistics below are counted from. Nothing is sent anywhere."
   >
     {#snippet control()}
       <Toggle bind:checked={prefs.dictation.keepHistory} onchange={commit} label="Keep a history" />
@@ -476,7 +481,7 @@
   {#if prefs.dictation.keepHistory}
     <Row
       title="Keep transcripts for"
-      description="Anything older is dropped the next time you dictate. Kept forever unless you say otherwise, because nothing lands here that you did not speak into it, and the statistics above read less well the more of it is thrown away."
+      description="Anything older is dropped the next time you dictate. Kept forever unless you say otherwise, because nothing lands here that you did not speak into it, and the statistics below read less well the more of it is thrown away."
     >
       {#snippet control()}
         <Segmented
@@ -494,7 +499,7 @@
 </Section>
 
 <Section
-  label="Transcription"
+  label="Engine"
   description="Local runs whisper.cpp on this machine and nothing leaves it. The others need an API key and are faster."
 >
   <Row title="Backend">
@@ -557,6 +562,41 @@
     {/snippet}
   </Row>
 
+  {#if isLocal && !prefs.dictation.provider.baseUrl}
+    <!--
+      The model rows sit with the backend that uses them rather than in a
+      section of their own three sections down, so the reader chooses the
+      engine and its size in one place.
+    -->
+    {#each models as model (model.id)}
+      <Row
+        title={model.label}
+        description="{formatBytes(model.sizeBytes)} to download · about {formatBytes(
+          MEMORY[model.id] ?? 0,
+        )} in memory{model.installed ? ' · downloaded' : ''}. Bigger is more accurate and slower. Changing this restarts the server on the next dictation."
+      >
+        {#snippet control()}
+          <div class="model-actions">
+            {#if prefs.dictation.modelId === model.id}
+              <span class="chosen">Selected</span>
+            {:else}
+              <Button
+                label="Use"
+                onclick={() => {
+                  prefs.dictation.modelId = model.id;
+                  commit();
+                  void refresh();
+                }}
+              />
+            {/if}
+            {#if model.installed}
+              <Button label="Remove" tone="danger" onclick={() => void remove(model.id)} />
+            {/if}
+          </div>
+        {/snippet}
+      </Row>
+    {/each}
+  {/if}
 </Section>
 
 <Section
@@ -615,7 +655,7 @@
 
 {#if isLocal && !prefs.dictation.provider.baseUrl}
   <Section
-    label="Engine"
+    label="Local server"
     description="whisper.cpp runs as a resident server, so the model loads once instead of on every dictation. Inference cost is flat with clip length: a twenty second dictation costs the same as a two second one."
     bare
   >
@@ -628,43 +668,15 @@
       onstop={() => void stopServer()}
     />
   </Section>
-  <Section
-    label="Speech model"
-    description="Bigger is more accurate and slower, and holds more memory for as long as the server is up. Changing this restarts the server on the next dictation."
-  >
-    {#each models as model (model.id)}
-      <Row
-        title={model.label}
-        description="{formatBytes(model.sizeBytes)} to download · about {formatBytes(
-          MEMORY[model.id] ?? 0,
-        )} in memory{model.installed ? ' · downloaded' : ''}"
-      >
-        {#snippet control()}
-          <div class="model-actions">
-            {#if prefs.dictation.modelId === model.id}
-              <span class="chosen">Selected</span>
-            {:else}
-              <Button
-                label="Use"
-                onclick={() => {
-                  prefs.dictation.modelId = model.id;
-                  commit();
-                  void refresh();
-                }}
-              />
-            {/if}
-            {#if model.installed}
-              <Button label="Remove" tone="danger" onclick={() => void remove(model.id)} />
-            {/if}
-          </div>
-        {/snippet}
-      </Row>
-    {/each}
-  </Section>
-
 {/if}
 
 {#if prefs.dictation.keepHistory}
+  <!-- Last, not first: a first-time reader meets the switch that turns
+       dictation on, not a board of words per minute. -->
+  <Section label="Dictation statistics" description="Counted from the history." bare>
+    <DictationStats />
+  </Section>
+
   <HistoryPanel />
 {/if}
 

@@ -39,14 +39,14 @@
 
 <style>
   section {
-    margin-bottom: var(--space-6);
+    margin-bottom: var(--space-10);
   }
 
   .head {
     display: flex;
     align-items: flex-start;
     gap: var(--space-3);
-    padding: 0 var(--space-half) var(--space-2);
+    padding: 0 var(--space-half) var(--space-3);
   }
 
   .words {
@@ -68,18 +68,16 @@
    */
   h3 {
     margin: 0;
-    font-size: var(--text-label);
+    font-size: var(--text-body);
     font-weight: var(--weight-strong);
-    letter-spacing: var(--track-label);
-    text-transform: uppercase;
-    color: var(--text-3);
+    color: var(--text-1);
   }
 
   p {
     margin: var(--space-1) 0 0;
     /* A line of prose stops being readable somewhere past 80 characters, and
        a wide settings pane will happily run to 160. */
-    max-width: 82ch;
+    max-width: 68ch;
     font-size: var(--text-meta);
     line-height: 1.55;
     color: var(--text-2);
