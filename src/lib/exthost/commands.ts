@@ -511,14 +511,45 @@ export interface AiUsage {
   output: number;
 }
 
+/**
+ * What a conversation has cost so far, added up in Rust.
+ *
+ * Held with the conversation, so a reopened one still knows and the launcher
+ * and the chat window agree. `unpriced` answers were counted as tokens but no
+ * rate was known for them, so `cost` is short by that much and the pill says.
+ */
+export interface AiSpent {
+  input: number;
+  output: number;
+  /** Dollars over the answers that could be priced. Null until one could. */
+  cost: number | null;
+  unpriced: number;
+  /** Output tokens a second over the last answer, when it could be timed. */
+  rate: number | null;
+  answers: number;
+}
+
 /** What a turn cost, said once it is over. Every field can be empty. */
 export interface AiFinished {
   /** Which model actually answered. Empty when the service did not say. */
   model: string;
   usage: AiUsage | null;
   durationMs: number;
-  /** In dollars, when the service says. Only Claude Code does. */
+  /** First piece to last, in milliseconds. Zero when it could not be timed. */
+  generatingMs: number;
+  /**
+   * In dollars: named by the service, or worked out in Rust from the
+   * published rate. Null for a model on this machine or one nobody priced.
+   */
   cost: number | null;
+  /** The conversation's running total with this turn counted in. */
+  spent: AiSpent;
+}
+
+/** Dollars per million tokens, in and out. */
+export interface AiRate {
+  input: number;
+  output: number;
 }
 
 /** Whether asking would work, and who would answer. */
@@ -543,6 +574,12 @@ export interface AiReady {
    * tool already signed in, or a key.
    */
   kind: string;
+  /**
+   * What the chosen model costs per million tokens, when it is paid for by
+   * the token and the rate is known. Null for a model on this machine, for
+   * Claude Code, and for a model nobody has priced.
+   */
+  price: AiRate | null;
   /** Why not, when not. Empty when it is ready. */
   whyNot: string;
 }
@@ -844,6 +881,16 @@ export function aiForgetAll(): Promise<void> {
 /** Everything said so far, for a window that has just opened. */
 export function aiTranscript(): Promise<AiTurn[]> {
   return invoke<AiTurn[]>("ai_transcript");
+}
+
+/**
+ * What the open conversation has cost so far.
+ *
+ * Asked once when a conversation is opened or resumed; every turn after that
+ * carries the new total on its done event.
+ */
+export function aiSpent(): Promise<AiSpent> {
+  return invoke<AiSpent>("ai_spent");
 }
 
 /** Forgets the conversation. */
@@ -1379,10 +1426,22 @@ export function defaultBrowser(): Promise<string | null> {
  * It carries the words, not a URL. Which engine turns them into one is a
  * setting, and it can change between this being offered and being picked.
  *
+ * ## Why it wears the browser and not Sill's own mark
+ *
  * `browser` is the program the search will open in, and it is what the row
- * wears. Searching the web is not something Sill does; it is Sill handing the
- * question to that browser, and a row marked with Sill's own gear would say
- * otherwise. It is the same rule the Windows switches follow.
+ * wears. Not as attribution but as **information**: it is the only place the
+ * launcher says where the answer is about to appear, and somebody with two
+ * browsers installed reads it before pressing Enter rather than after the
+ * wrong window comes up.
+ *
+ * This was tried the other way on 2026-09-05 and put straight back. The
+ * argument for Sill's mark was that a web search is the one offer here that is
+ * not a thing on this machine, which is true and is worth less than telling
+ * somebody where they are about to be sent. `urlRow` below wears it for the
+ * same reason, so the two agree.
+ *
+ * The mark is still the fallback, for a machine with no default browser: the
+ * row was otherwise handed the typed words as a path and lettered itself "S".
  */
 export function webSearchRow(query: string, browser?: string): RankedCommand {
   return {
@@ -1393,8 +1452,6 @@ export function webSearchRow(query: string, browser?: string): RankedCommand {
     subtitle: "",
     mode: "websearch",
     entrypoint: query,
-    // With no default browser to name, the search mark: otherwise the row
-    // was handed the typed words as a path and lettered itself "S".
     icon: browser ?? "mark:websearch",
     matched: [],
   };
