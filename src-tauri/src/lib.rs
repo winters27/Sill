@@ -1246,12 +1246,12 @@ impl DismissOnBlur {
 
 /// The settings panel holding the row that sets the summon key.
 ///
-/// It used to be `general`, which was right when `P1-11` wrote it and stopped
-/// being right when `P5-06` moved every hotkey under Shortcuts. The window
-/// went on opening a panel that no longer had the row, so the one control this
-/// exists to put in front of somebody was not on the screen it opened.
-/// `verify-source` reads the settings catalogue and refuses a section here
-/// that does not hold that row.
+/// It has moved twice. `P1-11` wrote `general`; `P5-06` moved every hotkey
+/// under Shortcuts and this followed; on 2026-09-05 a key went back to the
+/// panel of the thing it does, so the summon key is under General again. Each
+/// time, the window went on opening a panel that no longer had the row until
+/// this caught up, which is why `verify-source` reads the settings catalogue
+/// and refuses a section here that does not hold that row.
 const SUMMON_SECTION: &str = "general";
 
 /// Says out loud that the summon key never took.
