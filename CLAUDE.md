@@ -46,6 +46,11 @@ becomes the whole file.
 `#[cfg(test)]` module in the library that constructs one aborts the
 entire `cargo test --lib` run at load, naming nothing.
 
+**Nothing in `src-tauri/tests/` is built by `--lib`.** A signature
+change leaves those files calling something that no longer exists, and
+the quick loop stays green while a full run does not compile. This is
+why `verify:rust:fast` runs `cargo check --all-targets` first.
+
 **Tauri denies a command missing from `capabilities/` silently.** No
 error, no log, the page renders fine and the feature is dead. A `.catch`
 does not help: a denied command *resolves*. Validate the shape of what

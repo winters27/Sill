@@ -17,7 +17,7 @@
     "postinstall": "node scripts/fetch-fonts.mjs && node scripts/fetch-node.mjs",
     "verify:tree": "node scripts/verify-tree.mjs",
     "verify:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "verify:rust:fast": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
+    "verify:rust:fast": "cargo check --manifest-path src-tauri/Cargo.toml --all-targets && cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "verify": "npm run host:test && npm run check && npm run verify:web && npm run verify:rust && npm run verify:source && npm run verify:page && npm run verify:tree && npm run gate:views",
     "gate:views": "bash scripts/gate-views.sh",
     "extensions:fetch": "node scripts/fetch-raycast-src.mjs",
