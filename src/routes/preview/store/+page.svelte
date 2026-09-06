@@ -32,7 +32,8 @@
   import StoreView from "$lib/components/StoreView.svelte";
   import { LISTBOX, optionId } from "$lib/results";
   import type { Preferences } from "$lib/settings";
-  import type { Browse, Preparation, StoreRow, StoreQuery } from "$lib/store";
+  import type { Browse, Preparation, StoreFilterState, StoreRow, StoreQuery } from "$lib/store";
+  import StoreFilter from "$lib/components/StoreFilter.svelte";
 
   const WALLS = {
     dark: "radial-gradient(120% 90% at 20% 10%, #23262b, #0a0a0b 70%)",
@@ -41,6 +42,9 @@
   } as const;
 
   const THEMES = ["winters-glass", "oilslick", "graphite", "ember", "moss", "aberration"] as const;
+
+  /** What the store says can be filtered, drawn beside the field as in Sill. */
+  let filter = $state<StoreFilterState | null>(null);
 
   let wall = $state<keyof typeof WALLS>("dark");
   let theme = $state<(typeof THEMES)[number]>("winters-glass");
@@ -63,6 +67,15 @@
     return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   }
 
+  /** The marks Rust gives the store's categories, copied for the fixture. */
+  const MARK_OF: Record<string, string> = {
+    Productivity: "Rocket",
+    "Developer Tools": "Code",
+    Web: "Globe",
+    Media: "Image",
+    "AI Extensions": "Stars",
+  };
+
   function row(over: Partial<StoreRow>): StoreRow {
     return {
       name: "demo",
@@ -73,6 +86,7 @@
       authorName: "Some One",
       authorAvatar: "",
       categories: ["Productivity"],
+      mark: MARK_OF[(over.categories ?? ["Productivity"])[0] ?? ""] ?? "",
       platforms: ["macOS", "Windows"],
       downloads: 1000,
       icon: "",
@@ -319,7 +333,7 @@
       rows,
       categories: [...categories]
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([name, count]) => ({ name, count })),
+        .map(([name, count]) => ({ name, count, mark: MARK_OF[name] ?? "Tag" })),
       matched: rows.length,
       total: CATALOGUE.length,
       hidden,
@@ -490,6 +504,9 @@
         spellcheck="false"
         autofocus
       />
+      {#if filter}
+        <StoreFilter {filter} onpick={(value) => view?.pick(value)} />
+      {/if}
     </div>
     <div class="l-divider"></div>
 
@@ -503,6 +520,7 @@
         oncount={(n) => (count = n)}
         onstatus={(said) => (status = said)}
         oncurrent={() => {}}
+        onfilter={(state) => (filter = state)}
         onchanged={() => {}}
       />
     </div>

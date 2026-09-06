@@ -41,6 +41,8 @@ export interface StoreRow {
   /** The author's picture on Raycast's asset host, or empty. */
   authorAvatar: string;
   categories: string[];
+  /** The mark of its first category, or empty when it names none. */
+  mark: string;
   platforms: string[];
   downloads: number;
   revision: string;
@@ -66,6 +68,17 @@ export interface StoreRow {
 export interface StoreCategory {
   name: string;
   count: number;
+  /** The mark Rust chose for it, drawn beside the name. */
+  mark: string;
+}
+
+/** What to show, as the store's filter control draws it. */
+export interface StoreFilterState {
+  scope: "all" | "installed" | "updates";
+  category: string | null;
+  categories: StoreCategory[];
+  /** How many installed extensions the catalogue has moved past. */
+  updates: number;
 }
 
 export interface Browse {

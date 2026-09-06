@@ -63,6 +63,7 @@ function listing(
     authorName: "Some One",
     authorAvatar: "",
     categories: [],
+    mark: "",
     platforms: ["windows"],
     downloads: 10,
     revision: "bbbb",

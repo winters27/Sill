@@ -3,6 +3,8 @@
   // command rather than waiting for the DOM.
   import { onMount, setContext, tick as rendered, untrack } from "svelte";
   import { VIEW_SESSION, type SessionOf } from "$lib/exthost/assets";
+  import StoreFilter from "$lib/components/StoreFilter.svelte";
+  import type { StoreFilterState } from "$lib/store";
   import { beginCapture, captureScreen, lastImage, openMarkup } from "$lib/capture";
   import { onePerId } from "$lib/list";
   import { openQuicklink } from "$lib/quicklinks";
@@ -721,6 +723,8 @@
    * `rowForActions` answer for every view rather than three.
    */
   let storeListing = $state<StoreRow | null>(null);
+  /** The store's filter as it stands, for the control beside the field. */
+  let storeFilter = $state<StoreFilterState | null>(null);
   /** Whether the store was opened on what has an update rather than on all. */
   let storeOnUpdates = $state(false);
 
@@ -4573,7 +4577,14 @@
         status = `the command could not change that: ${err}`;
       });
     }}
+    accessory={mode === "store" && storeFilter ? storeFilterControl : undefined}
   />
+
+  {#snippet storeFilterControl()}
+    {#if storeFilter}
+      <StoreFilter filter={storeFilter} onpick={(value) => storeView?.pick(value)} />
+    {/if}
+  {/snippet}
 
   {#if mode === "output" && output}
     <ScriptOutput {output} />
@@ -4676,6 +4687,7 @@
         onselect={(i) => (selected = i)}
         oncount={(n) => (storeCount = n)}
         oncurrent={(row) => (storeListing = row)}
+        onfilter={(filter) => (storeFilter = filter)}
         onstatus={(said) => (status = said)}
         onchanged={() => void refreshRoot()}
       />

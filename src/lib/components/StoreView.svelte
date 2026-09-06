@@ -34,6 +34,7 @@
   } from "$lib/store";
   import StoreIcon from "./StoreIcon.svelte";
   import Chord from "./Chord.svelte";
+  import ExtIcon from "./ExtIcon.svelte";
   import { storeGallery } from "$lib/store";
   import { GLYPHS } from "./marks";
   import Instead from "./Instead.svelte";
@@ -41,6 +42,7 @@
   import { LISTBOX, optionId } from "$lib/results";
   import { hint } from "$lib/hint";
   import type { Preferences } from "$lib/settings";
+  import type { StoreFilterState } from "$lib/store";
 
   interface Props {
     /** The launcher's query field drives the search. */
@@ -61,6 +63,14 @@
     oncurrent: (row: StoreRow | null) => void;
     /** Refreshes the launcher's own list after an install or a removal. */
     onchanged: () => void;
+    /**
+     * The filter as it stands, for the control beside the search field.
+     *
+     * The field and its accessories belong to the launcher, so the store
+     * reports what can be filtered and how it is filtered now, and the
+     * launcher draws the control and hands a pick back to `pick`.
+     */
+    onfilter?: (filter: StoreFilterState) => void;
     prefs: Preferences | null;
     /** Opens straight onto what has an update, from the launcher's own row. */
     startOnUpdates?: boolean;
@@ -74,6 +84,7 @@
     onstatus,
     oncurrent,
     onchanged,
+    onfilter,
     prefs,
     startOnUpdates = false,
   }: Props = $props();
@@ -290,6 +301,32 @@
   $effect(() => {
     oncurrent(opened ?? current);
   });
+
+  $effect(() => {
+    onfilter?.({
+      scope,
+      category,
+      categories: browse?.categories ?? [],
+      updates: browse?.updates ?? 0,
+    });
+  });
+
+  /**
+   * A pick from the filter control: a scope, or a category, or any category.
+   * The values are the ones `StoreFilter` reports, and nothing else is one.
+   */
+  export function pick(value: string) {
+    if (value === "scope:all" || value === "scope:installed" || value === "scope:updates") {
+      scope = value.slice(6) as Scope;
+    } else if (value === "category:") {
+      category = null;
+    } else if (value.startsWith("category:")) {
+      category = value.slice(9);
+    } else {
+      return;
+    }
+    onselect(0);
+  }
 
   onMount(() => {
     void storeReady().then((answer) => (ready = answer));
@@ -778,49 +815,6 @@
       </p>
     {/if}
 
-    <div class="bar">
-      <!--
-        Scopes, then categories. The scopes are computed from what is
-        installed; the categories are read out of the catalogue, so a category
-        Raycast adds appears here without anybody adding it.
-      -->
-      <div class="chips sill-scrolls">
-        <!-- `aria-pressed` rather than a colour alone. Which chip is on is
-             drawn with a fill, and a fill is the one thing a screen reader
-             cannot see. -->
-        <button aria-pressed={scope === "all"} class:on={scope === "all"} onclick={() => (scope = "all")}>All</button>
-        <button
-          aria-pressed={scope === "installed"}
-          class:on={scope === "installed"}
-          onclick={() => (scope = "installed")}
-        >
-          Installed
-        </button>
-        <button
-          aria-pressed={scope === "updates"}
-          class:on={scope === "updates"}
-          onclick={() => (scope = "updates")}
-        >
-          Updates{browse?.updates ? ` ${browse.updates}` : ""}
-        </button>
-
-        <span class="divider"></span>
-
-        <button aria-pressed={category === null} class:on={category === null} onclick={() => (category = null)}>
-          Any
-        </button>
-        {#each browse?.categories ?? [] as one (one.name)}
-          <button
-            aria-pressed={category === one.name}
-            class:on={category === one.name}
-            onclick={() => (category = category === one.name ? null : one.name)}
-          >
-            {one.name}
-          </button>
-        {/each}
-      </div>
-    </div>
-
     <div class="pane">
       <!--
         A list of extensions is a list, and it was not one.
@@ -897,14 +891,6 @@
                          author; it says where it came from instead. -->
                     <span>Built here</span>
                   {/if}
-                  {#if row.installed?.outdated}
-                    <span class="state update">Update</span>
-                  {:else if row.installed}
-                    <span class="state have">
-                      <svg viewBox="0 0 12 12" aria-hidden="true">
-                        <path d="M2.5 6.4 5 8.8l4.6-5.4" />
-                      </svg>Installed</span>
-                  {/if}
                   {#if row.blocked}
                     <span class="blocked">{row.blocked}</span>
                   {/if}
@@ -912,21 +898,35 @@
               </div>
             </div>
 
-            {#if !row.native}
-              <!--
-                What the store knows about the listing that is not the
-                listing: how many have it, and who made it. On the right,
-                where the eye goes after the title, and as marks rather than
-                sentences: the count with the download mark, the author as
-                their picture with their name on hover.
-              -->
-              <div class="aside">
+            <!--
+              What the store knows about the listing that is not the listing,
+              on the right where the eye goes after the title, as marks rather
+              than sentences: its category, how many have it, whether it is
+              here, and who made it as their picture with their name on hover.
+            -->
+            <div class="aside">
+              {#if row.mark && row.categories[0]}
+                <span class="category" use:hint={row.categories[0]}>
+                  <ExtIcon icon={{ kind: "mark", name: row.mark }} small />
+                </span>
+              {/if}
+              {#if !row.native}
                 <span class="installs" use:hint={`${installs(row.downloads)} installs`}>
                   <svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
                     <path d={GLYPHS["arrow-circle-down"]} />
                   </svg>
                   {installs(row.downloads)}
                 </span>
+              {/if}
+              {#if row.installed?.outdated}
+                <span class="state update">Update</span>
+              {:else if row.installed}
+                <span class="state have">
+                  <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M2.5 6.4 5 8.8l4.6-5.4" />
+                  </svg>Installed</span>
+              {/if}
+              {#if row.author}
                 <span class="who" use:hint={row.authorName || row.author}>
                   {#if row.authorAvatar}
                     <img src={row.authorAvatar} alt={row.authorName || row.author} loading="lazy" />
@@ -936,8 +936,8 @@
                     </span>
                   {/if}
                 </span>
-              </div>
-            {/if}
+              {/if}
+            </div>
           </div>
         {/each}
       </div>
@@ -1006,11 +1006,6 @@
   /* Scopes and categories on one scrolling strip. There are sixteen
      categories and the window is 750px, so they scroll sideways rather than
      wrapping into a block that eats the list. */
-  .bar {
-    flex: none;
-    border-bottom: 1px solid var(--hairline);
-  }
-
   .missing {
     flex: none;
     margin: 0;
@@ -1019,44 +1014,6 @@
     color: var(--text-2);
     font-size: var(--text-meta);
     line-height: var(--line-meta);
-  }
-
-  .chips {
-    display: flex;
-    gap: var(--space-1);
-    align-items: center;
-    padding: var(--space-2) var(--space-3);
-    overflow-x: auto;
-  }
-
-  .chips button {
-    flex: none;
-    padding: var(--space-snug) var(--space-2);
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: transparent;
-    color: var(--text-3);
-    font-size: var(--text-meta);
-    white-space: nowrap;
-    cursor: pointer;
-  }
-
-  .chips button:hover {
-    background: var(--fill-1);
-    color: var(--text-2);
-  }
-
-  .chips button.on {
-    background: var(--accent-fill);
-    color: var(--text-1);
-  }
-
-  .divider {
-    flex: none;
-    width: 1px;
-    height: 14px;
-    margin: 0 var(--space-1);
-    background: var(--hairline);
   }
 
   .pane {
@@ -1188,9 +1145,18 @@
     white-space: nowrap;
   }
 
+  /* Drawn at the small icon size rather than at the text's: a 256-unit
+     outline at fourteen pixels aliased into a smudge. */
   .installs svg {
-    width: 14px;
-    height: 14px;
+    width: var(--icon-tile-sm);
+    height: var(--icon-tile-sm);
+  }
+
+  .category {
+    display: grid;
+    flex: none;
+    place-items: center;
+    color: var(--text-3);
   }
 
   .who {

@@ -509,6 +509,37 @@ pub const SHOWN: usize = 80;
 pub struct Category {
     pub name: String,
     pub count: usize,
+    /// The mark drawn beside the name, from Sill's own set.
+    pub mark: &'static str,
+}
+
+/// The mark for a store category, by the name Raycast gives it.
+///
+/// Raycast's store draws an icon beside each category and does not publish
+/// which; these are Sill's own choices from the marks it already has, one per
+/// category the index uses, so the filter and the row can wear the same
+/// picture. A category this has never heard of gets a plain tag rather than
+/// nothing, so a new one Raycast adds is still marked as a category.
+pub fn category_mark(name: &str) -> &'static str {
+    match name.trim() {
+        "Productivity" => "Rocket",
+        "Developer Tools" => "Code",
+        "Web" => "Globe",
+        "Applications" => "AppWindow",
+        "Fun" => "GameController",
+        "Data" => "BarChart",
+        "Media" => "Image",
+        "AI Extensions" => "Stars",
+        "Documentation" => "Book",
+        "Finance" => "Coins",
+        "System" => "ComputerChip",
+        "Design Tools" => "Brush",
+        "Communication" => "SpeechBubble",
+        "News" => "Megaphone",
+        "Security" => "Lock",
+        "Other" => "Ellipsis",
+        _ => "Tag",
+    }
 }
 
 /// What is known about an extension that is already here.
@@ -532,6 +563,8 @@ pub struct Row {
     pub author_name: String,
     pub author_avatar: String,
     pub categories: Vec<String>,
+    /// The mark of its first category, or empty when it names none.
+    pub mark: &'static str,
     pub platforms: Vec<String>,
     pub downloads: u64,
     pub revision: String,
@@ -727,6 +760,11 @@ pub fn browse(
             author_name: listing.author_name.clone(),
             author_avatar: listing.author_avatar.clone(),
             categories: listing.categories.clone(),
+            mark: listing
+                .categories
+                .first()
+                .map(|name| category_mark(name))
+                .unwrap_or(""),
             platforms: listing.platforms.clone(),
             downloads: listing.downloads,
             revision: listing.revision.clone(),
@@ -756,6 +794,7 @@ pub fn browse(
             .map(|(name, count)| Category {
                 name: name.to_string(),
                 count,
+                mark: category_mark(name),
             })
             .collect(),
         matched,
@@ -948,6 +987,25 @@ impl StoreState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every category the index used on 2026-09-05 has a mark of its own,
+    /// and a new one still reads as a category.
+    #[test]
+    fn every_category_the_store_uses_has_a_mark() {
+        let used = [
+            "Productivity", "Developer Tools", "Web", "Applications", "Fun", "Data", "Media",
+            "AI Extensions", "Documentation", "Other", "Finance", "System", "Design Tools",
+            "Communication", "News", "Security",
+        ];
+        let mut marks = std::collections::HashSet::new();
+        for name in used {
+            let mark = category_mark(name);
+            assert_ne!(mark, "Tag", "{name} has no mark of its own");
+            assert!(marks.insert(mark), "{name} shares its mark with another category");
+        }
+        assert_eq!(category_mark("Something New"), "Tag");
+        assert_eq!(category_mark(" Web "), "Globe");
+    }
 
     fn listing(name: &str, title: &str, downloads: u64) -> Listing {
         Listing {
@@ -1151,11 +1209,13 @@ mod tests {
             vec![
                 Category {
                     name: "Media".to_string(),
-                    count: 1
+                    count: 1,
+                    mark: "Image",
                 },
                 Category {
                     name: "Productivity".to_string(),
-                    count: 2
+                    count: 2,
+                    mark: "Rocket",
                 },
             ],
             "a category nobody here has ever heard of still appears, because it \

@@ -22,6 +22,7 @@
   import type { Mode } from "$lib/modes";
   import type { AiReady } from "$lib/exthost/commands";
   import type { dropdownOf } from "$lib/exthost/present";
+  import type { Snippet } from "svelte";
 
   interface Props {
     mode: Mode;
@@ -70,6 +71,11 @@
      * programmatic clear into a measurement of how fast typing feels.
      */
     ontyped?: () => void;
+    /**
+     * A control of the launcher's own beside the field, in the place an
+     * extension's dropdown takes: the store's filter, today.
+     */
+    accessory?: Snippet;
   }
 
   let {
@@ -90,6 +96,7 @@
     dropdown,
     onpick,
     ontyped,
+    accessory,
   }: Props = $props();
 
   /**
@@ -252,6 +259,9 @@
   -->
   {#if dropdown}
     <ExtDropdown {dropdown} {onpick} />
+  {/if}
+  {#if accessory}
+    {@render accessory()}
   {/if}
 
   {#if mode === "root" && answersWith}
