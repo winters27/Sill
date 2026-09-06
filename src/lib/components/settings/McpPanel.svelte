@@ -191,7 +191,6 @@
                   onchange={(value) =>
                     change(index, (one) => (one.actions[at].tool = value))}
                   ariaLabel="Which tool this action runs"
-                  full
                 />
               {:else}
                 <input
@@ -267,14 +266,17 @@
     tone={standing({ failed: false, loading: false, count: servers.length })}
     inline
     headline="No MCP servers yet"
-  >
-    Add one and Sill offers its tools in the action panel, beside everything Sill
-    itself can do to a file.
-  </Instead>
+  />
 
-  <div class="actions">
-    <Button label="Add a server" onclick={add} />
-  </div>
+  <!-- not a setting: the one thing this list can be told to do -->
+  <Row
+    title="Add a server"
+    description="Name it and say how it starts. Its tools appear in the action panel, beside everything Sill itself can do to a file."
+  >
+    {#snippet control()}
+      <Button label="Add" onclick={add} />
+    {/snippet}
+  </Row>
 </Section>
 
 <Section
@@ -373,9 +375,12 @@
     color: var(--text-2);
   }
 
+  /* Controls sit at the end of the line, where every row puts its control;
+     a button under a paragraph at the left edge read as a stray. */
   .actions {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: var(--space-2);
   }
 

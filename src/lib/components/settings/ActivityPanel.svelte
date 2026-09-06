@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import Section from "./Section.svelte";
   import Button from "./Button.svelte";
+  import Row from "./Row.svelte";
   import Instead from "../Instead.svelte";
 
   type Done = {
@@ -96,9 +97,12 @@
       {/each}
     </ul>
 
-    <div class="foot">
-      <Button label="Clear" tone="danger" onclick={clear} />
-    </div>
+    <!-- not a setting: the one thing this list can be told to do -->
+    <Row title="Clear this list" description="Forgets what was done. Nothing done is undone.">
+      {#snippet control()}
+        <Button label="Clear" tone="danger" onclick={clear} />
+      {/snippet}
+    </Row>
   {/if}
 
   {#if said}
@@ -172,9 +176,4 @@
     font-size: var(--text-meta);
   }
 
-  .foot {
-    display: flex;
-    justify-content: flex-end;
-    padding-top: var(--space-3);
-  }
 </style>

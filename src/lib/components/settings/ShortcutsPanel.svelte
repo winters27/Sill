@@ -554,9 +554,15 @@
       {/snippet}
     </Row>
 
-    <div class="foot">
-      <Button label="Add a shortcut" onclick={() => void add()} />
-    </div>
+    <!-- not a setting: the one thing this list can be told to do -->
+    <Row
+      title="Add a shortcut"
+      description="A key that runs an action on the selection, the window in front, or a folder, without the launcher appearing."
+    >
+      {#snippet control()}
+        <Button label="Add" onclick={() => void add()} />
+      {/snippet}
+    </Row>
   </Section>
 
   <Section
@@ -762,12 +768,6 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .foot {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-  }
 
   /* The row a key was just added to, so it is found after the scroll. */
   .revealed {

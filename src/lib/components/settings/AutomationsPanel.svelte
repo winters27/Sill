@@ -198,7 +198,6 @@
         options={offers.map((offer) => ({ value: offer.id, label: offer.title }))}
         onchange={(value) => (action = value)}
         ariaLabel="Which action the trigger runs"
-        full
       />
     </label>
 
@@ -220,7 +219,6 @@
           options={SCHEDULES}
           onchange={(value) => (schedule = value as typeof schedule)}
           ariaLabel="When the trigger runs"
-          full
         />
       </label>
 
@@ -301,6 +299,7 @@
 
   .actions {
     display: flex;
+    justify-content: flex-end;
     gap: var(--space-2);
   }
 

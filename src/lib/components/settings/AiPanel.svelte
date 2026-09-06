@@ -446,7 +446,6 @@
                       options={choices}
                       onchange={(next) => change(one.id, { model: next })}
                       ariaLabel="Model"
-                      full
                     />
                   {:else}
                     <TextField
