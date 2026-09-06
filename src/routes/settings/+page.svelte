@@ -2141,11 +2141,16 @@
               <div>
                 <h3>Sill {info?.version ?? ""}</h3>
                 <p>A launcher for Windows that runs Raycast extensions.</p>
+                <!--
+                  What is named here is somebody else's work, and nothing more.
+                  This used to credit the framework for the index and the
+                  ranking, which are written here, so it read as though the
+                  parts that took the longest had come out of a box.
+                -->
                 <p class="credits">
-                  Built on Tauri and Rust for the window, the Windows integration and the
-                  index; Svelte for everything drawn on screen; Node for the extension host,
-                  which runs each command in its own worker; and Everything, by voidtools,
-                  for file search when it is running.
+                  Written in Rust and Svelte, on Tauri. Extensions run on a bundled Node,
+                  each command in its own worker. Searching the whole disk is handed to
+                  Everything, by voidtools, when it is running.
                 </p>
               </div>
             </div>
