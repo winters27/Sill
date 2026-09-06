@@ -1125,15 +1125,15 @@
     white-space: nowrap;
   }
 
-  /* The right-hand side of a row: a count and a face, on one line with the
-     title, so a row's first line reads title, count, author. */
+  /* The right-hand side of a row: category, count, pill and face, centred
+     on the row rather than tied to its first line, so they sit level with
+     the middle of the icon whether the row is two lines or three. */
   .aside {
     display: flex;
     flex: none;
     gap: var(--space-3);
     align-items: center;
-    align-self: flex-start;
-    height: var(--icon-tile-sm);
+    align-self: center;
     color: var(--text-3);
     font-size: var(--text-meta);
   }
