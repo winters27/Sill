@@ -327,6 +327,48 @@ impl ObjectKind {
         }
     }
 
+    /// The kind as a settings heading: what a group of actions on it is called.
+    ///
+    /// For the shortcuts panel, which lists every action grouped by the first
+    /// kind it applies to. Decided here rather than in the window because the
+    /// grouping is a fact about the kinds, and a table of thirty names in the
+    /// window would be the second copy of this list.
+    pub const fn plural(self) -> &'static str {
+        match self {
+            Self::Application => "Applications",
+            Self::File => "Files",
+            Self::Folder => "Folders",
+            Self::ExtensionCommand => "Extension commands",
+            Self::SystemSetting => "Windows settings",
+            Self::Setting => "Sill settings",
+            Self::Builtin => "Sill commands",
+            Self::SystemControl => "System switches",
+            Self::Snippet => "Snippets",
+            Self::Quicklink => "Quicklinks",
+            Self::TerminalProfile => "Terminals",
+            Self::ScreenControl => "Controls on screen",
+            Self::Font => "Fonts",
+            Self::DisplayMode => "Display modes",
+            Self::Script => "Scripts",
+            Self::Answer => "Answers",
+            Self::ClipboardEntry => "Clipboard history",
+            Self::Text => "Text",
+            Self::Emoji => "Emoji",
+            Self::Window => "Windows",
+            Self::BrowserTab => "Browser tabs",
+            Self::Search => "Web searches",
+            Self::Url => "Web pages",
+            Self::AudioSession => "Program volumes",
+            Self::NowPlaying => "Now playing",
+            Self::Process => "Running programs",
+            Self::Workspace => "Arrangements",
+            Self::Conversation => "Conversations",
+            Self::StoreListing => "Store listings",
+            Self::Note => "Notes",
+            Self::Reminder => "Reminders",
+        }
+    }
+
     /// The kind behind an index entry's `mode`.
     ///
     /// `None` for a mode nothing knows about, which is a build newer than this

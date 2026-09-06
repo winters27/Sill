@@ -569,6 +569,8 @@ export type KeyLine = {
   does: string;
   changed: boolean;
   contested: boolean;
+  /** Windows would not register it: set, and does nothing. */
+  refused: boolean;
 };
 
 /** A group of lines under a heading. */

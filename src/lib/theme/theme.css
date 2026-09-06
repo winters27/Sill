@@ -589,6 +589,8 @@
    * mixed sources from looking ragged.
    */
   --control-height: 30px;
+  /* One row of the keyboard map in the shortcuts panel. */
+  --keymap-row: 34px;
   --icon-tile: 26px;
   --icon-tile-sm: 20px;
   --icon-tile-xs: 16px;

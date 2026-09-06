@@ -1,24 +1,54 @@
 <script lang="ts">
   /**
-   * Keys that run an action without the launcher appearing.
+   * Every key Sill answers to, in one place, with the keyboard at the top.
    *
-   * The list of actions is asked for rather than written here: it is the same
-   * registry Enter and the action panel use, so a transform added in Rust
-   * becomes bindable without this file changing.
+   * ## What this panel decides, and what it does not
+   *
+   * Nothing about which keys are taken. That is `key_owners` in Rust, asked
+   * by each recorder before it saves, and it reads the same sheet the keyboard
+   * reference draws. Nothing about which movement a chord resolves to, which
+   * action a chord runs, or which of two actions wins a chord: `navigation_keys`
+   * and `action_shortcuts` answer those, and the rows are re-read after every
+   * write rather than guessed at. This file holds focus, recording state, the
+   * filter typed into the action list, and the shape of the page.
+   *
+   * ## Why the global keys moved in here
+   *
+   * They were drawn by the settings page itself, two hundred lines above this
+   * component, with a recorder of their own that listened on the whole window
+   * and never disarmed. Two recorders with two looks in one scrolling panel
+   * was the visible half of that; the other half was that arming the summon
+   * recorder and then pressing a key over any other row rebound the summon key.
+   * One recorder, one look, one listener per control.
+   *
+   * ## What it costs
+   *
+   * Three reads when the panel opens and again after each write, all awaited.
+   * The four timers that used to re-read the rows a hundred and twenty
+   * milliseconds after a write are gone: the write is awaited instead.
    */
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import Section from "./Section.svelte";
   import Row from "./Row.svelte";
   import Button from "./Button.svelte";
   import Toggle from "../Toggle.svelte";
   import Segmented from "./Segmented.svelte";
   import Select from "./Select.svelte";
+  import TextField from "./TextField.svelte";
   import Instead from "../Instead.svelte";
+  import KeyRecorder from "./KeyRecorder.svelte";
+  import KeyMap from "./KeyMap.svelte";
   import { standing } from "$lib/instead";
-  import { actionsFor, searchCommands, type ActionInfo } from "$lib/exthost/commands";
+  import { SECTIONS } from "$lib/keys";
+  import {
+    actionsFor,
+    keyboardReference,
+    searchCommands,
+    type ActionInfo,
+    type KeySection,
+  } from "$lib/exthost/commands";
   import {
     actionShortcuts,
-    chordFrom,
     navigationKeys,
     type ActionShortcut,
     type NavigationKey,
@@ -27,18 +57,21 @@
 
   interface Props {
     prefs: Preferences;
-    commit: (next: Preferences) => void;
+    /** Saves a whole settings object. Awaited, so the rows can be re-read. */
+    commit: (next: Preferences) => Promise<void>;
     /**
-     * Accelerators Windows refused, from the same list the hotkey rows use.
+     * Accelerators Windows refused.
      *
      * A shortcut another application already owns registers as an error and
      * then looks exactly like one that works: the row shows the key, the key
-     * does nothing. These rows had no way to say so at all.
+     * does nothing. The recorder says so, in the row that set it.
      */
     conflicts: string[];
+    /** How the keyboard hook is doing, from the diagnostics the page holds. */
+    hookStory: string;
   }
 
-  let { prefs, commit, conflicts }: Props = $props();
+  let { prefs, commit, conflicts, hookStory }: Props = $props();
 
   /**
    * The keys worth offering as a hyper key.
@@ -56,41 +89,6 @@
     { value: "163", label: "Right Ctrl" },
   ];
 
-  const bindings = $derived(prefs.bindings ?? []);
-
-  /** Everything that can be done to text, which is what a key can bind to. */
-  let textActions = $state<ActionInfo[]>([]);
-  /**
-   * Everything that can be done to a window.
-   *
-   * A separate list because a key runs one action on one kind of thing, and
-   * offering "Snap Left" beside "Uppercase" in one list would let somebody
-   * build a shortcut that can never work. The source picker below chooses
-   * which list this row is drawn from, so the two always agree.
-   */
-  let windowActions = $state<ActionInfo[]>([]);
-  /**
-   * Everything that can be done to a folder.
-   *
-   * The list behind "Explorer's folder", and the reason it is asked for rather
-   * than assumed to be one entry: jumping a dialog is what that source was
-   * added for, and opening a terminal there, copying its path or compressing
-   * it are all keys somebody may reasonably want on the same thing.
-   */
-  let folderActions = $state<ActionInfo[]>([]);
-  /** Titles for the commands bindings point at, so the list reads as names. */
-  let commandNames = $state<Record<string, string>>({});
-
-  let recording = $state<number | null>(null);
-  let status = $state("");
-
-  /**
-   * How the launcher is moved around.
-   *
-   * Here rather than in its own panel because this is where somebody looks
-   * for "what keys does Sill use", and the two answers being in two places
-   * is the fragmentation the index list was built to undo.
-   */
   /**
    * The modifiers a double-tap can be bound to, and off.
    *
@@ -106,89 +104,108 @@
     { value: "win", label: "Win" },
   ];
 
-  function setTap(next: string) {
-    commit({
-      ...prefs,
-      taps: {
-        ...prefs.taps,
-        modifier: next === "off" ? null : (next as TapModifier),
-      },
-    });
-  }
-
   const PRESETS = [
     { value: "standard", label: "Arrows only" },
     { value: "vim", label: "Vim" },
     { value: "emacs", label: "Emacs" },
   ];
 
-  /**
-   * What each movement resolves to.
-   *
-   * Asked for rather than derived: the answer depends on the preset and on
-   * what has been overridden, and a preset can take a key another movement
-   * preferred. Working it out again here is how a settings screen ends up
-   * naming a key that does something else.
-   */
-  let moves = $state<NavigationKey[]>([]);
-  let rebinding = $state<string | null>(null);
+  /** The other keys that work whatever is in front. The summon key is drawn on its own. */
+  type GlobalKey = "switcher" | "capture" | "captureScreen";
+  const GLOBAL: { id: GlobalKey; title: string; description: string }[] = [
+    {
+      id: "switcher",
+      title: "Window switcher hotkey",
+      description: "Opens Sill straight onto the windows you have open, most recent first.",
+    },
+    {
+      id: "capture",
+      title: "Screenshot hotkey",
+      description: "Picks an area of the screen without opening Sill first. Drag an area, or click a window.",
+    },
+    {
+      id: "captureScreen",
+      title: "Whole screen hotkey",
+      description: "Copies everything on every display at once, with nothing to pick.",
+    },
+  ];
 
-  async function loadMoves() {
-    moves = await navigationKeys();
+  /** What Rust says the keys are. Re-read after every write. */
+  let reference = $state<KeySection[]>([]);
+  let moves = $state<NavigationKey[]>([]);
+  let actionKeys = $state<ActionShortcut[]>([]);
+
+  /** Everything that can be done to text, a window and a folder: what a binding can run. */
+  let textActions = $state<ActionInfo[]>([]);
+  let windowActions = $state<ActionInfo[]>([]);
+  let folderActions = $state<ActionInfo[]>([]);
+  /** Titles for the commands bindings point at, so the list reads as names. */
+  let commandNames = $state<Record<string, string>>({});
+
+  async function refresh(): Promise<void> {
+    const [sheet, moving, acting] = await Promise.all([
+      keyboardReference().catch(() => [] as KeySection[]),
+      navigationKeys(),
+      actionShortcuts(),
+    ]);
+    reference = sheet;
+    moves = moving;
+    actionKeys = acting;
   }
 
-  onMount(() => void loadMoves());
+  onMount(() => {
+    void refresh();
+    void Promise.all([actionsFor("text"), actionsFor("window"), actionsFor("folder")]).then(
+      ([text, window, folder]) => {
+        textActions = text;
+        windowActions = window;
+        folderActions = folder;
+      },
+    );
+  });
 
-  async function setPreset(next: string) {
-    commit({
+  /** Writes, then reads back what the write resolved to. No timer, no guess. */
+  async function save(next: Preferences): Promise<void> {
+    await commit(next);
+    await refresh();
+  }
+
+  const bindings = $derived(prefs.bindings ?? []);
+  const layouts = $derived(prefs.layouts ?? []);
+
+  function setHotkey(id: "summon" | GlobalKey, chord: string): Promise<void> {
+    return save({ ...prefs, hotkey: { ...prefs.hotkey, [id]: chord } });
+  }
+
+  function setTap(next: string): void {
+    void save({
+      ...prefs,
+      taps: { ...prefs.taps, modifier: next === "off" ? null : (next as TapModifier) },
+    });
+  }
+
+  function setPreset(next: string): void {
+    void save({
       ...prefs,
       navigation: { ...prefs.navigation, preset: next as "standard" | "vim" | "emacs" },
     });
-    // The commit is asynchronous and the resolved map lives in Rust, so the
-    // rows are re-read rather than guessed at.
-    setTimeout(() => void loadMoves(), 120);
   }
 
-  function rebind(event: KeyboardEvent, move: NavigationKey) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (event.key === "Escape") {
-      rebinding = null;
-      return;
-    }
-
-    // Backspace gives the movement back to the preset.
-    if (event.key === "Backspace") {
-      const overrides = { ...prefs.navigation.overrides };
-      delete overrides[move.id];
-      commit({ ...prefs, navigation: { ...prefs.navigation, overrides } });
-      rebinding = null;
-      setTimeout(() => void loadMoves(), 120);
-      return;
-    }
-
-    const chord = chordFrom(event);
-    if (!chord) return;
-
-    commit({
-      ...prefs,
-      navigation: {
-        ...prefs.navigation,
-        overrides: { ...prefs.navigation.overrides, [move.id]: chord },
-      },
-    });
-    rebinding = null;
-    setTimeout(() => void loadMoves(), 120);
+  /** A movement's key, or `null` to give it back to the preset. */
+  function setMove(id: NavigationKey["id"], chord: string | null): Promise<void> {
+    const overrides = { ...prefs.navigation.overrides };
+    if (chord === null) delete overrides[id];
+    else overrides[id] = chord;
+    return save({ ...prefs, navigation: { ...prefs.navigation, overrides } });
   }
 
-  onMount(async () => {
-    [textActions, windowActions, folderActions] = await Promise.all([
-      actionsFor("text"),
-      actionsFor("window"),
-      actionsFor("folder"),
-    ]);
-  });
+  /** An action's key: a chord, `""` for no key at all, or `null` for what it shipped with. */
+  function setActionKey(id: string, chord: string | null): Promise<void> {
+    const overrides = { ...(prefs.actionKeys?.overrides ?? {}) };
+    if (chord === null) delete overrides[id];
+    else overrides[id] = chord;
+    return save({ ...prefs, actionKeys: { overrides } });
+  }
 
   /**
    * Opening the action panel, offered as though it were an action.
@@ -198,111 +215,15 @@
    * appear in every action panel in the launcher including the one it opens.
    * The settings row still has to offer it, so the one place it is spelled out
    * is here, next to the id Rust reads.
-   *
-   * First in the list, so a key pointed at "whatever is selected" starts as
-   * the thing that item exists for rather than as an upper-case transform.
    */
-  const PANEL: ActionInfo = {
-    id: "sill.actions",
-    title: "Open the Action Panel",
-    primary: false,
-  };
+  const PANEL: ActionInfo = { id: "sill.actions", title: "Open the Action Panel", primary: false };
 
-  /**
-   * The actions a row may choose from, which follows what it runs on.
-   *
-   * The universal source gets the text list with the panel on top: what it
-   * resolves to is not known until the key is pressed, and offering only the
-   * actions that suit one of the two answers would be offering the wrong list
-   * half the time. The panel is the entry that works whichever it turns out to
-   * be, because it asks Rust once the answer is known.
-   */
+  /** The actions a binding may choose from, which follows what it runs on. */
   function choicesFor(source: BindingSource): ActionInfo[] {
     if (source.from === "foregroundWindow") return windowActions;
     if (source.from === "explorerFolder") return [PANEL, ...folderActions];
     if (source.from === "currentSelection") return [PANEL, ...textActions];
     return textActions;
-  }
-
-  /**
-   * The key that runs each action, and what is contesting it.
-   *
-   * Asked for rather than worked out here for the same reason the movements
-   * are: an action ships with a chord, a person may have replaced it, and
-   * whether two of them clash depends on which lists they appear on together.
-   * All three answers live in Rust, and computing any of them again here is
-   * how a settings screen ends up naming a key that does something else.
-   */
-  let actionKeys = $state<ActionShortcut[]>([]);
-  let rebindingAction = $state<string | null>(null);
-  let actionStatus = $state("");
-
-  async function loadActionKeys() {
-    actionKeys = await actionShortcuts();
-  }
-
-  onMount(() => void loadActionKeys());
-
-  /** Saves one action's key, or clears it, and re-reads what that resolved to. */
-  function setActionKey(id: string, chord: string | null) {
-    const overrides = { ...(prefs.actionKeys?.overrides ?? {}) };
-
-    if (chord === null) delete overrides[id];
-    else overrides[id] = chord;
-
-    commit({ ...prefs, actionKeys: { overrides } });
-    rebindingAction = null;
-    // The commit is asynchronous and the resolved chord, along with any
-    // conflict it just created, is worked out in Rust. The rows are re-read
-    // rather than guessed at.
-    setTimeout(() => void loadActionKeys(), 120);
-  }
-
-  function rebindAction(event: KeyboardEvent, row: ActionShortcut) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (event.key === "Escape") {
-      rebindingAction = null;
-      return;
-    }
-
-    // Backspace gives the action back the key it shipped with; Delete takes
-    // the key away entirely. Two different things, and a list where some rows
-    // ship with a key and some do not needs both.
-    if (event.key === "Backspace") {
-      actionStatus = "";
-      setActionKey(row.id, null);
-      return;
-    }
-
-    if (event.key === "Delete") {
-      actionStatus = "";
-      setActionKey(row.id, "");
-      return;
-    }
-
-    // The Windows key reaches the launcher as the same held key Ctrl does, so
-    // a chord saved with it would fire on the Ctrl version of itself. Rust
-    // refuses it as well; saying so here saves pressing it twice.
-    if (event.metaKey) {
-      actionStatus = "The Windows key cannot run an action";
-      return;
-    }
-
-    // A bare key is the letter itself. The launcher only reads an action chord
-    // when nothing is being typed, but its search field has focus the whole
-    // time, so binding `c` would be binding a character somebody meant to type.
-    if (!event.ctrlKey && !event.altKey) {
-      actionStatus = "An action key needs at least one of Ctrl or Alt";
-      return;
-    }
-
-    const chord = chordFrom(event);
-    if (!chord) return;
-
-    actionStatus = "";
-    setActionKey(row.id, chord);
   }
 
   $effect(() => {
@@ -321,12 +242,15 @@
     }
   });
 
-  function save(next: Binding[]) {
-    commit({ ...prefs, bindings: next });
+  function saveBindings(next: Binding[]): Promise<void> {
+    return save({ ...prefs, bindings: next });
   }
 
-  function add() {
-    save([
+  /** Where a binding row is, for the key that was just added to it. */
+  let reveal = $state<number | null>(null);
+
+  async function add(): Promise<void> {
+    await saveBindings([
       ...bindings,
       {
         accelerator: "",
@@ -335,125 +259,22 @@
         replace: true,
       },
     ]);
-    recording = bindings.length;
+    reveal = bindings.length - 1;
+    await showRow(reveal);
   }
 
-  function update(at: number, patch: Partial<Binding>) {
-    save(bindings.map((b, i) => (i === at ? { ...b, ...patch } : b)));
+  function update(at: number, patch: Partial<Binding>): Promise<void> {
+    return saveBindings(bindings.map((b, i) => (i === at ? { ...b, ...patch } : b)));
   }
 
-  function remove(at: number) {
-    save(bindings.filter((_, i) => i !== at));
-  }
-
-  /**
-   * Window layouts of your own, kept in preferences and applied by Rust.
-   *
-   * The fields are fractions of the work area and the panel only holds them:
-   * clamping, tiling and the move itself belong to the layout action, so a
-   * layout typed here and one named by the model are applied the same way.
-   */
-  const layouts = $derived(prefs.layouts ?? []);
-
-  const FRACTIONS = ["x", "y", "width", "height"] as const;
-
-  function saveLayouts(next: Layout[]) {
-    commit({ ...prefs, layouts: next });
-  }
-
-  function addLayout() {
-    saveLayouts([
-      ...layouts,
-      {
-        id: crypto.randomUUID(),
-        name: `Layout ${layouts.length + 1}`,
-        x: 0,
-        y: 0,
-        width: 0.5,
-        height: 1,
-      },
-    ]);
-  }
-
-  function updateLayout(at: number, patch: Partial<Layout>) {
-    saveLayouts(layouts.map((layout, i) => (i === at ? { ...layout, ...patch } : layout)));
-  }
-
-  function removeLayout(at: number) {
-    saveLayouts(layouts.filter((_, i) => i !== at));
-  }
-
-  /**
-   * A key for one layout: a binding on the window in front, carrying the
-   * layout's name as the answer the action would otherwise ask for.
-   */
-  function bindLayout(layout: Layout) {
-    save([
-      ...bindings,
-      {
-        accelerator: "",
-        action: "sill.window.layout",
-        source: { from: "foregroundWindow" },
-        replace: false,
-        argument: layout.name,
-      },
-    ]);
-    recording = bindings.length;
-  }
-
-  /** A typed fraction, or nothing while it is half typed. */
-  function fraction(text: string): number | null {
-    const value = Number(text.trim());
-    return text.trim() === "" || Number.isNaN(value) ? null : value;
-  }
-
-  /**
-   * Turns a key press into an accelerator string.
-   *
-   * A modifier on its own is not a shortcut, and binding one would swallow
-   * every Ctrl press on the machine.
-   */
-  function record(event: KeyboardEvent, at: number) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (event.key === "Escape") {
-      recording = null;
-      return;
-    }
-
-    const key = event.key;
-    if (["Control", "Alt", "Shift", "Meta", "OS"].includes(key)) return;
-
-    const parts: string[] = [];
-    if (event.ctrlKey) parts.push("Ctrl");
-    if (event.altKey) parts.push("Alt");
-    if (event.shiftKey) parts.push("Shift");
-    if (event.metaKey) parts.push("Super");
-
-    // A bare letter would take that key away from every application on the
-    // machine, which is not a thing anybody means to do.
-    if (parts.length === 0) {
-      status = "A shortcut needs at least one of Ctrl, Alt or Shift";
-      return;
-    }
-
-    const named = key.length === 1 ? key.toUpperCase() : key;
-    const accelerator = [...parts, named].join("+");
-
-    if (bindings.some((b, i) => i !== at && b.accelerator === accelerator)) {
-      status = `${accelerator} is already used`;
-      return;
-    }
-
-    status = "";
-    update(at, { accelerator });
-    recording = null;
+  function remove(at: number): Promise<void> {
+    return saveBindings(bindings.filter((_, i) => i !== at));
   }
 
   function describe(source: BindingSource): string {
     if (source.from === "selection") return "the selected text";
     if (source.from === "clipboard") return "the clipboard";
+    if (source.from === "clipboardImage") return "the last picture copied";
     if (source.from === "foregroundWindow") return "the window in front";
     if (source.from === "currentSelection") return "whatever is selected";
     if (source.from === "explorerFolder") return "the folder open in Explorer";
@@ -468,278 +289,429 @@
    * lies. Moving to a different kind takes the first action of that kind,
    * which is the one a person is most likely to have meant.
    */
-  function runOn(at: number, from: BindingSource["from"]) {
-    const source: BindingSource =
-      from === "foregroundWindow"
-        ? { from: "foregroundWindow" }
-        : from === "explorerFolder"
-          ? { from: "explorerFolder" }
-          : from === "currentSelection"
-            ? { from: "currentSelection" }
-            : from === "clipboard"
-              ? { from: "clipboard" }
-              : { from: "selection" };
-
+  function runOn(at: number, from: BindingSource["from"]): void {
+    const source = (from === "command" ? { from: "selection" } : { from }) as BindingSource;
     const current = bindings[at];
     const choices = choicesFor(source);
     const keeps = choices.some((action) => action.id === current.action);
 
-    update(at, {
-      source,
-      action: keeps ? current.action : (choices[0]?.id ?? current.action),
+    void update(at, { source, action: keeps ? current.action : (choices[0]?.id ?? current.action) });
+  }
+
+  /** A stable key for a binding row, so removing one does not re-key the rest. */
+  function keyOf(binding: Binding, at: number): string {
+    return `${at}:${binding.action}:${JSON.stringify(binding.source)}:${binding.argument ?? ""}`;
+  }
+
+  /*
+   * Window layouts of your own, kept in preferences and applied by Rust.
+   *
+   * The fields are fractions of the work area and the panel only holds them:
+   * clamping, tiling and the move itself belong to the layout action, so a
+   * layout typed here and one named by the model are applied the same way.
+   */
+  const FRACTIONS = ["x", "y", "width", "height"] as const;
+
+  function saveLayouts(next: Layout[]): Promise<void> {
+    return save({ ...prefs, layouts: next });
+  }
+
+  function addLayout(): void {
+    void saveLayouts([
+      ...layouts,
+      { id: crypto.randomUUID(), name: `Layout ${layouts.length + 1}`, x: 0, y: 0, width: 0.5, height: 1 },
+    ]);
+  }
+
+  function updateLayout(at: number, patch: Partial<Layout>): void {
+    void saveLayouts(layouts.map((layout, i) => (i === at ? { ...layout, ...patch } : layout)));
+  }
+
+  function removeLayout(at: number): void {
+    void saveLayouts(layouts.filter((_, i) => i !== at));
+  }
+
+  /**
+   * A key for one layout: a binding on the window in front, carrying the
+   * layout's name as the answer the action would otherwise ask for. The new
+   * row is scrolled to, because it lands in a different section.
+   */
+  async function bindLayout(layout: Layout): Promise<void> {
+    await saveBindings([
+      ...bindings,
+      {
+        accelerator: "",
+        action: "sill.window.layout",
+        source: { from: "foregroundWindow" },
+        replace: false,
+        argument: layout.name,
+      },
+    ]);
+    reveal = bindings.length - 1;
+    await showRow(reveal);
+  }
+
+  /** A typed fraction, or nothing while it is half typed. */
+  function fraction(text: string): number | null {
+    const value = Number(text.trim());
+    return text.trim() === "" || Number.isNaN(value) ? null : value;
+  }
+
+  /* The action keys: filtered and grouped for reading. Rust chose the groups. */
+  let filter = $state("");
+  let showUnbound = $state(false);
+
+  const bound = $derived(actionKeys.filter((row) => row.chord).length);
+
+  const shownActions = $derived.by(() => {
+    const needle = filter.trim().toLowerCase();
+    return actionKeys.filter((row) => {
+      if (!showUnbound && !row.chord && !row.contested) return false;
+      if (!needle) return true;
+      return row.title.toLowerCase().includes(needle) || row.group.toLowerCase().includes(needle);
     });
+  });
+
+  /* The map picked a key: take the person to the row that set it. */
+  let panel = $state<HTMLDivElement | null>(null);
+
+  async function showRow(at: number): Promise<void> {
+    await tick();
+    const row = panel?.querySelector<HTMLElement>(`[data-binding="${at}"]`);
+    row?.scrollIntoView({ block: "center", behavior: "smooth" });
+    row?.querySelector<HTMLButtonElement>("button")?.focus();
+  }
+
+  async function showChord(chord: string): Promise<void> {
+    await tick();
+    const rows = panel?.querySelectorAll<HTMLElement>("[data-chord]") ?? [];
+    const row = Array.from(rows).find((one) => one.dataset.chord === chord);
+    row?.scrollIntoView({ block: "center", behavior: "smooth" });
+    row?.querySelector<HTMLButtonElement>("button")?.focus();
   }
 </script>
 
-<Section
-  label="Shortcuts"
-  description="A key that runs an action without the launcher appearing. Highlight some text, press the key, and the text changes where it sits. Or point it at the window in front and move that instead."
->
-  {#each bindings as binding, at (at)}
-    <Row
-      title={choicesFor(binding.source).find((a) => a.id === binding.action)?.title ??
-        binding.action}
-      description={binding.accelerator && conflicts.includes(binding.accelerator)
-        ? "Another application already has this combination, so it does nothing. Choose a different one."
-        : `Runs on ${describe(binding.source)}`}
-    >
-      <div class="controls">
-        <button
-          class="key"
-          class:taken={!!binding.accelerator && conflicts.includes(binding.accelerator)}
-          class:recording={recording === at}
-          onclick={() => (recording = recording === at ? null : at)}
-          onkeydown={(e) => recording === at && record(e, at)}
-        >
-          {#if recording === at}
-            Press a key…
-          {:else if binding.accelerator}
-            {binding.accelerator}
-          {:else}
-            Set a key
-          {/if}
-        </button>
-
-        <Select
-          value={binding.action}
-          options={choicesFor(binding.source).map((action) => ({
-            value: action.id,
-            label: action.title,
-          }))}
-          onchange={(next) => update(at, { action: next })}
-          ariaLabel="What it does"
-        />
-
-        <Select
-          value={binding.source.from}
-          options={[
-            { value: "currentSelection", label: "Whatever is selected" },
-            { value: "selection", label: "Selected text" },
-            { value: "clipboard", label: "Clipboard" },
-            { value: "foregroundWindow", label: "Window in front" },
-            { value: "explorerFolder", label: "Explorer's folder" },
-          ]}
-          onchange={(next) => runOn(at, next as BindingSource["from"])}
-          ariaLabel="What it runs on"
-        />
-
-        <Button label="Remove" tone="danger" onclick={() => remove(at)} />
-      </div>
-    </Row>
-  {/each}
-
-  <Instead
-    tone={standing({ failed: false, loading: false, count: bindings.length })}
-    inline
-    headline="No shortcuts yet"
-    hint="One that upper-cases the selection is a good first one."
-  />
-
-  <Row
-    title="Put the result back"
-    description="Replaces the selected text with what the action produced. Off means the result is only copied."
+<div class="shortcuts" bind:this={panel}>
+  <Section
+    label="Keyboard"
+    description="Every key Sill answers to, lit on the keyboard. Choose a modifier above the board, or hold one over it, to see that layer; hover a lit key to read what it does; click one to go to the row that set it."
+    bare
   >
-    <Toggle
-      checked={bindings.length > 0 && bindings.every((b) => b.replace)}
-      onchange={(on: boolean) => save(bindings.map((b) => ({ ...b, replace: on })))}
-    />
-  </Row>
+    <KeyMap sections={reference} onpick={(chord) => void showChord(chord)} />
+  </Section>
 
-  <div class="foot">
-    <Button label="Add a shortcut" onclick={add} />
-    {#if status}<span class="status">{status}</span>{/if}
-  </div>
-</Section>
-
-<Section
-  label="Window layouts"
-  description="Positions of your own, as fractions of the display's work area: left 0, top 0, width 0.5, height 1 is the left half. Each can have a key, which sends the window in front there, and every one is in the action panel on any window."
->
-  {#each layouts as layout, at (layout.id)}
-    <Row title={layout.name || "Unnamed layout"} description="Left, top, width, height">
-      <div class="controls">
-        <input
-          class="name"
-          value={layout.name}
-          placeholder="Name"
-          aria-label="Layout name"
-          spellcheck="false"
-          onchange={(e) => updateLayout(at, { name: e.currentTarget.value.trim() })}
-        />
-        {#each FRACTIONS as field (field)}
-          <input
-            class="fraction"
-            type="number"
-            min="0"
-            max="1"
-            step="0.05"
-            value={layout[field]}
-            aria-label={field}
-            onchange={(e) => {
-              const value = fraction(e.currentTarget.value);
-              if (value !== null) updateLayout(at, { [field]: value });
-            }}
+  <Section
+    label="Opening Sill"
+    description="The key that summons the launcher, and the two gestures that can stand in for it."
+  >
+    <Row
+      title="Summon hotkey"
+      description="Whatever application is in front. Escape while recording keeps the current key."
+    >
+      {#snippet control()}
+        <span data-chord={prefs.hotkey.summon}>
+          <KeyRecorder
+            chord={prefs.hotkey.summon}
+            scope="hotkey"
+            section={SECTIONS.opening}
+            taken={conflicts.includes(prefs.hotkey.summon)}
+            onsave={(chord) => setHotkey("summon", chord)}
+            ariaLabel="Summon hotkey"
           />
-        {/each}
-        <Button label="Set a key" onclick={() => bindLayout(layout)} />
-        <Button label="Remove" tone="danger" onclick={() => removeLayout(at)} />
-      </div>
-    </Row>
-  {/each}
-
-  <Row
-    title="Custom layouts"
-    description="Halves, thirds and quarters are built in. This is for the rest."
-  >
-    <Button label="Add a layout" onclick={addLayout} />
-  </Row>
-</Section>
-
-<Section
-  label="Double-tap"
-  description="Tapping a modifier twice opens the launcher. It needs no chord and no key anything else wants: the modifier keeps doing its own job, and doing it twice quickly is a thing nothing else listens for."
->
-  <Row
-    title="Open with a double-tap"
-    description="Anything typed between the two taps cancels it, so an ordinary shortcut never sets it off. Watching for this installs a keyboard hook, which is why it is off until you ask for it."
-  >
-    {#snippet control()}
-      <Segmented
-        label="Open with a double-tap"
-        value={prefs.taps?.modifier ?? "off"}
-        options={TAP_MODIFIERS}
-        onchange={setTap}
-      />
-    {/snippet}
-  </Row>
-</Section>
-
-<Section
-  label="Moving around"
-  description="A preset adds keys, it never takes the arrows away. Where a preset wants a key something else was using, the displaced one falls back to its second choice and the row below shows what actually happens."
->
-  <Row
-    title="Extra keys"
-    description="Ctrl rather than bare letters throughout, and that is forced rather than chosen: the search field has focus the whole time, so a bare j is the letter j."
-  >
-    {#snippet control()}
-      <Segmented
-        label="Extra keys"
-        value={prefs.navigation.preset}
-        options={PRESETS}
-        onchange={(next) => void setPreset(next)}
-      />
-    {/snippet}
-  </Row>
-
-  <Row
-    title="Jump to a row by number"
-    description="Ctrl and a digit opens that result. Ctrl for the same reason as the presets: a bare 3 is the character three."
-  >
-    {#snippet control()}
-      <Toggle
-        checked={prefs.navigation.numeric}
-        onchange={(on: boolean) =>
-          commit({ ...prefs, navigation: { ...prefs.navigation, numeric: on } })}
-      />
-    {/snippet}
-  </Row>
-
-  {#each moves as move (move.id)}
-    <Row title={move.title} description={move.overridden ? "Set by hand" : ""}>
-      {#snippet control()}
-        <button
-          class="key"
-          class:recording={rebinding === move.id}
-          onclick={() => (rebinding = rebinding === move.id ? null : move.id)}
-          onkeydown={(e) => rebinding === move.id && rebind(e, move)}
-        >
-          {#if rebinding === move.id}
-            Press a key…
-          {:else}
-            {move.chord.split("+").join(" ")}
-          {/if}
-        </button>
+        </span>
       {/snippet}
     </Row>
-  {/each}
-</Section>
 
-<Section
-  label="Action keys"
-  description="A key that runs one of the actions on the selected result without opening the action panel first. The panel draws these down its right hand side, so the key is on screen beside the thing it does. Backspace puts one back to what it shipped with; Delete takes the key away."
->
-  {#each actionKeys as row (row.id)}
     <Row
-      title={row.title}
-      description={row.contested
-        ? `${row.chord} already runs ${row.contested} on the same list, so this one never fires. Choose a different key.`
-        : row.overridden
-          ? "Set by hand"
-          : ""}
+      title="Open with a double-tap"
+      description="Tapping a modifier twice opens the launcher. It needs no chord and no key anything else wants. Anything typed between the two taps cancels it, so an ordinary shortcut never sets it off."
     >
       {#snippet control()}
-        <button
-          class="key"
-          class:taken={!!row.contested}
-          class:recording={rebindingAction === row.id}
-          onclick={() => (rebindingAction = rebindingAction === row.id ? null : row.id)}
-          onkeydown={(e) => rebindingAction === row.id && rebindAction(e, row)}
-        >
-          {#if rebindingAction === row.id}
-            Press a key…
-          {:else if row.chord}
-            {row.chord.split("+").join(" ")}
-          {:else}
-            No key
-          {/if}
-        </button>
+        <Segmented
+          label="Open with a double-tap"
+          value={prefs.taps?.modifier ?? "off"}
+          options={TAP_MODIFIERS}
+          onchange={setTap}
+        />
       {/snippet}
     </Row>
-  {/each}
 
-  {#if actionStatus}<span class="status">{actionStatus}</span>{/if}
-</Section>
+    <Row
+      title="Hyper key"
+      description="One key that stands in for Ctrl, Alt, Shift and Windows together, so every letter becomes a shortcut nothing else has claimed. The key stops doing what is printed on it while this is on."
+    >
+      {#snippet control()}
+        <Select
+          value={String(prefs.hyper?.key ?? 0)}
+          options={HYPER_KEYS}
+          onchange={(value) => {
+            const key = Number(value);
+            void save({ ...prefs, hyper: { key: key === 0 ? null : key } });
+          }}
+          ariaLabel="Hyper key"
+        />
+      {/snippet}
+    </Row>
 
-<Section
-  label="Hyper key"
-  description="One key that stands in for Ctrl, Alt, Shift and Windows together, so every letter becomes a shortcut nothing else has claimed. The key stops doing what is printed on it while this is on."
->
-  <!-- not a setting: one command in the list, drawn again for every other one -->
-  <Row
-    title="Key"
-    description="Off by default. Each keystroke sends the whole chord and releases it in the same breath, so nothing can be left held down if Sill stops."
+    {#if prefs.hyper?.key || prefs.taps?.modifier}
+      <!-- not a setting: a reading of the hook both gestures run on -->
+      <Row
+        title="Keyboard hook"
+        description={hookStory}
+      />
+    {/if}
+  </Section>
+
+  <Section
+    label="From anywhere"
+    description="Keys that work whatever application is in front. The first three open one of Sill's own surfaces; the rest run an action on something without the launcher appearing: highlight some text, press the key, and the text changes where it sits."
   >
-    <Select
-      value={String(prefs.hyper?.key ?? 0)}
-      options={HYPER_KEYS}
-      onchange={(value) => {
-        const key = Number(value);
-        commit({ ...prefs, hyper: { key: key === 0 ? null : key } });
-      }}
+    {#each GLOBAL as key (key.id)}
+      <Row title={key.title} description={key.description}>
+        {#snippet control()}
+          <span data-chord={prefs.hotkey[key.id]}>
+            <KeyRecorder
+              chord={prefs.hotkey[key.id]}
+              scope="hotkey"
+              section={SECTIONS.anywhere}
+              taken={Boolean(prefs.hotkey[key.id]) && conflicts.includes(prefs.hotkey[key.id])}
+              onsave={(chord) => setHotkey(key.id, chord)}
+              onclear={() => setHotkey(key.id, "")}
+              placeholder="Off"
+              ariaLabel="{key.title} hotkey"
+            />
+          </span>
+        {/snippet}
+      </Row>
+    {/each}
+
+    {#each bindings as binding, at (keyOf(binding, at))}
+      <div data-binding={at} class:revealed={reveal === at}>
+        <Row
+          title={choicesFor(binding.source).find((a) => a.id === binding.action)?.title ??
+            binding.action}
+          description={`Runs on ${describe(binding.source)}`}
+        >
+          <div class="controls">
+            <span data-chord={binding.accelerator}>
+              <KeyRecorder
+                chord={binding.accelerator}
+                scope="binding"
+                section={SECTIONS.anywhere}
+                taken={Boolean(binding.accelerator) && conflicts.includes(binding.accelerator)}
+                onsave={(chord) => update(at, { accelerator: chord })}
+                onclear={() => update(at, { accelerator: "" })}
+                ariaLabel="Key for this shortcut"
+              />
+            </span>
+
+            <Select
+              value={binding.action}
+              options={choicesFor(binding.source).map((action) => ({
+                value: action.id,
+                label: action.title,
+              }))}
+              onchange={(next) => void update(at, { action: next })}
+              ariaLabel="What it does"
+            />
+
+            <Select
+              value={binding.source.from}
+              options={[
+                { value: "currentSelection", label: "Whatever is selected" },
+                { value: "selection", label: "Selected text" },
+                { value: "clipboard", label: "Clipboard" },
+                { value: "clipboardImage", label: "The last picture copied" },
+                { value: "foregroundWindow", label: "Window in front" },
+                { value: "explorerFolder", label: "Explorer's folder" },
+              ]}
+              onchange={(next) => runOn(at, next as BindingSource["from"])}
+              ariaLabel="What it runs on"
+            />
+
+            <Button label="Remove" tone="danger" onclick={() => void remove(at)} />
+          </div>
+        </Row>
+      </div>
+    {/each}
+
+    <Instead
+      tone={standing({ failed: false, loading: false, count: bindings.length })}
+      inline
+      headline="No shortcuts of your own yet"
+      hint="One that upper-cases the selection is a good first one."
     />
-  </Row>
-</Section>
+
+    <Row
+      title="Put the result back"
+      description="Replaces the selected text with what the action produced. Off means the result is only copied."
+    >
+      {#snippet control()}
+        <Toggle
+          checked={bindings.length > 0 && bindings.every((b) => b.replace)}
+          onchange={(on: boolean) => void saveBindings(bindings.map((b) => ({ ...b, replace: on })))}
+        />
+      {/snippet}
+    </Row>
+
+    <div class="foot">
+      <Button label="Add a shortcut" onclick={() => void add()} />
+    </div>
+  </Section>
+
+  <Section
+    label="Moving around"
+    description="A preset adds keys, it never takes the arrows away. Where a preset wants a key something else was using, the displaced one falls back to its second choice and the row shows what actually happens. Backspace while recording gives a movement back to the preset."
+  >
+    <Row
+      title="Extra keys"
+      description="Ctrl rather than bare letters throughout, and that is forced rather than chosen: the search field has focus the whole time, so a bare j is the letter j."
+    >
+      {#snippet control()}
+        <Segmented
+          label="Extra keys"
+          value={prefs.navigation.preset}
+          options={PRESETS}
+          onchange={setPreset}
+        />
+      {/snippet}
+    </Row>
+
+    <Row
+      title="Jump to a row by number"
+      description="Ctrl and a digit opens that result. Ctrl for the same reason as the presets: a bare 3 is the character three."
+    >
+      {#snippet control()}
+        <Toggle
+          checked={prefs.navigation.numeric}
+          onchange={(on: boolean) =>
+            void save({ ...prefs, navigation: { ...prefs.navigation, numeric: on } })}
+        />
+      {/snippet}
+    </Row>
+
+    {#each moves as move (move.id)}
+      <Row title={move.title} description={move.overridden ? "Set by hand" : ""}>
+        {#snippet control()}
+          <span data-chord={move.chord}>
+            <KeyRecorder
+              chord={move.chord}
+              scope="navigation"
+              section={SECTIONS.moving}
+              onsave={(chord) => setMove(move.id, chord)}
+              onreset={move.overridden ? () => setMove(move.id, null) : undefined}
+              ariaLabel="Key for {move.title}"
+            />
+          </span>
+        {/snippet}
+      </Row>
+    {/each}
+  </Section>
+
+  <Section
+    label="Action keys"
+    description="A key that runs one of the actions on the selected result without opening the action panel first. The panel draws these down its right hand side, so the key is on screen beside the thing it does. Backspace while recording puts one back to what it shipped with; Delete takes the key away."
+  >
+    <!-- not a setting: a count of the rows below, and a filter over them -->
+    <Row
+      title="{bound} of {actionKeys.length} actions have a key"
+      description="Grouped by what they act on. Type to find one."
+    >
+      {#snippet control()}
+        <div class="controls">
+          <TextField
+            value={filter}
+            oninput={(next) => (filter = next)}
+            placeholder="Find an action"
+            ariaLabel="Find an action"
+          />
+          <label class="show">
+            <Toggle checked={showUnbound} onchange={(on: boolean) => (showUnbound = on)} label="Show actions with no key" />
+            <span>Show those with no key</span>
+          </label>
+        </div>
+      {/snippet}
+    </Row>
+
+    {#each shownActions as row, at (row.id)}
+      {#if at === 0 || shownActions[at - 1].group !== row.group}
+        <div class="group">{row.group}</div>
+      {/if}
+      <Row title={row.title} description={row.overridden ? "Set by hand" : ""}>
+        {#snippet control()}
+          <span data-chord={row.chord}>
+            <KeyRecorder
+              chord={row.chord}
+              scope="action"
+              section={SECTIONS.acting}
+              contested={row.contested}
+              onsave={(chord) => setActionKey(row.id, chord)}
+              onreset={() => setActionKey(row.id, null)}
+              onclear={() => setActionKey(row.id, "")}
+              placeholder="No key"
+              ariaLabel="Key for {row.title}"
+            />
+          </span>
+        {/snippet}
+      </Row>
+    {/each}
+
+    {#if shownActions.length === 0}
+      <Instead
+        tone="empty"
+        inline
+        headline={filter ? "No action by that name" : "No action has a key"}
+        hint={filter ? "Try fewer letters." : "Show those with no key to give one a key."}
+      />
+    {/if}
+  </Section>
+
+  <Section
+    label="Window layouts"
+    description="Positions of your own, as fractions of the display's work area: left 0, top 0, width 0.5, height 1 is the left half. Each can have a key, which sends the window in front there, and every one is in the action panel on any window."
+  >
+    {#each layouts as layout, at (layout.id)}
+      <Row title={layout.name || "Unnamed layout"} description="Left, top, width, height">
+        <div class="controls">
+          <input
+            class="name"
+            value={layout.name}
+            placeholder="Name"
+            aria-label="Layout name"
+            spellcheck="false"
+            onchange={(e) => updateLayout(at, { name: e.currentTarget.value.trim() })}
+          />
+          {#each FRACTIONS as field (field)}
+            <input
+              class="fraction"
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              value={layout[field]}
+              aria-label={field}
+              onchange={(e) => {
+                const value = fraction(e.currentTarget.value);
+                if (value !== null) updateLayout(at, { [field]: value });
+              }}
+            />
+          {/each}
+          <Button label="Set a key" onclick={() => void bindLayout(layout)} />
+          <Button label="Remove" tone="danger" onclick={() => removeLayout(at)} />
+        </div>
+      </Row>
+    {/each}
+
+    <Row
+      title="Custom layouts"
+      description="Halves, thirds and quarters are built in. This is for the rest."
+    >
+      {#snippet control()}
+        <Button label="Add a layout" onclick={addLayout} />
+      {/snippet}
+    </Row>
+  </Section>
+</div>
 
 <style>
   .controls {
@@ -747,6 +719,25 @@
     align-items: center;
     gap: var(--space-2);
     flex-wrap: wrap;
+  }
+
+  .show {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-meta);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+
+  /* A heading inside the card, for the kind the actions below act on. */
+  .group {
+    padding: var(--space-3) var(--space-4) var(--space-1);
+    font-size: var(--text-label);
+    font-weight: var(--weight-strong);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--text-3);
   }
 
   /* The layout fields: a name and four fractions, sized to what they hold. */
@@ -771,39 +762,24 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .key {
-    min-width: 118px;
-    padding: var(--space-1) var(--space-2);
-    font: inherit;
-    font-size: var(--text-meta);
-    font-variant-numeric: tabular-nums;
-    color: var(--text-1);
-    background: var(--fill-1);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-  }
-
-  /* The same red the hotkey rows use for a key another application owns. */
-  .key.taken {
-    color: var(--danger);
-    border-color: var(--danger);
-  }
-
-  .key.recording {
-    color: var(--accent-bright);
-    border-color: var(--accent-bright);
-  }
-
   .foot {
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    padding-top: var(--space-2);
+    padding: var(--space-3) var(--space-4);
   }
 
-  .status {
-    font-size: var(--text-meta);
-    color: var(--text-2);
+  /* The row a key was just added to, so it is found after the scroll. */
+  .revealed {
+    animation: reveal var(--motion-reading) var(--ease);
+  }
+
+  @keyframes reveal {
+    from {
+      background: var(--accent-fill);
+    }
+    to {
+      background: transparent;
+    }
   }
 </style>

@@ -45,7 +45,6 @@
   import ExtensionsPanel from "$lib/components/settings/ExtensionsPanel.svelte";
   import { shortRevision, storePins, type Pin } from "$lib/store";
   import {
-    acceleratorFrom,
     applyAppearance,
     clearUsageHistory,
     browserProfiles,
@@ -357,41 +356,6 @@
    * There is more than one now, and a shared boolean would send whatever the
    * user pressed to the summon key regardless of which row they clicked.
    */
-  /**
-   * Which key is being recorded, by the field it sets.
-   *
-   * A name rather than one of a fixed pair. There were two keys and now there
-   * are four, and a chain of `if` per key is how the third one gets forgotten
-   * in one of the three places that has to know about it.
-   */
-  type Bindable = "summon" | "switcher" | "capture" | "captureScreen";
-  let recording = $state<Bindable | null>(null);
-
-  /** The keys somebody can set, and what each one does. */
-  const BINDABLE: { id: Bindable; title: string; description: string; optional: boolean }[] = [
-    {
-      id: "switcher",
-      title: "Window switcher hotkey",
-      description:
-        "Opens Sill straight onto the windows you have open, most recent first. Backspace turns it off.",
-      optional: true,
-    },
-    {
-      id: "capture",
-      title: "Screenshot hotkey",
-      description:
-        "Picks an area of the screen without opening Sill first. Drag an area, or click a window. Backspace turns it off.",
-      optional: true,
-    },
-    {
-      id: "captureScreen",
-      title: "Whole screen hotkey",
-      description:
-        "Copies everything on every display at once, with nothing to pick. Backspace turns it off.",
-      optional: true,
-    },
-  ];
-
   /** Accelerators Windows refused because something else already has them. */
   let conflicts = $state<string[]>([]);
 
@@ -498,52 +462,6 @@
   async function commitWith(next: Preferences) {
     prefs = next;
     await commit();
-  }
-
-  function onRecord(event: KeyboardEvent) {
-    if (!recording || !prefs) return;
-    event.preventDefault();
-
-    if (event.key === "Escape") {
-      recording = null;
-      return;
-    }
-
-    // Backspace clears rather than binds. Everything except the summon key is
-    // allowed to be off, and there has to be a way back to off once one is set.
-    const optional = recording !== "summon";
-    if (event.key === "Backspace" && optional) {
-      prefs.hotkey[recording] = "";
-      recording = null;
-      void commit();
-      return;
-    }
-
-    const accelerator = acceleratorFrom(event);
-    if (!accelerator) return;
-
-    /*
-     * One key cannot mean two things.
-     *
-     * Checked against every other key rather than against one of them.
-     * Windows registers the first and refuses the second, so a collision here
-     * is a key that silently does nothing, and which of the two it is depends
-     * on the order they happened to be registered in.
-     */
-    const clash = (["summon", "switcher", "capture", "captureScreen"] as Bindable[]).find(
-      (id) => id !== recording && prefs?.hotkey[id] === accelerator,
-    );
-
-    if (clash) {
-      status = `${accelerator.split("+").join(" ")} is already used`;
-      recording = null;
-      setTimeout(() => (status = ""), 1600);
-      return;
-    }
-
-    prefs.hotkey[recording] = accelerator;
-    recording = null;
-    void commit();
   }
 
   async function forgetHistory() {
@@ -893,7 +811,6 @@
   });
 </script>
 
-<svelte:window onkeydown={onRecord} />
 
 <div class="window">
   <TitleBar />
@@ -1340,56 +1257,7 @@
           {:else if active === "snippets"}
             <SnippetsPanel prefs={p} {commit} />
           {:else if active === "shortcuts"}
-          <Section
-            label="From anywhere"
-            description="Combinations Sill answers to whatever application is in front."
-          >
-            <Row
-              title="Summon hotkey"
-              description={conflicts.includes(p.hotkey.summon)
-                ? "Another application already has this combination, so it does nothing. Choose a different one."
-                : "Press the combination you want, or Escape to keep the current one."}
-            >
-              {#snippet control()}
-                <button
-                  class="recorder"
-                  class:taken={conflicts.includes(p.hotkey.summon)}
-                  class:recording={recording === "summon"}
-                  onclick={() => (recording = recording === "summon" ? null : "summon")}
-                >
-                  {recording === "summon"
-                    ? "Press a combination"
-                    : p.hotkey.summon.split("+").join(" ")}
-                </button>
-              {/snippet}
-            </Row>
-
-            {#each BINDABLE as key (key.id)}
-              <Row
-                title={key.title}
-                description={p.hotkey[key.id] && conflicts.includes(p.hotkey[key.id])
-                  ? "Another application already has this combination, so it does nothing. Choose a different one."
-                  : key.description}
-              >
-                {#snippet control()}
-                  <button
-                    class="recorder"
-                    class:taken={!!p.hotkey[key.id] && conflicts.includes(p.hotkey[key.id])}
-                    class:recording={recording === key.id}
-                    onclick={() => (recording = recording === key.id ? null : key.id)}
-                  >
-                    {recording === key.id
-                      ? "Press a combination"
-                      : p.hotkey[key.id]
-                        ? p.hotkey[key.id].split("+").join(" ")
-                        : "Off"}
-                  </button>
-                {/snippet}
-              </Row>
-            {/each}
-          </Section>
-
-            <ShortcutsPanel prefs={p} commit={commitWith} {conflicts} />
+            <ShortcutsPanel prefs={p} commit={commitWith} {conflicts} {hookStory} />
           {:else if active === "quicklinks"}
             <QuicklinksPanel />
           {:else if active === "automations"}
@@ -2578,38 +2446,6 @@
     min-width: 0;
   }
 
-  .recorder {
-    min-width: 150px;
-    padding: var(--space-1) var(--space-3);
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--fill-2);
-    box-shadow: var(--bevel-tile);
-    color: var(--text-1);
-    font-family: var(--font-mono);
-    font-size: var(--text-meta);
-    letter-spacing: 0.04em;
-    cursor: pointer;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
-  }
-
-  .recorder:hover {
-    background: var(--fill-3);
-  }
-
-  /* A key that Windows refused. Stated rather than merely styled: the colour
-     is a hint and the description above says what happened. */
-  .recorder.taken {
-    color: var(--danger);
-    box-shadow: var(--ring-danger);
-  }
-
-  .recorder.recording {
-    background: var(--hairline-strong);
-    color: var(--accent-bright);
-  }
 
   .fact {
     font-family: var(--font-mono);

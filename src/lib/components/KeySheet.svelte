@@ -12,6 +12,7 @@
 <script lang="ts">
   import { keyboardReference, type KeySection } from "$lib/exthost/commands";
   import Instead from "$lib/components/Instead.svelte";
+  import Chord from "$lib/components/Chord.svelte";
   import { standing } from "$lib/instead";
 
   let sections = $state<KeySection[]>([]);
@@ -51,11 +52,13 @@
         <h2>{section.title}</h2>
         <dl>
           {#each section.keys as key (key.chord + key.does)}
-            <div class="line" class:contested={key.contested}>
-              <dt><kbd class="sill-key">{key.chord}</kbd></dt>
+            <div class="line" class:contested={key.contested || key.refused}>
+              <dt><Chord chord={key.chord} /></dt>
               <dd>
                 {key.does}
-                {#if key.contested}
+                {#if key.refused}
+                  <span class="note">another application has this key, so it does nothing</span>
+                {:else if key.contested}
                   <span class="note">another action takes this key</span>
                 {:else if key.changed}
                   <span class="note">changed by you</span>

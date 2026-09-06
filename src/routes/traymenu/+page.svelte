@@ -17,6 +17,7 @@
   import { applyAppearance, getPreferences, openSettings, quitApp } from "$lib/settings";
   import { keyboardReference, summonWith } from "$lib/exthost/commands";
   import { itemId } from "$lib/results";
+  import Chord from "$lib/components/Chord.svelte";
   import "$lib/theme/theme.css";
 
   const win = getCurrentWindow();
@@ -116,8 +117,8 @@
       // the rule the welcome and the key sheet already follow: a surface that
       // names a key that does nothing is worse than one that names none.
       const sections = await keyboardReference();
-      const summon = sections.find((s) => s.title === "Opening Sill")?.keys[0]?.chord ?? "";
-      summonHotkey = summon.replaceAll("+", " ");
+      const summon = sections.find((s) => s.title === "Opening Sill")?.keys[0];
+      summonHotkey = summon && !summon.refused ? summon.chord : "";
     } catch {
       // A menu that will not open because it could not read a hint is worse
       // than one that shows the row without it.
@@ -221,7 +222,7 @@
       <span class="label">{item.label}</span>
       <span class="spacer"></span>
       {#if index === 0 && summonHotkey}
-        <span class="sill-key">{summonHotkey}</span>
+        <Chord chord={summonHotkey} />
       {:else if item.hint}
         <span class="hint">{item.hint}</span>
       {/if}

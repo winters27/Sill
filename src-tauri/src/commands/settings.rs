@@ -710,17 +710,101 @@ pub(crate) async fn set_pinned(
 /// changed, and the person reading it would have no way to tell.
 #[tauri::command]
 pub(crate) async fn keyboard_reference(
+    app: AppHandle,
     actions: State<'_, crate::action::ActionRegistry>,
     prefs: State<'_, crate::state::PrefsState>,
 ) -> Result<Vec<crate::keysheet::KeySection>, String> {
-    let (summon, navigation, keys) = {
+    Ok(reference_sections(&app, &actions, &prefs).await)
+}
+
+/// What already runs on a key, from the same sheet the reference draws.
+///
+/// Asked by a recorder in the settings window before it saves a chord. Three
+/// separate checks used to live in that window, none aware of the others: the
+/// global keys against each other, the bindings against each other, the action
+/// keys against the actions on one list. A chord could pass all three and do
+/// two things. This is the one answer, and it is the sheet a person reads.
+#[tauri::command]
+pub(crate) async fn key_owners(
+    accelerator: String,
+    app: AppHandle,
+    actions: State<'_, crate::action::ActionRegistry>,
+    prefs: State<'_, crate::state::PrefsState>,
+) -> Result<Vec<crate::keysheet::KeyOwner>, String> {
+    let sections = reference_sections(&app, &actions, &prefs).await;
+    Ok(crate::keysheet::owners_of(&sections, &accelerator))
+}
+
+/// The reference's sections, from every source a key comes from.
+///
+/// Shared by the reference and by `key_owners`, so what the sheet shows and
+/// what a recorder calls taken are one reading of one set of facts.
+async fn reference_sections(
+    app: &AppHandle,
+    actions: &crate::action::ActionRegistry,
+    prefs: &crate::state::PrefsState,
+) -> Vec<crate::keysheet::KeySection> {
+    let (hotkey, bindings, navigation, keys) = {
         let current = prefs.inner.lock().await;
         (
-            current.hotkey.summon.clone(),
+            current.hotkey.clone(),
+            current.bindings.clone(),
             current.navigation.clone(),
             current.action_keys.clone(),
         )
     };
+
+    // What Windows would not register. A key in here is set and does nothing,
+    // and the sheet says so rather than promising it.
+    let refused: std::collections::HashSet<String> = app
+        .try_state::<crate::HotkeyConflicts>()
+        .map(|conflicts| conflicts.all().into_iter().collect())
+        .unwrap_or_default();
+
+    // Titles by id, so a binding reads as what it runs rather than as an id.
+    let titles: std::collections::HashMap<String, String> = actions
+        .all()
+        .into_iter()
+        .map(|(id, title, _)| (id, title))
+        .collect();
+
+    let mut anywhere: Vec<(String, String, bool)> = vec![
+        (
+            hotkey.switcher.clone(),
+            "Open the window switcher".to_string(),
+            refused.contains(&hotkey.switcher),
+        ),
+        (
+            hotkey.capture.clone(),
+            "Take a screenshot".to_string(),
+            refused.contains(&hotkey.capture),
+        ),
+        (
+            hotkey.capture_screen.clone(),
+            "Copy every screen".to_string(),
+            refused.contains(&hotkey.capture_screen),
+        ),
+    ];
+
+    for binding in &bindings {
+        let what = match binding.action.as_str() {
+            crate::bindings::PANEL => "Open the Action Panel".to_string(),
+            crate::bindings::PRIMARY => "Run the first action".to_string(),
+            id => titles.get(id).cloned().unwrap_or_else(|| id.to_string()),
+        };
+        let does = match &binding.argument {
+            Some(argument) => format!("{what}: {argument}"),
+            None => what,
+        };
+        anywhere.push((
+            binding.accelerator.clone(),
+            does,
+            refused.contains(&binding.accelerator),
+        ));
+    }
+
+    let summon = hotkey.summon.clone();
+    let summon_refused = refused.contains(&summon);
 
     let moving: Vec<(String, String, bool)> = crate::navigation::Move::ALL
         .into_iter()
@@ -765,7 +849,7 @@ pub(crate) async fn keyboard_reference(
 
     let acting: Vec<(String, String, bool, bool)> = acting.into_values().collect();
 
-    Ok(crate::keysheet::reference(&summon, &moving, &acting))
+    crate::keysheet::reference(&summon, summon_refused, &anywhere, &moving, &acting)
 }
 
 /// What the launcher says the first time Sill runs on a machine.
@@ -1099,38 +1183,58 @@ pub(crate) async fn action_shortcuts(
     let mut clashes: std::collections::BTreeMap<String, crate::action_keys::Conflict> =
         std::collections::BTreeMap::new();
 
-    for kind in crate::object::ObjectKind::ALL {
+    // The first kind each action applies to, in `ALL`'s order. That is the
+    // group the panel files it under: an action on files and folders is a file
+    // action, and a hundred rows in one alphabet was a list nobody could scan.
+    let mut first_kind: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+
+    for (position, kind) in crate::object::ObjectKind::ALL.iter().enumerate() {
         let shown: Vec<(String, String, Option<crate::action_keys::Shortcut>)> = actions
             .describe(*kind, &keys)
             .into_iter()
             .map(|a| (a.id.to_string(), a.title.to_string(), a.shortcut))
             .collect();
 
+        for (id, _, _) in &shown {
+            first_kind.entry(id.clone()).or_insert(position);
+        }
+
         for clash in crate::action_keys::conflicts(&shown) {
             clashes.entry(clash.id.clone()).or_insert(clash);
         }
     }
 
-    let mut rows: Vec<ActionShortcut> = actions
+    let mut rows: Vec<(usize, ActionShortcut)> = actions
         .all()
         .into_iter()
         .map(|(id, title, default)| {
             let shortcut = crate::action_keys::effective(&keys, &id, default);
+            let position = first_kind.get(&id).copied().unwrap_or(usize::MAX);
+            let group = crate::object::ObjectKind::ALL
+                .get(position)
+                .map(|kind| kind.plural())
+                .unwrap_or("Everything else");
 
-            ActionShortcut {
-                overridden: keys.overrides.contains_key(&id),
-                contested: clashes.get(&id).map(|c| c.other.clone()),
-                chord: shortcut.map(|s| s.chord()).unwrap_or_default(),
-                id,
-                title,
-            }
+            (
+                position,
+                ActionShortcut {
+                    overridden: keys.overrides.contains_key(&id),
+                    contested: clashes.get(&id).map(|c| c.other.clone()),
+                    chord: shortcut.map(|s| s.chord()).unwrap_or_default(),
+                    group,
+                    id,
+                    title,
+                },
+            )
         })
         .collect();
 
-    // Alphabetical, because registration order is an implementation detail and
-    // this is a list somebody scans for a name.
-    rows.sort_by(|a, b| a.title.cmp(&b.title));
-    Ok(rows)
+    // By group in the order the kinds are declared, then alphabetical inside
+    // one: registration order is an implementation detail and this is a list
+    // somebody scans for a name.
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.title.cmp(&b.1.title)));
+    Ok(rows.into_iter().map(|(_, row)| row).collect())
 }
 
 /// One action, as a settings row shows it.
@@ -1145,6 +1249,8 @@ pub(crate) struct ActionShortcut {
     pub overridden: bool,
     /// The other action that wants this chord and gets it, when there is one.
     pub contested: Option<String>,
+    /// The heading the panel files this under: the first kind it applies to.
+    pub group: &'static str,
 }
 
 /// The skin tones, each shown as a hand rather than named.

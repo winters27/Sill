@@ -305,6 +305,16 @@ changed, and it has presets for arrow keys alone, for vim-style movement, and
 for emacs-style movement. A preset only ever adds: turning one on never takes
 the arrow keys away.
 
+The top of that panel is a keyboard with every bound key lit. Choose a
+modifier above it, or hold one down over it, and it shows that layer; hover a
+lit key to read what it does, and click one to go to the row that set it. When
+you record a key, the recorder shows the modifiers you are holding, and before
+it saves it asks Sill what already runs on that combination: something in the
+same section is refused with the reason, something elsewhere is saved and
+mentioned. A key Windows would not register is marked on the keyboard, in the
+reference, and on the row, and the tray menu shows no key at all rather than
+one that does nothing.
+
 ## Settings
 
 Settings opens from the launcher and covers, in its own words: startup and

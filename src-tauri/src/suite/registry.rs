@@ -3021,15 +3021,17 @@ mod a_now_playing_row {
         assert_eq!(row.command.extension_title, "Spotify");
     }
 
-    /// No icon, because an app user model id is not a file to take one from.
+    /// Sill's own mark for what is playing, never a path.
     ///
-    /// A row whose icon is a string the shell cannot resolve draws nothing at
-    /// all where the tile should be, which reads as a broken row rather than
-    /// as a row without a picture.
+    /// An app user model id is not a file to take an icon from, and a row
+    /// whose icon is a string the shell cannot resolve draws nothing at all
+    /// where the tile should be, which reads as a broken row rather than as a
+    /// row without a picture. So the row names a mark the window draws
+    /// itself, and never the id.
     #[test]
-    fn nothing_pretends_to_have_an_icon_it_does_not() {
+    fn the_row_wears_the_media_mark_and_never_a_path() {
         let row = registry::now_playing_record(&track("Weightless", "Marconi Union", true));
-        assert_eq!(row.command.icon, None);
+        assert_eq!(row.command.icon.as_deref(), Some("mark:media"));
     }
 }
 

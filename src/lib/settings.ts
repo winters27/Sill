@@ -285,6 +285,8 @@ export interface TapSettings {
 export type BindingSource =
   | { from: "selection" }
   | { from: "clipboard" }
+  /** The last picture copied. Rust has offered it for as long as the clipboard has; the panel now does too. */
+  | { from: "clipboardImage" }
   /** The window in front, which is what makes a window action bindable. */
   | { from: "foregroundWindow" }
   /**
@@ -894,6 +896,29 @@ export interface ActionShortcut {
    * actions appear on one list together and only the registry knows that.
    */
   contested?: string;
+  /** The heading the panel files this under: the first kind it applies to. */
+  group: string;
+}
+
+/** Something that already runs on a key: what, and in which section. */
+export interface KeyOwner {
+  chord: string;
+  does: string;
+  section: string;
+}
+
+/**
+ * What already runs on a chord, from the same sheet the keyboard reference
+ * draws.
+ *
+ * Asked by a recorder before it saves. Rust answers, because only Rust sees
+ * every source a key can come from; the window used to check three of them
+ * separately and a chord could pass all three and do two things.
+ */
+export function keyOwners(accelerator: string): Promise<KeyOwner[]> {
+  return invoke<KeyOwner[]>("key_owners", { accelerator }).catch(
+    orElse("settings", "what already runs on that key", [], "shortcuts"),
+  );
 }
 
 /**
