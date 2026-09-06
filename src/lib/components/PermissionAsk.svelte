@@ -97,4 +97,19 @@
     padding: var(--space-6);
     background: var(--scrim);
   }
+
+  /*
+   * The card centres here even though it does not in the chat.
+   *
+   * `ApprovalCard` is shared with the AI, where it sits at the top of a
+   * column of messages and carries `align-self: flex-start` to stay there.
+   * Inside this scrim that beat `place-items: center`, so the card drew
+   * against the top of the window and covered the search field: a dialog
+   * that looks like it landed wrong rather than like it is waiting for an
+   * answer. Overridden here rather than removed there, because the chat
+   * still wants it.
+   */
+  .scrim > :global(*) {
+    align-self: center;
+  }
 </style>
