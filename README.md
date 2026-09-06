@@ -6,13 +6,14 @@
 <h1 align="center">Sill</h1>
 
 <p align="center">
-  <strong>Press one key, type what you want, and it happens.</strong>
+  <strong>Your Windows toolbox, summoned with a keystroke.</strong>
 </p>
 
 <p align="center">
-  An open-source command palette for Windows. Apps, files, settings,
-  clipboard history, snippets, window control, on-device speech to text
-  and AI, from one search field. Runs Raycast extensions.
+  An open-source command palette. Search apps, files, settings, windows,
+  clipboard history and snippets, then act on what you find without reaching
+  for the mouse. Speech to text runs on your own machine, the AI provider is
+  yours to pick, and Raycast extensions run unmodified.
 </p>
 
 <p align="center">

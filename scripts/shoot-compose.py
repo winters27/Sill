@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "docs" / "media" / "raw"
 OUT = ROOT / "docs" / "media"
 MASTER = ROOT / "src-tauri" / "icons" / "master.png"
+FACE = ROOT / "src" / "lib" / "theme" / "fonts" / "Satoshi-Variable.woff2"
 
 # The primary display the shoot runs on.
 SCREEN = (2560, 1440)
@@ -68,6 +69,44 @@ def logo() -> Image.Image:
     return square.resize((512, 512), Image.LANCZOS)
 
 
+def wordmark(size: int) -> ImageFont.FreeTypeFont:
+    """The name in the face the launcher itself is set in.
+
+    Satoshi ships as a variable `.woff2`, which Pillow cannot open, so it is
+    converted to a TrueType in memory. Nothing is written to disk: the licence
+    is careful about the font file being made available, and an image rendered
+    with a face does not contain that face.
+
+    The file arrives per machine with `npm run fonts` and is not in the
+    repository, so a clone that has not fetched it falls back rather than
+    failing. The card is still a card in Segoe UI.
+    """
+    if not FACE.exists():
+        return font(size)
+
+    import io
+
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        # The conversion needs fontTools and brotli. Composing a card is not
+        # worth a hard dependency, and the fallback is a card that still reads.
+        print("  (fontTools is not installed; the name falls back to Segoe UI)")
+        return font(size)
+
+    face = TTFont(FACE)
+    face.flavor = None
+    buf = io.BytesIO()
+    face.save(buf)
+    buf.seek(0)
+
+    drawn = ImageFont.truetype(buf, size)
+    # The axis runs 300 to 900 and defaults to the top of it. A wordmark at 900
+    # is a shout; Bold is the weight the interface uses for a heading.
+    drawn.set_variation_by_name("Bold")
+    return drawn
+
+
 def font(size: int, weight: str = "semibold") -> ImageFont.FreeTypeFont:
     # Windows ships Segoe UI Variable; rendering an image with it is ordinary
     # use of a system font and nothing is redistributed.
@@ -98,9 +137,9 @@ def social(mark: Image.Image) -> Image.Image:
 
     side = 128
     lines = [
-        ("Sill", font(76), (238, 240, 243), 42),
-        ("Press one key, type what you want, and it happens.", font(32, "regular"), (186, 192, 200), 24),
-        ("An open-source command palette for Windows", font(22, "regular"), (128, 136, 146), 0),
+        ("Sill", wordmark(78), (238, 240, 243), 42),
+        ("Your Windows toolbox, summoned with a keystroke.", font(32, "regular"), (186, 192, 200), 24),
+        ("Open source. Search anything on your machine, then act on it.", font(22, "regular"), (128, 136, 146), 0),
     ]
 
     # Ink heights, so a line with no descender does not leave a bigger gap
