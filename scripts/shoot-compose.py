@@ -81,31 +81,43 @@ def font(size: int, weight: str = "semibold") -> ImageFont.FreeTypeFont:
     return ImageFont.load_default(size)
 
 
-def social(hero: Image.Image, mark: Image.Image) -> Image.Image:
+def social(mark: Image.Image) -> Image.Image:
+    """The card link previews show: the logo, the name, and the sentence.
+
+    No screenshot. A launcher window shrunk to fit beside the words is
+    illegible at the size these are actually seen at, and it makes the card
+    about a picture nobody can read rather than about what the thing does.
+
+    Laid out by measuring rather than by hardcoding a first line: the gaps are
+    optical, so they are set between the drawn edges of the type, and the whole
+    block is centred on what it actually measures.
+    """
     w, h = 1280, 640
     card = backdrop((w, h))
     draw = ImageDraw.Draw(card)
 
-    # Logo and words on the left third, the launcher on the right.
-    mark = mark.resize((132, 132), Image.LANCZOS)
-    card.paste(mark, (72, 96), mark)
-    draw.text((72, 262), "Sill", font=font(64), fill=(238, 240, 243))
-    lines = ["Press one key,", "type what you want,", "and it happens."]
-    y = 350
-    for line in lines:
-        draw.text((72, y), line, font=font(30, "regular"), fill=(186, 192, 200))
-        y += 42
-    draw.text((72, 512), "An open-source command palette for Windows", font=font(22, "regular"), fill=(140, 148, 158))
+    side = 128
+    lines = [
+        ("Sill", font(76), (238, 240, 243), 42),
+        ("Press one key, type what you want, and it happens.", font(32, "regular"), (186, 192, 200), 24),
+        ("An open-source command palette for Windows", font(22, "regular"), (128, 136, 146), 0),
+    ]
 
-    # The hero already carries its own backdrop; fade its left edge into ours.
-    shot = hero.convert("RGBA")
-    target_h = 560
-    shot = shot.resize((int(shot.width * target_h / shot.height), target_h), Image.LANCZOS)
-    mask = Image.new("L", shot.size, 255)
-    fade = Image.linear_gradient("L").rotate(90, expand=True).resize((160, shot.height))
-    mask.paste(fade, (0, 0))
-    shot.putalpha(mask)
-    card.paste(shot, (w - shot.width + 60, (h - target_h) // 2), shot)
+    # Ink heights, so a line with no descender does not leave a bigger gap
+    # under it than one that has.
+    measured = [(t, f, c, gap, draw.textbbox((0, 0), t, font=f)) for t, f, c, gap in lines]
+    text_block = sum((box[3] - box[1]) + gap for _, _, _, gap, box in measured)
+    total = side + 34 + text_block
+
+    y = (h - total) // 2
+    small = mark.resize((side, side), Image.LANCZOS)
+    card.paste(small, ((w - side) // 2, y), small)
+    y += side + 34
+
+    for text, font_, fill, gap, box in measured:
+        draw.text(((w - (box[2] - box[0])) / 2 - box[0], y - box[1]), text, font=font_, fill=fill)
+        y += (box[3] - box[1]) + gap
+
     return card
 
 
@@ -114,7 +126,6 @@ def compose() -> None:
     mark = logo()
     mark.save(OUT / "logo.png", optimize=True)
 
-    hero = None
     for raw in sorted(RAW.glob("*.png")):
         if raw.stem == "backdrop":
             continue
@@ -123,13 +134,10 @@ def compose() -> None:
         if picture.width > width:
             picture = picture.resize((width, int(picture.height * width / picture.width)), Image.LANCZOS)
         picture.save(OUT / raw.name, optimize=True)
-        if raw.stem == "hero":
-            hero = Image.open(raw).convert("RGB")
         print(f"{raw.name}: {picture.width}x{picture.height}")
 
-    if hero is not None:
-        social(hero, mark).save(OUT / "social-preview.png", optimize=True)
-        print("social-preview.png: 1280x640")
+    social(mark).save(OUT / "social-preview.png", optimize=True)
+    print("social-preview.png: 1280x640")
 
 
 if __name__ == "__main__":
