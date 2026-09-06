@@ -165,6 +165,14 @@ npm run dev
       { tag: "Grid.Item", props: { title: "Circle", subtitle: "round", content: "●" } },
       { tag: "Grid.Item", props: { title: "Ring", content: "○" } },
       { tag: "Grid.Item", props: { title: "Square", content: "■" } },
+      // The shapes LocalSend's send screen uses: a built-in icon as the
+      // tile, bare and wrapped with a tooltip, and a colour swatch.
+      { tag: "Grid.Item", props: { title: "Clipboard", content: { source: "Clipboard" } } },
+      {
+        tag: "Grid.Item",
+        props: { title: "Files", content: { value: { source: "Document" }, tooltip: "Send files" } },
+      },
+      { tag: "Grid.Item", props: { title: "Amber", content: { color: "#eab308" } } },
     ],
   });
 

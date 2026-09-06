@@ -152,6 +152,63 @@ export function iconOf(value: unknown, tint?: string): ExtIcon | undefined {
 }
 
 /**
+ * A colour a swatch can be filled with.
+ *
+ * Raycast's named colours through the theme, as everywhere else, and a
+ * literal hex or rgb() string as written: a swatch is the one place an
+ * extension's own colour is the content rather than a tint on something of
+ * Sill's, so a colour picker showing #eab308 has to show #eab308.
+ */
+function swatchOf(value: unknown): string | undefined {
+  const named = colourOf(value);
+  if (named) return named;
+  if (typeof value !== "string") return undefined;
+  const literal = value.trim();
+  const hex = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+  const rgb = /^rgba?\([\d\s.,%/]+\)$/i;
+  return hex.test(literal) || rgb.test(literal) ? literal : undefined;
+}
+
+/** What a grid cell draws in its tile. */
+export type GridContent =
+  | { kind: "image"; src: string }
+  | { kind: "icon"; icon: ExtIcon }
+  | { kind: "swatch"; color: string }
+  | { kind: "letters"; text: string };
+
+/**
+ * Reads whatever an extension put in a `Grid.Item`'s `content`.
+ *
+ * Raycast allows more shapes here than in an `icon`: an image in any of the
+ * forms `iconOf` reads, a `{ color }` swatch, and either of those wrapped as
+ * `{ value, tooltip }`. LocalSend's send screen puts `Icon.Document` and
+ * `Icon.Clipboard` in its tiles, which used to be handed to an `<img>` as a
+ * path and drew as five broken pictures: every built-in icon a list row
+ * resolves, a grid cell has to resolve too, and it goes through the same
+ * reading so the two cannot disagree.
+ *
+ * Letters from the title are the last resort, for content that is nothing
+ * the window can draw.
+ */
+export function gridContentOf(content: unknown, title: string): GridContent {
+  const letters = { kind: "letters" as const, text: title.trim().slice(0, 2) };
+
+  if (content && typeof content === "object") {
+    const record = content as Record<string, unknown>;
+    if ("value" in record) return gridContentOf(record.value, title);
+    if ("color" in record) {
+      const color = swatchOf(record.color);
+      return color ? { kind: "swatch", color } : letters;
+    }
+  }
+
+  const icon = iconOf(content);
+  if (!icon) return letters;
+  if (icon.kind === "image") return { kind: "image", src: icon.src };
+  return { kind: "icon", icon };
+}
+
+/**
  * One thing drawn down the right hand side of a row.
  *
  * Raycast's `accessories` is an array of these and a row can carry several.

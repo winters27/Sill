@@ -14,6 +14,7 @@ import {
   colourOf,
   dropdownOf,
   emptyViewOf,
+  gridContentOf,
   iconOf,
   metadataOf,
   paginationOf,
@@ -128,6 +129,42 @@ describe("icons, in every shape one arrives in", () => {
   test("a colour Sill has no hue for is not painted a nearby one", () => {
     expect(colourOf("raycast-purple")).toBeUndefined();
     expect(colourOf("raycast-red")).toBe("var(--danger)");
+  });
+});
+
+describe("what a grid cell draws", () => {
+  test("a built-in icon is a mark, not a picture path", () => {
+    // LocalSend's send screen: five tiles that drew as five broken images.
+    expect(gridContentOf({ source: "Clipboard" }, "Clipboard")).toEqual({
+      kind: "icon",
+      icon: { kind: "mark", name: "Clipboard", tint: undefined },
+    });
+    expect(gridContentOf("Document", "Files")).toEqual({
+      kind: "icon",
+      icon: { kind: "mark", name: "Document", tint: undefined },
+    });
+  });
+
+  test("a tooltip wrapper is looked through", () => {
+    expect(gridContentOf({ value: { source: "Folder" }, tooltip: "Send a folder" }, "Folder")).toEqual({
+      kind: "icon",
+      icon: { kind: "mark", name: "Folder", tint: undefined },
+    });
+  });
+
+  test("a colour is a swatch", () => {
+    expect(gridContentOf({ color: "#eab308" }, "Amber")).toEqual({ kind: "swatch", color: "#eab308" });
+    expect(gridContentOf({ value: { color: "raycast-blue" }, tooltip: "Blue" }, "Blue").kind).toBe("swatch");
+  });
+
+  test("a picture is a picture, an emoji is a glyph, and nothing drawable is letters", () => {
+    expect(gridContentOf("https://x.test/a.png", "A")).toEqual({ kind: "image", src: "https://x.test/a.png" });
+    expect(gridContentOf("●", "Circle")).toEqual({
+      kind: "icon",
+      icon: { kind: "glyph", text: "●", tint: undefined },
+    });
+    expect(gridContentOf(undefined, "Nothing here")).toEqual({ kind: "letters", text: "No" });
+    expect(gridContentOf({ color: 42 }, "Odd")).toEqual({ kind: "letters", text: "Od" });
   });
 });
 

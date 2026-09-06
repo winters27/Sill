@@ -762,9 +762,7 @@
                     <span class="state have">
                       <svg viewBox="0 0 12 12" aria-hidden="true">
                         <path d="M2.5 6.4 5 8.8l4.6-5.4" />
-                      </svg>
-                      Installed
-                    </span>
+                      </svg>Installed</span>
                   {/if}
                   {#if row.blocked}
                     <span class="blocked">{row.blocked}</span>
@@ -829,9 +827,7 @@
               <span class="state have">
                 <svg viewBox="0 0 12 12" aria-hidden="true">
                   <path d="M2.5 6.4 5 8.8l4.6-5.4" />
-                </svg>
-                Installed
-              </span>
+                </svg>Installed</span>
               <Chord chord="Ctrl+Shift+X" /> removes it.
             </p>
           {/if}

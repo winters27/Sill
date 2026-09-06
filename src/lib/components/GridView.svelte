@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ElementNode, ViewTree } from "$lib/exthost/tree";
   import type { Row } from "$lib/exthost/search";
-  import { emptyViewOf, iconOf } from "$lib/exthost/present";
+  import { emptyViewOf, gridContentOf, iconOf } from "$lib/exthost/present";
   import ExtIcon from "./ExtIcon.svelte";
   import Instead from "./Instead.svelte";
   import { whileEmpty } from "$lib/instead";
@@ -69,28 +69,9 @@
     return typeof v === "string" ? v : "";
   };
 
-  /**
-   * What to draw in a cell.
-   *
-   * `content` is usually an image source, but extensions also pass a bare
-   * string for emoji and similar, which is worth rendering directly rather
-   * than treating as a broken image.
-   */
-  function contentOf(item: ElementNode): { text?: string; src?: string } {
-    const content = item.props.content;
-
-    if (typeof content === "string") {
-      return content.startsWith("http") || content.includes("/") || content.includes(".")
-        ? { src: content }
-        : { text: content };
-    }
-
-    if (content && typeof content === "object") {
-      const source = (content as Record<string, unknown>).source;
-      if (typeof source === "string") return { src: source };
-    }
-
-    return { text: str(item, "title").slice(0, 2) };
+  /** What to draw in a cell. The reading is `gridContentOf`'s; see there. */
+  function contentOf(item: ElementNode) {
+    return gridContentOf(item.props.content, str(item, "title"));
   }
 </script>
 
@@ -129,9 +110,13 @@
           onclick={() => onrun(cell.index)}
           onkeydown={(e) => e.key === "Enter" && onrun(cell.index)}
         >
-          <div class="tile">
-            {#if content.src}
+          <div class="tile" class:marked={content.kind === "icon"}>
+            {#if content.kind === "image"}
               <img src={content.src} alt={str(cell.node, "title")} />
+            {:else if content.kind === "icon"}
+              <ExtIcon icon={content.icon} label={str(cell.node, "title")} />
+            {:else if content.kind === "swatch"}
+              <span class="swatch" style="background: {content.color}"></span>
             {:else}
               <span class="glyph">{content.text}</span>
             {/if}
@@ -228,6 +213,22 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  /*
+   * A built-in icon in a tile is drawn at a third of it, the way Raycast
+   * draws one: a picture fills the tile, a symbol sits in it. The size is
+   * handed to the icon through its own token, so the icon component draws
+   * the same mark it draws on a row, only larger.
+   */
+  .tile.marked {
+    --icon-tile: 36%;
+    color: var(--text-2);
+  }
+
+  .swatch {
+    width: 100%;
+    height: 100%;
   }
 
   .glyph {

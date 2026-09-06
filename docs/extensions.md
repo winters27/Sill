@@ -400,7 +400,7 @@ above.
 | `Color` | The nine colour names. Seven map onto Sill's palette; `Magenta` and `Purple` have no colour of their own and draw in the ordinary text colour rather than in a nearby hue |
 | `Detail` | A markdown page, with an optional metadata panel beside it |
 | `Form` | A form. The fields it supports are in the component table below |
-| `Grid` | A grid of tiles, with sections, an empty view and a picker beside the search field |
+| `Grid` | A grid of tiles, with sections, an empty view and a picker beside the search field. A tile draws a picture, a built-in icon, an emoji, or a `{ color }` swatch, wrapped in `{ value, tooltip }` or not |
 | `Icon` | Every name round-trips. Which names have a mark is decided in `src-tauri/src/exthost/icons.rs` and nowhere else; anything with no mark gets a lettered tile |
 | `Image` | `Image.Mask` only |
 | `Keyboard` | `Keyboard.Shortcut.Common` only. A `cmd` modifier is drawn and matched as Ctrl |
