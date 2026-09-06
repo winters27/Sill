@@ -7,7 +7,7 @@ table is the command that takes those readings on your own machine. Where a
 cost has no reading, or no command that would take one, the row says that
 instead.
 
-Generated for version 0.1.0 on 2026-09-03. Nothing on this page is written by
+Generated for version 0.1.1 on 2026-09-03. Nothing on this page is written by
 hand: it is assembled from what the measuring scripts concluded, and the build
 refuses a copy that has been edited.
 
@@ -29,10 +29,10 @@ hardware happens to run it, and a reader gets the same answer.
 
 | What it means | Reading | Allowed | Taken |
 | --- | --- | --- | --- |
-| Working out what to show for one letter typed, against an index of 1,500 things | 27.1 ms for the worst of four queries over 1,500 entries (provisional) | 20 ms release, 60 ms debug | 2026-09-03, debug build, machine A |
-| Whether that cost grows in step with the index rather than faster than it | still linear | at most 40x for 8x the entries | 2026-09-03, debug build, machine A |
-| Whether opening and closing the launcher five hundred times leaves anything behind | the check holds | no growth | 2026-09-03, debug build, machine A |
-| Repeating timers in the window with nothing saying why being put away stops them | 0 unaccounted for, of 4 repeating timers in the window | 0 unaccounted | 2026-09-03, debug build, machine A |
+| Working out what to show for one letter typed, against an index of 1,500 things | 27.1 ms for the worst of four queries over 1,500 entries (provisional) | 20 ms release, 60 ms debug | 2026-09-03, debug build, machine A, **version 0.1.0** |
+| Whether that cost grows in step with the index rather than faster than it | still linear | at most 40x for 8x the entries | 2026-09-03, debug build, machine A, **version 0.1.0** |
+| Whether opening and closing the launcher five hundred times leaves anything behind | the check holds | no growth | 2026-09-03, debug build, machine A, **version 0.1.0** |
+| Repeating timers in the window with nothing saying why being put away stops them | 0 unaccounted for, of 4 repeating timers in the window | 0 unaccounted | 2026-09-03, debug build, machine A, **version 0.1.0** |
 | How large the clipboard's write-ahead file is allowed to get | **not measured yet** | at most 2 MB | never |
 
 Take these yourself:
@@ -55,8 +55,8 @@ Reading them off a busy machine measures the machine.
 
 | What it means | Reading | Allowed | Taken |
 | --- | --- | --- | --- |
-| From a letter reaching the search field to the rows for it being in the document | 215.3 ms median, 298.0 ms worst, over 9 keystrokes from 5 visits (provisional) | 16 ms | 2026-09-03, debug build, machine A |
-| The same letter, to the first moment its pixels are certainly on the screen | 218.7 ms median, 308.1 ms worst (provisional) | one refresh more | 2026-09-03, debug build, machine A |
+| From a letter reaching the search field to the rows for it being in the document | 215.3 ms median, 298.0 ms worst, over 9 keystrokes from 5 visits (provisional) | 16 ms | 2026-09-03, debug build, machine A, **version 0.1.0** |
+| The same letter, to the first moment its pixels are certainly on the screen | 218.7 ms median, 308.1 ms worst (provisional) | one refresh more | 2026-09-03, debug build, machine A, **version 0.1.0** |
 | From pressing Enter on an extension to its first view being on the screen | **not measured yet** | 300 ms warm, 1,200 ms cold | never |
 | From pressing the summon key to being able to type | **not measured yet** | 250 ms | never |
 | From starting the program to the summon key answering | **not measured yet** | 4,000 ms | never |
