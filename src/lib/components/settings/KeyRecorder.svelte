@@ -42,7 +42,7 @@
     onclear?: () => Promise<void>;
     /** Puts the key back to what it shipped with. Backspace, where it exists. */
     onreset?: () => Promise<void>;
-    /** Windows refused this chord: it is set and does nothing. */
+    /** Windows would not register this chord as the hook's backstop. The hook still takes it. */
     taken?: boolean;
     /** Another action on the same list takes this chord first. */
     contested?: string;
@@ -185,8 +185,8 @@
     if (note) return note;
     if (taken) {
       return {
-        text: "Another application already has this combination, so it does nothing. Choose a different one.",
-        refused: true,
+        text: "Taken through the keyboard hook, ahead of everything else. Windows would not register it as a backstop: another program holds it, or Windows cannot name the key.",
+        refused: false,
       };
     }
     if (contested) {
@@ -202,7 +202,7 @@
     type="button"
     class="key"
     class:recording
-    class:refused={taken || Boolean(contested)}
+    class:refused={Boolean(contested)}
     class:blank={!chord && !recording}
     aria-label={ariaLabel}
     aria-pressed={recording}

@@ -110,13 +110,15 @@ pub(crate) async fn set_preferences(
         expander.set_enabled(prefs.snippets.expand_keywords);
         expander.set_tap_binding(crate::tap_binding(&prefs.taps));
         expander.set_hyper(prefs.hyper.key);
+        // Every global hotkey goes through the hook first; see hotkeys.rs.
+        expander.set_hotkeys(crate::hotkeys::from_prefs(&prefs));
 
         // Switched off means taken out, not told to ignore everything. A
         // low-level keyboard hook is called for every keystroke on the
         // machine, in every application; staying in that path in order to do
         // nothing is exactly the cost rule 23 refuses.
         //
-        // Two features share the hook now, so the question is whether either
+        // Several features share the hook now, so the question is whether any
         // wants it. Asked of the expander, which is the one place that knows,
         // rather than of the preferences here and again at startup.
         if expander.wanted() {

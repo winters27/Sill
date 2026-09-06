@@ -130,12 +130,17 @@ fn opening(chord: &str, taken: bool) -> Said {
         };
     }
 
+    // A key Windows would not register is still the key: the keyboard hook
+    // takes it ahead of whatever else wanted it. Said, because the hook cannot
+    // prove it is alive and a person who presses the key and gets nothing
+    // should know where to look.
     if taken {
         return Said {
-            headline: format!("{chord} belongs to another application"),
+            headline: format!("Press {chord} to open Sill"),
             body: format!(
-                "Sill asked Windows for {chord} when it started and was refused, so that \
-                 combination does nothing here. Choose a different one below."
+                "Another program had already asked Windows for {chord}, so Sill takes it \
+                 through its own keyboard hook instead, ahead of that program. If the key \
+                 does nothing, choose a different one below."
             ),
         };
     }
@@ -352,30 +357,27 @@ mod tests {
 
     /// **The one that matters.**
     ///
-    /// `Alt+Space` has been refused on this machine at every start for weeks.
-    /// A welcome built from the settings file would open by telling whoever is
-    /// reading it to press a key that does nothing, on their first contact
-    /// with the application, with no way to tell that it is the key and not
-    /// them.
+    /// `Alt+Space` was refused on this machine at every start for weeks, and
+    /// the welcome used to say so and send the reader to choose another key.
+    /// The keyboard hook now takes a refused key ahead of whoever held it, so
+    /// the key is still the key; what the welcome owes the reader is where to
+    /// look if it does nothing, because a hook cannot prove it is alive.
     #[test]
-    fn a_refused_key_is_never_something_the_welcome_says_to_press() {
+    fn a_refused_key_is_still_the_key_and_the_welcome_says_where_to_look() {
         let refused = greeting(&Facts {
             summon_taken: true,
             ..facts()
         });
+        let said = everything_said(&refused);
 
-        assert!(
-            !everything_said(&refused).contains("Press Alt+Space"),
-            "the welcome asked somebody to press a key Windows refused: {:?}",
-            refused.opening
-        );
+        assert!(said.contains("Press Alt+Space"), "the key still opens Sill: {:?}", refused.opening);
+        assert!(said.contains("keyboard hook"), "and the reader is told how");
+        assert!(said.contains("does nothing"), "and where to look if it does not");
 
-        // And the positive control, so the assertion above is not passing
-        // because the sentence was never there in the first place.
         let works = greeting(&facts());
         assert!(
-            everything_said(&works).contains("Press Alt+Space"),
-            "the welcome never says how to open Sill even when the key works"
+            !everything_said(&works).contains("keyboard hook"),
+            "a key Windows registered is not explained away"
         );
     }
 

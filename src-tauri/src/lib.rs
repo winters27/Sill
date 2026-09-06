@@ -39,6 +39,7 @@ pub mod hello;
 pub mod hooks;
 pub mod host;
 pub mod host_bridge;
+pub mod hotkeys;
 pub mod hyper;
 pub mod icons;
 pub mod images;
@@ -1951,6 +1952,7 @@ pub fn run() {
             expander.set_enabled(prefs.snippets.expand_keywords);
             expander.set_tap_binding(tap_binding(&prefs.taps));
             expander.set_hyper(prefs.hyper.key);
+            expander.set_hotkeys(hotkeys::from_prefs(&prefs));
 
             // Asked of the expander rather than of the preferences, because
             // two things want the hook now and only it knows whether either

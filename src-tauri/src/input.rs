@@ -106,6 +106,33 @@ pub fn hyper(_key: u16) -> bool {
     false
 }
 
+/// A keystroke that types nothing, so a held Windows key is not a tap.
+///
+/// A chord on the Windows key that the hook swallows still leaves Windows
+/// seeing the Windows key go down and come up with nothing between, which is
+/// the gesture that opens the Start menu. Every hook-driven hotkey tool sends
+/// a key that means nothing while the modifier is held, so the release is a
+/// chord's release rather than a tap. `0xFF` is the virtual key Windows
+/// reserves for exactly that: it is delivered and it does nothing. Marked as
+/// Sill's own, so the hook ignores it the way it ignores every other key Sill
+/// sends.
+#[cfg(windows)]
+pub fn blank() -> bool {
+    let vk = VIRTUAL_KEY(0xFF);
+    let events = [stroke(vk, false), stroke(vk, true)];
+
+    // SAFETY: a live array of correctly sized INPUT records, size taken from
+    // the type rather than assumed.
+    let sent = unsafe { SendInput(&events, std::mem::size_of::<INPUT>() as i32) };
+
+    sent as usize == events.len()
+}
+
+#[cfg(not(windows))]
+pub fn blank() -> bool {
+    false
+}
+
 #[cfg(windows)]
 pub fn ctrl(key: VIRTUAL_KEY) -> bool {
     // The shortcut that got us here is probably still held down.

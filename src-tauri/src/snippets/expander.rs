@@ -359,6 +359,12 @@ struct Inner {
     /// one value so the modifier and what it opens cannot be read a moment
     /// apart and disagree.
     tap_binding: ArcSwap<Option<TapBinding>>,
+    /// The global hotkeys, taken here ahead of any registration. Read on
+    /// every keystroke, so an `ArcSwap` for the same reason `snippets` is.
+    hotkeys: ArcSwap<Vec<crate::hotkeys::Hotkey>>,
+    /// The key a hotkey is holding down, so its auto-repeat and its release
+    /// are swallowed with it rather than fed to the program behind Sill.
+    hotkey_held: std::sync::atomic::AtomicU32,
 }
 
 /// Which modifier opens what, when it is tapped twice.
@@ -400,7 +406,19 @@ impl Expander {
     /// or the reverse. Every drift of this shape in this codebase has cost an
     /// afternoon.
     pub fn wanted(&self) -> bool {
-        self.is_enabled() || self.tap_binding().is_some() || self.hyper_on()
+        self.is_enabled()
+            || self.tap_binding().is_some()
+            || self.hyper_on()
+            || !self.inner.hotkeys.load().is_empty()
+    }
+
+    /// The global hotkeys the hook answers to. Replaced whole on every
+    /// settings write, which is rare; read on every keystroke, which is not.
+    pub fn set_hotkeys(&self, hotkeys: Vec<crate::hotkeys::Hotkey>) {
+        self.inner.hotkeys.store(Arc::new(hotkeys));
+        self.inner
+            .hotkey_held
+            .store(0, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Which key stands in for four modifiers, or none.
@@ -743,6 +761,44 @@ mod windows_impl {
             crate::hyper::Verdict::Chord(key) => {
                 crate::input::hyper(key as u16);
                 return LRESULT(1);
+            }
+        }
+
+        /*
+         * The global hotkeys, ahead of every registration on the machine.
+         *
+         * Matched on the key first and the modifiers second, so the cost on
+         * an ordinary keystroke is a scan of a few entries and nothing else.
+         * A match is swallowed on the way down, on every auto-repeat while it
+         * is held, and on the way up, so the program behind Sill sees none of
+         * it: a Menu key that summons the launcher must not also open a
+         * context menu. What the chord does runs off this thread.
+         */
+        let holding = expander.inner.hotkey_held.load(Ordering::Relaxed);
+        if up && holding == vk {
+            expander.inner.hotkey_held.store(0, Ordering::Relaxed);
+            return LRESULT(1);
+        }
+        if down {
+            if holding == vk {
+                return LRESULT(1);
+            }
+            let hotkeys = expander.inner.hotkeys.load();
+            if hotkeys.iter().any(|one| one.chord.vk == vk) {
+                let held = crate::hotkeys::held_now();
+                if let Some(hit) = crate::hotkeys::hit(&hotkeys, vk, held) {
+                    expander.inner.hotkey_held.store(vk, Ordering::Relaxed);
+                    // Swallowing Win+X leaves Windows a lone Win tap, which
+                    // opens the Start menu on release. A key that types
+                    // nothing, sent while Win is still down, makes it a chord.
+                    if hit.chord.win {
+                        crate::input::blank();
+                    }
+                    if let Some(app) = APP.get() {
+                        crate::hotkeys::dispatch(app, hit.target.clone());
+                    }
+                    return LRESULT(1);
+                }
             }
         }
 

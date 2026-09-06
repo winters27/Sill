@@ -112,13 +112,11 @@
     try {
       const prefs = await getPreferences();
       applyAppearance(prefs);
-      // The key Windows actually registered, not the one the settings file
-      // asked for. `keyboard_reference` leaves a refused summon out, which is
-      // the rule the welcome and the key sheet already follow: a surface that
-      // names a key that does nothing is worse than one that names none.
+      // From the keyboard reference rather than the settings file, so this
+      // and the key sheet name the same key. A key Windows refused to register
+      // is still taken through the keyboard hook, so it is still the key.
       const sections = await keyboardReference();
-      const summon = sections.find((s) => s.title === "Opening Sill")?.keys[0];
-      summonHotkey = summon && !summon.refused ? summon.chord : "";
+      summonHotkey = sections.find((s) => s.title === "Opening Sill")?.keys[0]?.chord ?? "";
     } catch {
       // A menu that will not open because it could not read a hint is worse
       // than one that shows the row without it.

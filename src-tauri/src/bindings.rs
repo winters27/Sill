@@ -297,7 +297,7 @@ pub fn apply(app: &AppHandle, previous: &[Binding], current: &[Binding]) {
 }
 
 /// Runs one binding.
-async fn fire(app: &AppHandle, binding: &Binding) {
+pub(crate) async fn fire(app: &AppHandle, binding: &Binding) {
     let registry = app.state::<ActionRegistry>();
 
     /*

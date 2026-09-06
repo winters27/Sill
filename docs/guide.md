@@ -298,6 +298,14 @@ and it is the real one: Sill builds it from the keys that are actually
 registered, including your own changes and including any chord two things are
 fighting over, which it marks rather than hides.
 
+Every global key goes through Sill's own low-level keyboard hook first, so
+Sill sees it before any other program's registration does and takes it, Menu
+key and media keys included. Windows' registration is kept behind the hook as
+a backstop, because Windows can silently remove a slow hook and a backstop is
+what brings it back on the next summon. A key another program has already
+registered is therefore still yours; Settings says when the backstop was
+refused, and why that is not a dead key.
+
 There is no list of keys on this page on purpose. A reference somebody types
 into a document is wrong the first time a key changes, and the person reading
 it has no way to tell. Settings, under Shortcuts, is where every key is
