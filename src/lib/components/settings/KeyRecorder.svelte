@@ -27,6 +27,7 @@
 -->
 <script lang="ts">
   import Chord from "../Chord.svelte";
+  import { hint } from "$lib/hint";
   import { chordFor, type Scope } from "$lib/keys";
   import { keyOwners, type KeyOwner } from "$lib/settings";
 
@@ -69,7 +70,7 @@
   /** The modifiers down right now, drawn ahead of the cursor. */
   let held = $state<string[]>([]);
   /** What the last press amounted to, said under the control. */
-  let note = $state<{ text: string; refused: boolean } | null>(null);
+  let note = $state<{ text: string; refused: boolean; more?: string } | null>(null);
   let button = $state<HTMLButtonElement | null>(null);
 
   function start(): void {
@@ -184,9 +185,12 @@
   const standing = $derived.by(() => {
     if (note) return note;
     if (taken) {
+      // One quiet line; the reason waits under the pointer. Four lines of
+      // explanation under a control read as an error whatever colour they are.
       return {
-        text: "Taken through the keyboard hook, ahead of everything else. Windows would not register it as a backstop: another program holds it, or Windows cannot name the key.",
+        text: "Through the keyboard hook",
         refused: false,
+        more: "Sill takes this key ahead of every other program through its keyboard hook. Windows would not also register it as a backstop, because another program holds it or Windows cannot name the key.",
       };
     }
     if (contested) {
@@ -241,7 +245,7 @@
 </div>
 
 {#if standing}
-  <p class="note" class:refused={standing.refused}>{standing.text}</p>
+  <p class="note" class:refused={standing.refused} use:hint={standing.more}>{standing.text}</p>
 {/if}
 
 <style>

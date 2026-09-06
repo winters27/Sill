@@ -50,7 +50,14 @@ export const SECTIONS = {
   acting: "Acting on a row",
 } as const;
 
-/** The names a chord uses for the keys that are not letters. */
+/**
+ * What a keycap prints, for the keys whose chord name is not it.
+ *
+ * The chord keeps the browser's name (`ContextMenu`, `AudioVolumeUp`),
+ * because that is what the recorder captured and what Rust parses; the cap
+ * prints what the keyboard does, because a cap reading ContextMenu is a cap
+ * reading the wrong language.
+ */
 const LABELS: Record<string, string> = {
   Ctrl: "Ctrl",
   Alt: "Alt",
@@ -66,6 +73,36 @@ const LABELS: Record<string, string> = {
   Escape: "Esc",
   Space: "Space",
   Tab: "Tab",
+  ContextMenu: "Menu",
+  Insert: "Ins",
+  PageUp: "PgUp",
+  PageDown: "PgDn",
+  CapsLock: "Caps",
+  NumLock: "NumLk",
+  ScrollLock: "ScrLk",
+  PrintScreen: "PrtSc",
+  AudioVolumeUp: "Vol+",
+  AudioVolumeDown: "Vol−",
+  AudioVolumeMute: "Mute",
+  MediaPlayPause: "Play",
+  MediaStop: "Stop",
+  MediaTrackNext: "Next",
+  MediaTrackPrevious: "Prev",
+  BrowserBack: "Back",
+  BrowserForward: "Forward",
+  BrowserRefresh: "Refresh",
+  BrowserSearch: "Search",
+  BrowserFavorites: "Favorites",
+  BrowserHome: "Home",
+  LaunchMail: "Mail",
+  LaunchMediaPlayer: "Media",
+  LaunchApplication1: "Explorer",
+  LaunchApplication2: "Calculator",
+  NumpadAdd: "Num +",
+  NumpadSubtract: "Num −",
+  NumpadMultiply: "Num *",
+  NumpadDivide: "Num /",
+  NumpadDecimal: "Num .",
 };
 
 /** The modifiers, in the order a chord writes them. */

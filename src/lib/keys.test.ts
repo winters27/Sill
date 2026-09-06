@@ -20,8 +20,11 @@ describe("drawing a chord as keys", () => {
     expect(keysOf("Alt+Space")).toEqual(["Alt", "Space"]);
   });
 
-  it("names the Windows key Win, which is what is printed on it", () => {
+  it("prints what the keyboard prints, not what the browser calls the key", () => {
     expect(keysOf("Super+K")).toEqual(["Win", "K"]);
+    expect(keysOf("ContextMenu")).toEqual(["Menu"]);
+    expect(keysOf("Ctrl+PrintScreen")).toEqual(["Ctrl", "PrtSc"]);
+    expect(keysOf("AudioVolumeUp")).toEqual(["Vol+"]);
   });
 
   it("draws nothing for an empty chord rather than one empty cap", () => {
