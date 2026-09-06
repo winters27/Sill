@@ -233,7 +233,10 @@ mod tests {
     /// this is the one line that decides whether a rewrite can read a file.
     #[test]
     fn the_request_over_http_names_no_tools() {
-        let source = include_str!("oneshot.rs");
+        // `include_str!` hands over whatever the checkout wrote. The pattern
+        // below spans two lines, so a machine that checks out CRLF would fail a
+        // test about tools for a reason that has nothing to do with tools.
+        let source = include_str!("oneshot.rs").replace("\r\n", "\n");
         assert!(
             source.contains("&messages(system, user),\n        None,"),
             "the HTTP one-shot must pass None where the chat passes its tools"
