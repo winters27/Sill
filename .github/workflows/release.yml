@@ -244,4 +244,16 @@ jobs:
           uploadWorkflowArtifacts: true
           # `bundle.targets` is "all", which on Windows means these two. Named
           # here so what comes out of a release is stated rather than inherited.
-          args: --bundles nsis,msi
+          #
+          # `tauri.release.conf.json` turns on `createUpdaterArtifacts`, and it
+          # is an overlay rather than a line in `tauri.conf.json` because that
+          # setting makes the bundler refuse to finish without the signing key.
+          # The key exists here and nowhere else, so in the base config it would
+          # break `npm run tauri build` on any machine and in any fork.
+          #
+          # It is also what the action reads to decide whether updater artifacts
+          # exist. Without it the bundler still wrote the `.zip` and its `.sig`,
+          # the action listed all eight files, kept the two installers, threw
+          # away every signature and skipped the manifest. A release with no
+          # `latest.json` is one no installed Sill can ever see.
+          args: --bundles nsis,msi --config src-tauri/tauri.release.conf.json
