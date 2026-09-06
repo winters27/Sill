@@ -532,6 +532,13 @@ mod windows_impl {
                         .thread
                         .store(GetCurrentThreadId(), Ordering::SeqCst);
 
+                    // Said, because a hook that installs quietly and a hook
+                    // that was never asked for read the same in the log.
+                    crate::say!(
+                        "snippet hook installed, watching {} hotkey(s)",
+                        expander.inner.hotkeys.load().len()
+                    );
+
                     /*
                      * Cleared however this thread ends, including by unwinding.
                      *

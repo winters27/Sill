@@ -198,6 +198,7 @@
     class:blank={!chord && !recording}
     aria-label={ariaLabel}
     aria-pressed={recording}
+    data-recording={recording || undefined}
     disabled={saving}
     onclick={toggle}
     {onkeydown}

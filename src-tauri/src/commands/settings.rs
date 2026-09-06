@@ -741,6 +741,46 @@ pub(crate) async fn key_owners(
     Ok(crate::keysheet::owners_of(&sections, &accelerator))
 }
 
+/// The chords the keyboard hook watches, for the window that has the keyboard.
+///
+/// A Sill window in front receives its own keystrokes as a page, and honours
+/// the global hotkeys from there (see `src/lib/quiet.ts`). This is the same
+/// table the hook reads, so the two cannot disagree about what is a hotkey.
+#[tauri::command]
+pub(crate) async fn hotkey_chords(
+    prefs: State<'_, crate::state::PrefsState>,
+) -> Result<Vec<String>, String> {
+    let prefs = prefs.inner.lock().await;
+    Ok(crate::hotkeys::from_prefs(&prefs)
+        .into_iter()
+        .map(|one| one.accelerator)
+        .collect())
+}
+
+/// Runs one of Sill's hotkeys, the way the hook would have.
+///
+/// Says whether the chord was one. Matched by what the chord means rather
+/// than by its spelling, so `Alt+Ctrl+U` runs what `Ctrl+Alt+U` was saved as.
+#[tauri::command]
+pub(crate) async fn press_hotkey(
+    accelerator: String,
+    app: AppHandle,
+    prefs: State<'_, crate::state::PrefsState>,
+) -> Result<bool, String> {
+    let Some(chord) = crate::hotkeys::parse(&accelerator) else {
+        return Ok(false);
+    };
+    let hotkeys = {
+        let prefs = prefs.inner.lock().await;
+        crate::hotkeys::from_prefs(&prefs)
+    };
+    let Some(hit) = hotkeys.iter().find(|one| one.chord == chord) else {
+        return Ok(false);
+    };
+    crate::hotkeys::dispatch(&app, hit.target.clone());
+    Ok(true)
+}
+
 /// The reference's sections, from every source a key comes from.
 ///
 /// Shared by the reference and by `key_owners`, so what the sheet shows and

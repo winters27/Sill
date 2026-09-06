@@ -2276,6 +2276,8 @@ pub fn run() {
             commands::settings::action_shortcuts,
             commands::settings::keyboard_reference,
             commands::settings::key_owners,
+            commands::settings::hotkey_chords,
+            commands::settings::press_hotkey,
             commands::settings::welcome,
             commands::settings::terminal_profiles,
             commands::settings::emoji_tones,

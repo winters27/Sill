@@ -304,7 +304,14 @@ key and media keys included. Windows' registration is kept behind the hook as
 a backstop, because Windows can silently remove a slow hook and a backstop is
 what brings it back on the next summon. A key another program has already
 registered is therefore still yours; Settings says when the backstop was
-refused, and why that is not a dead key.
+refused, and why that is not a dead key. When a Sill window itself has the
+keyboard, that window honours the same keys, so the screenshot key works from
+inside the launcher the way its own row does.
+
+The browser Sill draws in keeps none of its habits: no context menu on right
+click or the Menu key, no developer tools, no reload, print, find or zoom
+keys, no swipe to go back. Those are switched off natively in every window
+and cancelled again in the page.
 
 There is no list of keys on this page on purpose. A reference somebody types
 into a document is wrong the first time a key changes, and the person reading

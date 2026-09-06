@@ -111,6 +111,10 @@ pub fn hit<'a>(hotkeys: &'a [Hotkey], vk: u32, held: Held) -> Option<&'a Hotkey>
 /// the double-tap already does it, and the async work goes to the runtime.
 pub fn dispatch(app: &AppHandle, target: Target) {
     let app = app.clone();
+    // On this thread, not the hook's: writing a line inside a low-level hook
+    // callback stalls every keystroke on the machine.
+    let said = format!("{target:?}");
+    std::thread::spawn(move || crate::say!("hotkey {said}"));
     match target {
         Target::Summon => {
             std::thread::spawn(move || crate::summon::toggle_main(&app));
