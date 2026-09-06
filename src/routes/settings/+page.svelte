@@ -730,19 +730,33 @@
   let update = $state<UpdateState>(NOTHING_KNOWN);
 
   /**
+   * Why the last attempt to install did not work, if one did not.
+   *
+   * Held here because the progress no longer carries it. A download that fails
+   * leaves the newer Sill exactly where it was, so the state goes back to
+   * `available` and the button stays pressable; this is the only place the
+   * reason for the last press survives.
+   */
+  let updateTrouble = $state<string | null>(null);
+
+  /**
    * Installs the newer Sill, or restarts into one already downloaded.
    *
    * Two presses behind one button, decided by the state the row just drew, so
-   * the label and the action cannot disagree. The failure is left to the
-   * update row itself, which shows it in words on the next event: this window
-   * has somewhere to say it, which is exactly why the launcher does not.
+   * the label and the action cannot disagree. A failure is said in the row
+   * rather than swallowed: this window has somewhere to say it, which is
+   * exactly why the launcher does not.
    */
   async function applyUpdate() {
     if (update.progress.kind === "ready") {
       void restartForUpdate();
       return;
     }
-    await installUpdate().catch(() => {});
+
+    updateTrouble = null;
+    await installUpdate().catch((err) => {
+      updateTrouble = `${err}`;
+    });
   }
 
   onMount(() => {
@@ -773,6 +787,10 @@
        */
       update = await updateState("settings");
       updating = await whenUpdateChanges((progress) => {
+        // A failed download announces `available` again on its way to
+        // rejecting, so that one state has to leave the reason standing.
+        // Anything else moving means the trouble is over.
+        if (progress.kind !== "available") updateTrouble = null;
         update = { ...update, progress };
       });
       void checkForUpdate();
@@ -2170,7 +2188,8 @@
               {/snippet}
             </Row>
             <!--
-              The one place a failed check is said out loud.
+              The one place a failed check, or a failed install, is said out
+              loud.
 
               The launcher stays quiet about it on purpose: somebody who opened
               a launcher to run a command is not the audience for "the update
@@ -2178,7 +2197,12 @@
               is where it is answered, in the words `updateWords` gives both
               surfaces.
             -->
-            <Row title="Updates" description={updateWords(update.progress)}>
+            <Row
+              title="Updates"
+              description={updateTrouble
+                ? `${updateWords(update.progress)} The last attempt did not finish: ${updateTrouble}`
+                : updateWords(update.progress)}
+            >
               {#snippet control()}
                 {#if update.progress.kind === "available" || update.progress.kind === "ready"}
                   <Button

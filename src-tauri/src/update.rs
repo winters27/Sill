@@ -68,7 +68,11 @@ pub enum Progress {
     Downloading { version: String, percent: Option<u8> },
     /// Downloaded and verified. The next step closes Sill and runs it.
     Ready { version: String },
-    /// The check or the download did not work.
+    /// The check did not work, so nothing is known about a newer one.
+    ///
+    /// The check only. A download that fails goes back to [`Self::Available`]
+    /// and hands its reason to the caller, because the newer Sill it failed to
+    /// fetch is still there and still worth offering.
     ///
     /// Kept and shown in settings rather than raised as a toast: a failed
     /// update check is not something to interrupt somebody who just opened a
@@ -244,6 +248,9 @@ pub async fn install(app: AppHandle) -> Result<(), String> {
         .ok_or_else(|| "there is no newer version to install".to_string())?;
 
     let version = found.version.clone();
+    // Kept because `download_and_install` consumes `found`, and a failure has
+    // to be able to put the offer back exactly as it was.
+    let notes = found.body.clone();
     announce(
         &app,
         Progress::Downloading {
@@ -292,9 +299,24 @@ pub async fn install(app: AppHandle) -> Result<(), String> {
             Ok(())
         }
         Err(why) => {
-            let why = why.to_string();
-            announce(&app, Progress::Failed { why: why.clone() });
-            Err(why)
+            /*
+             * Back to the offer, not to `Failed`.
+             *
+             * `Failed` means the check did not work, which is the sentence
+             * settings puts on screen for it, and a download that 403s would
+             * put those words under a check that had just succeeded.
+             *
+             * It also loses the update. Both surfaces draw their button from
+             * `Available`, and `worth_asking` holds a check off for a day
+             * after one, so a failed download used to take the offer away and
+             * leave nothing to press for a day: the chin says nothing about a
+             * `Failed`, and settings offers only "Check now", which returns
+             * early and changes nothing. The newer Sill is still there and
+             * still installable, so the state says so and the reason goes back
+             * to the caller, which is the one that has somewhere to put it.
+             */
+            announce(&app, Progress::Available { version, notes });
+            Err(why.to_string())
         }
     }
 }
@@ -306,5 +328,90 @@ pub fn state(app: &AppHandle) -> UpdateState {
         progress,
         current: current(app),
         checked_recently,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn available() -> Progress {
+        Progress::Available {
+            version: "9.9.9".into(),
+            notes: None,
+        }
+    }
+
+    /// A summon does not re-ask about an update that has already been found.
+    #[test]
+    fn a_found_update_stays_found() {
+        let updates = Updates::default();
+        updates.set(available());
+
+        assert!(!updates.worth_asking(false));
+        assert!(
+            updates.worth_asking(true),
+            "the button in settings still asks"
+        );
+    }
+
+    /// Asking mid-download would replace the state the bar is reading from.
+    #[test]
+    fn nothing_asks_while_the_bytes_are_arriving() {
+        let updates = Updates::default();
+        updates.set(Progress::Downloading {
+            version: "9.9.9".into(),
+            percent: Some(40),
+        });
+
+        assert!(!updates.worth_asking(false));
+        assert!(
+            !updates.worth_asking(true),
+            "not even the button, or a second press starts a second download"
+        );
+    }
+
+    /// The first summon of a run asks, and the ones after it do not.
+    #[test]
+    fn the_first_summon_asks_and_the_rest_do_not() {
+        let updates = Updates::default();
+
+        assert!(updates.worth_asking(false));
+        updates.asked_now();
+        assert!(!updates.worth_asking(false));
+    }
+
+    /// A percentage that has not moved is not worth waking two windows for.
+    #[test]
+    fn the_same_state_twice_is_not_news() {
+        let updates = Updates::default();
+
+        assert!(updates.set(available()));
+        assert!(!updates.set(available()));
+    }
+
+    /// A download that fails leaves the update on offer.
+    ///
+    /// The install path needs a release to fetch, so this reads the line that
+    /// decides it instead. Announcing `Failed` there is what this replaced: it
+    /// takes the button away from both surfaces, because each draws one from
+    /// `Available`, and `worth_asking` then holds the next check off for a
+    /// day. The newer Sill was unreachable until Sill was restarted.
+    #[test]
+    fn a_failed_download_leaves_the_update_on_offer() {
+        let source = include_str!("update.rs").replace("\r\n", "\n");
+        let (_, rest) = source
+            .split_once("    match outcome {")
+            .expect("the arms the download is judged by");
+        // Bounded at the next item, or this reads its own assertion below and
+        // fails on the name it is looking for.
+        let (arm, _) = rest
+            .split_once("\n/// The state,")
+            .expect("the item after `install`");
+
+        assert!(
+            !arm.contains("Progress::Failed"),
+            "a failed download must announce the update it could not fetch, not Failed"
+        );
     }
 }
