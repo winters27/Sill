@@ -1152,10 +1152,14 @@
     height: var(--icon-tile-sm);
   }
 
+  /* Closer to the count than the rest of the row is to each other: the
+     category and the count are both facts about the listing, and read as a
+     pair. */
   .category {
     display: grid;
     flex: none;
     place-items: center;
+    margin-right: calc(var(--space-1) - var(--space-3));
     color: var(--text-3);
   }
 
