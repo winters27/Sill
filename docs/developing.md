@@ -133,7 +133,7 @@ has real windows and a real clipboard.
 | `src` | Svelte. The launcher, settings, chat, and the preview routes |
 | `host` | The Node process that runs Raycast-compatible extensions ([README](../host/README.md)) |
 | `scripts` | Build, verify, measurement and screenshot scripts |
-| `docs` | The user guide, the extension guide, performance budgets and the roadmap |
+| `docs` | The user guide, the extension guide and the performance budgets |
 
 ## Design
 

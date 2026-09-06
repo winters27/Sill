@@ -60,3 +60,8 @@ docs/media/raw/
 
 # Python bytecode from the compose script.
 __pycache__/
+
+# Assistant tooling and the internal roadmap: useful here, meaningless to
+# somebody who cloned this.
+.claude/
+docs/roadmap.md

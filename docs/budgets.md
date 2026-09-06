@@ -355,7 +355,7 @@ changed instead of walking everything again. That is not done yet.
 
 Summon latency and cold start have moved out of this section: measured on the
 release build at 25 ms median and 846 ms, held there by
-`scripts/measure-summon.ps1`, and written up in `docs/roadmap.md`.
+`scripts/measure-summon.ps1`.
 
 - **Every millisecond figure here is a release figure, and the keystroke rows
   are not yet among them.** The 215 ms above is a debug build served by a
