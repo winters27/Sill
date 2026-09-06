@@ -97,7 +97,7 @@
     }
   }
 
-  async function commit(next: string): Promise<void> {
+  async function commit(next: string, caution?: string): Promise<void> {
     if (next === chord) {
       stop();
       return;
@@ -119,7 +119,9 @@
       const elsewhere = owners[0];
       note = elsewhere
         ? { text: `Also ${elsewhere.does.charAt(0).toLowerCase()}${elsewhere.does.slice(1)} (${elsewhere.section})`, refused: false }
-        : null;
+        : caution
+          ? { text: caution, refused: false }
+          : null;
       stop();
     } catch (err) {
       note = { text: `Could not save: ${err}`, refused: true };
@@ -164,7 +166,7 @@
       held = [];
       return;
     }
-    await commit(read.chord);
+    await commit(read.chord, read.caution);
   }
 
   function onkeyup(event: KeyboardEvent): void {
@@ -252,6 +254,8 @@
   .key {
     display: inline-flex;
     align-items: center;
+    /* The caps sit in the middle of the control, however wide it is. */
+    justify-content: center;
     gap: var(--space-1);
     min-width: 118px;
     height: var(--control-height);

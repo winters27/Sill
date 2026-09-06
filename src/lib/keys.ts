@@ -20,15 +20,19 @@ import { acceleratorFrom, chordFrom } from "$lib/settings";
 /**
  * What a recorder is recording for, which decides what it will accept.
  *
- * - `hotkey`: a global key Windows registers. Needs a modifier, because a bare
- *   letter would take that key from every application on the machine. The
- *   Windows key is allowed.
+ * No scope requires more than one key. Every scope allows a combination.
+ *
+ * - `hotkey`: a global key Windows registers. A key on its own is fine (F12,
+ *   Pause); a bare letter, digit or Space is allowed too, with a caution,
+ *   because it takes that key from every program while Sill runs. The Windows
+ *   key is allowed.
  * - `binding`: the same, for a key that runs an action on the selection.
  * - `navigation`: a key that moves around the launcher while it has focus.
  *   Anything goes: Down means Down.
- * - `action`: a key that runs an action on the selected row. Needs Ctrl or
- *   Alt, because the search field has focus and a bare `c` is the letter c.
- *   The Windows key is refused, because the launcher reads it as Ctrl and the
+ * - `action`: a key that runs an action on the selected row. A bare letter,
+ *   digit or punctuation is refused, because the search field has focus and
+ *   would type it; a key that types nothing (F5, Insert) works on its own. The
+ *   Windows key is refused, because the launcher reads it as Ctrl and the
  *   chord would fire on the Ctrl version of itself; Rust refuses it too.
  */
 export type Scope = "hotkey" | "binding" | "navigation" | "action";
@@ -100,6 +104,11 @@ export function keyOf(accelerator: string): string {
   return last ? (LABELS[last] ?? last) : "";
 }
 
+/** Whether a key on its own would type something: a letter, a digit, punctuation or Space. */
+function types(event: Pick<KeyboardEvent, "key">): boolean {
+  return [...event.key].length === 1;
+}
+
 /**
  * What a keypress amounts to for a recorder in one scope.
  *
@@ -107,12 +116,13 @@ export function keyOf(accelerator: string): string {
  *   keys so far without committing to a chord nobody can press.
  * - `{ refused }` for a press the scope does not accept, with the sentence to
  *   show under the control.
- * - `{ chord }` when there is something to save.
+ * - `{ chord }` when there is something to save, with a `caution` when it is
+ *   legal but worth a second look.
  */
 export function chordFor(
   scope: Scope,
   event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey">,
-): { chord: string } | { refused: string } | { held: string[] } {
+): { chord: string; caution?: string } | { refused: string } | { held: string[] } {
   const isModifier = ["Control", "Alt", "Shift", "Meta", "OS"].includes(event.key);
   if (isModifier) {
     const held: string[] = [];
@@ -123,19 +133,24 @@ export function chordFor(
     return { held };
   }
 
+  const bare = !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey;
+
   if (scope === "action") {
     if (event.metaKey) {
       return { refused: "The Windows key cannot run an action" };
     }
-    if (!event.ctrlKey && !event.altKey) {
-      return { refused: "An action key needs Ctrl or Alt" };
+    if (bare && types(event)) {
+      return { refused: "On its own that key would be typed into the search field. Add Ctrl or Alt, or use a key that types nothing." };
     }
   }
 
   if (scope === "hotkey" || scope === "binding") {
     const chord = acceleratorFrom(event as KeyboardEvent);
     if (!chord) {
-      return { refused: "A shortcut needs at least one of Ctrl, Alt, Shift or Win" };
+      return { refused: "That key cannot be a shortcut" };
+    }
+    if (bare && types(event)) {
+      return { chord, caution: `${chord} on its own is taken from every program while Sill runs.` };
     }
     return { chord };
   }

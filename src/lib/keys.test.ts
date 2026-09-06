@@ -44,12 +44,17 @@ describe("what a recorder accepts", () => {
     });
   });
 
-  it("refuses a bare letter as a global key, because it would take that key from every program", () => {
-    expect(chordFor("hotkey", press("k"))).toEqual({
-      refused: "A shortcut needs at least one of Ctrl, Alt, Shift or Win",
-    });
+  it("takes a key on its own as a global key, and a combination too", () => {
+    expect(chordFor("hotkey", press("F12"))).toEqual({ chord: "F12" });
     expect(chordFor("binding", press("k", { ctrl: true, alt: true }))).toEqual({
       chord: "Ctrl+Alt+K",
+    });
+  });
+
+  it("allows a bare letter as a global key with a caution, because it takes that key from every program", () => {
+    expect(chordFor("hotkey", press("k"))).toEqual({
+      chord: "K",
+      caution: "K on its own is taken from every program while Sill runs.",
     });
   });
 
@@ -58,13 +63,14 @@ describe("what a recorder accepts", () => {
     expect(chordFor("navigation", press("j", { ctrl: true }))).toEqual({ chord: "Ctrl+J" });
   });
 
-  it("refuses the Windows key and bare letters for an action key, with the reason", () => {
+  it("refuses the Windows key and a bare letter for an action key, and takes a lone key that types nothing", () => {
     expect(chordFor("action", press("k", { meta: true }))).toEqual({
       refused: "The Windows key cannot run an action",
     });
     expect(chordFor("action", press("k"))).toEqual({
-      refused: "An action key needs Ctrl or Alt",
+      refused: "On its own that key would be typed into the search field. Add Ctrl or Alt, or use a key that types nothing.",
     });
+    expect(chordFor("action", press("F5"))).toEqual({ chord: "F5" });
     expect(chordFor("action", press("k", { ctrl: true, shift: true }))).toEqual({
       chord: "Ctrl+Shift+K",
     });

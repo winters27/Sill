@@ -705,7 +705,10 @@ export function quitApp(): Promise<void> {
  * Turns a keyboard event into a Tauri accelerator.
  *
  * Returns null while only modifiers are held, so a recorder can show the keys
- * so far without committing to an accelerator that cannot be pressed.
+ * so far without committing to an accelerator that cannot be pressed. A key on
+ * its own is a chord: F12 or Pause is a perfectly good summon key, and whether
+ * a bare letter is wise is the recorder's to say, not this function's to
+ * refuse.
  */
 export function acceleratorFrom(event: KeyboardEvent): string | null {
   const parts: string[] = [];
@@ -731,10 +734,6 @@ export function acceleratorFrom(event: KeyboardEvent): string | null {
   };
 
   parts.push(named[key] ?? (key.length === 1 ? key.toUpperCase() : key));
-
-  // A bare letter is not a global hotkey; it would swallow that key system
-  // wide. At least one modifier is required.
-  if (parts.length < 2) return null;
 
   return parts.join("+");
 }
