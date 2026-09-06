@@ -84,6 +84,26 @@ is for selection, matches, focus and affirmative state, nothing else.
 Restraint is the house style: no glows, 1px separators, no bordered chip
 buttons, no toast spam, and do not surface internal machinery as UI.
 
+## Writing a commit message
+
+State what is true after the change, plus any fact somebody editing this later
+has to know. Do not argue the case for the change.
+
+A message that explains why the previous state was wrong is writing down one
+side of a discussion the reader was not in. It is longest and least useful
+exactly where the change came from taste rather than from a defect, because
+then there is no defect to describe and the "why" can only be a paraphrase of
+somebody's preference.
+
+The test: **would this sentence exist if the code had been written this way on
+day one?** An explanation of how a font is converted survives it, because it
+describes a mechanism. "The old wording was vague" does not, because there was
+no old wording.
+
+The diff already records what changed. The message is for what the diff cannot
+show: a constraint, a trap, a reason one of two obvious approaches was not
+taken.
+
 ## Scope
 
 Do the work asked. When you notice something else worth fixing, say so

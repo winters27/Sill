@@ -57,3 +57,6 @@ vite.config.ts.timestamp-*
 # `scripts/shoot-compose.py` turns them into the pictures the README shows,
 # which are what gets committed. The backdrop is generated, not kept.
 docs/media/raw/
+
+# Python bytecode from the compose script.
+__pycache__/

@@ -10,6 +10,7 @@ each window with the backdrop around it. It scales the feature pictures to one
 width, cuts the logo out of the icon master, and lays out the social preview.
 """
 
+import math
 import sys
 from pathlib import Path
 
@@ -27,37 +28,94 @@ FEATURE_WIDTH = 1200
 HERO_WIDTH = 1400
 
 
-def backdrop(size=SCREEN) -> Image.Image:
+# Two grounds, because the two surfaces are doing different jobs.
+#
+# The screenshots want the launcher to be the only thing with colour in the
+# frame, so they sit on a neutral. The social card is the one place the project
+# gets to look like itself, so it wears the Oilslick theme's own wash.
+#
+# Both are written as a base colour plus elliptical gradients carrying their
+# colour stops and alphas, which is the shape `theme.css` states Oilslick in.
+PALETTES = {
+    # No hue anywhere. Black through charcoal, lit from the upper left.
+    "graphite": ((9, 9, 10), [
+        (1.05, 1.00, 0.22, 0.16, [(0.00, (58, 59, 63), 0.62), (1.00, None, 0.0)]),
+        (0.95, 0.90, 0.82, 0.86, [(0.00, (30, 30, 33), 0.55), (1.00, None, 0.0)]),
+    ], 1.0),
+    # Oilslick, copied from `theme.css`. One hue dominates and the rest stay
+    # subordinate, which is what reads as a sheen rather than three blobs.
+    # The theme's alphas are set for a 750px window; across a whole canvas they
+    # fall below what an 8-bit channel can show, so they are scaled.
+    "oilslick": ((0x0B, 0x0A, 0x0E), [
+        (0.96, 0.93, 0.28, 0.20, [(0.00, (0, 29, 35), 0.11), (0.42, (37, 24, 0), 0.09), (1.00, None, 0.0)]),
+        (1.00, 0.96, 0.76, 0.62, [(0.00, (55, 0, 47), 0.11), (0.38, (0, 30, 20), 0.09),
+                                  (0.72, (45, 19, 0), 0.07), (1.00, None, 0.0)]),
+        (0.80, 0.70, 0.50, 0.30, [(0.00, (48, 30, 120), 0.165), (0.42, (42, 27, 102), 0.09), (1.00, None, 0.0)]),
+    ], 3.0),
+}
+
+
+def _ramp(size, rx, ry, cx, cy) -> Image.Image:
+    """Distance from a gradient's centre, 0 at the centre and 255 at its edge.
+
+    `Image.radial_gradient` is a 256 square reaching 255 at the inscribed
+    circle. Stretched to the ellipse's bounding box and pasted at its centre,
+    it is the normalised elliptical radius a CSS gradient measures its stops
+    along. Everything outside stays at 255, past the last stop and therefore
+    fully transparent.
+    """
     w, h = size
-    canvas = Image.new("RGB", size, (11, 13, 16))
+    box = (max(int(2 * rx * w), 1), max(int(2 * ry * h), 1))
+    out = Image.new("L", size, 255)
+    out.paste(Image.radial_gradient("L").resize(box, Image.BILINEAR),
+              (int(cx * w) - box[0] // 2, int(cy * h) - box[1] // 2))
+    return out
 
-    # Washes are drawn small and scaled up after blurring: blurring a
-    # full-size layer with a radius this large is slow for no visible gain.
+
+def _lut(stops, channel, strength):
+    """A 256-entry table mapping the ramp to one colour channel, or to alpha."""
+    table = []
+    for i in range(256):
+        t = i / 255
+        value = 0.0
+        for (o0, c0, a0), (o1, c1, a1) in zip(stops, stops[1:]):
+            if not (o0 <= t <= o1):
+                continue
+            f = (t - o0) / max(o1 - o0, 1e-6)
+            if channel == "a":
+                value = (a0 * (1 - f) + a1 * f) * strength * 255
+            else:
+                v0 = c0[channel] if c0 else 0
+                v1 = c1[channel] if c1 else v0
+                value = v0 * (1 - f) + v1 * f
+            break
+        table.append(int(max(0, min(255, round(value)))))
+    return table
+
+
+def backdrop(size=SCREEN, palette="graphite") -> Image.Image:
+    """The desktop the shoot runs over, and the ground the social card sits on.
+
+    The launcher is transparent, so whatever is behind it is blurred through the
+    glass and becomes part of every screenshot. That is why the shoot gets the
+    neutral: the only colour in the frame should be the program's.
+    """
+    base, gradients, strength = PALETTES[palette]
+    canvas = Image.new("RGB", size, base)
+
+    for rx, ry, cx, cy, stops in gradients:
+        t = _ramp(size, rx, ry, cx, cy)
+        colour = Image.merge("RGB", tuple(t.point(_lut(stops, c, strength)) for c in (0, 1, 2)))
+        canvas.paste(colour, (0, 0), t.point(_lut(stops, "a", strength)))
+
+    w, h = size
     scale = 8
-    small = Image.new("RGB", (w // scale, h // scale), (11, 13, 16))
-    draw = ImageDraw.Draw(small)
-    # Cool wash, upper left. Warm wash, lower right. Both far from saturated.
-    draw.ellipse(
-        [w * -0.15 // scale, h * -0.35 // scale, w * 0.62 // scale, h * 0.55 // scale],
-        fill=(44, 58, 74),
-    )
-    draw.ellipse(
-        [w * 0.50 // scale, h * 0.45 // scale, w * 1.25 // scale, h * 1.35 // scale],
-        fill=(70, 54, 46),
-    )
-    small = small.filter(ImageFilter.GaussianBlur(radius=34))
-    washes = small.resize(size, Image.LANCZOS)
-    canvas = Image.blend(canvas, washes, 1.0)
-
-    # A faint vignette so the edges fall away rather than stop.
     vignette = Image.new("L", (w // scale, h // scale), 0)
     ImageDraw.Draw(vignette).ellipse(
-        [w * -0.1 // scale, h * -0.2 // scale, w * 1.1 // scale, h * 1.2 // scale], fill=255
+        [w * -0.10 // scale, h * -0.20 // scale, w * 1.10 // scale, h * 1.20 // scale], fill=255
     )
     vignette = vignette.filter(ImageFilter.GaussianBlur(radius=40)).resize(size, Image.LANCZOS)
-    dark = Image.new("RGB", size, (6, 7, 9))
-    canvas = Image.composite(canvas, dark, vignette)
-    return canvas
+    return Image.composite(canvas, Image.new("RGB", size, (5, 5, 7)), vignette)
 
 
 def logo() -> Image.Image:
@@ -120,42 +178,131 @@ def font(size: int, weight: str = "semibold") -> ImageFont.FreeTypeFont:
     return ImageFont.load_default(size)
 
 
+# The two ends of the wash behind the letters "AI".
+AI_WARM = (255, 146, 52)
+AI_COOL = (233, 78, 190)
+
+
+def _sparkle(draw: ImageDraw.ImageDraw, cx: float, cy: float, r: float, fill) -> None:
+    """A four-pointed star, drawn concave so it reads as a glint.
+
+    The waist is what makes it a sparkle rather than a diamond: points on the
+    axes at the full radius, and the corners between them pulled most of the
+    way back in.
+    """
+    waist = r * 0.26
+    points = []
+    for i in range(8):
+        reach = r if i % 2 == 0 else waist
+        angle = math.radians(i * 45)
+        points.append((cx + reach * math.sin(angle), cy - reach * math.cos(angle)))
+    draw.polygon(points, fill=fill)
+
+
+def _gradient_text(text: str, font_: ImageFont.FreeTypeFont) -> Image.Image:
+    """The text as an image, its letters filled with the warm-to-cool wash."""
+    box = font_.getbbox(text)
+    w, h = box[2] - box[0], box[3] - box[1]
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).text((-box[0], -box[1]), text, font=font_, fill=255)
+
+    wash = Image.new("RGB", (w, h))
+    px = wash.load()
+    for x in range(w):
+        f = x / max(w - 1, 1)
+        px[x, 0] = tuple(int(AI_WARM[i] * (1 - f) + AI_COOL[i] * f) for i in range(3))
+    wash.paste(wash.crop((0, 0, w, 1)).resize((w, h), Image.NEAREST), (0, 0))
+
+    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    out.paste(wash, (0, 0), mask)
+    return out
+
+
 def social(mark: Image.Image) -> Image.Image:
-    """The card link previews show: the logo, the name, and the sentence.
+    """The card link previews show.
 
-    No screenshot. A launcher window shrunk to fit beside the words is
-    illegible at the size these are actually seen at, and it makes the card
-    about a picture nobody can read rather than about what the thing does.
+    No screenshot: a launcher window shrunk to fit beside the words is
+    illegible at the size these are actually seen at.
 
-    Laid out by measuring rather than by hardcoding a first line: the gaps are
-    optical, so they are set between the drawn edges of the type, and the whole
-    block is centred on what it actually measures.
+    Laid out by measuring rather than by hardcoding a first line, so the gaps
+    are optical and the block is centred on what it measures.
     """
     w, h = 1280, 640
-    card = backdrop((w, h))
+    card = backdrop((w, h), "oilslick")
     draw = ImageDraw.Draw(card)
 
-    side = 128
-    lines = [
-        ("Sill", wordmark(78), (238, 240, 243), 42),
-        ("Your Windows toolbox, summoned with a keystroke.", font(32, "regular"), (186, 192, 200), 24),
-        ("Open source. Search anything on your machine, then act on it.", font(22, "regular"), (128, 136, 146), 0),
-    ]
+    headline = ("Your Windows toolbox, summoned with a keystroke.", font(34, "regular"), (222, 226, 232))
+    chip_font = font(21, "regular")
 
-    # Ink heights, so a line with no descender does not leave a bigger gap
-    # under it than one that has.
-    measured = [(t, f, c, gap, draw.textbbox((0, 0), t, font=f)) for t, f, c, gap in lines]
-    text_block = sum((box[3] - box[1]) + gap for _, _, _, gap, box in measured)
-    total = side + 34 + text_block
+    name = wordmark(76)
+    hbox = draw.textbbox((0, 0), headline[0], font=headline[1])
+    nbox = draw.textbbox((0, 0), "Sill", font=name)
+    chip_h = 46
+    side = 122
+    block = (side + 36 + (nbox[3] - nbox[1]) + 26
+             + (hbox[3] - hbox[1]) + 46 + chip_h)
 
-    y = (h - total) // 2
+    y = (h - block) // 2
     small = mark.resize((side, side), Image.LANCZOS)
     card.paste(small, ((w - side) // 2, y), small)
-    y += side + 34
+    y += side + 36
 
-    for text, font_, fill, gap, box in measured:
-        draw.text(((w - (box[2] - box[0])) / 2 - box[0], y - box[1]), text, font=font_, fill=fill)
-        y += (box[3] - box[1]) + gap
+    draw.text(((w - (nbox[2] - nbox[0])) / 2 - nbox[0], y - nbox[1] - 4), "Sill", font=name, fill=(240, 242, 245))
+    y += (nbox[3] - nbox[1]) + 26
+
+    draw.text(((w - (hbox[2] - hbox[0])) / 2 - hbox[0], y - hbox[1]), headline[0], font=headline[1], fill=headline[2])
+    y += (hbox[3] - hbox[1]) + 46
+
+    # The row underneath: three claims, the middle one carrying the wash and
+    # its glints. Drawn on its own layer, because a chip is a translucent fill
+    # and `ImageDraw` on an RGB canvas throws the alpha away.
+    chip_font = font(22, "regular")
+    ai_font = font(26)
+    chips = [("Built in Rust", None), ("AI", "on your machine"), ("Open source", None)]
+    pad_x, gap, chip_h = 22, 16, 46
+
+    def widths_of():
+        out = []
+        for lead, tail in chips:
+            if tail is None:
+                out.append(int(draw.textlength(lead, font=chip_font)) + pad_x * 2)
+            else:
+                out.append(int(22 + draw.textlength(lead, font=ai_font) + 18
+                               + draw.textlength(tail, font=chip_font)) + pad_x * 2)
+        return out
+
+    widths = widths_of()
+    row_w = sum(widths) + gap * (len(chips) - 1)
+    x0 = (w - row_w) // 2
+
+    shells = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shells)
+    x = x0
+    for cw in widths:
+        sd.rounded_rectangle([x, y, x + cw, y + chip_h], radius=chip_h // 2,
+                             fill=(255, 255, 255, 12), outline=(255, 255, 255, 34), width=1)
+        x += cw + gap
+    card = Image.alpha_composite(card.convert("RGBA"), shells).convert("RGB")
+    draw = ImageDraw.Draw(card)
+
+    def baseline(f):
+        box = f.getbbox("Hg")
+        return y + (chip_h - (box[3] - box[1])) // 2 - box[1]
+
+    x = x0
+    for (lead, tail), cw in zip(chips, widths):
+        tx = x + pad_x
+        if tail is None:
+            draw.text((tx, baseline(chip_font)), lead, font=chip_font, fill=(176, 182, 192))
+        else:
+            _sparkle(draw, tx + 6, y + chip_h / 2 + 1, 8.5, AI_WARM)
+            tx += 22
+            letters = _gradient_text(lead, ai_font)
+            card.paste(letters, (int(tx), int(y + (chip_h - letters.height) // 2)), letters)
+            _sparkle(draw, tx + letters.width + 6, y + chip_h / 2 - 12, 5.5, AI_COOL)
+            tx += letters.width + 18
+            draw.text((tx, baseline(chip_font)), tail, font=chip_font, fill=(176, 182, 192))
+        x += cw + gap
 
     return card
 
