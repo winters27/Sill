@@ -128,6 +128,20 @@ pub(crate) async fn begin_capture(app: AppHandle) -> Result<(), String> {
         .set_size(tauri::PhysicalSize::new(width as u32, height as u32))
         .map_err(|err| format!("could not size the overlay: {err}"))?;
 
+    /*
+     * Woken before it is shown, and this line is not optional.
+     *
+     * A hidden window's renderer is made invisible twenty seconds after it
+     * hides (`sleep.rs`), and a renderer made invisible does not paint and
+     * does not take input. Showing this window without undoing that put an
+     * always-on-top, transparent, virtual-screen-sized window over both
+     * screens with nothing behind it: the pointer moved, sound played, and
+     * nothing could be clicked or typed, including the Escape that closes
+     * the overlay, because there was no page to receive it. The first
+     * capture of a session worked, because the window was new; the second,
+     * twenty seconds or more after the first, took the machine.
+     */
+    crate::sleep::wake(&window);
     window
         .show()
         .map_err(|err| format!("could not show the overlay: {err}"))?;
@@ -529,6 +543,7 @@ async fn after_capture(app: &AppHandle, shot: crate::capture::Shot) -> Result<()
 
         if let Ok(window) = crate::lazy_windows::ensure(&app, "markup") {
             let _ = window.emit("sill://markup", ());
+            crate::sleep::wake(&window);
             let _ = window.show();
             let _ = window.set_focus();
 
@@ -623,6 +638,7 @@ pub(crate) async fn open_markup(app: AppHandle, entry: i64) -> Result<(), String
     // swaps to the new one rather than showing the last.
     let _ = window.emit("sill://markup", ());
 
+    crate::sleep::wake(&window);
     window
         .show()
         .map_err(|err| format!("could not show the markup window: {err}"))?;

@@ -827,6 +827,42 @@ for (const file of sources("src-tauri/src")) {
   }
 }
 
+/*
+ * A window is woken before it is shown, everywhere it is shown.
+ *
+ * Twenty seconds after any window hides, `sleep.rs` makes its renderer
+ * invisible to WebView2, and a renderer made invisible paints nothing and
+ * takes no input. Showing such a window without `sleep::wake` first puts up
+ * a window with nothing behind it. For the capture overlay, which is
+ * always-on-top and the size of every screen, that was both screens dead to
+ * the mouse and the keyboard until the process was killed (2026-09-05).
+ * The first show of a session worked, because the window was new; only the
+ * second, after the timer, took the machine, which is exactly the shape a
+ * test suite never sees. So it is held here: every `.show()` on a window in
+ * Rust has `sleep::wake(` within the fifteen lines above it. Waking a window
+ * that never slept is one COM call that changes nothing.
+ */
+for (const file of sources("src-tauri/src")) {
+  if (file.endsWith("sleep.rs")) continue;
+
+  const text = readFileSync(file, "utf8");
+  const lines = text.split("\n");
+
+  lines.forEach((line, at) => {
+    if (!/\.show\(\)/.test(line) || /^\s*(\/\/|\*|\/\*)/.test(line)) return;
+    const above = lines.slice(Math.max(0, at - 15), at).join("\n");
+    if (above.includes("sleep::wake(")) return;
+    fail(
+      file,
+      at + 1,
+      "shows a window without `crate::sleep::wake(&window)` just before it; a " +
+        "window that hid twenty seconds ago has a renderer that paints nothing " +
+        "and takes no input, and the capture overlay shown that way froze " +
+        "both screens",
+    );
+  });
+}
+
 for (const file of sources("scripts")) {
   const text = readFileSync(file, "utf8");
 

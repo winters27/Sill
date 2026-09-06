@@ -68,8 +68,25 @@ pub(crate) struct Ready {
     /// where the answer comes from and who pays for it: this machine, a
     /// subscription through a tool already signed in, or a key.
     pub kind: String,
+    /// What the chosen model costs, in dollars per million tokens, when the
+    /// answer is paid for by the token and the rate is known. Absent for a
+    /// model on this machine, for Claude Code (a subscription, which names
+    /// its own cost per turn) and for a model nobody has priced.
+    ///
+    /// Carried here so the pill counting a conversation can say what the
+    /// answer arriving will come to before the service has said.
+    pub price: Option<crate::ai::pricing::Rate>,
     /// Why not, when not. Empty when it is ready.
     pub why_not: String,
+}
+
+/// The rate a provider is billed at, when it is billed by the token.
+fn price_of(provider: &Provider) -> Option<crate::ai::pricing::Rate> {
+    if kind_of(provider) != "key" {
+        return None;
+    }
+
+    crate::ai::pricing::rate_for(&provider.model)
 }
 
 /// Which of the three kinds of provider this is.
@@ -104,6 +121,7 @@ pub(crate) async fn ai_ready(prefs: State<'_, PrefsState>) -> Result<Ready, Stri
             name: String::new(),
             model: String::new(),
             kind: String::new(),
+            price: None,
             why_not: if settings.providers.is_empty() {
                 "Nothing is set up to answer yet.".to_string()
             } else {
@@ -121,6 +139,7 @@ pub(crate) async fn ai_ready(prefs: State<'_, PrefsState>) -> Result<Ready, Stri
             name: chosen.name.clone(),
             model: provider::short_model(chosen.wire, &chosen.model),
             kind: kind_of(&chosen),
+            price: None,
             why_not: missing,
         });
     }
@@ -131,6 +150,7 @@ pub(crate) async fn ai_ready(prefs: State<'_, PrefsState>) -> Result<Ready, Stri
         name: chosen.name.clone(),
         model: provider::short_model(chosen.wire, &chosen.model),
         kind: kind_of(&chosen),
+        price: price_of(&chosen),
         why_not: String::new(),
     })
 }
@@ -139,6 +159,38 @@ pub(crate) async fn ai_ready(prefs: State<'_, PrefsState>) -> Result<Ready, Stri
 #[tauri::command]
 pub(crate) fn ai_transcript(chat: State<'_, Chat>) -> Vec<Turn> {
     chat.transcript()
+}
+
+/// What the open conversation has cost so far.
+///
+/// Asked alongside the transcript when a window opens or a conversation is
+/// resumed. Every turn after that arrives with the new total on its done
+/// event, so this is read once per opening rather than polled.
+#[tauri::command]
+pub(crate) fn ai_spent(chat: State<'_, Chat>) -> crate::ai::chat::Spent {
+    chat.spent()
+}
+
+/// What every provider has cost over its lifetime, for the settings panel.
+///
+/// Read once when the panel opens. Nothing here changes while somebody is
+/// looking at Settings unless they are also asking a question, and a total
+/// that is a turn behind for the length of a visit is not worth a stream.
+#[tauri::command]
+pub(crate) fn ai_usage(ledger: State<'_, crate::ai::ledger::Ledger>) -> Vec<crate::ai::ledger::Usage> {
+    ledger.report(crate::dates::today())
+}
+
+/// Forgets one provider's totals, and answers with what is left.
+#[tauri::command]
+pub(crate) fn ai_usage_reset(
+    app: AppHandle,
+    ledger: State<'_, crate::ai::ledger::Ledger>,
+    provider: String,
+) -> Vec<crate::ai::ledger::Usage> {
+    ledger.forget(&provider);
+    ledger.save(&app);
+    ledger.report(crate::dates::today())
 }
 
 /// Forgets the conversation.
@@ -256,6 +308,7 @@ pub(crate) async fn open_ask(app: AppHandle) -> Result<(), String> {
         // so asking for it again did nothing visible and it had to be found in
         // the taskbar, which is the opposite of asking for it.
         let _ = existing.unminimize();
+        crate::sleep::wake(&existing);
         let _ = existing.show();
         let _ = existing.set_focus();
         crate::summon::forget_foreground();

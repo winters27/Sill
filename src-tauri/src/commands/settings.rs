@@ -304,6 +304,7 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
         // Unminimised first: `show` on a minimised window leaves it minimised,
         // so asking for settings again did nothing visible.
         let _ = existing.unminimize();
+        crate::sleep::wake(&existing);
         let _ = existing.show();
         let _ = existing.set_focus();
         if let Some(name) = section {

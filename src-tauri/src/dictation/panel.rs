@@ -73,6 +73,7 @@ pub fn show(app: &AppHandle, status: PanelStatus) -> Result<()> {
         }
     }
 
+    crate::sleep::wake(&window);
     window
         .show()
         .map_err(|e| DictationError::Platform(format!("show dictation panel: {e}")))?;

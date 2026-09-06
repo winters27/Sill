@@ -35,6 +35,7 @@ prototype most of them have not switched on.
 pub fn show_note(app: &AppHandle, id: &str) -> Result<(), String> {
     let window = crate::lazy_windows::ensure(app, WINDOW)?;
 
+    crate::sleep::wake(&window);
     window
         .show()
         .map_err(|err| format!("could not show the notes window: {err}"))?;
