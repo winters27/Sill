@@ -183,10 +183,21 @@ which writes a file wherever it is pointed. A refusal names the permission and
 says where to grant it, rather than failing as though the extension were
 broken.
 
-Extensions need **Node 22.15 or newer**. That is the release
-`module.registerHooks` arrived in, and without it a dynamic `import()` walks
-past all of the above, so a worker on an older Node refuses to run a command
-rather than running it with a hole in it.
+Extensions run on **the Node runtime Sill ships**, one pinned LTS build
+fetched by `scripts/fetch-node.mjs` and bundled as `node/node.exe`, so an
+extension is the same program on every machine and nobody has to install
+Node to use the store. A Node on the PATH is used only when the bundled one
+is missing. Either way it has to be **Node 22.15 or newer**: that is the
+release `module.registerHooks` arrived in, and without it a dynamic
+`import()` walks past all of the above, so a worker on an older Node refuses
+to run a command rather than running it with a hole in it.
+
+The installer also adds one inbound Windows Firewall rule for that runtime,
+on private and domain networks, so an extension granted the network can hear
+answers from it (LocalSend's device discovery is a multicast call and a
+reply). The host refuses a listening socket to any extension without the
+grant, so the rule opens nothing the person did not allow; the uninstaller
+removes it.
 
 ### The honest limit of that
 

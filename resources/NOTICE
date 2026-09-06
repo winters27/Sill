@@ -11,6 +11,20 @@ find them. They exist only as a catalog, and this is Microsoft's own.
 
 --------------------------------------------------------------------------
 
+Node.js (fetched to src-tauri/resources/node/, shipped as node/node.exe)
+
+Copyright Node.js contributors. Licensed under the MIT License; the full text
+and the notices for the components Node.js itself bundles are in the LICENSE
+file shipped beside the binary as node/LICENSE.
+
+Sill runs extensions in a Node process, and ships one pinned LTS build of
+Node so that an extension is the same program on every machine. The binary
+is not in this repository: `npm run node:fetch` (`scripts/fetch-node.mjs`)
+fetches the release archive from nodejs.org per machine, checks it against
+the SHA-256 Node published for it, and keeps only node.exe and LICENSE.
+
+--------------------------------------------------------------------------
+
 Satoshi (fetched to src/lib/theme/fonts/Satoshi-Variable.woff2)
 
 Satoshi, by Indian Type Foundry. Distributed through Fontshare

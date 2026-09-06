@@ -58,8 +58,34 @@ pub(crate) fn index_paths(app: &AppHandle) -> Vec<PathBuf> {
 /// with "the system cannot find the file specified", naming a file the person
 /// reading it had never heard of.
 pub(crate) const NO_NODE: &str =
-    "Extensions need Node.js, which is not installed. Get it from nodejs.org, \
-     or run: winget install OpenJS.NodeJS.LTS";
+    "Sill's extension runtime is missing. Reinstall Sill to put it back, or install \
+     Node.js from nodejs.org and Sill will use that.";
+
+/// The Node runtime Sill ships, when it is where the installer put it.
+///
+/// Extensions ran on whatever `node` the machine had, which was a different
+/// Node on every machine and none on most; the store told those people to go
+/// and install one. Now `scripts/fetch-node.mjs` pins one LTS build and the
+/// bundle carries it as `node/node.exe`, and it is looked for before anything
+/// on the PATH: an extension is the same program everywhere it runs. In
+/// development the same file sits under `src-tauri/resources/node`.
+pub(crate) fn bundled_node(app: &AppHandle) -> Option<PathBuf> {
+    let shipped = app
+        .path()
+        .resolve("node/node.exe", tauri::path::BaseDirectory::Resource)
+        .ok()
+        .map(without_extended_prefix);
+    let built = dev_root()
+        .join("src-tauri")
+        .join("resources")
+        .join("node")
+        .join("node.exe");
+
+    [shipped, Some(built)]
+        .into_iter()
+        .flatten()
+        .find(|candidate| candidate.is_file())
+}
 
 /// The Node interpreter, if this machine has one.
 ///
@@ -74,12 +100,15 @@ pub(crate) const NO_NODE: &str =
 /// and takes the slot rather than the whole `HostState`, because that is the
 /// dependency it actually has. A test can then hand it an empty one instead of
 /// standing up an extension host to ask a question about a file path.
-pub fn node_exe(remembered: &std::sync::Mutex<Option<PathBuf>>) -> Option<PathBuf> {
+pub fn node_exe(
+    remembered: &std::sync::Mutex<Option<PathBuf>>,
+    bundled: Option<PathBuf>,
+) -> Option<PathBuf> {
     if let Some(known) = remembered.lock().ok().and_then(|held| held.clone()) {
         return Some(known);
     }
 
-    let found = look_for_node();
+    let found = look_for_node(bundled);
 
     if let Some(path) = found.as_ref() {
         if let Ok(mut held) = remembered.lock() {
@@ -90,8 +119,19 @@ pub fn node_exe(remembered: &std::sync::Mutex<Option<PathBuf>>) -> Option<PathBu
     found
 }
 
-fn look_for_node() -> Option<PathBuf> {
+/// The bundled runtime first, then whatever the machine has.
+///
+/// The order is the point. A system Node is only a fallback for a build whose
+/// runtime went missing, and a person who put a newer Node on their PATH has
+/// not asked for Sill's extensions to run on it.
+fn look_for_node(bundled: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(shipped) = bundled {
+        crate::say!("extension runtime: {} (bundled)", shipped.display());
+        return Some(shipped);
+    }
+
     if which("node").is_some() {
+        crate::say!("extension runtime: node on the PATH (no bundled runtime found)");
         return Some(PathBuf::from("node"));
     }
 
@@ -266,7 +306,7 @@ pub(crate) async fn host_of(app: &AppHandle, state: &HostState) -> Result<Arc<Ex
     // Asked before spawning, so the answer names the missing thing rather
     // than the symptom. Failing at the spawn gives "The system cannot find the
     // file specified", which is true of an interpreter nobody knew was needed.
-    let Some(node) = node_exe(&state.node) else {
+    let Some(node) = node_exe(&state.node, bundled_node(app)) else {
         return Err(NO_NODE.to_string());
     };
 
@@ -636,10 +676,24 @@ mod finding_node {
         let state = Mutex::new(Some(sentinel.clone()));
 
         assert_eq!(
-            super::node_exe(&state),
+            super::node_exe(&state, None),
             Some(sentinel),
             "the remembered answer was not used, so every caller pays a process"
         );
+    }
+
+    /// The runtime Sill ships is used before anything on the machine, and it
+    /// is what gets remembered.
+    #[test]
+    fn the_bundled_runtime_is_preferred_to_the_system_one() {
+        let state = Mutex::new(None);
+        let shipped = PathBuf::from(r"C:Program FilesSill
+ode
+ode.exe");
+
+        let found = super::node_exe(&state, Some(shipped.clone()));
+        assert_eq!(found, Some(shipped.clone()), "the bundled runtime was passed over");
+        assert_eq!(state.lock().expect("not poisoned").clone(), Some(shipped));
     }
 
     /// Finding it writes it down, and failing to find it does not.
@@ -653,7 +707,7 @@ mod finding_node {
     fn the_slot_ends_up_holding_exactly_what_was_answered() {
         let state = Mutex::new(None);
 
-        let found = super::node_exe(&state);
+        let found = super::node_exe(&state, None);
         let remembered = state.lock().expect("not poisoned").clone();
 
         assert_eq!(
@@ -674,7 +728,7 @@ mod finding_node {
         let state = Mutex::new(None);
 
         let first = std::time::Instant::now();
-        let found = super::node_exe(&state);
+        let found = super::node_exe(&state, None);
         let looking = first.elapsed();
 
         assert!(
@@ -683,7 +737,7 @@ mod finding_node {
         );
 
         let again = std::time::Instant::now();
-        let _ = super::node_exe(&state);
+        let _ = super::node_exe(&state, None);
         let remembering = again.elapsed();
 
         eprintln!("looking took {looking:?}, remembering took {remembering:?}");

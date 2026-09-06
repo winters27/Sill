@@ -11,7 +11,33 @@
 ; list are one fact written twice, which is the shape that has gone stale four
 ; times in this codebase; the rule is what stops it going stale a fifth.
 
+!macro NSIS_HOOK_POSTINSTALL
+  ; The firewall rule that lets extensions hear the network.
+  ;
+  ; Windows Firewall rules are per program, and the program that listens on
+  ; an extension's behalf is the Node runtime Sill ships at $INSTDIR\node.
+  ; One inbound rule for that one file, on private and domain networks only,
+  ; never public. The host refuses a listening socket to any extension that
+  ; was not granted the network, so this opens nothing the person did not
+  ; grant. Best effort: an installer running without elevation cannot add a
+  ; rule and must not fail over it, so the result is read and discarded, and
+  ; Sill asks again, with the reason on screen, the first time an extension
+  ; needs it.
+  ;
+  ; Named in `src-tauri/src/leavings.rs` as "Windows Firewall\Sill extension runtime";
+  ; the rule name is the last part.
+  nsExec::ExecToLog '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="Sill extension runtime"'
+  Pop $0
+  nsExec::ExecToLog '"$SYSDIR\netsh.exe" advfirewall firewall add rule name="Sill extension runtime" dir=in action=allow program="$INSTDIR\node\node.exe" enable=yes profile=private,domain'
+  Pop $0
+!macroend
+
 !macro NSIS_HOOK_PREUNINSTALL
+  ; The firewall rule above, for a program that is about to be gone. Not the
+  ; person's data, so never subject to the question below.
+  nsExec::ExecToLog '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="Sill extension runtime"'
+  Pop $0
+
   ; Whether the person wants to keep their settings. Asked before anything is
   ; removed, so a No leaves the machine as it was rather than half cleaned.
   Var /GLOBAL SillKeepData

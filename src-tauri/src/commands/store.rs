@@ -294,8 +294,11 @@ pub(crate) async fn store_install(
     // Found here rather than inside the install, for the same reason esbuild
     // is: finding Node means running it, and this is the layer that holds the
     // answer.
-    let node = crate::host::node_exe(&app.state::<crate::state::HostState>().node)
-        .ok_or(crate::host::NO_NODE)?;
+    let node = crate::host::node_exe(
+        &app.state::<crate::state::HostState>().node,
+        crate::host::bundled_node(&app),
+    )
+    .ok_or(crate::host::NO_NODE)?;
 
     // Off the UI thread: npm is a subprocess that takes seconds and esbuild is
     // one more per command.
@@ -762,7 +765,8 @@ pub(crate) async fn store_pins(app: AppHandle) -> Result<Vec<Pinned>, String> {
 /// Node in two places.
 #[tauri::command]
 pub(crate) async fn store_ready(
+    app: AppHandle,
     host: tauri::State<'_, crate::state::HostState>,
 ) -> Result<bool, String> {
-    Ok(crate::host::node_exe(&host.node).is_some())
+    Ok(crate::host::node_exe(&host.node, crate::host::bundled_node(&app)).is_some())
 }

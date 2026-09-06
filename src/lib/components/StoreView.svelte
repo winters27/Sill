@@ -810,8 +810,9 @@
            without Node and installing does not, and finding that out after
            choosing something is finding it out too late. -->
       <p class="missing">
-        Extensions need Node.js, which is not installed, so nothing here can be
-        installed yet. Get it from nodejs.org, or run: winget install OpenJS.NodeJS.LTS
+        Sill's extension runtime is missing, so nothing here can be installed yet.
+        Reinstall Sill to put it back, or install Node.js from nodejs.org and Sill
+        will use that.
       </p>
     {/if}
 

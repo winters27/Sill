@@ -97,8 +97,11 @@ fn gather(app: &AppHandle, registry: &RegistryState) -> Diagnostics {
         // Asked live for the same reason Everything is: somebody can install
         // Node while Sill is open, and the panel showing this is exactly where
         // they would look afterwards.
-        node_installed: crate::host::node_exe(&app.state::<crate::state::HostState>().node)
-            .is_some(),
+        node_installed: crate::host::node_exe(
+            &app.state::<crate::state::HostState>().node,
+            crate::host::bundled_node(app),
+        )
+        .is_some(),
         extensions: extension_summary(&index.commands),
         by_source: source_summary(&index.commands),
         keyboard_hook_installed: hook.0,

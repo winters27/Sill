@@ -46,6 +46,24 @@ pub struct Leaving {
 /// would otherwise keep starting a program that is gone, then the data.
 pub const LEAVINGS: &[Leaving] = &[
     Leaving {
+        /*
+         * The firewall rule that lets extensions hear the network.
+         *
+         * Windows Firewall rules are per program. An extension that listens,
+         * LocalSend waiting for the devices on the network to answer its
+         * call, hears nothing unless the program doing the listening has an
+         * inbound rule, and the program is Sill's bundled Node runtime. The
+         * installer adds one rule for that one file, private and domain
+         * networks only, and the host already refuses a listening socket to
+         * any extension not granted the network, so the rule opens nothing
+         * the person did not grant. Removed on uninstall, because a rule for
+         * a program that is gone is a rule nobody asked to keep.
+         */
+        where_it_is: r"Windows Firewall\Sill extension runtime",
+        what_it_is: "the firewall rule that lets extensions hear the network",
+        theirs: false,
+    },
+    Leaving {
         // The autostart plugin writes this, and it is the one that matters
         // most: left behind, Windows keeps trying to start a program that is
         // not there any more, and the only sign is a delay at login.
@@ -149,7 +167,10 @@ mod tests {
             assert!(
                 one.where_it_is.starts_with('$')
                     || one.where_it_is.starts_with("HKCU\\")
-                    || one.where_it_is.starts_with("Task Scheduler\\"),
+                    || one.where_it_is.starts_with("Task Scheduler\\")
+                    // A firewall rule, which the installer names rather than
+                    // paths to, the same way it names a scheduled task.
+                    || one.where_it_is.starts_with("Windows Firewall\\"),
                 "{} is not a constant the uninstaller can resolve",
                 one.where_it_is
             );
