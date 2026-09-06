@@ -143,11 +143,11 @@ licensed.
   <tr>
     <td width="50%" valign="top">
       <img src="docs/media/extension.png"
-        alt="A Raycast extension drawing its list inside Sill">
-      <p><b>Raycast extensions, on Windows.</b> Browse the store from inside
-      Sill and install with Enter. They draw with the launcher's own rows,
-      icons and keys, so an extension looks like part of the program rather
-      than a window inside it.</p>
+        alt="An extension drawing its list inside Sill">
+      <p><b>Extensions that already exist.</b> Sill runs Raycast extensions
+      unmodified, so a store of them is searchable from inside the launcher and
+      installs with Enter. They draw with Sill's own rows, icons and keys, so
+      one looks like part of the program rather than a window inside it.</p>
     </td>
     <td width="50%" valign="top">
       <img src="docs/media/store.png" alt="The extension store inside the launcher">
@@ -217,10 +217,10 @@ signing, and how the pictures on this page are taken.
 Four ways in, and every one of them lands in the same action registry as a
 keypress.
 
-**A Raycast extension**, from the store or a folder on disk. The API coverage
-table is in [docs/extensions.md](docs/extensions.md).
+**An extension**, from the store or a folder on disk. The API coverage table
+is in [docs/extensions.md](docs/extensions.md).
 
-**A script** with a Raycast-style header, in PowerShell, cmd, bash, Python or
+**A script** with a header naming it, in PowerShell, cmd, bash, Python or
 a bare executable. It is found by search and its arguments are asked for one
 at a time:
 
@@ -248,7 +248,7 @@ sill run sill.file.recycle C:\Users\me\old.txt
 | Page | What it is for |
 | --- | --- |
 | [Using Sill](docs/guide.md) | The guide for somebody with it open |
-| [Writing an extension](docs/extensions.md) | The Raycast API, name by name, and Sill's own |
+| [Writing an extension](docs/extensions.md) | The extension API, name by name, and Sill's own |
 | [MCP servers](docs/mcp.md) | Putting a server you have into the action panel |
 | [What it costs](docs/benchmark.md) | Every measured reading, and the budgets in [budgets.md](docs/budgets.md) |
 | [Developing](docs/developing.md) | Building, verifying, releasing |
