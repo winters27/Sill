@@ -142,6 +142,7 @@
     "clipboard",
     "sources",
     "files",
+    "websearch",
     "screenshot",
     "extensions",
     "scripts",
