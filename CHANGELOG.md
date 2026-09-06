@@ -19,7 +19,7 @@ IPC surface, the dependencies added, and every commit body in full. What goes
 in a section here is the subset of that which somebody would notice, said
 differently.
 
-## Unreleased
+## 0.1.0
 
 The first build with an installer. Everything before this was cloned and
 compiled.
