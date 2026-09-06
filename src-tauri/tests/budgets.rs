@@ -288,6 +288,11 @@ mod the_store {
                      the length a real store listing says it at."
                     .to_string(),
                 author: format!("author{}", i % 400),
+                // Both empty on purpose: this measures ranking over a corpus,
+                // and neither is read while ranking. A catalogue cached before
+                // the store gained them reads the same way.
+                author_name: String::new(),
+                author_avatar: String::new(),
                 categories: vec![CATEGORIES[i % CATEGORIES.len()].to_string()],
                 platforms: vec!["macOS".to_string(), "Windows".to_string()],
                 revision: "6939fc298cd701b66a652b5bcc6d1c763252391e".to_string(),

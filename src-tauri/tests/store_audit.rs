@@ -100,7 +100,7 @@ async fn the_most_installed_extensions_install_and_say_what_they_needed() {
     // Found once here rather than inside the install, which is where the
     // command layer does it too: finding Node means running it, and this loop
     // installs a great many extensions.
-    let node = sill_lib::host::node_exe(&std::sync::Mutex::new(None))
+    let node = sill_lib::host::node_exe(&std::sync::Mutex::new(None), None)
         .expect("this audit needs Node on PATH");
 
     let mut built = Vec::new();

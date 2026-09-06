@@ -48,8 +48,10 @@ async fn a_local_model_answers_and_the_answer_arrives_in_pieces() {
     println!("asking {model} on {BASE}");
 
     let mut pieces: Vec<String> = Vec::new();
+    let mut thoughts = 0usize;
     let started = std::time::Instant::now();
     let mut first_piece_after = None;
+    let mut first_word_after = None;
 
     openai::ask(
         &client,
@@ -63,11 +65,23 @@ async fn a_local_model_answers_and_the_answer_arrives_in_pieces() {
         None,
         // Never stops. What is being measured is a whole answer arriving.
         &|| false,
-        |text| {
+        // A piece is either words of the answer or the thinking before them,
+        // and the default model here thinks. Both are timed: the first piece
+        // is when the stream came alive, the first word is when somebody could
+        // start reading, and on a thinking model those are far apart.
+        |piece| {
             if first_piece_after.is_none() {
                 first_piece_after = Some(started.elapsed());
             }
-            pieces.push(text);
+            match piece {
+                openai::Piece::Text(text) => {
+                    if first_word_after.is_none() {
+                        first_word_after = Some(started.elapsed());
+                    }
+                    pieces.push(text);
+                }
+                openai::Piece::Thinking(_) => thoughts += 1,
+            }
         },
     )
     .await
@@ -76,10 +90,15 @@ async fn a_local_model_answers_and_the_answer_arrives_in_pieces() {
     let answer: String = pieces.concat();
 
     println!(
-        "first piece after {:?}",
-        first_piece_after.unwrap_or_default()
+        "first piece after {:?}, first word after {:?}",
+        first_piece_after.unwrap_or_default(),
+        first_word_after.unwrap_or_default()
     );
-    println!("{} pieces in {:?}", pieces.len(), started.elapsed());
+    println!(
+        "{} piece(s) of answer and {thoughts} of thinking in {:?}",
+        pieces.len(),
+        started.elapsed()
+    );
     println!("answer: {}", answer.trim());
 
     assert!(!answer.trim().is_empty(), "the answer was empty");
