@@ -52,3 +52,8 @@ vite.config.ts.timestamp-*
 # node_modules and Cargo target, so one `git add -A` without this line would
 # commit tens of thousands of build artefacts.
 /.claude/worktrees/
+
+# Raw screen captures. `scripts/shoot.ps1` writes them and
+# `scripts/shoot-compose.py` turns them into the pictures the README shows,
+# which are what gets committed. The backdrop is generated, not kept.
+docs/media/raw/
