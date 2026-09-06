@@ -110,7 +110,11 @@
           onclick={() => onrun(cell.index)}
           onkeydown={(e) => e.key === "Enter" && onrun(cell.index)}
         >
-          <div class="tile" class:marked={content.kind === "icon"}>
+          <div
+            class="tile"
+            class:marked={content.kind === "icon" && content.icon.kind !== "asset"}
+            class:pictured={content.kind === "icon" && content.icon.kind === "asset"}
+          >
             {#if content.kind === "image"}
               <img src={content.src} alt={str(cell.node, "title")} />
             {:else if content.kind === "icon"}
@@ -224,6 +228,11 @@
   .tile.marked {
     --icon-tile: 36%;
     color: var(--text-2);
+  }
+
+  /* A picture out of the extension's own assets is a picture: it fills. */
+  .tile.pictured {
+    --icon-tile: 100%;
   }
 
   .swatch {

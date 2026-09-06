@@ -2372,6 +2372,7 @@ pub fn run() {
             commands::launch::run_action,
             commands::launch::undo_action,
             commands::extensions::activate_handler,
+            commands::extensions::extension_asset,
             commands::extensions::unload_extension,
             commands::extensions::install_extension,
             commands::extensions::extension_grants,

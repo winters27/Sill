@@ -432,6 +432,35 @@ pub fn declared_api(manifest: &Manifest) -> Option<&str> {
 /// the failure would be an extension that installs and cannot be found.
 /// Where a command's picture sits once the extension is installed.
 ///
+/// Where a picture an extension names lives, or nowhere.
+///
+/// The name is what the extension wrote in a view, `icons/star.png` or
+/// `logo.svg`, and it is resolved against that extension's `assets`, the way
+/// Raycast resolves it. Both the extension id and the name have to be plain
+/// path components: an id or a name that climbs, or is absolute, or names a
+/// drive, is refused rather than resolved, because this reaches a reader that
+/// opens whatever it is handed and the name came from somebody else's code.
+pub(crate) fn asset_path(home: &Path, extension: &str, name: &str) -> Option<PathBuf> {
+    let plain = |text: &str| {
+        let path = Path::new(text.trim());
+        let mut parts = path.components();
+        parts.next().is_some()
+            && path
+                .components()
+                .all(|part| matches!(part, std::path::Component::Normal(_)))
+    };
+
+    if !plain(extension) || !plain(name) {
+        return None;
+    }
+
+    Some(
+        home.join(extension.trim())
+            .join("assets")
+            .join(Path::new(name.trim())),
+    )
+}
+
 /// Raycast resolves an icon against the extension's own `assets` directory,
 /// and a command may name one instead of taking the extension's. Derived from
 /// the entrypoint rather than looked up on disk, because this record is
@@ -1338,6 +1367,20 @@ mod tests {
 
     /// A manifest is somebody else's file, and this value reaches a loader
     /// that reads whatever path it is handed and draws the bytes.
+    #[test]
+    fn a_named_asset_is_found_beside_the_code_and_nowhere_else() {
+        let home = Path::new("C:/data/extensions");
+        assert_eq!(
+            asset_path(home, "localsend", "icons/send.png"),
+            Some(PathBuf::from("C:/data/extensions/localsend/assets/icons/send.png"))
+        );
+        for climbing in ["../secrets.png", "/etc/passwd", "C:/Windows/x.png", "..", ""] {
+            assert_eq!(asset_path(home, "localsend", climbing), None, "{climbing:?} was resolved");
+        }
+        assert_eq!(asset_path(home, "../other", "a.png"), None);
+        assert_eq!(asset_path(home, "", "a.png"), None);
+    }
+
     #[test]
     fn a_picture_that_climbs_out_of_the_assets_folder_is_refused() {
         for named in ["../../../../Windows/System32/x.png", "/etc/passwd", "C:/secrets.png"] {

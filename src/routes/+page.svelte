@@ -1,7 +1,8 @@
 <script lang="ts">
   // Aliased: this page has a `tick` of its own, which measures a running
   // command rather than waiting for the DOM.
-  import { onMount, tick as rendered, untrack } from "svelte";
+  import { onMount, setContext, tick as rendered, untrack } from "svelte";
+  import { VIEW_SESSION, type SessionOf } from "$lib/exthost/assets";
   import { beginCapture, captureScreen, lastImage, openMarkup } from "$lib/capture";
   import { onePerId } from "$lib/list";
   import { openQuicklink } from "$lib/quicklinks";
@@ -304,6 +305,9 @@
    */
   let moving = $state<{ path: string; title: string; of: ActionTarget } | null>(null);
   let session = $state<string | null>(null);
+  // A getter, so every icon in the view can ask which session it belongs to
+  // without the session being threaded through four components as a prop.
+  setContext<SessionOf>(VIEW_SESSION, () => session);
 
   /**
    * Sessions that crashed, and why, keyed by session id.

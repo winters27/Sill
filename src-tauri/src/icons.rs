@@ -404,7 +404,7 @@ pub(crate) fn wants_recall(attributes: u32) -> bool {
 /// A packaged app's icon is a PNG in its install directory, not an icon
 /// resource inside a PE file, so there is nothing to ask the shell for. The
 /// bytes already are the picture.
-fn image_file(path: &str) -> Option<String> {
+pub(crate) fn image_file(path: &str) -> Option<String> {
     let lower = path.to_ascii_lowercase();
     let mime = if lower.ends_with(".png") {
         "image/png"

@@ -132,6 +132,32 @@ describe("icons, in every shape one arrives in", () => {
   });
 });
 
+describe("a file beside the extension's code", () => {
+  test("a relative path with a picture's extension is an asset", () => {
+    expect(iconOf("files.png")).toEqual({ kind: "asset", name: "files.png", tint: undefined });
+    expect(iconOf({ source: "icons/star.svg", tintColor: "raycast-blue" })).toEqual({
+      kind: "asset",
+      name: "icons/star.svg",
+      tint: "var(--info)",
+    });
+    expect(iconOf("send.PNG")?.kind).toBe("asset");
+  });
+
+  test("a built-in name and an absolute path are not assets", () => {
+    expect(iconOf("Star")?.kind).toBe("mark");
+    expect(iconOf("Clipboard")?.kind).toBe("mark");
+    expect(iconOf("C:/Windows/x.png")?.kind).toBe("mark");
+    expect(iconOf("/etc/x.png")?.kind).toBe("mark");
+  });
+
+  test("a grid tile carries it as an icon, for the tile to fill", () => {
+    expect(gridContentOf("files.png", "Files")).toEqual({
+      kind: "icon",
+      icon: { kind: "asset", name: "files.png", tint: undefined },
+    });
+  });
+});
+
 describe("what a grid cell draws", () => {
   test("a built-in icon is a mark, not a picture path", () => {
     // LocalSend's send screen: five tiles that drew as five broken images.

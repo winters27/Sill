@@ -1,7 +1,7 @@
 //! Driving a loaded extension command.
 
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::host::running_host;
 use crate::state::HostState;
@@ -40,6 +40,40 @@ pub(crate) async fn activate_handler(
     host.activate_handler(&session, &handler, args.unwrap_or(Value::Array(vec![])))
         .await
         .map_err(|e| e.to_string())
+}
+
+/// A picture out of a running extension's own `assets`, as a data URI.
+///
+/// A view writes `icon: "files.png"` and means the file beside its code. The
+/// window cannot open that file and does not know where the extension lives,
+/// so it names the session and the picture, and this finds the extension
+/// behind the session, refuses a name that climbs out of `assets`, and reads
+/// the picture the way command icons are read at install. `None` for a name
+/// that is not a picture Sill can read, which the window letters as before.
+#[tauri::command]
+pub(crate) async fn extension_asset(
+    app: AppHandle,
+    state: State<'_, HostState>,
+    session: String,
+    name: String,
+) -> Result<Option<String>, String> {
+    let host = running_host(&state)
+        .await
+        .ok_or_else(|| format!("no such session: {session}"))?;
+    let extension = host
+        .extension_of(&session)
+        .ok_or_else(|| format!("no such session: {session}"))?;
+
+    let home = crate::store::extensions_home(&crate::state::data_dir(&app));
+    let Some(path) = crate::extension_install::asset_path(&home, &extension, &name) else {
+        return Ok(None);
+    };
+
+    // A file read, off the async runtime's threads.
+    let path = path.to_string_lossy().replace('\\', "/");
+    tokio::task::spawn_blocking(move || crate::icons::image_file(&path))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Tears down a running command.

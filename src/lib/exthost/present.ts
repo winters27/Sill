@@ -65,11 +65,26 @@ export function colourOf(value: unknown): string | undefined {
 export type ExtIcon =
   | { kind: "image"; src: string; tint?: string }
   | { kind: "mark"; name: string; tint?: string }
-  | { kind: "glyph"; text: string; tint?: string };
+  | { kind: "glyph"; text: string; tint?: string }
+  /** A file in the extension's own `assets`, read through Rust by session. */
+  | { kind: "asset"; name: string; tint?: string };
 
 /** Whether a string is something the window can actually put in an `<img>`. */
 function drawable(src: string): boolean {
   return /^(https?:|data:)/.test(src);
+}
+
+/**
+ * Whether a string names a file beside the extension's code.
+ *
+ * A path separator, or a picture's extension: `icons/star.png`, `logo.svg`,
+ * `send.PNG`. Raycast's own icon names are words with no dot in them, so
+ * nothing here can take one of those for a file. An absolute path is not an
+ * asset; it is not resolved against anything and is left as a name.
+ */
+function assetLike(value: string): boolean {
+  if (/^([a-z]:[\\/]|[\\/])/i.test(value)) return false;
+  return /[\\/]/.test(value) || /\.(png|jpe?g|gif|svg|webp|ico|bmp)$/i.test(value);
 }
 
 /**
@@ -116,17 +131,16 @@ const printable = isGlyph;
  *
  * Returns undefined for an icon that cannot be drawn at all, which a row is
  * expected to treat as "no icon" rather than as an empty picture. A relative
- * path into the extension's own assets is one of those today: the window has
- * no idea where an installed extension lives on disk, and inventing a URL for
- * it would draw a broken image on every row instead of none.
+ * path into the extension's own assets is an `asset`, which the icon
+ * component fetches through Rust by the session the view belongs to.
  */
 export function iconOf(value: unknown, tint?: string): ExtIcon | undefined {
   if (typeof value === "string") {
     if (!value) return undefined;
     if (drawable(value)) return { kind: "image", src: readable(value), tint };
     if (printable(value)) return { kind: "glyph", text: value, tint };
-    // Everything else is a name: `Icon.Star` is the string "Star", and a
-    // relative asset path is a name Sill has no picture for either.
+    if (assetLike(value)) return { kind: "asset", name: value, tint };
+    // Everything else is a name: `Icon.Star` is the string "Star".
     return { kind: "mark", name: value, tint };
   }
 

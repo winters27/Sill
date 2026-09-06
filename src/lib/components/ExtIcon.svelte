@@ -28,17 +28,22 @@
    * thickness as Phosphor's regular outline on its 256 box, so a list mixing
    * the two reads as one family rather than as two.
    *
-   * ## What still letters itself
+   * ## A picture out of the extension's own assets
    *
-   * A relative path into an extension's own assets arrives here as a name, and
-   * there is nothing to look it up as. It falls back to its own first letter
-   * on a tile, which is the launcher's existing answer for an application
-   * whose icon the shell will not give up, so it looks like something Sill
-   * drew rather than like something that failed. The window does not know
-   * where an installed extension lives, so the alternative would be a broken
-   * image on every row.
+   * `icon: "files.png"` means the file beside the extension's code. The
+   * window cannot open it and does not know where the extension lives, so it
+   * asks Rust by session (`$lib/exthost/assets`), which finds the extension,
+   * refuses a name that climbs, and reads the picture. Until the answer is
+   * back the tile is reserved and empty rather than lettered, so a row drawn
+   * on the next keystroke does not flash a letter under a picture that was
+   * already known. A name Rust has no picture for letters itself, which is
+   * the launcher's existing answer for an application whose icon the shell
+   * will not give up, so it looks like something Sill drew rather than like
+   * something that failed.
    */
+  import { getContext } from "svelte";
   import type { ExtIcon } from "$lib/exthost/present";
+  import { VIEW_SESSION, extensionAsset, knownAsset, type SessionOf } from "$lib/exthost/assets";
   import { GLYPHS, MARKS, TEXT_MARKS } from "./marks";
 
   interface Props {
@@ -79,7 +84,41 @@
    */
   let refused = $state("");
 
-  const broke = $derived(icon.kind === "image" && refused === icon.src);
+  /** Which session this view belongs to, from the page that hosts it. */
+  const sessionOf = getContext<SessionOf | undefined>(VIEW_SESSION);
+
+  /** The asset's picture: unknown yet, the data URI, or null for none. */
+  let asset = $state<string | null | undefined>(undefined);
+
+  $effect(() => {
+    if (icon.kind !== "asset") {
+      asset = undefined;
+      return;
+    }
+    const session = sessionOf?.() ?? null;
+    const name = icon.name;
+    const known = knownAsset(session, name);
+    asset = known;
+    if (known !== undefined) return;
+    void extensionAsset(session, name).then((got) => {
+      // Still the same picture being asked for; a row can be reused for
+      // another icon before the first answer is back.
+      if (icon.kind === "asset" && icon.name === name) asset = got;
+    });
+  });
+
+  /** The picture to put in the img, whichever way it arrived. */
+  const picture = $derived(
+    icon.kind === "image" ? icon.src : icon.kind === "asset" ? (asset ?? null) : null,
+  );
+
+  /** Whether the asset is still being fetched, which is a tile to reserve. */
+  const waiting = $derived(icon.kind === "asset" && asset === undefined);
+
+  const broke = $derived(
+    (icon.kind === "image" && refused === icon.src) ||
+      (icon.kind === "asset" && (asset === null || (asset !== undefined && refused === asset))),
+  );
 
   /**
    * The letter on the tile, for the two things that have no picture to draw.
@@ -94,7 +133,12 @@
    */
   const initial = $derived.by(() => {
     if (icon.kind === "mark") return (icon.name.trim()[0] ?? "?").toUpperCase();
-    if (broke) return (label?.trim()[0] ?? "").toUpperCase();
+    if (broke) {
+      // The label, or the file's own name: "s" for send.png is a truer
+      // stand-in than nothing.
+      const own = icon.kind === "asset" ? icon.name.trim()[0] : undefined;
+      return (label?.trim()[0] ?? own ?? "").toUpperCase();
+    }
     return "";
   });
 
@@ -115,8 +159,10 @@
     class:lettered={(icon.kind === "mark" && !drawn) || broke}
     style={icon.tint ? `color: ${icon.tint}` : undefined}
   >
-    {#if icon.kind === "image" && !broke}
-      <img src={icon.src} alt="" onerror={() => (refused = icon.src)} />
+    {#if picture && !broke}
+      <img src={picture} alt="" onerror={() => (refused = picture)} />
+    {:else if waiting}
+      <!-- Reserved, not lettered: the picture is on its way. -->
     {:else if icon.kind === "glyph"}
       <span class="glyph">{icon.text}</span>
     {:else if outline}

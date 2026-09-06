@@ -551,9 +551,14 @@ An `icon` prop is allowed to be four different things and all four are read:
 a name, a URL or data URI, `{ source, tintColor, mask }`, and
 `{ light, dark }`. A character or an emoji is printed as itself.
 
-One shape does not draw: a path relative to the extension's own assets. The
-window has no idea where an installed extension lives on disk, so those rows
-get the lettered tile rather than a broken image.
+A fifth shape is a path relative to the extension's own assets, `icons/star.png`
+or `logo.svg`. The window cannot open that file and does not know where the
+extension lives, so it asks Rust by the session the view belongs to
+(`extension_asset`): Rust finds the extension behind the session, refuses a
+name that climbs out of `assets`, reads the picture and answers with a data
+URI, which the window keeps for the rest of the session. Until the answer is
+back the tile is reserved and empty rather than lettered; a name Rust has no
+picture for letters itself.
 
 A name is looked up in one table, `src-tauri/src/exthost/icons.rs`. Several
 names are one picture there, because they are: `Icon.Cog` and `Icon.Gear` are
@@ -624,8 +629,7 @@ node scripts/audit-extensions.mjs
 
 That is the other half: what real extensions reach for, ranked by how many of
 them want each one. It covers APIs the host does not answer, permissions
-refused at load, icon names drawn as letters, and assets the window cannot
-resolve.
+refused at load, and icon names drawn as letters.
 
 **"APIs the host does not answer" is measured against the runner, not against
 Rust.** `run-extension.mjs` has no Rust behind it and serves the API from its
@@ -651,6 +655,6 @@ names the store's extensions were measured asking for, which is a real answer
 to a real question and the wrong place to stop: an extension is written
 against the whole vocabulary, so the next one installed brings back the
 letters. All 469 names Raycast publishes now have a mark, and
-`src-tauri/src/exthost/icons.rs` is the list. A name still reaching the letter
-tile is a relative path into an extension's own assets, which is a different
-gap with a different fix.
+`src-tauri/src/exthost/icons.rs` is the list. A relative path into an
+extension's own assets is read through Rust by session, so the letter tile is
+now only for a picture that is genuinely not there.
