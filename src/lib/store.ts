@@ -8,6 +8,7 @@
  * and the point of the split is that this side never sees it.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { orElse } from "$lib/status";
 
 /** One command an extension contributes, as the store describes it. */
 export interface StoreCommand {
@@ -179,6 +180,13 @@ export function storeBrowse(query: StoreQuery, refresh = false): Promise<Browse>
 }
 
 /** Lets go of the catalogue. Called when the store is left, always. */
+/** The screenshots the store shows for one extension; none when it has none. */
+export function storeGallery(name: string): Promise<string[]> {
+  return invoke<unknown>("store_gallery", { name })
+    .then((got) => (Array.isArray(got) ? got.filter((one): one is string => typeof one === "string") : []))
+    .catch(orElse("launcher", `the pictures for ${name}`, [], "extensions"));
+}
+
 export function storeClose(): Promise<void> {
   return invoke("store_close");
 }

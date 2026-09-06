@@ -107,6 +107,37 @@ fn start_idle_watchdog(app: AppHandle) {
 }
 
 /// Everything one screen of the store needs.
+/// The screenshots the store shows for one extension.
+///
+/// Fetched from the listing page the first time an extension is opened and
+/// remembered with the catalogue after that. An extension the catalogue does
+/// not carry, or one the store has no pictures for, is an empty gallery
+/// rather than an error: the detail screen simply has nothing to show under
+/// the description.
+#[tauri::command]
+pub(crate) async fn store_gallery(
+    app: AppHandle,
+    state: State<'_, store::StoreState>,
+    name: String,
+) -> Result<Vec<String>, String> {
+    if let Some(known) = state.gallery(&name) {
+        return Ok(known);
+    }
+
+    let catalog = catalog_of(&app, &state, false).await?;
+    let Some(listing) = catalog.listings.iter().find(|one| one.name == name) else {
+        return Ok(Vec::new());
+    };
+    if listing.author.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let client = crate::dictation::fetch::client();
+    let urls = catalog::fetch_gallery(&client, &listing.author, &listing.name).await?;
+    state.remember_gallery(&name, urls.clone());
+    Ok(urls)
+}
+
 #[tauri::command]
 pub(crate) async fn store_browse(
     app: AppHandle,

@@ -42,6 +42,15 @@ use super::{ListedCommand, Listing};
 /// The public index every Raycast client reads.
 const INDEX: &str = "https://backend.raycast.com/api/v1/store_listings";
 
+/// One listing in full, which is where the screenshots are.
+///
+/// The index carries `metadata_count` and not the pictures themselves; the
+/// listing page carries `metadata`, a list of URLs on Raycast's asset host.
+/// Asked for one extension at a time, when somebody opens it, and never for
+/// the whole catalogue: two thousand extra requests to draw a shelf is not a
+/// shelf anybody asked for.
+const LISTING: &str = "https://backend.raycast.com/api/v1/extensions";
+
 /// How many listings one request asks for.
 ///
 /// Measured: 500 comes back in under a second and 3 MB, and the seven requests
@@ -290,6 +299,61 @@ pub fn listings_in(body: &str) -> Result<Vec<Listing>, String> {
     Ok(page.data.into_iter().filter_map(reduce).collect())
 }
 
+// ------------------------------------------------------------------ gallery
+
+/// The screenshots in one listing page, in the order the store shows them.
+///
+/// Only addresses on the web are kept: the field is somebody else's and it
+/// reaches an `<img>`, so anything that is not `https://` is left out rather
+/// than drawn.
+pub fn gallery_in(body: &str) -> Result<Vec<String>, String> {
+    #[derive(Deserialize)]
+    struct Page {
+        #[serde(default)]
+        metadata: Vec<serde_json::Value>,
+    }
+
+    let page: Page = serde_json::from_str(body)
+        .map_err(|err| format!("the store's listing page was not what was expected: {err}"))?;
+
+    Ok(page
+        .metadata
+        .into_iter()
+        .filter_map(|one| one.as_str().map(str::to_string))
+        .filter(|url| url.starts_with("https://"))
+        .collect())
+}
+
+/// Fetches the screenshots for one extension.
+pub async fn fetch_gallery(
+    client: &reqwest::Client,
+    author: &str,
+    name: &str,
+) -> Result<Vec<String>, String> {
+    let url = format!("{LISTING}/{author}/{name}");
+
+    let response = client
+        .get(&url)
+        .header(reqwest::header::USER_AGENT, super::source::USER_AGENT)
+        .send()
+        .await
+        .map_err(|err| format!("could not reach the extension store: {err}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "the extension store answered {} when asked about {name}",
+            response.status()
+        ));
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|err| format!("the store's listing page did not finish arriving: {err}"))?;
+
+    gallery_in(&body)
+}
+
 // ----------------------------------------------------------------- fetching
 
 /// Fetches the whole catalogue.
@@ -397,6 +461,39 @@ pub async fn load(data_dir: &Path, refresh: bool) -> Result<Catalog, String> {
             Some(stale) if stale.format == FORMAT => Ok(stale),
             _ => Err(err),
         },
+    }
+}
+
+#[cfg(test)]
+mod gallery {
+    use super::*;
+
+    #[test]
+    fn the_screenshots_are_read_in_order_and_only_from_the_web() {
+        let body = r#"{"name":"localsend","metadata_count":3,"metadata":[
+            "https://files.raycast.com/one",
+            "https://files.raycast.com/two",
+            "file:///C:/secret.png",
+            42
+        ]}"#;
+        assert_eq!(
+            gallery_in(body).unwrap(),
+            vec![
+                "https://files.raycast.com/one".to_string(),
+                "https://files.raycast.com/two".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn a_listing_with_no_screenshots_is_an_empty_gallery() {
+        assert_eq!(gallery_in(r#"{"name":"x"}"#).unwrap(), Vec::<String>::new());
+        assert_eq!(gallery_in(r#"{"name":"x","metadata":null}"#).is_ok(), false);
+    }
+
+    #[test]
+    fn a_page_that_is_not_json_is_refused_rather_than_read_as_nothing() {
+        assert!(gallery_in("<html>").is_err());
     }
 }
 

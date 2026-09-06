@@ -34,6 +34,7 @@
   } from "$lib/store";
   import StoreIcon from "./StoreIcon.svelte";
   import Chord from "./Chord.svelte";
+  import { storeGallery } from "$lib/store";
   import Instead from "./Instead.svelte";
   import { couldNot, noMatch, standing } from "$lib/instead";
   import { LISTBOX, optionId } from "$lib/results";
@@ -105,6 +106,19 @@
 
   /** The install being decided, if one is. */
   let deciding = $state<Preparation | null>(null);
+
+  /**
+   * The listing somebody opened, drawn on its own screen.
+   *
+   * The shelf used to be two panes, the list and a detail column beside it,
+   * so every row came with a description, a command list and a version before
+   * anybody had asked. Now the list is the list, and opening a row is what
+   * brings the rest: the screenshots the store shows, the commands, the
+   * version, and the one key that installs it.
+   */
+  let opened = $state<StoreRow | null>(null);
+  /** Its screenshots: not asked yet, or the answer, which may be empty. */
+  let gallery = $state<string[] | null>(null);
   /** What is happening, so every surface can say so. */
   let working = $state<string | null>(null);
   /**
@@ -273,7 +287,7 @@
    * arrangement as the count beside it, and for the same reason.
    */
   $effect(() => {
-    oncurrent(current);
+    oncurrent(opened ?? current);
   });
 
   onMount(() => {
@@ -333,14 +347,31 @@
      * to do instead, because removing it is the one thing this screen can do
      * for it.
      */
-    if (current?.native) {
+    // The first Enter opens the row; the second does what its screen says.
+    if (!opened) {
+      if (current) open(current);
+      return;
+    }
+
+    if (opened.native) {
       onstatus(
-        `${current.title} was built here rather than installed from the store, so there is nothing to fetch. Ctrl Shift X removes it.`,
+        `${opened.title} was built here rather than installed from the store, so there is nothing to fetch. Ctrl Shift X removes it.`,
       );
       return;
     }
 
-    if (current) await decide(current);
+    await decide(opened);
+  }
+
+  /** Shows one listing on its own screen and asks for its pictures. */
+  function open(row: StoreRow) {
+    opened = row;
+    gallery = null;
+    void storeGallery(row.name).then((urls) => {
+      // Still the listing on screen: somebody can back out and open another
+      // before the first answer is back.
+      if (opened?.name === row.name) gallery = urls;
+    });
   }
 
   /**
@@ -353,6 +384,11 @@
   export function back(): boolean {
     if (deciding) {
       cancel();
+      return true;
+    }
+    if (opened) {
+      opened = null;
+      gallery = null;
       return true;
     }
     return false;
@@ -391,7 +427,7 @@
 
   /** Whether the highlighted row has something to take back. */
   export function isInstalled(): boolean {
-    return current?.installed != null;
+    return (opened ?? current)?.installed != null;
   }
 
   /** Step one. Fetches the source and reads it; installs nothing. */
@@ -624,6 +660,112 @@
         {/if}
       </p>
     {/if}
+  {:else if opened}
+    <!--
+      One extension, opened.
+
+      The store's own page for it, near enough: the pictures Raycast shows,
+      then what it does and what it is. This is the only place the pictures
+      are fetched, one extension at a time, when somebody asks to see it.
+    -->
+    <div class="opened sill-scrolls">
+      <div class="head">
+        <StoreIcon src={opened.icon} label={opened.title} size={40} />
+        <div class="named">
+          <h2>{opened.title}</h2>
+          <p class="sub">by {opened.author}</p>
+        </div>
+        {#if opened.installed?.outdated}
+          <span class="state update">Update</span>
+        {:else if opened.installed}
+          <span class="state have">
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M2.5 6.4 5 8.8l4.6-5.4" />
+            </svg>Installed</span>
+        {/if}
+      </div>
+      <p class="desc">{opened.description}</p>
+
+      {#if gallery?.length}
+        <div class="gallery sill-scrolls" aria-label="Screenshots">
+          {#each gallery as shot, at (shot)}
+            <img src={shot} alt="Screenshot {at + 1} of {opened.title}" loading="lazy" />
+          {/each}
+        </div>
+      {/if}
+
+      <h3>Commands</h3>
+      <ul class="commands">
+        {#each opened.commands as command (command.name)}
+          <li class:unrunnable={!command.runnable}>
+            <span>{command.title}</span>
+            {#if !command.runnable}
+              <span class="tag">{command.mode}</span>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+
+      {#if opened.categories.length}
+        <h3>Categories</h3>
+        <p class="quiet">{opened.categories.join(", ")}</p>
+      {/if}
+
+      <!-- A folder install has no published revision to be behind. -->
+      {#if opened.revision}
+        <h3>Version</h3>
+        <p class="quiet">
+          <code>{shortRevision(opened.revision)}</code>
+          {#if opened.installed}
+            {opened.installed.outdated
+              ? ` published, you have ${shortRevision(opened.installed.revision) || "an unrecorded version"}`
+              : " published, which is what you have"}
+          {/if}
+        </p>
+      {/if}
+
+      {#if opened.native}
+        <p class="cta">
+          Built here rather than installed from the store, so there is nothing to fetch.
+          <Chord chord="Ctrl+Shift+X" /> removes it.
+        </p>
+      {:else if acts(opened)}
+        <p class="cta act"><kbd class="sill-key">↵</kbd> {verb(opened)}</p>
+      {:else}
+        <p class="cta"><Chord chord="Ctrl+Shift+X" /> removes it.</p>
+      {/if}
+    </div>
+
+    <div class="foot">
+      <span class="keys">
+        {#if working}
+          <span class="busy">{detail || `${working} ${opened.title}…`}</span>
+          {#if howFar !== null}
+            <span
+              class="bar wide"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(howFar * 100)}
+              aria-label="{working} {opened.title}"
+            >
+              <span class="far" style="width: {Math.round(howFar * 100)}%"></span>
+            </span>
+          {/if}
+        {:else}
+          {#if acts(opened)}
+            <span class="key"><Chord chord="Enter" /> {verb(opened)}</span>
+          {/if}
+          {#if opened.installed}
+            <span class="key"><Chord chord="Ctrl+Shift+X" /> Remove</span>
+          {/if}
+          <span class="key"><Chord chord="Escape" /> Back</span>
+        {/if}
+      </span>
+      <span class="counts">
+        {#if opened.native}Built here{:else}{installs(opened.downloads)} installs{/if}
+      </span>
+    </div>
   {:else}
     {#if !ready}
       <!-- Said here rather than at the moment an install fails. Browsing works
@@ -774,65 +916,6 @@
         {/each}
       </div>
 
-      <div class="detail sill-scrolls">
-        {#if current}
-          <div class="head">
-            <StoreIcon src={current.icon} label={current.title} size={40} />
-            <div>
-              <h2>{current.title}</h2>
-              <p class="sub">by {current.author}</p>
-            </div>
-          </div>
-          <p class="desc">{current.description}</p>
-
-          <h3>Commands</h3>
-          <ul class="commands">
-            {#each current.commands as command (command.name)}
-              <li class:unrunnable={!command.runnable}>
-                <span>{command.title}</span>
-                {#if !command.runnable}
-                  <span class="tag">{command.mode}</span>
-                {/if}
-              </li>
-            {/each}
-          </ul>
-
-          {#if current.categories.length}
-            <h3>Categories</h3>
-            <p class="quiet">{current.categories.join(", ")}</p>
-          {/if}
-
-          <!-- A folder install has no published revision to be behind. -->
-          {#if current.revision}
-            <h3>Version</h3>
-            <p class="quiet">
-              <code>{shortRevision(current.revision)}</code>
-              {#if current.installed}
-                {current.installed.outdated
-                  ? ` published, you have ${shortRevision(current.installed.revision) || "an unrecorded version"}`
-                  : " published, which is what you have"}
-              {/if}
-            </p>
-          {/if}
-
-          {#if current.native}
-            <p class="cta">
-              Built here rather than installed from the store, so there is nothing to fetch.
-              <Chord chord="Ctrl+Shift+X" /> removes it.
-            </p>
-          {:else if acts(current)}
-            <p class="cta act"><kbd class="sill-key">↵</kbd> {verb(current)}</p>
-          {:else}
-            <p class="cta">
-              <span class="state have">
-                <svg viewBox="0 0 12 12" aria-hidden="true">
-                  <path d="M2.5 6.4 5 8.8l4.6-5.4" />
-                </svg>Installed</span>
-              <Chord chord="Ctrl+Shift+X" /> removes it.
-            </p>
-          {/if}
-        {/if}
-      </div>
     </div>
 
     <!--
@@ -861,9 +944,7 @@
             </span>
           {/if}
         {:else}
-          {#if !current || acts(current)}
-            <span class="key"><Chord chord="Enter" /> {current ? verb(current) : "Install"}</span>
-          {/if}
+          <span class="key"><Chord chord="Enter" /> Open</span>
           {#if current?.installed}
             <span class="key"><Chord chord="Ctrl+Shift+X" /> Remove</span>
           {/if}
@@ -959,18 +1040,50 @@
   }
 
   .list {
-    flex: 1 1 58%;
+    flex: 1;
     min-width: 0;
     padding: var(--space-1);
     overflow-y: auto;
   }
 
-  .detail {
-    flex: 1 1 42%;
-    min-width: 0;
-    padding: var(--space-3);
-    border-left: 1px solid var(--hairline);
+  /* One extension, opened: the store's page for it, at reading width. */
+  .opened {
+    flex: 1;
+    min-height: 0;
+    padding: var(--space-4) var(--space-5) var(--space-5);
     overflow-y: auto;
+  }
+
+  .opened .head {
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+
+  .named {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /*
+   * The screenshots, as the store shows them: one strip, scrolled sideways,
+   * each at a fixed height so a portrait and a landscape shot sit on one
+   * line. Loaded lazily, so an extension with eight pictures fetches the
+   * two on screen and the rest as they are scrolled to.
+   */
+  .gallery {
+    display: flex;
+    gap: var(--space-2);
+    margin: var(--space-3) 0 var(--space-1);
+    padding-bottom: var(--space-1);
+    overflow-x: auto;
+  }
+
+  .gallery img {
+    flex: none;
+    height: 190px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--ring-outside);
+    background: var(--fill-1);
   }
 
   /* Three lines rather than the launcher's one, so this cannot use
@@ -1115,7 +1228,7 @@
     font-size: var(--text-meta);
   }
 
-  .detail .desc {
+  .opened .desc {
     display: block;
     white-space: normal;
     line-height: var(--line-body);

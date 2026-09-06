@@ -2382,6 +2382,7 @@ pub fn run() {
             commands::extensions::revoke_extension_grant,
             commands::extensions::pick_files,
             commands::store::store_browse,
+            commands::store::store_gallery,
             commands::store::store_close,
             commands::store::store_prepare,
             commands::store::store_install,

@@ -320,6 +320,16 @@
    * because SvelteKit still evaluates this module before the browser has one
    * in some builds, even with `ssr = false`.
    */
+  /** A stand-in screenshot: a tinted card with a word on it. */
+  function shot(width: number, height: number, fill: string, word: string): string {
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
+      `<rect width="100%" height="100%" rx="24" fill="${fill}"/>` +
+      `<text x="50%" y="50%" fill="#e8ecef" font-family="sans-serif" font-size="${Math.round(width / 16)}" text-anchor="middle" dominant-baseline="middle">${word}</text>` +
+      `</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
+
   if (typeof window !== "undefined") {
     const answers: Record<string, (args: Record<string, unknown>) => unknown> = {
       store_browse: (args) => fakeBrowse(args.query as StoreQuery),
@@ -333,6 +343,17 @@
       }),
       store_discard: () => null,
       store_uninstall: () => `Removed ${PREPARED.title}`,
+      // Three screenshots of two shapes, drawn here rather than fetched, so
+      // the strip can be judged without the network: a landscape, a portrait
+      // and another landscape, the mix a real listing has.
+      store_gallery: (args) =>
+        args.name === "spotify-player"
+          ? [
+              shot(1280, 800, "#2a3d47", "Now Playing"),
+              shot(720, 1280, "#3b3550", "Queue"),
+              shot(1280, 800, "#334034", "Search"),
+            ]
+          : [],
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

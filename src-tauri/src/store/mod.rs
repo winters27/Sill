@@ -857,6 +857,12 @@ pub struct StoreState {
     inner: std::sync::Mutex<Option<std::sync::Arc<catalog::Catalog>>>,
     /// When it was last reached for, which is what the timer measures.
     last_used: std::sync::Mutex<Option<std::time::Instant>>,
+    /// Screenshots already fetched, by extension name.
+    ///
+    /// Fetched once per extension somebody opens and kept beside the
+    /// catalogue, so reopening the same listing draws its pictures without a
+    /// second trip. Let go when the catalogue is, in `forget`.
+    galleries: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
 }
 
 impl StoreState {
@@ -879,6 +885,18 @@ impl StoreState {
         self.touch();
     }
 
+    /// The screenshots already fetched for one extension, if any.
+    pub fn gallery(&self, name: &str) -> Option<Vec<String>> {
+        self.galleries.lock().ok()?.get(name).cloned()
+    }
+
+    /// Keeps the screenshots fetched for one extension.
+    pub fn remember_gallery(&self, name: &str, urls: Vec<String>) {
+        if let Ok(mut held) = self.galleries.lock() {
+            held.insert(name.to_string(), urls);
+        }
+    }
+
     fn touch(&self) {
         if let Ok(mut at) = self.last_used.lock() {
             *at = Some(std::time::Instant::now());
@@ -894,6 +912,9 @@ impl StoreState {
 
     /// Lets go of it. Returns whether there was anything to let go of.
     pub fn forget(&self) -> bool {
+        if let Ok(mut held) = self.galleries.lock() {
+            held.clear();
+        }
         let dropped = self
             .inner
             .lock()

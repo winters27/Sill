@@ -29,9 +29,13 @@ import type { Browse, Preparation, StoreRow } from "$lib/store";
  */
 vi.setConfig({ testTimeout: 30_000 });
 
+/** What `store_gallery` answers for the opened listing. */
+let gallery: string[] = [];
+
 const invoke = vi.fn(async (command: string, _args?: unknown) => {
   if (command === "store_browse") return browse;
   if (command === "store_prepare") return prepared;
+  if (command === "store_gallery") return gallery;
   return null;
 });
 
@@ -90,7 +94,7 @@ const prepared: Preparation = {
   notEnforced: "",
 };
 
-let mounted: Record<string, unknown> | null = null;
+let mounted: { activate: () => Promise<void>; back: () => boolean } | null = null;
 
 async function shelf(rows: StoreRow[]) {
   const { mount, tick } = await import("svelte");
@@ -182,21 +186,69 @@ describe("the store's update path", () => {
    * to mean the row does anything. This is the second half: Enter on a row
    * that is behind reaches Rust with that extension's name.
    */
-  it("fetches the newer copy when the outdated row is activated", async () => {
+  it("opens the outdated row first, and fetches the newer copy on the next Enter", async () => {
     const { target, tick } = await shelf([
       listing("behind", { revision: "aaaa", source: "store", outdated: true }),
     ]);
 
     invoke.mockClear();
 
+    // The first activation opens the listing on its own screen: nothing is
+    // fetched yet, and the screen names the key that will.
     const row = target.querySelector<HTMLElement>('[role="option"]');
     row?.click();
+    for (let i = 0; i < 6; i += 1) {
+      await Promise.resolve();
+      await tick();
+    }
 
+    expect(invoke.mock.calls.map(([command]) => command)).not.toContain("store_prepare");
+    expect(target.querySelector(".opened")).not.toBeNull();
+    expect(target.querySelector('[role="listbox"]')).toBeNull();
+    expect(target.querySelector(".cta.act")?.textContent).toContain("Update");
+
+    // The second is the update.
+    await mounted?.activate();
     for (let i = 0; i < 6; i += 1) {
       await Promise.resolve();
       await tick();
     }
 
     expect(invoke.mock.calls.map(([command]) => command)).toContain("store_prepare");
+  });
+
+  it("shows the store's screenshots on the opened listing, and Escape goes back to the list", async () => {
+    gallery = ["https://files.raycast.com/one", "https://files.raycast.com/two"];
+    const { target, tick } = await shelf([listing("shown", null)]);
+
+    target.querySelector<HTMLElement>('[role="option"]')?.click();
+    for (let i = 0; i < 6; i += 1) {
+      await Promise.resolve();
+      await tick();
+    }
+
+    const shots = [...target.querySelectorAll<HTMLImageElement>(".gallery img")];
+    expect(shots.map((img) => img.getAttribute("src"))).toEqual(gallery);
+    expect(shots[0].getAttribute("alt")).toBe("Screenshot 1 of shown");
+    expect(invoke.mock.calls.filter(([command]) => command === "store_gallery")).toHaveLength(1);
+
+    expect(mounted?.back()).toBe(true);
+    await tick();
+    expect(target.querySelector(".opened")).toBeNull();
+    expect(target.querySelector('[role="listbox"]')).not.toBeNull();
+    expect(mounted?.back()).toBe(false);
+    gallery = [];
+  });
+
+  it("draws no gallery strip for a listing the store has no pictures of", async () => {
+    gallery = [];
+    const { target, tick } = await shelf([listing("plain", null)]);
+    target.querySelector<HTMLElement>('[role="option"]')?.click();
+    for (let i = 0; i < 6; i += 1) {
+      await Promise.resolve();
+      await tick();
+    }
+    expect(target.querySelector(".opened")).not.toBeNull();
+    expect(target.querySelector(".gallery")).toBeNull();
   });
 });
