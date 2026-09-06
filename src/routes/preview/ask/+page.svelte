@@ -15,7 +15,7 @@
   const PREFS = {
     appearance: {
       backdrop: "acrylic",
-      theme: "winters-glass",
+      theme: "frost",
       chromaStrength: 1,
       font: "satoshi",
       glassStrength: 0.85,
@@ -26,14 +26,31 @@
     },
   };
 
-  const READY = {
-    ready: true,
-    id: "ollama",
-    name: "Ollama",
-    model: "qwen3:1.7b",
-    kind: "local",
-    whyNot: "",
-  };
+  /**
+   * `?paid` swaps the local model for a metered one, so the pill that counts
+   * the conversation can be seen pricing an answer rather than timing it.
+   */
+  const paid = new URLSearchParams(location.search).has("paid");
+
+  const READY = paid
+    ? {
+        ready: true,
+        id: "xai",
+        name: "xAI Grok",
+        model: "grok-4.6",
+        kind: "key",
+        price: { input: 2, output: 6 },
+        whyNot: "",
+      }
+    : {
+        ready: true,
+        id: "ollama",
+        name: "Ollama",
+        model: "qwen3:1.7b",
+        kind: "local",
+        price: null,
+        whyNot: "",
+      };
 
   const PAST = [
     { id: "chat:2", title: "Find the largest files in my Downloads folder", replies: 1, age: 90, open: false },
@@ -105,14 +122,27 @@
       emit("sill://ai-said", piece);
       await wait(160);
     }
+    turns += 1;
     emit("sill://ai-done", {
-      model: "qwen3:1.7b",
+      model: READY.model,
       usage: { input: 812, output: 143 },
       durationMs: 4120,
-      cost: null,
+      generatingMs: 3100,
+      cost: paid ? 0.002482 : null,
+      spent: {
+        input: 812 * turns,
+        output: 143 * turns,
+        cost: paid ? 0.002482 * turns : null,
+        unpriced: paid ? 0 : turns,
+        rate: paid ? null : 46.1,
+        answers: turns,
+      },
     });
     return ANSWER.join("");
   }
+
+  /** Answers given so far, so the total on each done event grows. */
+  let turns = 0;
 
   let Page = $state<Component | null>(null);
 

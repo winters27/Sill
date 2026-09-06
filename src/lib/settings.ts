@@ -92,7 +92,8 @@ export interface Hotkey {
  * block there plus a variant here plus a variant in Rust, and nothing else.
  */
 export type Theme =
-  | "winters-glass"
+  | "frost"
+  | "frost-light"
   | "oilslick"
   | "graphite"
   | "ember"

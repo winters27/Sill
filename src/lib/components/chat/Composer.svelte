@@ -20,7 +20,9 @@
    * height rather than the content.
    */
   import AiMark from "$lib/components/settings/AiMark.svelte";
+  import Tally from "$lib/components/chat/Tally.svelte";
   import type { AiAsking, AiAttached, AiReady } from "$lib/exthost/commands";
+  import type { Live } from "$lib/chat/live";
   import { hint } from "$lib/hint";
 
   interface Props {
@@ -37,6 +39,12 @@
     first: boolean;
     /** Who answers, for the chip that says so. */
     answersWith: AiReady | null;
+    /**
+     * The turn in flight and the conversation's total, for the pill that
+     * counts what it has cost. Optional, because the box does not need it to
+     * be a box.
+     */
+    live?: Live;
     onsend: () => void;
     onstop: () => void;
     onpick: () => void;
@@ -55,6 +63,7 @@
     asked,
     first,
     answersWith,
+    live,
     onsend,
     onstop,
     onpick,
@@ -188,6 +197,16 @@
         {/if}
         <span>{whom}</span>
       </button>
+
+      <!--
+        What the conversation has cost, at the far end of the row from the
+        attach button, where the eye goes after the answer and before the
+        next question.
+      -->
+      {#if live}
+        <span class="grow"></span>
+        <Tally {live} {answersWith} />
+      {/if}
 
       <span class="key-hint" aria-hidden="true">
         {#if asking}
@@ -419,6 +438,12 @@
   .unset {
     padding-left: var(--space-2);
     color: var(--accent);
+  }
+
+  /* Takes the slack ahead of the pill, so the pill, the key and the button
+     sit together at the end. */
+  .grow {
+    flex: 1;
   }
 
   .key-hint {

@@ -8,15 +8,21 @@
   import AiMark from "./AiMark.svelte";
   import Instead from "../Instead.svelte";
   import { drawer } from "$lib/motion";
+  import { hint } from "$lib/hint";
   import {
     aiHello,
     aiKnown,
     aiModels,
     aiNamed,
+    aiUsage,
+    aiUsageReset,
     type AiHelloHere,
     type AiModel,
     type AiProvider,
+    type AiUsage,
   } from "$lib/ai";
+  import type { AiSpent } from "$lib/exthost/commands";
+  import { dollars, perSecond, tokens } from "$lib/chat/tally";
   import type { Preferences } from "$lib/settings";
 
   interface Props {
@@ -29,6 +35,107 @@
 
   /** The services Sill knows how to reach, for the Add list. */
   let known = $state<AiProvider[]>([]);
+
+  /**
+   * What each provider has cost over its lifetime, keyed by id.
+   *
+   * Read once when the panel opens, the way the Add list is. Rust adds it up
+   * and keeps it; this only draws it, and a total that is a turn behind for
+   * the length of a visit to Settings is not worth a subscription.
+   */
+  let usage = $state<Record<string, AiUsage>>({});
+
+  function keep(list: AiUsage[]) {
+    usage = Object.fromEntries(list.map((one) => [one.provider, one]));
+  }
+
+  $effect(() => {
+    void aiUsage().then(keep);
+  });
+
+  async function resetUsage(id: string) {
+    keep(await aiUsageReset(id));
+  }
+
+  /** `3 answers`, said so a count of one does not read as a typo. */
+  function answers(n: number): string {
+    return n === 1 ? "1 answer" : `${n} answers`;
+  }
+
+  /**
+   * The few words a card adds after its model once something has been spent.
+   *
+   * Dollars when the provider is metered, speed when it runs on this machine,
+   * and only the count when neither is known. Nothing at all before the
+   * first answer: a card promising a bill reads worse than one saying nothing.
+   */
+  function spendLine(one: AiUsage | undefined): string {
+    if (!one || one.all.spent.answers === 0) return "";
+
+    const count = answers(one.all.spent.answers);
+    if (one.all.spent.cost !== null) return `${dollars(one.all.spent.cost)} over ${count}`;
+    if (one.all.meanRate !== null) return `${count}, ${perSecond(one.all.meanRate)}`;
+    return count;
+  }
+
+  /**
+   * Which figure the last column of the breakdown carries.
+   *
+   * A metered provider shows cost; one on this machine shows speed; one
+   * that has neither shows nothing there, rather than a column of dashes.
+   */
+  function measure(one: AiUsage): "cost" | "speed" | "" {
+    if (one.all.spent.cost !== null) return "cost";
+    if (one.all.meanRate !== null) return "speed";
+    return "";
+  }
+
+  /** The last column for one row of the breakdown. */
+  function figure(one: AiUsage, spent: AiSpent, meanRate: number | null): string {
+    switch (measure(one)) {
+      case "cost":
+        return spent.answers ? dollars(spent.cost ?? 0) : "";
+      case "speed":
+        return meanRate !== null ? perSecond(meanRate) : "";
+      default:
+        return "";
+    }
+  }
+
+  /** The three windows a breakdown shows. */
+  function windows(one: AiUsage): { name: string; spent: AiSpent; meanRate: number | null }[] {
+    return [
+      { name: "All time", spent: one.all.spent, meanRate: one.all.meanRate },
+      { name: "Last 30 days", spent: one.month.spent, meanRate: one.month.meanRate },
+      { name: "Today", spent: one.today.spent, meanRate: one.today.meanRate },
+    ];
+  }
+
+  /** The day the first answer was counted, as a date somebody would say. */
+  function since(seconds: number): string {
+    return new Date(seconds * 1000).toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  }
+
+  /** What the note under the breakdown says about where the numbers came from. */
+  function provenance(one: AiUsage): string {
+    const from = `Counted here since ${since(one.first)}.`;
+    const unpriced = one.all.spent.unpriced;
+
+    if (measure(one) === "cost" && unpriced > 0) {
+      return `${from} ${answers(unpriced)} could not be priced, so the cost is short by that much.`;
+    }
+    if (measure(one) === "cost") {
+      return `${from} Dollars are what the service said, or its published rate.`;
+    }
+    if (measure(one) === "speed") {
+      return `${from} Speed is output tokens a second, from the first token to the last.`;
+    }
+    return from;
+  }
 
   /**
    * Whether this PC can actually run the Windows Hello gate.
@@ -367,7 +474,11 @@
 
               <span class="text">
                 <span class="name">{one.name}</span>
-                <span class="status" class:todo={unfinished(one)}>{status(one)}</span>
+                <span class="status" class:todo={unfinished(one)}>
+                  {status(one)}{#if spendLine(usage[one.id])}{" "}<span class="spend"
+                      >&middot; {spendLine(usage[one.id])}</span
+                    >{/if}
+                </span>
               </span>
 
               {#if answering === one.id}
@@ -481,8 +592,58 @@
                 </div>
               </div>
 
+              <!--
+                What it has cost, under the fields that decide what it costs.
+
+                Three windows and, when more than one model has answered, a
+                line per model. Read-only prose in a grid rather than a
+                control: there is nothing to set, only something to know.
+              -->
+              {#if usage[one.id]?.all.spent.answers}
+                {@const seen = usage[one.id]}
+                <div class="field">
+                  <span class="what">Usage</span>
+                  <div class="control">
+                    <div class="usage">
+                      <span class="head"></span>
+                      <span class="head num">Answers</span>
+                      <span class="head num">In</span>
+                      <span class="head num">Out</span>
+                      <span class="head num">
+                        {measure(seen) === "cost" ? "Cost" : measure(seen) === "speed" ? "Speed" : ""}
+                      </span>
+                      {#each windows(seen) as row (row.name)}
+                        <span class="name">{row.name}</span>
+                        <span class="num">{row.spent.answers}</span>
+                        <span class="num">{tokens(row.spent.input)}</span>
+                        <span class="num">{tokens(row.spent.output)}</span>
+                        <span class="num">{figure(seen, row.spent, row.meanRate)}</span>
+                      {/each}
+                      {#if seen.models.length > 1}
+                        <span class="head">By model</span>
+                        <span class="head"></span>
+                        <span class="head"></span>
+                        <span class="head"></span>
+                        <span class="head"></span>
+                        {#each seen.models as row (row.model)}
+                          <span class="name model" use:hint={row.model}>{row.label}</span>
+                          <span class="num">{row.spent.answers}</span>
+                          <span class="num">{tokens(row.spent.input)}</span>
+                          <span class="num">{tokens(row.spent.output)}</span>
+                          <span class="num">{figure(seen, row.spent, row.meanRate)}</span>
+                        {/each}
+                      {/if}
+                    </div>
+                    <span class="note">{provenance(seen)}</span>
+                  </div>
+                </div>
+              {/if}
+
               <div class="actions">
                 <Button label="Refresh models" onclick={() => loadModels(open)} />
+                {#if usage[one.id]?.all.spent.answers}
+                  <Button label="Reset usage" onclick={() => void resetUsage(one.id)} />
+                {/if}
                 <span class="spacer"></span>
                 <Button label="Remove" tone="danger" onclick={() => remove(one.id)} />
               </div>
@@ -788,5 +949,56 @@
 
   .spacer {
     flex: 1;
+  }
+
+  /* After the model on the card, quieter than it: a fact, not a state. */
+  .spend {
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+
+  /*
+   * The breakdown: a small grid of numbers under a hairline header.
+   *
+   * Text, not a bordered table. It sits in the same label column as the
+   * fields above it and at their size, so it reads as one more line of the
+   * form rather than a report pasted into it.
+   */
+  .usage {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(4, max-content);
+    column-gap: var(--space-4);
+    row-gap: var(--space-1);
+    max-width: 62ch;
+    color: var(--text-2);
+    font-size: var(--text-meta);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.5;
+  }
+
+  .usage .head {
+    padding-bottom: var(--space-half);
+    border-bottom: 1px solid var(--hairline);
+    color: var(--text-3);
+  }
+
+  /* The second header sits under the rows above it, so it gets room. */
+  .usage .head:nth-child(n + 6) {
+    margin-top: var(--space-2);
+  }
+
+  .usage .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-1);
+  }
+
+  .usage .model {
+    color: var(--text-2);
+  }
+
+  .usage .num {
+    text-align: right;
   }
 </style>

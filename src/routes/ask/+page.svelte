@@ -50,6 +50,7 @@
     aiReady,
     aiRefusePending,
     aiResume,
+    aiSpent,
     aiLimits,
     aiStop,
     aiTranscript,
@@ -295,6 +296,8 @@
     }
 
     reset(live);
+    // After the reset, which forgets the total of the one just left.
+    live.spent = await aiSpent().catch(() => null);
     await refreshList();
     void toTheEnd();
     field?.focus();
@@ -321,6 +324,7 @@
     // The one on screen is the one that went, so the screen follows.
     if (id === openId || !past.some((one) => one.open)) {
       conversation = (await aiTranscript()).map(fromTurn);
+      live.spent = await aiSpent().catch(() => null);
     }
   }
 
@@ -384,6 +388,7 @@
       );
 
       conversation = (await aiTranscript()).map(fromTurn);
+      live.spent = await aiSpent().catch(() => null);
       await refreshList();
       void toTheEnd();
 
@@ -611,6 +616,7 @@
         asked={live.asked}
         first={conversation.length === 0}
         {answersWith}
+        {live}
         onsend={() => void send()}
         onstop={() => void stop()}
         onpick={() => void pick()}

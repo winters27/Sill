@@ -5,6 +5,7 @@
  * what a request looks like. This side only shows and collects.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type { AiSpent } from "$lib/exthost/commands";
 import { silently } from "$lib/status";
 
 /** The shape a service expects, or the CLI that is not a shape at all. */
@@ -83,4 +84,47 @@ export function aiModels(provider: AiProvider): Promise<AiModel[]> {
  */
 export function aiNamed(providers: AiProvider[]): Promise<string[]> {
   return invoke<string[]>("ai_named", { providers });
+}
+
+/** A total with its mean speed worked out in Rust. */
+export interface AiWindow {
+  spent: AiSpent;
+  /** Output tokens a second over everything timed. Null when nothing was. */
+  meanRate: number | null;
+}
+
+/** One model's share of a provider's total. */
+export interface AiModelUsage extends AiWindow {
+  /** As the service named it. */
+  model: string;
+  /** As the chip would call it. */
+  label: string;
+}
+
+/**
+ * What one provider has cost over its lifetime, added up in Rust.
+ *
+ * Conversations are forgotten; this is not. `month` is the last thirty
+ * days, today included, on this machine's calendar.
+ */
+export interface AiUsage {
+  provider: string;
+  all: AiWindow;
+  today: AiWindow;
+  month: AiWindow;
+  /** Most answers first. */
+  models: AiModelUsage[];
+  /** When the first and last counted answer landed, in seconds. */
+  first: number;
+  last: number;
+}
+
+/** Every provider's totals, for the settings panel. Read once per opening. */
+export function aiUsage(): Promise<AiUsage[]> {
+  return invoke<AiUsage[]>("ai_usage").catch(silently([]));
+}
+
+/** Forgets one provider's totals, and answers with what is left. */
+export function aiUsageReset(provider: string): Promise<AiUsage[]> {
+  return invoke<AiUsage[]>("ai_usage_reset", { provider });
 }

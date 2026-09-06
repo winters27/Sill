@@ -118,11 +118,56 @@
     },
   });
 
+  /** A total, the shape Rust's `Spent` serialises to, with its mean speed. */
+  const total = (
+    answers: number,
+    input: number,
+    output: number,
+    cost: number | null,
+    meanRate: number | null,
+    unpriced = 0,
+  ) => ({
+    spent: { input, output, cost, unpriced, rate: meanRate, answers, generatingMs: 0 },
+    meanRate,
+  });
+
+  /**
+   * What two providers have cost, so the breakdown can be looked at: one
+   * metered with two models and an unpriced answer, one on this machine
+   * with a speed instead of a bill.
+   */
+  const USAGE = [
+    {
+      provider: "claudeCode",
+      all: total(142, 1_284_000, 96_500, 4.18, null, 3),
+      month: total(61, 540_000, 41_200, 1.72, null, 0),
+      today: total(4, 31_000, 2_900, 0.11, null, 0),
+      models: [
+        { model: "claude-sonnet-5", label: "claude-sonnet-5", ...total(121, 1_010_000, 80_100, 2.9, null, 3) },
+        { model: "claude-opus-5", label: "claude-opus-5", ...total(21, 274_000, 16_400, 1.28, null, 0) },
+      ],
+      first: 1_754_000_000,
+      last: 1_788_600_000,
+    },
+    {
+      provider: "ollama",
+      all: total(37, 210_000, 48_000, null, 41.3, 37),
+      month: total(37, 210_000, 48_000, null, 41.3, 37),
+      today: total(0, 0, 0, null, null, 0),
+      models: [
+        { model: "huihui_ai/qwen3.5-abliterated:9b", label: "qwen3.5-abliterated:9b", ...total(30, 180_000, 40_000, null, 39.8, 30) },
+        { model: "qwen3:1.7b", label: "qwen3:1.7b", ...total(7, 30_000, 8_000, null, 58.2, 7) },
+      ],
+      first: 1_786_000_000,
+      last: 1_788_500_000,
+    },
+  ];
+
   /* The panel is imported at runtime, so its type is stated rather than
      inferred. The mock prefs are a subset of the real Preferences. */
   type PanelProps = { prefs: unknown; commit: () => void };
   let Panel = $state<Component<PanelProps> | null>(null);
-  let theme = $state("winters-glass");
+  let theme = $state("frost");
 
   $effect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -132,9 +177,11 @@
     (window as never as Record<string, unknown>).__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: "settings" } },
       transformCallback: (cb: unknown) => cb,
-      invoke: async (cmd: string) => {
+      invoke: async (cmd: string, args?: Record<string, unknown>) => {
         if (cmd === "ai_known") return KNOWN;
         if (cmd === "ai_models") return MODELS;
+        if (cmd === "ai_usage") return USAGE;
+        if (cmd === "ai_usage_reset") return USAGE.filter((one) => one.provider !== args?.provider);
         return null;
       },
     };
@@ -147,7 +194,8 @@
 <div class="frame">
   <div class="bar">
     <select bind:value={theme} aria-label="Theme">
-      <option value="winters-glass">winters-glass</option>
+      <option value="frost">frost</option>
+      <option value="frost-light">frost-light</option>
       <option value="oilslick">oilslick</option>
       <option value="graphite">graphite</option>
       <option value="ember">ember</option>
