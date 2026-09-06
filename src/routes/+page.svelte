@@ -36,6 +36,7 @@
   import { fromQuestion, fromTurn, type Shown } from "$lib/chat/parts";
   import { begin, fresh, reset, type Live } from "$lib/chat/live";
   import { listenToChat } from "$lib/chat/listen";
+  import Tally from "$lib/components/chat/Tally.svelte";
   import ScriptOutput, { type Ran } from "$lib/components/ScriptOutput.svelte";
   import KeySheet from "$lib/components/KeySheet.svelte";
   import PermissionAsk from "$lib/components/PermissionAsk.svelte";
@@ -95,6 +96,7 @@
     aiRefusePending,
     aiClear,
     aiReady,
+    aiSpent,
     completePath as finishPath,
     aiTranscript,
     searchAppVolume,
@@ -324,7 +326,14 @@
    * event, so this cannot grow without bound in a session that never crashes.
    */
   const died = new Map<string, string>();
-  let running = $state<{ title: string; extensionTitle: string } | null>(null);
+  let running = $state<{
+    title: string;
+    extensionTitle: string;
+    /** The picture its row wears, for the crumb: a path, `mark:<name>`, or nothing. */
+    icon: string | null;
+    /** The settings art standing in for a picture it does not have. */
+    panel: string | null;
+  } | null>(null);
 
   let query = $state("");
   let selected = $state(0);
@@ -2570,7 +2579,12 @@
 
         session = launched.session;
         launchedAt = { at: askedAt, session: launched.session };
-        running = { title: launched.title, extensionTitle: launched.extensionTitle };
+        running = {
+          title: launched.title,
+          extensionTitle: launched.extensionTitle,
+          icon: command.icon ?? null,
+          panel: command.panel ?? null,
+        };
         mode = "command";
         selected = 0;
         query = "";
@@ -3316,6 +3330,9 @@
     if (starting) {
       cameFrom = question;
       conversation = [];
+      // The total belongs to the conversation just left; this one has none
+      // until its first answer lands with the new one.
+      aiLive.spent = null;
     }
 
     mode = "ai";
@@ -3356,6 +3373,8 @@
     selected = 0;
     aiWhoNot = "";
     reset(aiLive);
+    // After the reset, which forgets the total of the one just left.
+    aiLive.spent = await aiSpent().catch(() => null);
     query = "";
   }
 
@@ -4565,6 +4584,8 @@
     movingTitle={moving?.title}
     namingTitle={naming?.title}
     runningTitle={running?.extensionTitle}
+    runningIcon={running?.icon ?? undefined}
+    runningPanel={running?.panel ?? undefined}
     {answersWith}
     asking={aiLive.asking}
     conversationEmpty={conversation.length === 0}
@@ -4577,13 +4598,23 @@
         status = `the command could not change that: ${err}`;
       });
     }}
-    accessory={mode === "store" && storeFilter ? storeFilterControl : undefined}
+    accessory={mode === "store" && storeFilter
+      ? storeFilterControl
+      : mode === "ai"
+        ? tallyControl
+        : undefined}
   />
 
   {#snippet storeFilterControl()}
     {#if storeFilter}
       <StoreFilter filter={storeFilter} onpick={(value) => storeView?.pick(value)} />
     {/if}
+  {/snippet}
+
+  <!-- What the conversation has cost, at the end of the field it is asked
+       from. Draws nothing until there is a first answer to count. -->
+  {#snippet tallyControl()}
+    <Tally live={aiLive} {answersWith} />
   {/snippet}
 
   {#if mode === "output" && output}

@@ -16,6 +16,8 @@
    */
   import AiMark from "$lib/components/settings/AiMark.svelte";
   import ExtDropdown from "$lib/components/ExtDropdown.svelte";
+  import LaunchIcon from "$lib/components/LaunchIcon.svelte";
+  import SettingsIcon, { PANEL_ICONS, type IconName } from "$lib/components/SettingsIcon.svelte";
   import { LISTBOX, optionId } from "$lib/results";
   import { hint } from "$lib/hint";
   import { openSettings } from "$lib/settings";
@@ -50,6 +52,10 @@
     namingTitle: string | undefined;
     /** The extension whose command is running. */
     runningTitle: string | undefined;
+    /** Its picture on disk, when the extension has one. */
+    runningIcon?: string;
+    /** The settings art standing in for it, when it has none. */
+    runningPanel?: string;
     /** Who answers, for the crumb and the chip. */
     answersWith: AiReady | null;
     /** Whether a question is in flight. */
@@ -89,6 +95,8 @@
     movingTitle,
     namingTitle,
     runningTitle,
+    runningIcon,
+    runningPanel,
     answersWith,
     asking,
     conversationEmpty,
@@ -98,6 +106,21 @@
     ontyped,
     accessory,
   }: Props = $props();
+
+  /**
+   * The running extension's picture, read the way its row reads it: a path
+   * on disk is a picture; `mark:<name>` is settings art; anything else, a
+   * glyph or nothing, leaves the crumb a word.
+   */
+  const runningIconPath = $derived(
+    runningIcon && /[\\/]/.test(runningIcon) && !runningIcon.startsWith("mark:")
+      ? runningIcon
+      : undefined,
+  );
+  const runningPanelName = $derived.by((): IconName | undefined => {
+    const named = runningIcon?.startsWith("mark:") ? runningIcon.slice(5) : runningPanel;
+    return named && (PANEL_ICONS as readonly string[]).includes(named) ? (named as IconName) : undefined;
+  });
 
   /**
    * What the chip says when it is hovered.
@@ -117,22 +140,43 @@
   });
 </script>
 
+<!--
+  Where you are, with the picture of the place.
+
+  The crumb used to be a word. A word says which face is on screen; the
+  picture beside it says it at a glance, the way the row that opened the
+  place did. An extension wears its own icon, the one its row wears in the
+  list; each of the launcher's own faces wears the settings art of the panel
+  it belongs to, so the clipboard crumb and the Clipboard panel are one
+  picture. A face with no art of its own stays a word.
+-->
+{#snippet crumb(text: string, panel?: IconName, path?: string)}
+  <span class="crumb">
+    {#if path}
+      <span class="crumb-mark"><LaunchIcon {path} label={text} resolvable /></span>
+    {:else if panel}
+      <SettingsIcon name={panel} size={14} />
+    {/if}
+    <span class="crumb-text">{text}</span>
+  </span>
+{/snippet}
+
 <div class="search">
   <img class="mark" src="/sill.png" alt="" width="26" height="26" draggable="false" />
   {#if mode === "argument" && awaitingTitle !== undefined}
-    <span class="crumb">{awaitingTitle}</span>
+    {@render crumb(awaitingTitle)}
   {:else if mode === "output" && outputTitle !== undefined}
-    <span class="crumb">{outputTitle}</span>
+    {@render crumb(outputTitle)}
   {:else if mode === "clipboard"}
-    <span class="crumb">Clipboard History</span>
+    {@render crumb("Clipboard History", "clipboard")}
   {:else if mode === "switcher"}
-    <span class="crumb">Open Windows</span>
+    {@render crumb("Open Windows", "arrangements")}
   {:else if mode === "emoji"}
-    <span class="crumb">Emoji</span>
+    {@render crumb("Emoji", "emoji")}
   {:else if mode === "keys"}
-    <span class="crumb">Keyboard</span>
+    {@render crumb("Keyboard", "shortcuts")}
   {:else if mode === "welcome"}
-    <span class="crumb">Welcome</span>
+    {@render crumb("Welcome", "general")}
   {:else if mode === "ai"}
     <!--
       Who is answering, in the place that says where you are.
@@ -157,28 +201,28 @@
         <span class="who">{answersWith.model || answersWith.name}</span>
       </button>
     {:else}
-      <span class="crumb">AI Chat</span>
+      {@render crumb("AI Chat", "ai")}
     {/if}
   {:else if mode === "conversations"}
-    <span class="crumb">Conversations</span>
+    {@render crumb("Conversations", "ai")}
   {:else if mode === "appVolume"}
-    <span class="crumb">App Volume</span>
+    {@render crumb("App Volume", "media")}
   {:else if mode === "processes"}
-    <span class="crumb">Processes</span>
+    {@render crumb("Processes", "advanced")}
   {:else if mode === "widgets"}
-    <span class="crumb">Widgets</span>
+    {@render crumb("Widgets", "widgets")}
   {:else if mode === "namingWorkspace"}
-    <span class="crumb">Save workspace</span>
+    {@render crumb("Save workspace", "arrangements")}
   {:else if mode === "store"}
-    <span class="crumb">Extension Store</span>
+    {@render crumb("Extension Store", "extensions")}
   {:else if mode === "destination" && movingTitle !== undefined}
-    <span class="crumb">Move {movingTitle}</span>
+    {@render crumb(`Move ${movingTitle}`, "files")}
   {:else if mode === "collection"}
-    <span class="crumb">Collection</span>
+    {@render crumb("Collection", "clipboard")}
   {:else if mode === "alias" && namingTitle !== undefined}
-    <span class="crumb">{namingTitle}</span>
+    {@render crumb(namingTitle)}
   {:else if runningTitle !== undefined}
-    <span class="crumb">{runningTitle}</span>
+    {@render crumb(runningTitle, runningPanelName, runningIconPath)}
   {/if}
   <!--
     A combobox, which is what this is: a field whose typing filters a list
@@ -344,18 +388,33 @@
   /* A chip, not a tile. The sheen-and-bevel recipe belongs to something that
      reads as a raised object; this is a label saying where you are. */
   .crumb {
+    display: inline-flex;
     flex: none;
+    gap: var(--space-1);
+    align-items: center;
     /* An extension's or a file's name, so it is bounded the way `.who`
        below is; otherwise a long one squeezes the field to nothing. */
-    max-width: 22ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    max-width: 24ch;
     padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
     background: var(--fill-2);
     color: var(--text-2);
     font-size: var(--text-meta);
     white-space: nowrap;
+  }
+
+  .crumb-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* The extension's own picture at the crumb's size rather than a row's. */
+  .crumb-mark {
+    --icon-tile: 14px;
+    display: grid;
+    flex: none;
+    place-items: center;
   }
 
   /* The one crumb that is pressable, so it says so on hover rather than only
