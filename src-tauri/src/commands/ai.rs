@@ -281,6 +281,7 @@ pub(crate) async fn open_ask(app: AppHandle) -> Result<(), String> {
             .focused(true)
             .build()
             .map_err(|err| err.to_string())?;
+    crate::webchrome::quiet(&window);
 
     let _ = window.set_focus();
 

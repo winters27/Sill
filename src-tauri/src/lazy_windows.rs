@@ -140,6 +140,7 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
     };
 
     let window = window.map_err(|err| format!("could not make the {label} window: {err}"))?;
+    crate::webchrome::quiet(&window);
 
     crate::say!("built the {label} window");
     Ok(window)

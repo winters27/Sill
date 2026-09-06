@@ -104,6 +104,7 @@ pub mod uia;
 pub mod update;
 pub mod utilities;
 pub mod weather;
+pub mod webchrome;
 pub mod websearch;
 pub mod welcome;
 pub mod windowing;
@@ -1976,6 +1977,13 @@ pub fn run() {
 
             if let Some(window) = app.get_webview_window("main") {
                 session::watch(&window);
+            }
+
+            // The browser's own chrome, off in every window that exists at
+            // this point (the launcher and the tray menu). Windows built on
+            // demand are quieted where they are built.
+            for window in app.webview_windows().values() {
+                webchrome::quiet(window);
             }
 
             // Acted on in Rust rather than the frontend: a keyword is typed

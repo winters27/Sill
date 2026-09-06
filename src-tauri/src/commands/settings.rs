@@ -349,6 +349,7 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
             .focused(false)
             .build()
             .map_err(|e| e.to_string())?;
+    crate::webchrome::quiet(&window);
 
     // The launcher must not hand the screen back to whatever was in front
     // before it. See the same note in `open_ask`.
