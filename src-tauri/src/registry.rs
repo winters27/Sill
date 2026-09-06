@@ -3759,11 +3759,22 @@ pub fn search_excluding<'a>(
         }
     };
 
-    scored.sort_by(|(a_class, a_weight, a, _), (b_class, b_weight, b, _)| {
+    scored.sort_by(|(a_class, a_weight, a, a_matched), (b_class, b_weight, b, b_matched)| {
         pin_of(&a.id)
             .cmp(&pin_of(&b.id))
             .then_with(|| a_class.cmp(b_class))
             .then_with(|| reach_of(a).cmp(&reach_of(b)))
+            /*
+             * The row whose own title carries the match, before a row reached
+             * through its extension's name.
+             *
+             * "gen" is the start of "Generate UUID" and the start of a word
+             * in "UUID Generator", and the second reaches "View History" too.
+             * Same class; but one of them is underlined and the other is a
+             * sibling that happens to share a parent. A title match is the
+             * one with positions to draw, which is what tells them apart.
+             */
+            .then_with(|| a_matched.is_empty().cmp(&b_matched.is_empty()))
             .then_with(|| b_weight.cmp(a_weight))
             .then_with(|| {
                 if typed {

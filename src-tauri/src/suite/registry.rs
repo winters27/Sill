@@ -854,7 +854,13 @@ fn realistic() -> Vec<CommandRecord> {
     ]
     .iter()
     .enumerate()
-    .map(|(i, title)| command(&format!("app:{i}"), title, "Application"))
+    .map(|(i, title)| {
+        // Programs, and said so: an extension named "Application" would be
+        // matched by that name, which is a different rule.
+        let mut program = command(&format!("app:{i}"), title, "Application");
+        program.mode = "app".to_string();
+        program
+    })
     .collect()
 }
 
@@ -3130,8 +3136,12 @@ fn naming_a_category_exactly_finds_the_things_in_it() {
 /// hundred and fifty rows.
 #[test]
 fn a_category_the_word_is_only_part_of_stays_weak() {
-    let corpus = vec![command("app:one", "Something", "Application")];
-    let results = search(&corpus, "app", &Frecency::default(), NOW, 20);
+    // A program, whose `extension_title` is its category. For a command an
+    // extension provides that field is the extension's name, and a name is
+    // matched as a name; see `extensions_first`.
+    let mut program = command("app:one", "Something", "Application");
+    program.mode = "app".to_string();
+    let results = search(&[program], "app", &Frecency::default(), NOW, 20);
 
     assert!(
         results
