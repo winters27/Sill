@@ -3262,6 +3262,28 @@ fn classify_text(needle: &[char], command: &CommandRecord) -> Option<(MatchClass
         return Some(found);
     }
 
+    /*
+     * An extension's name is a name, not a category.
+     *
+     * `extension_title` is the category for everything else in the index:
+     * "Application", "Windows Tools", "Notes". For a command an extension
+     * provides it is the extension's own name, and that name is what somebody
+     * types to reach it: "locals" for LocalSend's eight commands, none of
+     * which has "local" in its title. Read as a category, that match was
+     * `Elsewhere`, the weakest class there is, and every one of those
+     * commands sat under a program that merely shared the name.
+     *
+     * So the name is matched the way a title is, and the commands take that
+     * class. No highlight, because the letters matched are not in the title
+     * the row draws. Typo forgiveness is not extended to it; that stays with
+     * the title alone.
+     */
+    if from_an_extension(command) {
+        if let Some((class, _)) = match_name(needle, &command.extension_title) {
+            return Some((class, Vec::new()));
+        }
+    }
+
     // Nothing in the title. The other sources are searched but never
     // highlighted, since their indices would point into the wrong string.
     // No highlight for either of these: what matched is not in the title, so
@@ -3998,10 +4020,14 @@ mod extensions_first {
     const NOW: i64 = 1_700_000_000;
 
     fn record(id: &str, title: &str, mode: &str) -> CommandRecord {
+        named(id, title, mode, if mode == "app" { "Application" } else { "LocalSend" })
+    }
+
+    fn named(id: &str, title: &str, mode: &str, extension_title: &str) -> CommandRecord {
         CommandRecord {
             id: id.to_string(),
             extension: "test".into(),
-            extension_title: "Test".into(),
+            extension_title: extension_title.into(),
             command: "run".into(),
             title: title.to_string(),
             subtitle: String::new(),
@@ -4024,6 +4050,10 @@ mod extensions_first {
             record("app:localsend", "LocalSend", "app"),
             record("ext:localsend", "LocalSend", "view"),
             record("app:localhost", "Localhost Tools", "app"),
+            // As the real extension names its commands: nothing in the title
+            // says which extension they belong to.
+            record("ext:send-files", "Send Files", "view"),
+            record("ext:receive", "Receive", "view"),
         ]
     }
 
@@ -4053,8 +4083,13 @@ mod extensions_first {
         }
 
         let order = ranked("local", &frecency);
-        assert_eq!(order[0], "ext:localsend", "thirty launches of the program outranked the extension");
-        assert_eq!(order[1], "app:localsend");
+        let program = order.iter().position(|id| id == "app:localsend").expect("the program matched");
+        let extension = order.iter().position(|id| id == "ext:localsend").expect("the extension matched");
+        assert!(extension < program, "thirty launches of the program outranked the extension: {order:?}");
+        assert!(
+            order[..program].iter().all(|id| id.starts_with("ext:")),
+            "something other than an extension sat above the program: {order:?}"
+        );
     }
 
     /// Only within a match class: a program whose title *is* the query is
@@ -4063,6 +4098,44 @@ mod extensions_first {
     fn a_better_match_still_wins() {
         let order = ranked("localhost tools", &Frecency::default());
         assert_eq!(order[0], "app:localhost");
+    }
+
+    /// The case as it actually presented: LocalSend's commands are called
+    /// "Send Files" and "Receive", and only the extension is called LocalSend.
+    /// Typing the extension's name reaches them, above the program.
+    #[test]
+    fn the_extensions_name_reaches_its_commands_above_the_program() {
+        let mut frecency = Frecency::default();
+        for _ in 0..30 {
+            frecency.record("app:localsend", NOW);
+        }
+
+        let order = ranked("locals", &frecency);
+        let program = order.iter().position(|id| id == "app:localsend").expect("the program matched");
+        for id in ["ext:send-files", "ext:receive"] {
+            let command = order.iter().position(|one| one == id).expect("the command matched");
+            assert!(command < program, "{id} sat below the program it belongs to: {order:?}");
+        }
+    }
+
+    /// A category is still a category: "appl" does not turn every program
+    /// into a name match on "Application".
+    #[test]
+    fn a_category_is_not_read_as_a_name() {
+        let needle: Vec<char> = "applic".chars().collect();
+        let program = named("app:notepad", "Notepad", "app", "Application");
+        assert_eq!(
+            classify_text(&needle, &program).map(|(class, _)| class),
+            Some(MatchClass::Elsewhere)
+        );
+
+        let command = named("ext:send", "Send Files", "view", "LocalSend");
+        let needle: Vec<char> = "locals".chars().collect();
+        let class = classify_text(&needle, &command).map(|(class, _)| class);
+        assert!(
+            class.is_some_and(|class| class < MatchClass::Elsewhere),
+            "an extension's name matched as something other than a name: {class:?}"
+        );
     }
 
     /// The empty list is what you reach for; an extension is not that.
