@@ -41,13 +41,13 @@
     light: "radial-gradient(120% 90% at 25% 15%, #e8e4dc, #b9b2a6 75%)",
   } as const;
 
-  const THEMES = ["winters-glass", "oilslick", "graphite", "ember", "moss", "aberration"] as const;
+  const THEMES = ["frost", "frost-light", "oilslick", "graphite", "ember", "moss", "aberration"] as const;
 
   /** What the store says can be filtered, drawn beside the field as in Sill. */
   let filter = $state<StoreFilterState | null>(null);
 
   let wall = $state<keyof typeof WALLS>("dark");
-  let theme = $state<(typeof THEMES)[number]>("winters-glass");
+  let theme = $state<(typeof THEMES)[number]>("frost");
   let face = $state("satoshi");
 
   $effect(() => {

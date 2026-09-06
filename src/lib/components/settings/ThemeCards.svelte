@@ -18,7 +18,8 @@
    * palettes the way a table of hex values here would.
    */
   const THEMES: { id: Theme; name: string; note: string }[] = [
-    { id: "winters-glass", name: "Winters' Glass", note: "Neutral, blue-grey accent" },
+    { id: "frost", name: "Frost", note: "Neutral, blue-grey accent" },
+    { id: "frost-light", name: "Frost Light", note: "The same glass on a pale ground" },
     { id: "oilslick", name: "Oilslick", note: "A faint iridescent wash" },
     { id: "graphite", name: "Graphite", note: "No hue anywhere" },
     { id: "ember", name: "Ember", note: "Warm black, amber accent" },
