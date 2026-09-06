@@ -56,9 +56,7 @@
               <dt><Chord chord={key.chord} /></dt>
               <dd>
                 {key.does}
-                {#if key.refused}
-                  <span class="note">through the keyboard hook</span>
-                {:else if key.contested}
+                {#if key.contested}
                   <span class="note">another action takes this key</span>
                 {:else if key.changed}
                   <span class="note">changed by you</span>

@@ -43,6 +43,8 @@
   import McpPanel from "$lib/components/settings/McpPanel.svelte";
   import QuicklinksPanel from "$lib/components/settings/QuicklinksPanel.svelte";
   import ShortcutsPanel from "$lib/components/settings/ShortcutsPanel.svelte";
+  import KeyRecorder from "$lib/components/settings/KeyRecorder.svelte";
+  import { SECTIONS } from "$lib/keys";
   import ThemeCards from "$lib/components/settings/ThemeCards.svelte";
   import ExtensionsPanel from "$lib/components/settings/ExtensionsPanel.svelte";
   import { shortRevision, storePins, type Pin } from "$lib/store";
@@ -71,6 +73,7 @@
     type Backdrop,
     type SettingEntry,
     type InterfaceFont,
+    type TapModifier,
     type Theme,
     type Diagnostics,
     type Timings,
@@ -99,6 +102,21 @@
      */
     group?: string;
   }
+
+  /**
+   * The modifiers a double-tap can be bound to, and off.
+   *
+   * Off first, because it is the default and because a gesture that installs
+   * a keyboard hook should be something somebody chooses rather than
+   * something they have to find and turn off.
+   */
+  const TAP_MODIFIERS = [
+    { value: "off", label: "Off" },
+    { value: "control", label: "Ctrl" },
+    { value: "alt", label: "Alt" },
+    { value: "shift", label: "Shift" },
+    { value: "win", label: "Win" },
+  ];
 
   const PANELS: Panel[] = [
     {
@@ -1014,7 +1032,66 @@
             </Row>
           </Section>
 
-          <Section label="Opening and closing">
+          <Section
+            label="Opening and closing"
+            description="The keys that bring Sill up, and what it does when it comes and goes."
+          >
+            <Row
+              title="Summon hotkey"
+              description="Whatever application is in front. Escape while recording keeps the current key."
+            >
+              {#snippet control()}
+                <KeyRecorder
+                  chord={p.hotkey.summon}
+                  scope="hotkey"
+                  section={SECTIONS.opening}
+                  onsave={async (chord) => {
+                    p.hotkey.summon = chord;
+                    await commit();
+                  }}
+                  ariaLabel="Summon hotkey"
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="Window switcher hotkey"
+              description="Opens Sill straight onto the windows you have open, most recent first."
+            >
+              {#snippet control()}
+                <KeyRecorder
+                  chord={p.hotkey.switcher}
+                  scope="hotkey"
+                  section={SECTIONS.anywhere}
+                  onsave={async (chord) => {
+                    p.hotkey.switcher = chord;
+                    await commit();
+                  }}
+                  onclear={async () => {
+                    p.hotkey.switcher = "";
+                    await commit();
+                  }}
+                  placeholder="Off"
+                  ariaLabel="Window switcher hotkey"
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="Open with a double-tap"
+              description="Tapping a modifier twice opens the launcher. It needs no chord and no key anything else wants; anything typed between the two taps cancels it."
+            >
+              {#snippet control()}
+                <Segmented
+                  label="Open with a double-tap"
+                  value={p.taps?.modifier ?? "off"}
+                  options={TAP_MODIFIERS}
+                  onchange={(next) => {
+                    if (!prefs) return;
+                    p.taps.modifier = next === "off" ? null : (next as TapModifier);
+                    void commit();
+                  }}
+                />
+              {/snippet}
+            </Row>
             <Row
               title="Hide when it loses focus"
               description="Clicking away dismisses Sill, the same as pressing Escape."
@@ -1312,7 +1389,7 @@
           {:else if active === "snippets"}
             <SnippetsPanel prefs={p} {commit} />
           {:else if active === "shortcuts"}
-            <ShortcutsPanel prefs={p} commit={commitWith} {conflicts} />
+            <ShortcutsPanel prefs={p} commit={commitWith} />
           {:else if active === "quicklinks"}
             <QuicklinksPanel />
           {:else if active === "automations"}
@@ -1620,8 +1697,52 @@
           {:else if active === "screenshot"}
           <Section
             label="Taking one"
-            description="Pick an area, click a window, or take every screen at once. Whatever you take goes to the clipboard, and to the editor if you want it. The keys that take one are under Shortcuts."
+            description="Pick an area, click a window, or take every screen at once. Whatever you take goes to the clipboard, and to the editor if you want it."
           >
+            <Row
+              title="Screenshot hotkey"
+              description="Picks an area of the screen without opening Sill first. Drag an area, or click a window."
+            >
+              {#snippet control()}
+                <KeyRecorder
+                  chord={p.hotkey.capture}
+                  scope="hotkey"
+                  section={SECTIONS.anywhere}
+                  onsave={async (chord) => {
+                    p.hotkey.capture = chord;
+                    await commit();
+                  }}
+                  onclear={async () => {
+                    p.hotkey.capture = "";
+                    await commit();
+                  }}
+                  placeholder="Off"
+                  ariaLabel="Screenshot hotkey"
+                />
+              {/snippet}
+            </Row>
+            <Row
+              title="Whole screen hotkey"
+              description="Copies everything on every display at once, with nothing to pick."
+            >
+              {#snippet control()}
+                <KeyRecorder
+                  chord={p.hotkey.captureScreen}
+                  scope="hotkey"
+                  section={SECTIONS.anywhere}
+                  onsave={async (chord) => {
+                    p.hotkey.captureScreen = chord;
+                    await commit();
+                  }}
+                  onclear={async () => {
+                    p.hotkey.captureScreen = "";
+                    await commit();
+                  }}
+                  placeholder="Off"
+                  ariaLabel="Whole screen hotkey"
+                />
+              {/snippet}
+            </Row>
             <Row
               title="After taking one"
               description="The editor draws boxes, arrows, highlights and blocks over anything you have hidden. It reaches the clipboard from there either way."

@@ -53,23 +53,15 @@
     type ActionShortcut,
     type NavigationKey,
   } from "$lib/settings";
-  import type { Binding, BindingSource, Layout, Preferences, TapModifier } from "$lib/settings";
+  import type { Binding, BindingSource, Layout, Preferences } from "$lib/settings";
 
   interface Props {
     prefs: Preferences;
     /** Saves a whole settings object. Awaited, so the rows can be re-read. */
     commit: (next: Preferences) => Promise<void>;
-    /**
-     * Accelerators Windows refused.
-     *
-     * A shortcut another application already owns registers as an error and
-     * then looks exactly like one that works: the row shows the key, the key
-     * does nothing. The recorder says so, in the row that set it.
-     */
-    conflicts: string[];
   }
 
-  let { prefs, commit, conflicts }: Props = $props();
+  let { prefs, commit }: Props = $props();
 
   /**
    * The keys worth offering as a hyper key.
@@ -87,45 +79,10 @@
     { value: "163", label: "Right Ctrl" },
   ];
 
-  /**
-   * The modifiers a double-tap can be bound to, and off.
-   *
-   * Off first, because it is the default and because a gesture that installs
-   * a keyboard hook should be something somebody chooses rather than
-   * something they have to find and turn off.
-   */
-  const TAP_MODIFIERS = [
-    { value: "off", label: "Off" },
-    { value: "control", label: "Ctrl" },
-    { value: "alt", label: "Alt" },
-    { value: "shift", label: "Shift" },
-    { value: "win", label: "Win" },
-  ];
-
   const PRESETS = [
     { value: "standard", label: "Arrows only" },
     { value: "vim", label: "Vim" },
     { value: "emacs", label: "Emacs" },
-  ];
-
-  /** The other keys that work whatever is in front. The summon key is drawn on its own. */
-  type GlobalKey = "switcher" | "capture" | "captureScreen";
-  const GLOBAL: { id: GlobalKey; title: string; description: string }[] = [
-    {
-      id: "switcher",
-      title: "Window switcher hotkey",
-      description: "Opens Sill straight onto the windows you have open, most recent first.",
-    },
-    {
-      id: "capture",
-      title: "Screenshot hotkey",
-      description: "Picks an area of the screen without opening Sill first. Drag an area, or click a window.",
-    },
-    {
-      id: "captureScreen",
-      title: "Whole screen hotkey",
-      description: "Copies everything on every display at once, with nothing to pick.",
-    },
   ];
 
   /** What Rust says the keys are. Re-read after every write. */
@@ -170,17 +127,6 @@
 
   const bindings = $derived(prefs.bindings ?? []);
   const layouts = $derived(prefs.layouts ?? []);
-
-  function setHotkey(id: "summon" | GlobalKey, chord: string): Promise<void> {
-    return save({ ...prefs, hotkey: { ...prefs.hotkey, [id]: chord } });
-  }
-
-  function setTap(next: string): void {
-    void save({
-      ...prefs,
-      taps: { ...prefs.taps, modifier: next === "off" ? null : (next as TapModifier) },
-    });
-  }
 
   function setPreset(next: string): void {
     void save({
@@ -398,45 +344,18 @@
     <KeyMap sections={reference} onpick={(chord) => void showChord(chord)} />
   </Section>
 
+  <!--
+    The keys that open Sill live under General, and the keys that take a
+    screenshot under Screenshots: a key belongs on the panel of the thing it
+    does. What is left here is what is about keys as such.
+  -->
   <Section
-    label="Opening Sill"
-    description="The key that summons the launcher, and the two gestures that can stand in for it."
+    label="Hyper key"
+    description="One key that stands in for Ctrl, Alt, Shift and Windows together, so every letter becomes a shortcut nothing else has claimed."
   >
     <Row
-      title="Summon hotkey"
-      description="Whatever application is in front. Escape while recording keeps the current key."
-    >
-      {#snippet control()}
-        <span data-chord={prefs.hotkey.summon}>
-          <KeyRecorder
-            chord={prefs.hotkey.summon}
-            scope="hotkey"
-            section={SECTIONS.opening}
-            taken={conflicts.includes(prefs.hotkey.summon)}
-            onsave={(chord) => setHotkey("summon", chord)}
-            ariaLabel="Summon hotkey"
-          />
-        </span>
-      {/snippet}
-    </Row>
-
-    <Row
-      title="Open with a double-tap"
-      description="Tapping a modifier twice opens the launcher. It needs no chord and no key anything else wants. Anything typed between the two taps cancels it, so an ordinary shortcut never sets it off."
-    >
-      {#snippet control()}
-        <Segmented
-          label="Open with a double-tap"
-          value={prefs.taps?.modifier ?? "off"}
-          options={TAP_MODIFIERS}
-          onchange={setTap}
-        />
-      {/snippet}
-    </Row>
-
-    <Row
       title="Hyper key"
-      description="One key that stands in for Ctrl, Alt, Shift and Windows together, so every letter becomes a shortcut nothing else has claimed. The key stops doing what is printed on it while this is on."
+      description="The key stops doing what is printed on it while this is on."
     >
       {#snippet control()}
         <Select
@@ -455,28 +374,8 @@
 
   <Section
     label="From anywhere"
-    description="Keys that work whatever application is in front. The first three open one of Sill's own surfaces; the rest run an action on something without the launcher appearing: highlight some text, press the key, and the text changes where it sits."
+    description="Keys that run an action on something without the launcher appearing, whatever application is in front: highlight some text, press the key, and the text changes where it sits."
   >
-    <!-- indexed as "Window switcher hotkey", "Screenshot hotkey", "Whole screen hotkey" -->
-    {#each GLOBAL as key (key.id)}
-      <Row title={key.title} description={key.description}>
-        {#snippet control()}
-          <span data-chord={prefs.hotkey[key.id]}>
-            <KeyRecorder
-              chord={prefs.hotkey[key.id]}
-              scope="hotkey"
-              section={SECTIONS.anywhere}
-              taken={Boolean(prefs.hotkey[key.id]) && conflicts.includes(prefs.hotkey[key.id])}
-              onsave={(chord) => setHotkey(key.id, chord)}
-              onclear={() => setHotkey(key.id, "")}
-              placeholder="Off"
-              ariaLabel="{key.title} hotkey"
-            />
-          </span>
-        {/snippet}
-      </Row>
-    {/each}
-
     {#each bindings as binding, at (keyOf(binding, at))}
       <div data-binding={at} class:revealed={reveal === at}>
         <Row
@@ -490,7 +389,6 @@
                 chord={binding.accelerator}
                 scope="binding"
                 section={SECTIONS.anywhere}
-                taken={Boolean(binding.accelerator) && conflicts.includes(binding.accelerator)}
                 onsave={(chord) => update(at, { accelerator: chord })}
                 onclear={() => update(at, { accelerator: "" })}
                 ariaLabel="Key for this shortcut"

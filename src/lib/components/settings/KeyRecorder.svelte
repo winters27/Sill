@@ -43,8 +43,6 @@
     onclear?: () => Promise<void>;
     /** Puts the key back to what it shipped with. Backspace, where it exists. */
     onreset?: () => Promise<void>;
-    /** Windows would not register this chord as the hook's backstop. The hook still takes it. */
-    taken?: boolean;
     /** Another action on the same list takes this chord first. */
     contested?: string;
     /** What the control says when there is no key. */
@@ -59,7 +57,6 @@
     onsave,
     onclear,
     onreset,
-    taken = false,
     contested,
     placeholder = "Set a key",
     ariaLabel,
@@ -184,15 +181,6 @@
   /** The control speaks for the row, so the row's own copy of this goes quiet. */
   const standing = $derived.by(() => {
     if (note) return note;
-    if (taken) {
-      // One quiet line; the reason waits under the pointer. Four lines of
-      // explanation under a control read as an error whatever colour they are.
-      return {
-        text: "Through the keyboard hook",
-        refused: false,
-        more: "Sill takes this key ahead of every other program through its keyboard hook. Windows would not also register it as a backstop, because another program holds it or Windows cannot name the key.",
-      };
-    }
     if (contested) {
       return { text: `${contested} takes this key on the same list, so this one never fires.`, refused: true };
     }

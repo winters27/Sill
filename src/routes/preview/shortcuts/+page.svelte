@@ -98,9 +98,9 @@
         <KeyRecorder chord={switcher} scope="hotkey" section="From anywhere" onsave={async (c) => { switcher = c; }} onclear={async () => { switcher = ""; }} placeholder="Off" />
       {/snippet}
     </Row>
-    <Row title="Screenshot" description="A key Windows refused.">
+    <Row title="Screenshot" description="A key that can be taken away, and is off until set.">
       {#snippet control()}
-        <KeyRecorder chord={capture} scope="hotkey" section="From anywhere" taken onsave={async (c) => { capture = c; }} onclear={async () => { capture = ""; }} placeholder="Off" />
+        <KeyRecorder chord={capture} scope="hotkey" section="From anywhere" onsave={async (c) => { capture = c; }} onclear={async () => { capture = ""; }} placeholder="Off" />
       {/snippet}
     </Row>
     <Row title="Next" description="A movement, set by hand. Backspace gives it back to the preset.">

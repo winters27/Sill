@@ -464,14 +464,14 @@ pub const SETTINGS: &[Setting] = &[
     ),
     // ----------------------------------------------------------- shortcuts
     s(
-        "shortcuts",
-        "Shortcuts",
+        "general",
+        "General",
         "Summon hotkey",
         "shortcut keybind alt space keyboard hotkey",
     ),
     s(
-        "shortcuts",
-        "Shortcuts",
+        "general",
+        "General",
         "Window switcher hotkey",
         "alt tab window switch cycle shortcut keybind",
     ),
@@ -482,8 +482,8 @@ pub const SETTINGS: &[Setting] = &[
         "paste replace selection result back",
     ),
     s(
-        "shortcuts",
-        "Shortcuts",
+        "general",
+        "General",
         "Open with a double-tap",
         "double tap modifier open shortcut",
     ),
@@ -673,14 +673,14 @@ pub const SETTINGS: &[Setting] = &[
         "exclude filter block ignore hide",
     ),
     s(
-        "shortcuts",
-        "Shortcuts",
+        "screenshot",
+        "Screenshots",
         "Screenshot hotkey",
         "screenshot capture key bind area region",
     ),
     s(
-        "shortcuts",
-        "Shortcuts",
+        "screenshot",
+        "Screenshots",
         "Whole screen hotkey",
         "screenshot capture key bind fullscreen display",
     ),

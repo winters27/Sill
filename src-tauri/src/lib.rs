@@ -1252,7 +1252,7 @@ impl DismissOnBlur {
 /// exists to put in front of somebody was not on the screen it opened.
 /// `verify-source` reads the settings catalogue and refuses a section here
 /// that does not hold that row.
-const SUMMON_SECTION: &str = "shortcuts";
+const SUMMON_SECTION: &str = "general";
 
 /// Says out loud that the summon key never took.
 ///

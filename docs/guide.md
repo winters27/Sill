@@ -308,10 +308,13 @@ refused, and why that is not a dead key.
 
 There is no list of keys on this page on purpose. A reference somebody types
 into a document is wrong the first time a key changes, and the person reading
-it has no way to tell. Settings, under Shortcuts, is where every key is
-changed, and it has presets for arrow keys alone, for vim-style movement, and
-for emacs-style movement. A preset only ever adds: turning one on never takes
-the arrow keys away.
+it has no way to tell. A key is changed on the panel of the thing it does:
+the summon key and the window switcher under General, the screenshot keys
+under Screenshots, the dictation trigger under Dictation. Settings, under
+Shortcuts, holds the keyboard map, shortcuts of your own, the movement keys
+and the action keys, and it has presets for arrow keys alone, for vim-style
+movement, and for emacs-style movement. A preset only ever adds: turning one
+on never takes the arrow keys away.
 
 The top of that panel is a keyboard with every bound key lit. Choose a
 modifier above it, or hold one down over it, and it shows that layer; hover a
