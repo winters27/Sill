@@ -1230,18 +1230,68 @@ impl FirstRun {
 ///
 /// Its own flag rather than a read of the preferences, because the answer is
 /// needed inside a window event handler, which is synchronous, and the
-/// preferences live behind an async lock. An atomic bool is also the whole of
-/// what that handler needs to know.
+/// preferences live behind an async lock. Two atomic bools are the whole of
+/// what that handler needs to know: what the setting says, and whether a
+/// capture is holding the launcher on screen regardless.
+///
+/// ## The hold
+///
+/// Taking a screenshot used to dismiss the launcher first, "or it is in the
+/// picture". That was the wrong way round: a picture with Sill in it is a
+/// picture somebody chose to take with Sill open, and the one screenshot it
+/// made impossible was a screenshot of Sill itself. The overlay takes the
+/// keyboard, which reads as clicking away, so the capture holds the launcher
+/// for as long as the overlay is up and lets go when it hides.
 #[derive(Default)]
-pub struct DismissOnBlur(std::sync::atomic::AtomicBool);
+pub struct DismissOnBlur {
+    wanted: std::sync::atomic::AtomicBool,
+    held: std::sync::atomic::AtomicBool,
+}
 
 impl DismissOnBlur {
     pub(crate) fn set(&self, yes: bool) {
-        self.0.store(yes, std::sync::atomic::Ordering::Relaxed);
+        self.wanted.store(yes, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn wanted(&self) -> bool {
-        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    /// A capture surface is about to take the keyboard; the launcher stays.
+    pub(crate) fn hold(&self) {
+        self.held.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The capture surface has gone; clicking away dismisses again.
+    pub(crate) fn release(&self) {
+        self.held.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether losing focus right now should dismiss the launcher.
+    fn dismisses(&self) -> bool {
+        self.wanted.load(std::sync::atomic::Ordering::Relaxed)
+            && !self.held.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod dismissal {
+    use super::DismissOnBlur;
+
+    #[test]
+    fn a_hold_outranks_the_setting_until_it_is_released() {
+        let blur = DismissOnBlur::default();
+        blur.set(true);
+        assert!(blur.dismisses());
+        blur.hold();
+        assert!(!blur.dismisses(), "the overlay taking focus is not clicking away");
+        blur.release();
+        assert!(blur.dismisses());
+    }
+
+    #[test]
+    fn releasing_does_not_switch_the_setting_on() {
+        let blur = DismissOnBlur::default();
+        blur.set(false);
+        blur.hold();
+        blur.release();
+        assert!(!blur.dismisses());
     }
 }
 
@@ -1406,7 +1456,7 @@ fn watch_focus(app: &AppHandle, dismiss_on_blur: bool) {
     let handle = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(false) = event {
-            if !handle.app_handle().state::<DismissOnBlur>().wanted() {
+            if !handle.app_handle().state::<DismissOnBlur>().dismisses() {
                 return;
             }
 
@@ -1471,6 +1521,38 @@ pub(crate) fn autohide_tray_menu(app: &AppHandle) {
 pub(crate) fn dismiss_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         summon::hide(&window);
+    }
+}
+
+/// Keeps the launcher on screen while a capture surface has the keyboard.
+///
+/// Called just before the overlay is shown. See `DismissOnBlur` for why the
+/// launcher stays in the picture rather than getting out of it.
+pub(crate) fn keep_main_through_capture(app: &AppHandle) {
+    if let Some(blur) = app.try_state::<DismissOnBlur>() {
+        blur.hold();
+    }
+}
+
+/// The capture surface has gone: clicking away dismisses the launcher again,
+/// and if the launcher stayed on screen it gets the keyboard back, so the
+/// next keystroke goes where the eye is.
+pub(crate) fn capture_over(app: &AppHandle) {
+    if let Some(blur) = app.try_state::<DismissOnBlur>() {
+        blur.release();
+    }
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if !window.is_visible().unwrap_or(false) {
+        return;
+    }
+    let _ = window.set_focus();
+    #[cfg(windows)]
+    if let Ok(handle) = window.hwnd() {
+        summon::force_foreground(windows::Win32::Foundation::HWND(
+            handle.0 as *mut core::ffi::c_void,
+        ));
     }
 }
 
@@ -2507,9 +2589,9 @@ mod tests {
     fn the_dismissal_setting_is_read_after_it_changes() {
         let blur = DismissOnBlur::default();
         blur.set(true);
-        assert!(blur.wanted());
+        assert!(blur.dismisses());
 
         blur.set(false);
-        assert!(!blur.wanted(), "turning it off still needs a restart");
+        assert!(!blur.dismisses(), "turning it off still needs a restart");
     }
 }

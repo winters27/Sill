@@ -1576,8 +1576,9 @@
       return true;
     }
 
-    // Picking an area puts an overlay over every screen, so the launcher has
-    // nothing more to do than get out of the way, which Rust does.
+    // Picking an area puts an overlay over every screen. The launcher stays
+    // where it is, under the overlay and in the picture if that is the
+    // picture wanted; Rust holds it there while the overlay has the keyboard.
     if (id === "sill:capture-area") {
       void recordUse(id, typed);
       try {

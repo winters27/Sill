@@ -115,8 +115,11 @@ pub(crate) async fn begin_capture(app: AppHandle) -> Result<(), String> {
         return Err("no screens were found".to_string());
     }
 
-    // The launcher gets out of the way first, or it is in the picture.
-    crate::dismiss_main(&app);
+    // The launcher stays where it is, and in the picture if that is what
+    // somebody is after; a screenshot of Sill is a screenshot like any other.
+    // The overlay is about to take the keyboard, which would otherwise read
+    // as clicking away.
+    crate::keep_main_through_capture(&app);
 
     window
         .set_position(tauri::PhysicalPosition::new(left, top))
@@ -190,6 +193,7 @@ pub(crate) struct CaptureTarget {
 #[tauri::command]
 pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, String> {
     crate::lazy_windows::hide(&app, "capture");
+    crate::capture_over(&app);
     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
 
     // Read again rather than trusting what the overlay was told: a handle can
@@ -228,7 +232,7 @@ pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, 
 #[tauri::command]
 pub(crate) async fn capture_display(app: AppHandle, index: usize) -> Result<String, String> {
     crate::lazy_windows::hide(&app, "capture");
-    crate::dismiss_main(&app);
+    crate::capture_over(&app);
     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
 
     let screen = crate::windowing::monitors()
@@ -257,6 +261,7 @@ pub(crate) async fn cancel_capture(app: AppHandle) -> Result<(), String> {
     // dropping their sender is what their receiver reads as cancelled.
     forget_choice(&app);
     crate::lazy_windows::hide(&app, "capture");
+    crate::capture_over(&app);
 
     Ok(())
 }
@@ -334,6 +339,7 @@ pub(crate) async fn chose_area(
     height: i32,
 ) -> Result<(), String> {
     crate::lazy_windows::hide(&app, "capture");
+    crate::capture_over(&app);
     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
 
     let waiting = {
@@ -451,6 +457,7 @@ pub(crate) async fn capture_area(
     height: i32,
 ) -> Result<String, String> {
     crate::lazy_windows::hide(&app, "capture");
+    crate::capture_over(&app);
 
     // Hiding is a request to the compositor, not something that has happened
     // by the time the call returns. Without this the overlay's dimming is in
@@ -473,11 +480,8 @@ pub(crate) async fn capture_area(
 /// Copies the whole of every screen at once.
 #[tauri::command]
 pub(crate) async fn capture_screen(app: AppHandle) -> Result<String, String> {
-    crate::dismiss_main(&app);
-
-    // The launcher is a window and hiding it is a request, the same as above.
-    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-
+    // Nothing is hidden first. If the launcher is up, it is part of the
+    // screen being copied, which is what "every screen" means.
     let (left, top, width, height) = crate::capture::virtual_screen();
 
     let allowed = crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
