@@ -63,8 +63,8 @@
  * `rgba(var(--accent-rgb), 0.07)` at a time.
  * ---------------------------------------------------------------------------
  *
- * The palette itself is StreamNook's "Winters' Glass", expressed in Vicinae's
- * token schema so Vicinae theme files still port directly:
+ * The palette itself is the one Sill shares with StreamNook, expressed in
+ * Vicinae's token schema so Vicinae theme files still port directly:
  *
  *   [colors.core]                  -> --core-*
  *   [colors.accents]               -> --accent-*
@@ -118,6 +118,7 @@
   --accent-green: #22c55e;
   --accent-red: #ef4444;
   --accent-red-rgb: 239, 68, 68;
+  --accent-green-rgb: 34, 197, 94;
   --accent-yellow: #eab308;
 
   --list-selection-background: rgba(var(--accent-rgb), 0.16);
@@ -140,13 +141,42 @@
   --danger-fill: rgba(var(--accent-red-rgb), 0.15);
   --warning: var(--accent-yellow);
   --success: var(--accent-green);
+  /* The wash behind a reading that is going well: the pill counting what a
+     conversation has cost sits on this, at the alpha `--danger-fill` uses. */
+  --success-fill: rgba(var(--accent-green-rgb), 0.14);
   --info: var(--accent-blue);
 
   /*
    * ---- The neutral ramp -------------------------------------------------
    *
+   * What the ramp is made of.
+   *
+   * Every step below is alpha over this and never a colour of its own, and
+   * that is the whole of how a light theme works: one variable flips and
+   * text, hairlines, fills and the scrollbar all follow. It stays one ramp
+   * with one set of steps rather than becoming a second design system, which
+   * is the rule this file has kept from the start.
+   *
+   * Three numbers rather than a colour because every use is an `rgba()` with
+   * its own alpha, and `color-mix` at thirteen call sites is arithmetic at
+   * paint time for a value that never animates.
+   *
+   * The steps themselves are NOT symmetric between the two polarities and a
+   * light theme has to say so: black at 0.07 over a pale surface is a good
+   * deal more present than white at 0.07 over a dark one, because the eye
+   * reads a darkening against light as an edge sooner than it reads a
+   * lightening against dark. `frost-light` retunes the few that need it and
+   * inherits the rest.
+   */
+  --ink: 255, 255, 255;
+
+  /*
    * Raised surfaces, as flat colours. Used where something must read as an
    * object rather than as a wash: a keycap, a segmented thumb.
+   *
+   * Opaque, so these are not on the `--ink` ramp and a light theme restates
+   * them. There are four, which is cheaper than making every raised surface
+   * an alpha that has to stack correctly over an unknown backdrop.
    */
   --grey-0: #0c0c0d;
   --grey-1: #141416;
@@ -163,8 +193,8 @@
    * Raycast's own tokens sit (secondary `rgb(156,156,157)`, and
    * `rgba(255,255,255,.4/.6)` throughout).
    */
-  --text-1: #ffffff;
-  --text-2: rgba(255, 255, 255, 0.62);
+  --text-1: rgb(var(--ink));
+  --text-2: rgba(var(--ink), 0.62);
   /*
    * 0.50 rather than the 0.40 Raycast uses, and the reason is Sill-specific.
    *
@@ -178,28 +208,28 @@
    * small text lighter than its nominal alpha suggests, so the generic value
    * has less headroom here than it would in an opaque window.
    */
-  --text-3: rgba(255, 255, 255, 0.5);
+  --text-3: rgba(var(--ink), 0.5);
   /* Decorative only: placeholder text and the Escape hint. Never carries
      information that has to be read, so the small-text threshold is not the
      bar it is measured against. */
-  --text-4: rgba(255, 255, 255, 0.26);
+  --text-4: rgba(var(--ink), 0.26);
 
   /* Fills and lines. Neutral, so a hover state never tints. */
   /* Under `--fill-1`, and it earns a step of its own: six panels wanted a
      surface that is present but not yet a hover, and each wrote 0.02 inline
      because the scale did not reach that far down. */
-  --fill-0: rgba(255, 255, 255, 0.02);
-  --fill-1: rgba(255, 255, 255, 0.04);
-  --fill-2: rgba(255, 255, 255, 0.07);
-  --fill-3: rgba(255, 255, 255, 0.1);
+  --fill-0: rgba(var(--ink), 0.02);
+  --fill-1: rgba(var(--ink), 0.04);
+  --fill-2: rgba(var(--ink), 0.07);
+  --fill-3: rgba(var(--ink), 0.1);
   /* The top of the ramp, for a control that must read as an object on a
      surface that is not ours: the keycap drawn over a screenshot, the lit
      edge of a slider thumb. */
-  --fill-4: rgba(255, 255, 255, 0.16);
-  --fill-5: rgba(255, 255, 255, 0.25);
-  --hairline: rgba(255, 255, 255, 0.07);
-  --hairline-strong: rgba(255, 255, 255, 0.12);
-  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --fill-4: rgba(var(--ink), 0.16);
+  --fill-5: rgba(var(--ink), 0.25);
+  --hairline: rgba(var(--ink), 0.07);
+  --hairline-strong: rgba(var(--ink), 0.12);
+  --scrollbar-thumb: rgba(var(--ink), 0.16);
 
   /*
    * Shade, which is the same ramp pointed the other way.
@@ -321,7 +351,7 @@
   --scrim: rgba(0, 0, 0, 0.35);
 
   /*
-   * The canonical Winters' Glass bevels, taken verbatim from StreamNook so the
+   * The canonical bevels, taken verbatim from StreamNook so the
    * recipe stays identical across both apps.
    */
   --bevel-tile: inset 1px 1px 0 0 rgba(255, 255, 255, 0.1),
@@ -345,14 +375,24 @@
   --etch: rgba(0, 0, 0, 0.62);
 
   /*
-   * The window gets the light catch only, not the full tile bevel.
+   * The window's edge: a hairline ring, and a light catch along the top.
    *
-   * A border plus two 1px insets is 3px of edge treatment stacked exactly
-   * where DWM is already clipping the corner. On StreamNook's settings modal
-   * that is proportionally invisible; on a 750x500 launcher it reads as a
-   * chunky frame. DWM defines the shape, this just catches the light.
+   * DWM defines the shape and clips to it, so the ring is drawn inside the
+   * window and follows the rounded corner exactly; nothing can be drawn
+   * outside. It replaces a one-pixel inset on the top and left only, which
+   * met the corner at a right angle and read as a bevel cut into the glass
+   * rather than an edge of it, and it replaces the frame line Windows drew
+   * around the window in its own colour (switched off in summon.rs). One
+   * ring at hairline strength is the whole border now: enough for the pane
+   * to separate from a wallpaper of its own colour, faint enough to be
+   * glass. The catch along the top is where light lands on a sheet.
+   *
+   * A border plus two 1px insets was 3px of edge treatment stacked where
+   * DWM clips the corner; on a 750x500 launcher that read as a frame.
    */
-  --bevel-window: inset 1px 1px 0 0 rgba(255, 255, 255, 0.08);
+  --bevel-window:
+    inset 0 0 0 1px var(--hairline),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
 
   /* The single light catch a selected row takes. One bevel per edge, and a
      row has no border to stack it on. */
@@ -798,13 +838,96 @@
 }
 
 /* Neutral near-black, desaturated blue-grey accent. Shared with StreamNook. */
-[data-theme="winters-glass"] {
+[data-theme="frost"] {
   --core-background: #0c0c0d;
   --core-secondary-background: #1a1a1b;
   --core-accent: #97b1b9;
   --accent-hover: #adc4cc;
   --accent-bright: #c8e0e8;
   --accent-rgb: 151, 177, 185;
+}
+
+/*
+ * Frost, the other way up.
+ *
+ * The same glass on a pale ground rather than a second palette. `--ink` flips
+ * and the whole neutral ramp follows, so text, hairlines, fills, hovers and
+ * the scrollbar stay the same thirteen steps at the same alphas, reading down
+ * from the surface instead of up off it.
+ *
+ * What is restated below is only what is NOT on that ramp: the opaque raised
+ * greys, the accent, and the handful of effects written as a fixed black or a
+ * fixed white rather than as ink.
+ *
+ * > [!IMPORTANT] Raised means darker here
+ * > `--grey-0` to `--grey-3` ascend on the dark themes, because an object
+ * > lifted off a near-black surface catches light. On a pale surface it casts
+ * > shadow instead, so the same four steps run the other way. Copying the dark
+ * > values and lightening them gives four surfaces nobody can tell apart.
+ *
+ * The accent is DARKER than its dark-theme counterpart, not lighter. `#97b1b9`
+ * is legible on near-black and nearly invisible on near-white, and the accent
+ * marks selection and focus, which are the two things that must never be
+ * subtle.
+ */
+[data-theme="frost-light"] {
+  --ink: 0, 0, 0;
+
+  --core-background: #eef0f3;
+  --core-secondary-background: #f8f9fb;
+
+  --core-accent: #5d7f8a;
+  --accent-hover: #4c6b76;
+  --accent-bright: #395660;
+  --accent-rgb: 93, 127, 138;
+
+  /* Descending, for the reason in the callout above. */
+  --grey-0: #ffffff;
+  --grey-1: #f7f8fa;
+  --grey-2: #eef0f3;
+  --grey-3: #e3e6ea;
+  --grid-item-background: #f8f9fb;
+
+  /*
+   * The three ramp steps that are not symmetric.
+   *
+   * A darkening against a pale surface reads as an edge sooner than a
+   * lightening against a dark one, so the hairlines need a little more alpha
+   * to sit at the same apparent weight. The decorative step needs more again:
+   * 0.26 black over near-white is about #bcbcbc, which is past the point
+   * where a placeholder stops being readable at all.
+   */
+  --hairline: rgba(var(--ink), 0.09);
+  --hairline-strong: rgba(var(--ink), 0.16);
+  --text-4: rgba(var(--ink), 0.35);
+
+  /*
+   * Effects written as a fixed black or white rather than as ink.
+   *
+   * The light that makes glass read as glass comes from above whichever way
+   * the surface goes, so these do not simply invert: the highlight stays
+   * white and the shadow stays black, and what changes is which of the two
+   * does the work. On a pale surface it is the shadow.
+   */
+  --chin: rgba(0, 0, 0, 0.045);
+  --scrim: rgba(0, 0, 0, 0.2);
+  --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.25));
+  --well: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+  --bevel-tile: inset 1px 1px 0 0 rgba(255, 255, 255, 0.8),
+    inset -1px -1px 0 0 rgba(0, 0, 0, 0.07);
+  --bevel-hero: inset 1px 1px 0 0 rgba(255, 255, 255, 0.9),
+    inset -1px -1px 0 0 rgba(0, 0, 0, 0.09), 0 4px 10px rgba(0, 0, 0, 0.1);
+
+  /*
+   * The settings glyph groove, inverted.
+   *
+   * `SettingsIcon` draws the shape twice: this colour lifted a pixel, then
+   * `currentColor` at the true position. On the dark themes the second pass
+   * is the pale line you see and this is its shadow. Here `currentColor` is
+   * dark, so this becomes the highlight instead; a black one would give a
+   * dark line under a dark shadow, which is mud rather than engraving.
+   */
+  --etch: rgba(255, 255, 255, 0.85);
 }
 
 /*
@@ -1114,6 +1237,18 @@ option,
 input,
 textarea {
   color-scheme: dark;
+}
+
+/*
+ * ...and light on the theme that is light.
+ *
+ * `color-scheme` is what the engine reads to decide the parts of a native
+ * control it draws itself, the popup scrollbar among them. Left saying dark
+ * on a pale window it would hand back a dark list under a light one, which
+ * is the same bug as the white list under a dark one, wearing the other hat.
+ */
+[data-theme="frost-light"] :is(select, option, input, textarea) {
+  color-scheme: light;
 }
 
 /*

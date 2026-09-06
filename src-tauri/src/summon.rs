@@ -86,12 +86,34 @@ pub fn apply_backdrop(window: &WebviewWindow, backdrop: Backdrop, tint_alpha: u8
 #[cfg(windows)]
 fn round_corners(window: &WebviewWindow) {
     use windows::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
 
     let Ok(handle) = window.hwnd() else { return };
     let hwnd = HWND(handle.0 as *mut core::ffi::c_void);
     let preference = DWMWCP_ROUND;
+
+    /*
+     * The frame line Windows draws, off.
+     *
+     * A window with no decorations still gets a one-pixel border from DWM in
+     * the system's frame colour, a flat grey that follows the rounded corner
+     * around a pane that is otherwise dark glass. Stacked on the page's own
+     * edge it was two lines of two colours at the same place, and the
+     * launcher read as boxed. The page draws the edge (`--bevel-window`), a
+     * hairline in the theme's own ink, and Windows draws none.
+     */
+    let none = DWMWA_COLOR_NONE;
+    // SAFETY: the same contract as the corner preference below.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            &none as *const _ as *const core::ffi::c_void,
+            std::mem::size_of_val(&none) as u32,
+        )
+    };
 
     // SAFETY: the attribute id and the size match the DWM contract, and the
     // value outlives the call. Older Windows returns an error rather than
