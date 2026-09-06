@@ -237,10 +237,9 @@ def social(mark: Image.Image) -> Image.Image:
     name = wordmark(76)
     hbox = draw.textbbox((0, 0), headline[0], font=headline[1])
     nbox = draw.textbbox((0, 0), "Sill", font=name)
-    chip_h = 46
     side = 122
     block = (side + 36 + (nbox[3] - nbox[1]) + 26
-             + (hbox[3] - hbox[1]) + 46 + chip_h)
+             + (hbox[3] - hbox[1]) + 48 + 44)
 
     y = (h - block) // 2
     small = mark.resize((side, side), Image.LANCZOS)
@@ -251,58 +250,48 @@ def social(mark: Image.Image) -> Image.Image:
     y += (nbox[3] - nbox[1]) + 26
 
     draw.text(((w - (hbox[2] - hbox[0])) / 2 - hbox[0], y - hbox[1]), headline[0], font=headline[1], fill=headline[2])
-    y += (hbox[3] - hbox[1]) + 46
+    y += (hbox[3] - hbox[1]) + 48
 
-    # The row underneath: three claims, the middle one carrying the wash and
-    # its glints. Drawn on its own layer, because a chip is a translucent fill
-    # and `ImageDraw` on an RGB canvas throws the alpha away.
-    chip_font = font(22, "regular")
-    ai_font = font(26)
-    chips = [("Built in Rust", None), ("AI", "on your machine"), ("Open source", None)]
-    pad_x, gap, chip_h = 22, 16, 46
+    # The row underneath: three claims on one line, divided by hairlines. No
+    # fill and no border. A bordered pill reads as a button somebody forgot to
+    # make clickable, and this is a caption, not a control.
+    row_font = font(22, "regular")
+    ai_font = font(27)
+    dim = (150, 156, 167)
 
-    def widths_of():
-        out = []
-        for lead, tail in chips:
-            if tail is None:
-                out.append(int(draw.textlength(lead, font=chip_font)) + pad_x * 2)
-            else:
-                out.append(int(22 + draw.textlength(lead, font=ai_font) + 18
-                               + draw.textlength(tail, font=chip_font)) + pad_x * 2)
-        return out
+    lead_glint, trail_glint, after_ai = 21, 15, 9
+    ai_w = int(draw.textlength("AI", font=ai_font))
+    items = [
+        ("Built in Rust", int(draw.textlength("Built in Rust", font=row_font))),
+        ("AI", lead_glint + ai_w + trail_glint + after_ai
+              + int(draw.textlength("on your machine", font=row_font))),
+        ("Open source", int(draw.textlength("Open source", font=row_font))),
+    ]
 
-    widths = widths_of()
-    row_w = sum(widths) + gap * (len(chips) - 1)
-    x0 = (w - row_w) // 2
+    rule = 34
+    total = sum(w for _, w in items) + rule * (len(items) - 1)
+    x = (w - total) // 2
+    mid = y + 22
 
-    shells = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(shells)
-    x = x0
-    for cw in widths:
-        sd.rounded_rectangle([x, y, x + cw, y + chip_h], radius=chip_h // 2,
-                             fill=(255, 255, 255, 12), outline=(255, 255, 255, 34), width=1)
-        x += cw + gap
-    card = Image.alpha_composite(card.convert("RGBA"), shells).convert("RGB")
-    draw = ImageDraw.Draw(card)
+    box = row_font.getbbox("Hg")
+    baseline = mid - (box[3] - box[1]) // 2 - box[1]
 
-    def baseline(f):
-        box = f.getbbox("Hg")
-        return y + (chip_h - (box[3] - box[1])) // 2 - box[1]
-
-    x = x0
-    for (lead, tail), cw in zip(chips, widths):
-        tx = x + pad_x
-        if tail is None:
-            draw.text((tx, baseline(chip_font)), lead, font=chip_font, fill=(176, 182, 192))
+    for i, (kind, width) in enumerate(items):
+        if kind == "AI":
+            _sparkle(draw, x + 8, mid + 1, 8.5, AI_WARM)
+            letters = _gradient_text("AI", ai_font)
+            lx = x + lead_glint
+            card.paste(letters, (lx, mid - letters.height // 2), letters)
+            _sparkle(draw, lx + letters.width + 6, mid - 12, 5, AI_COOL)
+            draw.text((lx + letters.width + trail_glint + after_ai, baseline),
+                      "on your machine", font=row_font, fill=dim)
         else:
-            _sparkle(draw, tx + 6, y + chip_h / 2 + 1, 8.5, AI_WARM)
-            tx += 22
-            letters = _gradient_text(lead, ai_font)
-            card.paste(letters, (int(tx), int(y + (chip_h - letters.height) // 2)), letters)
-            _sparkle(draw, tx + letters.width + 6, y + chip_h / 2 - 12, 5.5, AI_COOL)
-            tx += letters.width + 18
-            draw.text((tx, baseline(chip_font)), tail, font=chip_font, fill=(176, 182, 192))
-        x += cw + gap
+            draw.text((x, baseline), kind, font=row_font, fill=dim)
+        x += width
+        if i < len(items) - 1:
+            # A hairline, the same one every separator in the launcher is.
+            draw.line([(x + rule // 2, mid - 7), (x + rule // 2, mid + 7)], fill=(68, 66, 78), width=1)
+            x += rule
 
     return card
 
