@@ -109,13 +109,26 @@ impl ExtHost {
         host_js: &Path,
         api: Arc<ApiLayer>,
     ) -> std::io::Result<Self> {
-        let mut child = Command::new(node_exe)
+        let mut command = Command::new(node_exe);
+        command
             .arg(host_js)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()?;
+            .kill_on_drop(true);
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // Node is the extension host and is never looked at directly: all
+            // three of its streams are piped here. Without this it opens a
+            // console window, so running an extension flashes one up over
+            // whatever the person was doing.
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = command.spawn()?;
 
         let stdin = child.stdin.take().expect("stdin was piped");
         let stdout = child.stdout.take().expect("stdout was piped");

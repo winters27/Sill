@@ -324,9 +324,19 @@ $out | ConvertTo-Json -Compress
 pub fn scan_apps_folder() -> Vec<AppRecord> {
     use std::process::Command;
 
-    let output = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", APPS_QUERY])
-        .output();
+    let mut command = Command::new("powershell.exe");
+    command.args(["-NoProfile", "-NonInteractive", "-Command", APPS_QUERY]);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // This runs while the index is built, which is while Sill is starting.
+        // Without it, starting Sill flashes a console window.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = command.output();
 
     let Ok(output) = output else {
         return Vec::new();
