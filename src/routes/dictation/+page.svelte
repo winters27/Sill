@@ -34,7 +34,7 @@
    * read out of the stylesheet each time the panel shows: `--accent-bright`,
    * the one token bright enough to read at 1.5px, in whichever theme is on.
    * The literal is only the value before the first read, and it is the
-   * Winters' Glass one; five other themes define their own.
+   * Frost one; five other themes define their own.
    */
   let ACCENT = "200, 224, 232";
 
@@ -215,7 +215,10 @@
   {#if visible}
     <div class="pill">
       {#if status === "transcribing"}
-        <span class="label">Transcribing</span>
+        <!-- The one state that is work in progress, drawn as such: a sheen
+             passes along the word while the model runs, and stops the moment
+             it says Copied. -->
+        <span class="label busy">Transcribing</span>
       {:else if status === "copied"}
         <span class="label">Copied</span>
       {:else if status === "confirming"}
@@ -285,5 +288,46 @@
   /* The one destructive state gets the one colour that says so. */
   .warn {
     color: var(--danger);
+  }
+
+  /*
+   * A sheen along the word, for the wait.
+   *
+   * The ink is a gradient wider than the word, moved across it, so the
+   * word itself stays the accent and only the light travels. Two and a half
+   * seconds a pass, which is slow enough to read as patience rather than as
+   * a spinner. Somebody who has asked for less motion gets the still word.
+   */
+  .label.busy {
+    background: linear-gradient(
+      90deg,
+      var(--accent) 0%,
+      var(--accent-bright) 45%,
+      var(--text-1) 50%,
+      var(--accent-bright) 55%,
+      var(--accent) 100%
+    );
+    background-size: 220% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: sheen var(--motion-shimmer) linear infinite;
+  }
+
+  @keyframes sheen {
+    from {
+      background-position: 120% 0;
+    }
+    to {
+      background-position: -120% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .label.busy {
+      background: none;
+      color: var(--accent-bright);
+      animation: none;
+    }
   }
 </style>

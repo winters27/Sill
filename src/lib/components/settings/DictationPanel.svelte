@@ -29,7 +29,9 @@
     type SetupProgress,
     type WhisperModel,
   } from "$lib/dictation";
-  import { acceleratorFrom, type Preferences } from "$lib/settings";
+  import type { Preferences } from "$lib/settings";
+  import KeyRecorder from "./KeyRecorder.svelte";
+  import { SECTIONS } from "$lib/keys";
 
   interface Props {
     /** Not `$bindable`: nothing here reassigns it, only writes its fields,
@@ -54,7 +56,6 @@
   let devices = $state<AudioInputDevice[]>([]);
   let models = $state<WhisperModel[]>([]);
   let status = $state<LocalSetupStatus | null>(null);
-  let recording = $state(false);
   let installing = $state(false);
   let hook = $state<HookState | null>(null);
 
@@ -191,30 +192,33 @@
   }
 
   /**
-   * The trigger is recorded as a modifier plus a key, because a low-level
-   * keyboard hook binds the two separately: it watches the modifier's real
-   * down and up edges, which is what makes hold-to-talk possible at all.
+   * The trigger as one chord, the way every other key is drawn.
+   *
+   * It is kept as a modifier and a key because the low-level hook binds the
+   * two separately: it watches the modifier's real down and up edges, which
+   * is what makes hold-to-talk possible at all. The recorder is the same
+   * one the rest of Settings uses, so it looks the same; the one rule of its
+   * own is that a modifier is not optional here, and a chord without one is
+   * refused with the reason under the control.
    */
-  function onRecord(event: KeyboardEvent) {
-    if (!recording) return;
-    event.preventDefault();
-    event.stopPropagation();
+  const trigger = $derived(
+    prefs.dictation.shortcutModifier
+      ? `${prefs.dictation.shortcutModifier}+${prefs.dictation.shortcutKey}`
+      : prefs.dictation.shortcutKey,
+  );
 
-    if (event.key === "Escape") {
-      recording = false;
+  let triggerNote = $state<string | undefined>(undefined);
+
+  async function saveTrigger(chord: string) {
+    const parts = chord.split("+");
+    const key = parts.pop() ?? "";
+    if (parts.length === 0) {
+      triggerNote = "Hold-to-talk needs a modifier held with the key: Alt, Ctrl, Shift or Win.";
       return;
     }
-
-    const accelerator = acceleratorFrom(event);
-    if (!accelerator) return;
-
-    const parts = accelerator.split("+");
-    const key = parts.pop() ?? "";
-    if (parts.length === 0) return;
-
+    triggerNote = undefined;
     prefs.dictation.shortcutModifier = parts.join("+");
     prefs.dictation.shortcutKey = key;
-    recording = false;
     commit();
   }
 
@@ -240,8 +244,6 @@
     };
   });
 </script>
-
-<svelte:window onkeydown={onRecord} />
 
 
 <Section
@@ -309,11 +311,14 @@
     disabled={!prefs.dictation.enabled}
   >
     {#snippet control()}
-      <button class="recorder" class:recording onclick={() => (recording = !recording)}>
-        {recording
-          ? "Press a combination"
-          : `${prefs.dictation.shortcutModifier.split("+").join(" ")} ${prefs.dictation.shortcutKey}`}
-      </button>
+      <KeyRecorder
+        chord={trigger}
+        scope="hotkey"
+        section={SECTIONS.anywhere}
+        onsave={saveTrigger}
+        contested={triggerNote}
+        ariaLabel="Dictation trigger"
+      />
     {/snippet}
   </Row>
 </Section>
@@ -682,32 +687,6 @@
 {/if}
 
 <style>
-  .recorder {
-    min-width: 150px;
-    padding: var(--space-1) var(--space-3);
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--fill-2);
-    box-shadow: var(--bevel-tile);
-    color: var(--text-1);
-    font-family: var(--font-mono);
-    font-size: var(--text-meta);
-    letter-spacing: 0.04em;
-    cursor: pointer;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
-  }
-
-  .recorder:hover {
-    background: var(--fill-3);
-  }
-
-  .recorder.recording {
-    background: var(--hairline-strong);
-    color: var(--accent-bright);
-  }
-
   .hook-state {
     display: flex;
     align-items: center;
