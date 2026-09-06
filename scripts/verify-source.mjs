@@ -2052,6 +2052,51 @@ for (const file of sources("src-tauri/src")) {
 }
 
 /*
+ * Every tool the model can reach has words in the window, and no words name
+ * a tool that is not there.
+ *
+ * The timeline reads a step by its tool name out of `src/lib/chat/verbs.ts`,
+ * and a name it does not know falls back to the raw `snake_case`. That is the
+ * right fallback and the wrong thing to ship: a tool added to `tools.rs` for
+ * the model shows up in the window as `read_registry`, and nothing about that
+ * fails a test on either side. Two lists that must agree, with this making
+ * them agree.
+ */
+{
+  const CATALOGUE = "src-tauri/src/ai/tools.rs";
+  const WORDS = "src/lib/chat/verbs.ts";
+  const rust = readFileSync(CATALOGUE, "utf8");
+  const words = readFileSync(WORDS, "utf8");
+
+  const from = rust.indexOf("CATALOGUE");
+  const tools = [...rust.slice(from).matchAll(/^\s*name: "([a-z_]+)",/gm)].map((m) => m[1]);
+  const named = [...words.matchAll(/^\s{2}([a-z_]+): \{/gm)].map((m) => m[1]);
+
+  if (tools.length === 0) {
+    fail(CATALOGUE, null, "no tools were read out of the catalogue, so this rule checks nothing");
+  }
+
+  for (const tool of tools) {
+    if (named.includes(tool)) continue;
+    fail(
+      WORDS,
+      null,
+      `\`${tool}\` is a tool the model can reach and has no words here, so the ` +
+        "window reads it out by its API name",
+    );
+  }
+
+  for (const word of named) {
+    if (tools.includes(word)) continue;
+    fail(
+      WORDS,
+      lineOf(words, words.indexOf(`  ${word}: {`)),
+      `\`${word}\` has words but is not a tool in the catalogue`,
+    );
+  }
+}
+
+/*
  * The automation module runs nothing at rest, and gates what it writes down.
  *
  * `P8-02`'s whole claim is that Sill contributes no scheduler: a trigger is a
@@ -4478,8 +4523,8 @@ if (tracked.status !== 0) {
  * drawing that is, and that it is the same drawing `Icon.Gear` gets, is
  * interpretation of somebody else's vocabulary, so it is decided once in
  * `exthost/icons.rs`. The window still has to hold the same names to draw
- * with, and that is a second list of forty-eight names with nothing making it
- * agree with the first.
+ * with, and that is a second list of four hundred and sixty-nine names with
+ * nothing making it agree with the first.
  *
  * This is what makes them agree. Four ways a pair like this comes apart, and
  * every one of them fails here:
@@ -4488,18 +4533,24 @@ if (tracked.status !== 0) {
  *   tile while the table says it has a picture;
  * - a name the window has and Rust does not, which is a picture nothing owns;
  * - a name whose mark differs between them, which is the wrong drawing;
- * - a mark named by one side with no arm, or an arm for a mark nothing names,
- *   which is a drawing that can never be reached.
+ * - a mark named by one side with nothing to draw it, or a drawing for a mark
+ *   nothing names, which is a drawing that can never be reached.
  *
- * The last pair is why the markup is keyed by the mark rather than by the
+ * The last pair is why the marks are keyed by the mark rather than by the
  * name. `{:else if drawn === "Gear" || drawn === "Cog"}` could say the two are
  * one picture while the table said they were two, and nothing could tell.
+ *
+ * A mark is drawn three ways and this counts all three: a Phosphor outline in
+ * `GLYPHS`, characters in `TEXT_MARKS`, or an arm in the markup. A mark in
+ * none of them is a name that silently letters itself.
  */
 {
   const RUST = "src-tauri/src/exthost/icons.rs";
+  const TABLE = "src/lib/components/marks.ts";
   const DRAWS = "src/lib/components/ExtIcon.svelte";
 
   const rustText = readFileSync(RUST, "utf8");
+  const tableText = readFileSync(TABLE, "utf8");
   const drawsText = readFileSync(DRAWS, "utf8");
 
   /** The table itself, so a pair written in a doc comment is not read. */
@@ -4514,16 +4565,31 @@ if (tracked.status !== 0) {
     }
   }
 
-  const window = drawsText.match(/const MARKS: Record<string, string> = \{([\s\S]*?)\n  \};/);
+  const window = tableText.match(/export const MARKS: Record<string, string> = \{([\s\S]*?)\n\};/);
 
   const inWindow = new Map();
   if (!window) {
-    fail(DRAWS, null, "no `MARKS` map, so nothing here is being held to " + RUST);
+    fail(TABLE, null, "no `MARKS` map, so nothing here is being held to " + RUST);
   } else {
     for (const row of window[1].matchAll(/^\s*([A-Za-z][A-Za-z0-9]*): "([^"]+)",/gm)) {
       inWindow.set(row[1], row[2]);
     }
   }
+
+  /** The two generated ways a mark gets a drawing, by mark name. */
+  const named = (what) => {
+    const found = tableText.match(
+      new RegExp(`export const ${what}: Record<string, string> = \\{([\\s\\S]*?)\\n\\};`),
+    );
+    if (!found) {
+      fail(TABLE, null, `no \`${what}\` map, so the marks it draws cannot be counted`);
+      return new Set();
+    }
+    return new Set([...found[1].matchAll(/^\s*"([a-z][a-z0-9-]*)":/gm)].map((one) => one[1]));
+  };
+
+  const outlines = named("GLYPHS");
+  const printed = named("TEXT_MARKS");
 
   /*
    * A parse that found nothing agrees with everything, which is the failure
@@ -4533,7 +4599,9 @@ if (tracked.status !== 0) {
    */
   for (const [what, found, where] of [
     ["name", inRust, RUST],
-    ["name", inWindow, DRAWS],
+    ["name", inWindow, TABLE],
+    ["outline", outlines, TABLE],
+    ["printed mark", printed, TABLE],
   ]) {
     if (found.size >= 20) continue;
     fail(where, null, `only ${found.size} icon ${what}(s) found, so this is parsing rather than checking`);
@@ -4542,14 +4610,14 @@ if (tracked.status !== 0) {
   for (const [name, mark] of inRust) {
     if (!inWindow.has(name)) {
       fail(
-        DRAWS,
+        TABLE,
         null,
         `\`${name}\` has a mark in ${RUST} and none here, so a row asking for ` +
           "it draws a lettered tile while the table says it has a picture",
       );
     } else if (inWindow.get(name) !== mark) {
       fail(
-        DRAWS,
+        TABLE,
         null,
         `\`${name}\` is "${inWindow.get(name)}" here and "${mark}" in ${RUST}, ` +
           "so the window draws a different icon from the one Rust names",
@@ -4560,7 +4628,7 @@ if (tracked.status !== 0) {
   for (const name of inWindow.keys()) {
     if (inRust.has(name)) continue;
     fail(
-      DRAWS,
+      TABLE,
       null,
       `\`${name}\` is drawn here and is not in ${RUST}, so the window has an ` +
         "icon name of its own and the table has stopped being the table",
@@ -4578,7 +4646,7 @@ if (tracked.status !== 0) {
    * two and nothing can see the difference.
    */
   for (const arm of drawsText.matchAll(/\{[:#](?:else )?if ([^}]*drawn ===[^}]*)\}/g)) {
-    if (/^drawn === "[a-z][a-z-]*"$/.test(arm[1].trim())) continue;
+    if (/^drawn === "[a-z][a-z0-9-]*"$/.test(arm[1].trim())) continue;
     fail(
       DRAWS,
       lineOf(drawsText, arm.index),
@@ -4587,14 +4655,15 @@ if (tracked.status !== 0) {
     );
   }
 
-  // Every mark either side names, against the arms that draw one.
+  // Every mark either side names, against the three ways one gets drawn.
   const wanted = new Set([...inRust.values(), ...inWindow.values()]);
   const arms = new Set(
-    [...drawsText.matchAll(/drawn === "([a-z][a-z-]*)"/g)].map((one) => one[1]),
+    [...drawsText.matchAll(/drawn === "([a-z][a-z0-9-]*)"/g)].map((one) => one[1]),
   );
+  const drawnSomehow = new Set([...arms, ...outlines, ...printed]);
 
   for (const mark of wanted) {
-    if (arms.has(mark)) continue;
+    if (drawnSomehow.has(mark)) continue;
     fail(
       DRAWS,
       null,
@@ -4603,14 +4672,239 @@ if (tracked.status !== 0) {
     );
   }
 
-  for (const mark of arms) {
+  for (const mark of drawnSomehow) {
     if (wanted.has(mark)) continue;
+    fail(
+      arms.has(mark) ? DRAWS : TABLE,
+      null,
+      `the mark "${mark}" is drawn and no name resolves to it, so that ` +
+        "drawing is unreachable",
+    );
+  }
+
+  /*
+   * A mark is drawn one way, not two.
+   *
+   * An outline and an arm for the same mark is two pictures for one name with
+   * the markup's order deciding which wins, which is the `||` chain again in a
+   * different costume: the table would say one thing and the screen another.
+   */
+  for (const mark of arms) {
+    if (!outlines.has(mark) && !printed.has(mark)) continue;
     fail(
       DRAWS,
       null,
-      `an arm draws the mark "${mark}" and no name resolves to it, so that ` +
-        "drawing is unreachable",
+      `the mark "${mark}" is both drawn here and generated in ${TABLE}, so ` +
+        "which of the two a row gets is decided by the order of the markup",
     );
+  }
+}
+
+/**
+ * What the extension runner reports, and what the audit reads back.
+ *
+ * `run-extension.mjs` ends with `audit: <key>=<values>` lines and
+ * `audit-extensions.mjs` ranks them across a hundred commands. Two files, one
+ * vocabulary, and nothing making them agree, which is the shape this codebase
+ * has been bitten by repeatedly.
+ *
+ * **It had already come apart.** The audit used to scrape the runner's prose
+ * for the word "unimplemented", and the pattern matched the runner's own
+ * headline and captured the word "API" for every extension, including the ones
+ * with nothing missing. The ranking the whole script exists to produce was one
+ * meaningless row deep, and nothing failed, because prose that has changed
+ * shape still reads as prose. A key emitted and never read fails the same way:
+ * quietly, and only in a report nobody can tell is wrong.
+ */
+{
+  const RUNNER = "scripts/run-extension.mjs";
+  const AUDIT = "scripts/audit-extensions.mjs";
+
+  const emitted = new Set(
+    [...readFileSync(RUNNER, "utf8").matchAll(/summarise\(\s*"([a-z-]+)"/g)].map((m) => m[1]),
+  );
+  const read = new Set(
+    [...readFileSync(AUDIT, "utf8").matchAll(/found\(output,\s*"([a-z-]+)"\)/g)].map((m) => m[1]),
+  );
+
+  if (emitted.size === 0) {
+    fail(RUNNER, null, "no `audit:` findings are emitted, so this is parsing rather than checking");
+  }
+  if (read.size === 0) {
+    fail(AUDIT, null, "no `audit:` findings are read, so this is parsing rather than checking");
+  }
+
+  for (const key of emitted) {
+    if (read.has(key)) continue;
+    fail(
+      AUDIT,
+      null,
+      `the runner reports "${key}" and nothing here reads it, so that finding ` +
+        "is collected on every command and ranked nowhere",
+    );
+  }
+
+  for (const key of read) {
+    if (emitted.has(key)) continue;
+    fail(
+      RUNNER,
+      null,
+      `the audit reads "${key}" and the runner never reports it, so that ` +
+        "ranking is empty however many extensions have the problem",
+    );
+  }
+}
+
+
+
+/**
+ * Every panel Rust knows about has a drawing, and every drawing is reachable.
+ *
+ * This replaces a check that held `SettingsIcon`'s `ART` set against the PNGs
+ * in `static/settings`, from when the icons were artwork. The artwork is gone;
+ * the mistake it caught is not. A panel added to `PANELS` with no branch in
+ * the glyph chain falls to the empty frame, and an empty frame is a real
+ * drawing rather than a broken image, so it is *quieter* than the failure it
+ * replaced and no easier to notice.
+ *
+ * `scripts` is why both versions of this exist. It was listed as having art
+ * nobody had drawn, and because `script_record` hands every script without its
+ * own icon `panel: "scripts"`, the broken image reached the launcher's result
+ * list as well as the settings sidebar.
+ */
+{
+  const ICON = "src/lib/components/SettingsIcon.svelte";
+  const INDEX = "src-tauri/src/settings_index.rs";
+  const text = readFileSync(ICON, "utf8");
+
+  const list = readFileSync(INDEX, "utf8").match(/PANELS: &\[&str\] = &\[([\s\S]*?)\];/);
+  const panels = list ? [...list[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]) : [];
+  const drawn = new Set([...text.matchAll(/name === "([a-z-]+)"/g)].map((m) => m[1]));
+  const named = new Set(
+    [
+      ...(text.match(/PANEL_ICONS = \[([\s\S]*?)\] as const/)?.[1] ?? "").matchAll(/"([a-z-]+)"/g),
+    ].map((m) => m[1]),
+  );
+
+  /*
+   * Parsing rather than checking. All three patterns read somebody else's
+   * formatting, and a check that reads nothing agrees with everything.
+   */
+  if (panels.length === 0) {
+    fail(INDEX, null, "no `PANELS` were read, so this is parsing rather than checking");
+  }
+  if (drawn.size === 0) {
+    fail(ICON, null, "no glyph branches were read, so this is parsing rather than checking");
+  }
+  if (named.size === 0) {
+    fail(ICON, null, "no `PANEL_ICONS` were read, so this is parsing rather than checking");
+  }
+
+  for (const panel of panels) {
+    if (!named.has(panel)) {
+      fail(
+        ICON,
+        null,
+        `settings has a "${panel}" panel that PANEL_ICONS does not name, so the ` +
+          "cast in the sidebar lands on a value this cannot draw",
+      );
+    } else if (!drawn.has(panel)) {
+      fail(
+        ICON,
+        null,
+        `settings has a "${panel}" panel with no branch in the glyph chain, so ` +
+          "it wears the empty frame and says nothing about what it is",
+      );
+    }
+  }
+
+  for (const name of named) {
+    if (drawn.has(name)) continue;
+    fail(
+      ICON,
+      lineOf(text, text.indexOf(`"${name}"`)),
+      `PANEL_ICONS offers "${name}" and no branch draws it, so anything asking ` +
+        "for it gets the empty frame",
+    );
+  }
+}
+
+/**
+ * Every name in `SettingsIcon`'s `ART` set has all of its art on disk, and
+ * every file on disk is claimed by a name at a width the component offers.
+ *
+ * The set is a *claim* about the filesystem, and nothing checked it. When the
+ * claim is wrong the component takes the `<img>` path, the request 404s, and
+ * the fallback glyph written to prevent exactly that is skipped. A name
+ * listed there with no art is strictly worse than a name left out.
+ *
+ * `scripts` is why this exists. It was in the set with nothing drawn for it,
+ * and because `script_record` hands every script without its own icon
+ * `panel: "scripts"`, the broken image reached the launcher's result list as
+ * well as the settings sidebar.
+ *
+ * The other direction catches the opposite waste: `browsers` and `websearch`
+ * both had six widths on disk that no call site could ever ask for.
+ */
+{
+  const ICON = "src/lib/components/SettingsIcon.svelte";
+  const ART_DIR = "static/settings";
+  const text = readFileSync(ICON, "utf8");
+
+  const set = text.match(/const ART = new Set<IconName>\(\[([\s\S]*?)\]\)/);
+  const names = set ? [...set[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]) : [];
+  const widths = [
+    ...(text.match(/const WIDTHS = \[([\d,\s]+)\]/)?.[1] ?? "").matchAll(/\d+/g),
+  ].map((m) => Number(m[0]));
+
+  /*
+   * Parsing rather than checking. Either pattern can stop matching after an
+   * ordinary rename, and a check that reads nothing passes every time.
+   */
+  if (names.length === 0) {
+    fail(ICON, null, "no `ART` names were read, so this is parsing rather than checking");
+  }
+  if (widths.length === 0) {
+    fail(ICON, null, "no `WIDTHS` were read, so this is parsing rather than checking");
+  }
+  if (!existsSync(ART_DIR)) {
+    fail(ART_DIR, null, "the settings art folder is missing, so every drawn panel is a 404");
+  }
+
+  const claimed = new Set(names);
+  const offered = new Set(widths);
+
+  for (const name of names) {
+    const gone = widths.filter((w) => !existsSync(join(ART_DIR, `${name}-${w}.png`)));
+    if (gone.length === 0) continue;
+
+    fail(
+      ICON,
+      lineOf(text, text.indexOf(`"${name}"`, set.index)),
+      `"${name}" is in ART and ${gone.map((w) => `${name}-${w}.png`).join(", ")} ` +
+        `${gone.length === 1 ? "is" : "are"} not in ${ART_DIR}/, so it draws a ` +
+        "broken image instead of the fallback glyph that exists for this",
+    );
+  }
+
+  for (const file of existsSync(ART_DIR) ? readdirSync(ART_DIR) : []) {
+    const drawn = file.match(/^([a-z-]+)-(\d+)\.png$/);
+
+    if (!drawn) {
+      fail(ART_DIR, null, `${file} is not <name>-<width>.png, so nothing can ask for it`);
+    } else if (!claimed.has(drawn[1])) {
+      fail(
+        ART_DIR,
+        null,
+        `${file} is art for "${drawn[1]}", which is not in ART, so it is drawn nowhere`,
+      );
+    } else if (!offered.has(Number(drawn[2]))) {
+      fail(
+        ART_DIR,
+        null,
+        `${file} is a width WIDTHS does not offer, so no browser will ever pick it`,
+      );
+    }
   }
 }
 

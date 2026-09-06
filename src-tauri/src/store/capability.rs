@@ -338,9 +338,60 @@ pub fn required_by_bundle(text: &str) -> Vec<String> {
     CAPABILITIES
         .iter()
         .filter(|capability| GATED_AT_REQUIRE.contains(&capability.id))
-        .filter(|capability| capability.tokens.iter().any(|token| mentions(text, token)))
+        .filter(|capability| {
+            capability.tokens.iter().any(|token| mentions(text, token))
+                || REQUIRED_AT_LOAD
+                    .iter()
+                    .any(|(module, id)| *id == capability.id && requires_module(text, module))
+        })
         .map(|capability| capability.id.to_string())
         .collect()
+}
+
+/// The Node built-ins the worker charges a permission for, and which row of
+/// the table each one is.
+///
+/// **This list has to agree with `GATED` in `patch-require.ts`**, and a test
+/// reads that file to be sure it does. The tokens on the rows above are what
+/// an author's own source looks like; a bundle looks like `require("https")`,
+/// bare, because esbuild leaves a built-in as a plain require. The first
+/// bundle scan looked for `node:https` and never saw the form every bundle
+/// actually uses, so Hacker News was installed with nothing granted for the
+/// network its feed parser opens on the first line.
+const REQUIRED_AT_LOAD: &[(&str, &str)] = &[
+    ("fs", "filesystem"),
+    ("child_process", "processes"),
+    ("worker_threads", "processes"),
+    ("cluster", "processes"),
+    ("inspector", "processes"),
+    ("net", "network"),
+    ("tls", "network"),
+    ("dgram", "network"),
+    ("dns", "network"),
+    ("http", "network"),
+    ("https", "network"),
+    ("http2", "network"),
+];
+
+/// Whether a bundle requires this built-in, in any of the ways a bundle does.
+///
+/// `require("fs")`, `require('fs')`, `require("node:fs")`, and the same with
+/// a subpath such as `fs/promises`, which the gate keys on the first segment
+/// as well. A dynamic `import("node:fs")` is the same text with `import`, and
+/// the gate meets it on the same terms.
+pub fn requires_module(text: &str, module: &str) -> bool {
+    for call in ["require(", "import("] {
+        for quote in ['"', '\''] {
+            for prefix in ["", "node:"] {
+                let exact = format!("{call}{quote}{prefix}{module}{quote}");
+                let subpath = format!("{call}{quote}{prefix}{module}/");
+                if text.contains(&exact) || text.contains(&subpath) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Every permission an extension can be given, in the order the table lists.
@@ -622,10 +673,14 @@ mod tests {
          * again, because the string being asked for is not a permission that
          * exists. Nothing else in either half would notice.
          */
-        for piece in GATE.split("held.has(\"").skip(1) {
-            let name = piece.split('"').next().unwrap_or_default();
-            if !name.is_empty() && !asked.iter().any(|it| it == name) {
-                asked.push(name.to_string());
+        // Two spellings: `held.has("x")` reads, `held.allows(["x"])` reads
+        // and asks. Both are hand-written names and both count.
+        for opener in ["held.has(\"", "held.allows([\""] {
+            for piece in GATE.split(opener).skip(1) {
+                let name = piece.split('"').next().unwrap_or_default();
+                if !name.is_empty() && !asked.iter().any(|it| it == name) {
+                    asked.push(name.to_string());
+                }
             }
         }
 
@@ -651,6 +706,72 @@ mod tests {
                 known.contains(name),
                 "the module gate asks for {name:?}, which is not how Rust spells any \
                  capability, so it can never be granted"
+            );
+        }
+    }
+
+    /// A bundle requires a built-in bare, and that is the form that matters.
+    ///
+    /// The first scan looked for `node:https` and saw nothing in a bundle
+    /// full of `require("https")`, which is what every dependency that opens
+    /// a socket looks like once esbuild is done with it.
+    #[test]
+    fn a_bundle_requiring_a_builtin_bare_is_seen() {
+        assert_eq!(
+            required_by_bundle("var h = require(\"https\");"),
+            vec!["network".to_string()]
+        );
+        assert_eq!(
+            required_by_bundle("var f = require('node:fs/promises');"),
+            vec!["filesystem".to_string()]
+        );
+        assert_eq!(
+            required_by_bundle("var w = require(\"worker_threads\");"),
+            vec!["processes".to_string()]
+        );
+        assert!(
+            required_by_bundle("var c = require(\"crypto\"); var z = require(\"node:zlib\");")
+                .is_empty(),
+            "a free built-in costs nothing"
+        );
+        assert!(
+            !requires_module("require(\"fsevents\")", "fs"),
+            "a package whose name starts with a built-in's is not the built-in"
+        );
+    }
+
+    /// The scan names the same modules the gate charges for, or it forecasts
+    /// a grant the gate never asks about and misses one it does.
+    #[test]
+    fn the_bundle_scan_names_exactly_the_modules_the_gate_charges_for() {
+        const GATE: &str = include_str!("../../../host/src/worker/patch-require.ts");
+
+        let table = GATE
+            .split("const GATED: Record<string, { needs: string[]; plainly: string }> = {")
+            .nth(1)
+            .expect("the gate still has a GATED table")
+            .split("\n};")
+            .next()
+            .expect("the table closes");
+
+        let gated: Vec<&str> = table
+            .lines()
+            .filter(|line| line.contains("needs:"))
+            .filter_map(|line| line.trim().split(':').next())
+            .collect();
+
+        assert!(gated.len() >= 10, "only found {gated:?}, so the parse is wrong");
+
+        for module in &gated {
+            assert!(
+                REQUIRED_AT_LOAD.iter().any(|(named, _)| named == module),
+                "the gate charges for {module} and the bundle scan does not look for it"
+            );
+        }
+        for (module, _) in REQUIRED_AT_LOAD {
+            assert!(
+                gated.contains(module),
+                "the bundle scan looks for {module}, which the gate does not charge for"
             );
         }
     }

@@ -84,6 +84,54 @@ pub struct Message {
     /// Anything handed over with the question.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attached>,
+    /// How an answer came about, in the order it happened.
+    ///
+    /// Only ever set on an `assistant` message, and never sent anywhere:
+    /// `wire` does not read it. It is what the window draws above and between
+    /// the words, and a conversation reopened tomorrow shows the working as
+    /// well as the answer. A file from before this field reads as a message
+    /// with no parts, which draws as it always did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<Part>,
+}
+
+/// One thing that happened on the way to an answer.
+///
+/// Text, thinking and steps interleave, because that is the order a model
+/// produces them: it says what it is about to do, does it, and says what it
+/// found. Flattening that into "steps, then words" loses why a step happened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Part {
+    /// Words of the answer.
+    Text { text: String },
+    /// What the model thought before it said anything.
+    Thinking {
+        text: String,
+        /// How long it thought for, once something else followed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ms: Option<u64>,
+    },
+    /// One tool reached for.
+    Step {
+        /// The call's own id, so its result can find it.
+        id: String,
+        tool: String,
+        /// What it was used on. Empty for tools that take no arguments.
+        subject: String,
+        /// Whether it worked. `None` while it runs, and after a turn that
+        /// stopped before it finished.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ok: Option<bool>,
+    },
+}
+
+/// What one request cost, in tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Usage {
+    pub input: u64,
+    pub output: u64,
 }
 
 /// One message, in the shape a service receives.
@@ -146,7 +194,14 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: None,
             attachments: Vec::new(),
+            parts: Vec::new(),
         }
+    }
+
+    /// The same message, with how it came about.
+    pub fn with_parts(mut self, parts: Vec<Part>) -> Self {
+        self.parts = parts;
+        self
     }
 
     /// A question with something handed over alongside it.
@@ -181,6 +236,7 @@ impl Message {
             tool_calls: calls,
             tool_call_id: None,
             attachments: Vec::new(),
+            parts: Vec::new(),
         }
     }
 
@@ -192,6 +248,7 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: Some(id.into()),
             attachments: Vec::new(),
+            parts: Vec::new(),
         }
     }
 }
@@ -217,6 +274,13 @@ pub enum Event {
     Text(String),
     /// More of a call the model wants made.
     Calling(CallPiece),
+    /// More of what the model is thinking before it answers.
+    Thinking(String),
+    /// What the request cost, which arrives once at the very end.
+    Usage(Usage),
+    /// Which model actually answered, which can differ from the one asked
+    /// for when the name was an alias or a gateway chose.
+    Model(String),
     /// The answer is finished.
     Done,
     /// Nothing this needs to act on.
@@ -251,6 +315,9 @@ pub fn body(
         // Tokens as they are produced. A launcher that shows nothing for four
         // seconds and then a paragraph feels broken even when it is not.
         "stream": true,
+        // What it cost, on one more line at the end. Services that do not
+        // know the option ignore it; none has been seen to refuse it.
+        "stream_options": { "include_usage": true },
     });
 
     if let Some(tools) = tools.filter(|list| !list.as_array().is_some_and(Vec::is_empty)) {
@@ -294,12 +361,65 @@ pub fn parse_line(line: &str) -> Event {
     }
 
     // The delta of the first choice, which is the only one asked for.
-    match value
+    if let Some(text) = value
         .pointer("/choices/0/delta/content")
         .and_then(|c| c.as_str())
+        .filter(|text| !text.is_empty())
     {
-        Some(text) if !text.is_empty() => Event::Text(text.to_string()),
-        _ => Event::Ignored,
+        return Event::Text(text.to_string());
+    }
+
+    // Thinking, under either of the two names it goes by. `reasoning_content`
+    // is the older spelling most gateways copied; `reasoning` is what the
+    // newer services send. A service that streams neither is simply a service
+    // that does not think out loud.
+    for key in ["/choices/0/delta/reasoning_content", "/choices/0/delta/reasoning"] {
+        if let Some(thought) = value
+            .pointer(key)
+            .and_then(|t| t.as_str())
+            .filter(|thought| !thought.is_empty())
+        {
+            return Event::Thinking(thought.to_string());
+        }
+    }
+
+    // The cost, which comes on its own line at the end once it was asked for.
+    if let Some(usage) = value.get("usage").and_then(read_usage) {
+        return Event::Usage(usage);
+    }
+
+    // A chunk with nothing else to say still names the model. Read last, so a
+    // chunk carrying words is words rather than a name repeated every line.
+    if let Some(model) = value
+        .get("model")
+        .and_then(|m| m.as_str())
+        .filter(|model| !model.is_empty())
+    {
+        return Event::Model(model.to_string());
+    }
+
+    Event::Ignored
+}
+
+/// The token counts out of a `usage` object.
+///
+/// Both names, because the field is `prompt_tokens` in the shape everybody
+/// copied and `input_tokens` in the shape Anthropic's gateway route sends.
+fn read_usage(value: &serde_json::Value) -> Option<Usage> {
+    let count = |keys: [&str; 2]| {
+        keys.iter()
+            .find_map(|key| value.get(key).and_then(serde_json::Value::as_u64))
+    };
+
+    let input = count(["prompt_tokens", "input_tokens"]);
+    let output = count(["completion_tokens", "output_tokens"]);
+
+    match (input, output) {
+        (None, None) => None,
+        (input, output) => Some(Usage {
+            input: input.unwrap_or(0),
+            output: output.unwrap_or(0),
+        }),
     }
 }
 
@@ -399,7 +519,16 @@ pub fn headers(provider: &Provider) -> Vec<(String, String)> {
     vec![("Authorization".to_string(), format!("Bearer {key}"))]
 }
 
-/// Asks, and hands each piece of the answer to `on_text` as it arrives.
+/// One piece of an answer as it arrives, handed to whoever asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Piece {
+    /// Words of the answer.
+    Text(String),
+    /// Thinking, before the words.
+    Thinking(String),
+}
+
+/// Asks, and hands each piece of the answer to `on_piece` as it arrives.
 ///
 /// Streaming rather than collecting, because the point of a launcher is that
 /// it answers while you are still reading the first line. The caller decides
@@ -422,7 +551,7 @@ pub async fn ask(
      * fail to compile with an error that names the await rather than this.
      */
     give_up: &(dyn Fn() -> bool + Sync),
-    mut on_text: impl FnMut(String),
+    mut on_piece: impl FnMut(Piece),
 ) -> Result<Said, String> {
     use futures_util::StreamExt;
 
@@ -454,18 +583,15 @@ pub async fn ask(
     // Kept as well as handed out, because a turn that asks for a tool has to
     // send its own words back with the calls, and the caller only sees the
     // pieces as they go past.
-    let mut said = String::new();
+    let mut said = Said::default();
     let mut calls = Calls::default();
 
     while let Some(chunk) = stream.next().await {
         // Checked before the chunk is read rather than after, so a stop takes
         // effect on the next thing to arrive rather than one thing later.
         if give_up() {
-            return Ok(Said {
-                text: said,
-                calls: Vec::new(),
-                stopped: true,
-            });
+            said.stopped = true;
+            return Ok(said);
         }
 
         let chunk = chunk.map_err(|err| format!("the answer stopped part way: {err}"))?;
@@ -478,16 +604,19 @@ pub async fn ask(
 
             match parse_line(&line) {
                 Event::Text(text) => {
-                    said.push_str(&text);
-                    on_text(text);
+                    said.text.push_str(&text);
+                    on_piece(Piece::Text(text));
+                }
+                Event::Thinking(thought) => {
+                    said.thinking.push_str(&thought);
+                    on_piece(Piece::Thinking(thought));
                 }
                 Event::Calling(piece) => calls.take(piece),
+                Event::Usage(usage) => said.usage = Some(usage),
+                Event::Model(model) => said.model = model,
                 Event::Done => {
-                    return Ok(Said {
-                        text: said,
-                        calls: calls.finish(),
-                        stopped: false,
-                    })
+                    said.calls = calls.finish();
+                    return Ok(said);
                 }
                 Event::Ignored => {}
             }
@@ -496,11 +625,8 @@ pub async fn ask(
 
     // The stream ended without a `[DONE]`, which several services do. The
     // answer still arrived.
-    Ok(Said {
-        text: said,
-        calls: calls.finish(),
-        stopped: false,
-    })
+    said.calls = calls.finish();
+    Ok(said)
 }
 
 /// What one exchange produced.
@@ -510,7 +636,13 @@ pub async fn ask(
 #[derive(Debug, Default)]
 pub struct Said {
     pub text: String,
+    /// What it thought before answering, for services that say.
+    pub thinking: String,
     pub calls: Vec<ToolCall>,
+    /// Which model answered, when the service said. Empty otherwise.
+    pub model: String,
+    /// What the request cost, when the service said.
+    pub usage: Option<Usage>,
     /// Whether it was told to stop rather than finishing.
     ///
     /// Not an error. What arrived is still an answer and is still worth
@@ -839,6 +971,45 @@ mod tests {
         fn it_always_asks_for_a_stream() {
             let sent = body(&provider("http://x/v1", "", "m"), &[], None);
             assert_eq!(sent["stream"], true);
+        }
+
+        /// The cost arrives on one more line at the end, and only when it
+        /// was asked for.
+        #[test]
+        fn usage_is_asked_for_alongside_the_stream() {
+            let sent = body(&provider("http://x/v1", "", "m"), &[], None);
+            assert_eq!(sent["stream_options"]["include_usage"], true);
+        }
+
+        /// The working stays with the answer and goes nowhere else. A service
+        /// sent a field it does not know rejects the whole request.
+        #[test]
+        fn parts_are_kept_but_never_sent() {
+            let message = Message::assistant("eleven").with_parts(vec![Part::Step {
+                id: "call_1".into(),
+                tool: "list_windows".into(),
+                subject: String::new(),
+                ok: Some(true),
+            }]);
+
+            let sent = wire(&message);
+            assert!(sent.get("parts").is_none(), "{sent}");
+            assert_eq!(sent["content"], "eleven");
+
+            let kept: Message =
+                serde_json::from_str(&serde_json::to_string(&message).expect("written"))
+                    .expect("read back");
+            assert_eq!(kept.parts, message.parts);
+        }
+
+        /// A message written before there were parts.
+        #[test]
+        fn a_message_without_parts_still_reads() {
+            let read: Message =
+                serde_json::from_str(r#"{"role":"assistant","content":"eleven"}"#)
+                    .expect("read");
+            assert!(read.parts.is_empty());
+            assert_eq!(read, Message::assistant("eleven"));
         }
 
         /// A local model does not want an empty bearer token, and some
@@ -1283,6 +1454,71 @@ mod tests {
             }
         }
 
+        /// Two spellings for the same thing, one older and widely copied,
+        /// one newer. Either is thinking rather than words.
+        #[test]
+        fn reasoning_comes_out_as_thinking() {
+            let older = r#"data: {"choices":[{"delta":{"reasoning_content":"hmm"}}]}"#;
+            let newer = r#"data: {"choices":[{"delta":{"reasoning":"hmm"}}]}"#;
+
+            assert_eq!(parse_line(older), Event::Thinking("hmm".into()));
+            assert_eq!(parse_line(newer), Event::Thinking("hmm".into()));
+
+            // An empty one is nothing, the same as empty content.
+            let empty = r#"data: {"choices":[{"delta":{"reasoning_content":""}}]}"#;
+            assert_eq!(parse_line(empty), Event::Ignored);
+        }
+
+        /// The last line once usage was asked for: no choices, just numbers.
+        #[test]
+        fn a_chunk_carrying_only_usage_says_what_it_cost() {
+            let line = r#"data: {"choices":[],"model":"m","usage":{"prompt_tokens":12,"completion_tokens":34,"total_tokens":46}}"#;
+            assert_eq!(
+                parse_line(line),
+                Event::Usage(Usage {
+                    input: 12,
+                    output: 34
+                })
+            );
+
+            // The other spelling, from a gateway in front of Anthropic.
+            let line = r#"data: {"choices":[],"usage":{"input_tokens":1,"output_tokens":2}}"#;
+            assert_eq!(parse_line(line), Event::Usage(Usage { input: 1, output: 2 }));
+        }
+
+        /// The first chunk carries the role and the model and nothing else.
+        /// The model is worth knowing: a gateway asked for an alias answers
+        /// with whichever real one it chose.
+        #[test]
+        fn the_first_chunk_names_the_model() {
+            let line = r#"data: {"model":"qwen3:1.7b","choices":[{"delta":{"role":"assistant"}}]}"#;
+            assert_eq!(parse_line(line), Event::Model("qwen3:1.7b".into()));
+
+            // Words are words, however many times the name rides along.
+            let line = r#"data: {"model":"qwen3:1.7b","choices":[{"delta":{"content":"x"}}]}"#;
+            assert_eq!(parse_line(line), Event::Text("x".into()));
+        }
+
+        /// Taken from a real Ollama stream: the whole call in one chunk, with
+        /// its id and index, an empty content beside it and the role repeated.
+        #[test]
+        fn a_whole_call_in_one_chunk_the_way_ollama_sends_it() {
+            let line = r#"data: {"id":"chatcmpl-125","object":"chat.completion.chunk","created":1788631012,"model":"huihui_ai/qwen3.5-abliterated:9b","system_fingerprint":"fp_ollama","choices":[{"index":0,"delta":{"role":"assistant","content":"","tool_calls":[{"id":"call_z6ed1hvv","index":0,"type":"function","function":{"name":"list_windows","arguments":"{}"}}]},"finish_reason":null}]}"#;
+
+            let Event::Calling(piece) = parse_line(line) else {
+                panic!("not a call: {:?}", parse_line(line));
+            };
+
+            let mut calls = Calls::default();
+            calls.take(piece);
+            let calls = calls.finish();
+
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].id, "call_z6ed1hvv");
+            assert_eq!(calls[0].function.name, "list_windows");
+            assert_eq!(calls[0].function.arguments, "{}");
+        }
+
         /// Whitespace around the payload varies between services.
         #[test]
         fn the_space_after_data_is_optional() {
@@ -1291,6 +1527,128 @@ mod tests {
 
             assert_eq!(parse_line(with), Event::Text("x".into()));
             assert_eq!(parse_line(without), Event::Text("x".into()));
+        }
+    }
+
+    /// Against the Ollama running on this machine.
+    ///
+    /// Ignored, because it needs a service and a model and takes as long as
+    /// the model takes. It is the only proof that the parser reads what a real
+    /// service sends rather than what a fixture says it sends.
+    ///
+    ///   cargo test --lib ai::openai::tests::live -- --ignored --nocapture
+    mod live {
+        use super::*;
+
+        const MODEL: &str = "huihui_ai/qwen3.5-abliterated:9b";
+
+        fn ollama() -> Provider {
+            provider("http://localhost:11434/v1", "", MODEL)
+        }
+
+        fn never() -> bool {
+            false
+        }
+
+        #[tokio::test]
+        #[ignore]
+        async fn a_thinking_model_thinks_then_answers_and_says_what_it_cost() {
+            let client = reqwest::Client::new();
+            let mut thinking = String::new();
+            let mut text = String::new();
+            let mut order: Vec<&str> = Vec::new();
+
+            let said = ask(
+                &client,
+                &ollama(),
+                &[Message::user(
+                    "What is 17 times 23? Answer in one short sentence.",
+                )],
+                None,
+                &never,
+                |piece| match piece {
+                    Piece::Thinking(t) => {
+                        if order.last() != Some(&"thinking") {
+                            order.push("thinking");
+                        }
+                        thinking.push_str(&t);
+                    }
+                    Piece::Text(t) => {
+                        if order.last() != Some(&"text") {
+                            order.push("text");
+                        }
+                        text.push_str(&t);
+                    }
+                },
+            )
+            .await
+            .expect("answered");
+
+            eprintln!(
+                "thinking {} chars, text {text:?}, model {:?}, usage {:?}",
+                thinking.len(),
+                said.model,
+                said.usage
+            );
+
+            assert!(!thinking.is_empty(), "no thinking arrived");
+            assert!(text.contains("391"), "{text}");
+            assert_eq!(order, vec!["thinking", "text"]);
+            assert_eq!(said.model, MODEL);
+            assert!(said.usage.is_some_and(|u| u.output > 0), "{:?}", said.usage);
+            assert!(said.calls.is_empty());
+        }
+
+        /// Writes the exact request the tool test sends, so it can be replayed
+        /// with curl when the model does something the parser did not expect.
+        #[test]
+        #[ignore]
+        fn dump_the_tool_request() {
+            let tools = crate::ai::tools::as_request();
+            let sent = body(
+                &ollama(),
+                &[Message::user(
+                    "Which windows are open on this machine right now? Use a tool to find out.",
+                )],
+                Some(&tools),
+            );
+            std::fs::write(
+                std::env::temp_dir().join("sill-tool-request.json"),
+                serde_json::to_string_pretty(&sent).expect("json"),
+            )
+            .expect("written");
+        }
+
+        #[tokio::test]
+        #[ignore]
+        async fn a_question_about_this_machine_reaches_for_a_tool() {
+            let client = reqwest::Client::new();
+            let tools = crate::ai::tools::as_request();
+
+            let said = ask(
+                &client,
+                &ollama(),
+                &[Message::user(
+                    "Which windows are open on this machine right now? Use a tool to find out.",
+                )],
+                Some(&tools),
+                &never,
+                |_| {},
+            )
+            .await
+            .expect("answered");
+
+            eprintln!(
+                "calls {:?}, text {:?}, thought {} chars: {:?}",
+                said.calls,
+                said.text,
+                said.thinking.len(),
+                said.thinking.chars().rev().take(300).collect::<String>().chars().rev().collect::<String>()
+            );
+
+            assert!(!said.calls.is_empty(), "no tool was asked for: {}", said.text);
+            assert_eq!(said.calls[0].function.name, "list_windows");
+            assert!(!said.calls[0].id.is_empty(), "the call has no id to answer");
         }
     }
 }

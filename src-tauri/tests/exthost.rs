@@ -439,36 +439,13 @@ async fn opening_nothing_is_an_error_rather_than_a_silent_no_op() {
     );
 }
 
-/// Methods the host is allowed to call without Rust answering them.
+/// Every method the host can ask Rust for, read out of the host's own source.
 ///
-/// Empty, and the test below is what keeps it honest: adding a call on the
-/// host side without an answer on this side fails until it is either
-/// implemented or written down here as a decision.
-///
-/// The last two came out on 2026-08-30. Neither needed the work their note
-/// claimed: reading the selection is the capture the launcher already does for
-/// its own text actions, and the default application is one `AssocQueryString`
-/// call. **A gap listed as needing a large piece of work is worth re-reading
-/// before it is believed.**
-const DECLARED_GAPS: &[&str] = &[];
-
-/// JSON-RPC's code for a method the server does not have.
-const METHOD_NOT_FOUND: i32 = -32601;
-
-/// Every method the host can call is answered, or is a declared gap.
-///
-/// This is the test that was missing. `host/src/api/runtime.ts` called nine
-/// methods that `ApiLayer::dispatch` had no arm for, and every one failed at
-/// runtime with "method not found". Nothing caught it: the Rust tests only
-/// exercised the methods that existed, and `scripts/run-extension.mjs` serves
-/// the API from its own hand-written table, so its stub answered calls the
-/// real implementation did not. The gate was green because it was grading a
-/// different program.
-///
-/// Reading the host's source is the point. The two sides cannot drift while
-/// the list comes from one of them.
-#[tokio::test]
-async fn every_method_the_host_calls_is_answered_or_declared_missing() {
+/// Reading it rather than listing it here is the point: two lists of method
+/// names with nothing making them agree is how the view gate came to grade a
+/// program that did not exist. The list comes from one side, so it cannot
+/// drift from that side.
+fn host_methods() -> Vec<String> {
     let api_dir = repo_root().join("host").join("src").join("api");
 
     let mut wanted: Vec<String> = Vec::new();
@@ -506,6 +483,41 @@ async fn every_method_the_host_calls_is_answered_or_declared_missing() {
         api_dir.display()
     );
 
+    wanted
+}
+
+/// Methods the host is allowed to call without Rust answering them.
+///
+/// Empty, and the test below is what keeps it honest: adding a call on the
+/// host side without an answer on this side fails until it is either
+/// implemented or written down here as a decision.
+///
+/// The last two came out on 2026-08-30. Neither needed the work their note
+/// claimed: reading the selection is the capture the launcher already does for
+/// its own text actions, and the default application is one `AssocQueryString`
+/// call. **A gap listed as needing a large piece of work is worth re-reading
+/// before it is believed.**
+const DECLARED_GAPS: &[&str] = &[];
+
+/// JSON-RPC's code for a method the server does not have.
+const METHOD_NOT_FOUND: i32 = -32601;
+
+/// Every method the host can call is answered, or is a declared gap.
+///
+/// This is the test that was missing. `host/src/api/runtime.ts` called nine
+/// methods that `ApiLayer::dispatch` had no arm for, and every one failed at
+/// runtime with "method not found". Nothing caught it: the Rust tests only
+/// exercised the methods that existed, and `scripts/run-extension.mjs` serves
+/// the API from its own hand-written table, so its stub answered calls the
+/// real implementation did not. The gate was green because it was grading a
+/// different program.
+///
+/// Reading the host's source is the point. The two sides cannot drift while
+/// the list comes from one of them.
+#[tokio::test]
+async fn every_method_the_host_calls_is_answered_or_declared_missing() {
+    let wanted = host_methods();
+
     let (tx, _events) = mpsc::unbounded_channel();
     let (api, _bridge) = layer(tx);
 
@@ -537,6 +549,70 @@ async fn every_method_the_host_calls_is_answered_or_declared_missing() {
             "{gap} is implemented now; take it out of DECLARED_GAPS"
         );
     }
+}
+
+/// The view gate's stub answers everything Rust answers.
+///
+/// Its sibling above guards the direction that shipped a bug: the stub
+/// answering calls Rust did not, so the gate graded a program that did not
+/// exist. This is the other direction, and it also came true.
+///
+/// `scripts/run-extension.mjs` throws `not implemented` for any method its
+/// table has no case for, and `scripts/audit-extensions.mjs` collects those
+/// throws and prints them under "APIs the host does not answer". So a method
+/// Rust answers and the stub does not is reported as a hole in Sill. It named
+/// `UI/getSelectedText`, which has been implemented since 2026-08-30, along
+/// with `Storage/clear` and `Application/getDefault`. A report that invents
+/// missing features is worse than no report: the next reader implements
+/// something that is already there.
+///
+/// Dispatching for the Rust side rather than reading `api.rs` for it, because
+/// what matters is whether a call is answered, not whether a string appears
+/// in a match arm.
+#[tokio::test]
+async fn the_view_gate_stub_answers_everything_rust_answers() {
+    let runner = repo_root().join("scripts").join("run-extension.mjs");
+    let source = std::fs::read_to_string(&runner).expect("the runner is readable");
+
+    // `case "Service/method":`, which is the only shape its table is written in.
+    let mut stubbed: Vec<String> = Vec::new();
+    for (index, _) in source.match_indices("case \"") {
+        let rest = &source[index + 6..];
+        let Some(close) = rest.find('"') else { continue };
+        let method = &rest[..close];
+        if method.contains('/') && !stubbed.iter().any(|m| m == method) {
+            stubbed.push(method.to_string());
+        }
+    }
+
+    assert!(
+        stubbed.len() >= 15,
+        "found only {} cases in {}; the scan is broken, not the runner",
+        stubbed.len(),
+        runner.display()
+    );
+
+    let (tx, _events) = mpsc::unbounded_channel();
+    let (api, _bridge) = layer(tx);
+
+    // Every method the host can call, which is the same scan its sibling uses.
+    let mut behind: Vec<String> = Vec::new();
+    for method in host_methods() {
+        let outcome = api.dispatch("s1", "ext", &method, &json!({})).await;
+        let rust_answers = !matches!(&outcome, Err(err) if err.code == METHOD_NOT_FOUND);
+
+        if rust_answers && !stubbed.iter().any(|m| *m == method) {
+            behind.push(method);
+        }
+    }
+
+    assert!(
+        behind.is_empty(),
+        "Rust answers these and the view gate's stub does not, so an extension 
+         using one crashes in the gate and the audit reports it as missing 
+         from Sill: {behind:?}
+         Add a case to serveApi in scripts/run-extension.mjs."
+    );
 }
 
 #[test]
@@ -791,14 +867,21 @@ fn refusing(
 ///
 /// So: load it with nothing granted, and require that the crash arrives and
 /// says which permission it was.
+///
+/// The gate asks before it refuses now, on the same card an RPC call is
+/// asked on, so this is driven through a permit that says no. What is
+/// checked is the same as before plus one thing: the question was put, once,
+/// for exactly what `fs` costs, and the no came back as the crash the window
+/// hears rather than as a worker blocked for a card nobody will answer.
 #[tokio::test]
 async fn a_module_refused_while_loading_reaches_the_window() {
     let host = host_js();
     assert!(host.exists(), "host bundle missing at {}", host.display());
 
     let (tx, mut events) = mpsc::unbounded_channel();
+    let (layer, _bridge, permits) = refusing(tx);
 
-    let exthost = ExtHost::spawn(&PathBuf::from("node"), &host, layer(tx).0)
+    let exthost = ExtHost::spawn(&PathBuf::from("node"), &host, layer)
         .await
         .expect("spawned the host");
 
@@ -834,6 +917,14 @@ async fn a_module_refused_while_loading_reaches_the_window() {
     assert!(
         reason.to_lowercase().contains("not allowed"),
         "and say it was a permission rather than a fault in the extension, got {reason:?}"
+    );
+
+    // The worker asked before it gave up, once, for what `fs` costs.
+    let asked = permits.asked.lock().unwrap().clone();
+    assert_eq!(
+        asked,
+        vec![vec![Capability::FileRead, Capability::FileWrite]],
+        "the module gate asked the permit rather than refusing on its own"
     );
 }
 

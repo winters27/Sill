@@ -282,6 +282,66 @@ impl Granted {
 
 #[async_trait::async_trait]
 impl Permits for Granted {
+    fn held(&self, extension: &str) -> Vec<Capability> {
+        Granted::held(self, extension)
+    }
+
+    /// One card for what a module costs, in the gate's words.
+    ///
+    /// Only what is not already held is asked about, and only if any of it
+    /// needs granting at all; otherwise there is nothing to put on a card and
+    /// this answers yes at once. A yes remembers every capability the module
+    /// costs, which is what saying yes to `fs` means, and a no records
+    /// nothing, for the reason [`allow`](Permits::allow) records nothing.
+    async fn allow_together(
+        &self,
+        extension: &str,
+        needs: &[Capability],
+        plainly: &str,
+    ) -> Result<(), String> {
+        let wanted: Vec<Capability> = needs
+            .iter()
+            .copied()
+            .filter(|capability| needs_granting(capability) && !self.already(extension, capability))
+            .collect();
+
+        if wanted.is_empty() {
+            return Ok(());
+        }
+
+        // Without a sentence to put on the card there is no single question
+        // to ask, and one per capability is the honest fallback.
+        if plainly.trim().is_empty() {
+            return self.allow(extension, needs).await;
+        }
+
+        let pending = self.app.state::<Pending>();
+        let id = pending.next_id();
+
+        approval::raise(
+            &self.app,
+            Asking {
+                id: id.clone(),
+                title: format!("{extension} wants permission"),
+                subject: plainly.to_string(),
+                touches: crate::ai::acting::what_it_touches(&wanted).to_string(),
+                instead: None,
+            },
+        );
+
+        match pending.wait_for(&id, PATIENCE).await {
+            Answer::Allowed => {
+                for capability in &wanted {
+                    self.remember(extension, *capability);
+                }
+                Ok(())
+            }
+            Answer::Refused | Answer::Unanswered => Err(format!(
+                "{extension} is not allowed to {plainly}. Grant it in Settings, under Extensions.",
+            )),
+        }
+    }
+
     async fn allow(&self, extension: &str, needs: &[Capability]) -> Result<(), String> {
         for capability in needs {
             if !needs_granting(capability) || self.already(extension, capability) {

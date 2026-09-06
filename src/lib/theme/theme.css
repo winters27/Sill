@@ -321,6 +321,23 @@
    */
   --bevel-tile: inset 1px 1px 0 0 rgba(255, 255, 255, 0.1),
     inset -1px -1px 0 0 rgba(0, 0, 0, 0.18);
+  /* The raised one, for the single object in a window that floats: the
+     composer card in AI Chat. A tile bevel with a short contact shadow. */
+  --bevel-hero: inset 1px 1px 0 0 rgba(255, 255, 255, 0.14),
+    inset -1px -1px 0 0 rgba(0, 0, 0, 0.22), 0 4px 10px rgba(0, 0, 0, 0.18);
+
+  /*
+   * The recess a settings glyph is cut into.
+   *
+   * Same idea as the bevels above and the same light: the groove's far wall is
+   * in shadow and its near lip catches. `SettingsIcon` draws the shape twice,
+   * once in this colour offset up by a pixel and once in `currentColor` at the
+   * true position, and the pair reads as engraved rather than drawn on.
+   *
+   * A colour rather than a shadow because it is a stroke, and the only thing
+   * `box-shadow` can do to an SVG stroke is blur the whole element.
+   */
+  --etch: rgba(0, 0, 0, 0.62);
 
   /*
    * The window gets the light catch only, not the full tile bevel.
@@ -481,6 +498,35 @@
    */
   --motion-pulse: 1.4s;
   --motion-pulse-slow: 2.4s;
+  /** One sweep of light across the words that say the model is working. */
+  --motion-shimmer: 2.6s;
+  /**
+   * One tick of a streamed answer being revealed.
+   *
+   * Read by `$lib/chat/reveal`. Every tick re-parses the answer, so per frame
+   * missed frames on a long one; twenty-five a second still reads as writing.
+   */
+  --motion-reveal: 40ms;
+
+  /*
+   * ---- The assistant ----------------------------------------------------
+   *
+   * The orb is light through the theme's own accent, not a colour of its own:
+   * a deep body mixed from the accent and the ground, a bright current from
+   * the accent's highlight, and the panel tint as the glass over it. It
+   * follows every theme without any theme naming it.
+   */
+  --orb-inline: 28px;
+  --orb-hero: 96px;
+  --orb-deep: color-mix(in srgb, var(--core-accent) 38%, var(--core-background));
+  --orb-light: var(--accent-bright);
+  --orb-glass: rgba(255, 255, 255, 0.55);
+  /** Text-toned rather than accented: it is a status line, not a selection. */
+  --shimmer-ink: linear-gradient(90deg, var(--text-3), var(--text-1), var(--text-3));
+  /** The timeline of what the model reached for: a node, a hairline, a label. */
+  --timeline-node: 18px;
+  --timeline-icon: 10px;
+  --timeline-line: var(--hairline);
 
 
   /*
@@ -1021,6 +1067,53 @@
 
 * {
   box-sizing: border-box;
+}
+
+/*
+ * The one thing a native control has to be told.
+ *
+ * `<select>` is a deliberate choice, not a shortcut: `ExtDropdown` and
+ * `Select` both use one because its popup opens on its own layer, takes the
+ * arrow keys only while it is open and gives them straight back. A popover of
+ * Sill's own would spend the whole time fighting the launcher's list and the
+ * search field for the same keys, and Escape would have three meanings.
+ *
+ * The cost of that choice is that the popup is drawn by the engine and not by
+ * the page, so **no rule in this file reaches it**. With nothing said about
+ * the scheme the engine assumes a light document and draws a white list with
+ * black text, in a window where everything else is dark. Hacker News' feed
+ * picker is where this shows up first, because it is the first control with
+ * enough options to be worth opening.
+ *
+ * `color-scheme` is the only property that does reach it. Set on the controls
+ * rather than on `:root` on purpose: the root's background is the acrylic's,
+ * transparent so the desktop blur reaches the page, and this property is
+ * exactly the one that decides what an unpainted canvas falls back to.
+ */
+select,
+option,
+input,
+textarea {
+  color-scheme: dark;
+}
+
+/*
+ * The open list, which is a window of its own and starts white.
+ *
+ * `color-scheme` above dresses the parts the engine draws from the scheme;
+ * the list's background is not one of them, because the control has an author
+ * background and `--fill-1` is white at four per cent. Four per cent of white
+ * over the engine's own white is white, so the labels arrive as light text on
+ * a light list and only the highlighted row can be read.
+ *
+ * `Select` in the settings window already carried this rule and said in its
+ * own comment that deciding it once was the point of that file. It was not
+ * once: `ExtDropdown` is a second `<select>`, written later, and it forgot.
+ * Here it cannot be forgotten, and a third one gets it without knowing.
+ */
+select option {
+  background: var(--core-secondary-background);
+  color: var(--text-1);
 }
 
 html,

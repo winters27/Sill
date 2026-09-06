@@ -189,6 +189,7 @@ impl ExtHost {
         {
             let sessions = sessions.clone();
             let api = api.clone();
+            let manager = manager.clone();
             tokio::spawn(async move {
                 while let Some(work) = incoming.recv().await {
                     match work {
@@ -233,8 +234,85 @@ impl ExtHost {
                             crate::say!("extension crashed in session {session_id}: {reason}");
                             // Told to the window as well as the log. Without
                             // this it sits on an empty view waiting for a
-                            // first render that is never coming.
-                            api.report_crash(session_id, reason);
+                            // first render that is never coming. The window
+                            // gets the sentence and the log keeps the stack:
+                            // a Node backtrace in a status line is twelve
+                            // rows of the launcher under a wall of text.
+                            api.report_crash(session_id, &headline(reason));
+                        }
+
+                        Incoming::Event { method, params }
+                            if method == "Manager/extensionAsks" =>
+                        {
+                            /*
+                             * A worker wants something it was not granted,
+                             * and is blocked in `require` until it hears
+                             * what it holds now.
+                             *
+                             * The same card and the same store an RPC call
+                             * goes through, so an extension asked for the
+                             * network at `require("http")` is asked the way
+                             * one calling `Clipboard.read` is, and a yes is
+                             * remembered the same way. Answered whichever
+                             * way it goes: a refusal is a list without the
+                             * thing in it, and the worker reads its answer
+                             * off that rather than off a second message.
+                             */
+                            let session_id = params
+                                .get("session_id")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_string();
+                            let needs = capabilities_in(params.get("needs"));
+                            let plainly = params
+                                .get("plainly")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_string();
+
+                            let extension = sessions
+                                .lock()
+                                .expect("sessions poisoned")
+                                .get(&session_id)
+                                .map(|s| s.extension.clone());
+
+                            let Some(extension) = extension else {
+                                crate::say!("a permission was asked for by unknown session {session_id}, dropped");
+                                continue;
+                            };
+
+                            let api = api.clone();
+                            let manager = manager.clone();
+                            tokio::spawn(async move {
+                                let wanted = needs
+                                    .iter()
+                                    .map(permission::plainly)
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                crate::say!("{extension} asks to {wanted}");
+
+                                let permits = api.permits();
+                                let outcome = permits.allow_together(&extension, &needs, &plainly).await;
+
+                                let mut held = permits.held(&extension);
+                                match outcome {
+                                    Ok(()) => {
+                                        crate::say!("{extension} may now {wanted}");
+                                        for need in &needs {
+                                            if !held.contains(need) {
+                                                held.push(*need);
+                                            }
+                                        }
+                                    }
+                                    Err(why) => crate::say!("{extension} asked and was refused: {why}"),
+                                }
+
+                                if let Err(err) = manager.set_capabilities(&session_id, &held).await {
+                                    crate::say!(
+                                        "could not answer {extension}, which is waiting on a permission: {err}"
+                                    );
+                                }
+                            });
                         }
 
                         Incoming::Event { method, .. } => {
@@ -571,6 +649,51 @@ fn joined(sessions: &HashMap<String, Session>, readings: Vec<Reading>) -> Vec<Ru
 /// sessions somebody made up. Standing up an [`ExtHost`] costs a Node process,
 /// which is a poor thing to need in order to ask which of two loaded commands
 /// is a view.
+/// The sentence out of a crash report, for a line of the window.
+///
+/// The host describes a crash with the error's stack, which is right for the
+/// log and wrong for a status line: the twelve frames under "not allowed to
+/// make web requests" are nothing the person can act on, and drawn into the
+/// launcher's chin they cover the rows. The first line that says anything is
+/// the sentence, minus the prefixes an error grows on its way out of Node.
+fn headline(reason: &str) -> String {
+    let line = reason
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("unknown");
+
+    let mut said = line;
+    for prefix in ["Error:", "error:", "sill:"] {
+        if let Some(rest) = said.strip_prefix(prefix) {
+            said = rest.trim_start();
+        }
+    }
+
+    if said.is_empty() {
+        line.to_string()
+    } else {
+        said.to_string()
+    }
+}
+
+/// The capabilities a worker asked for, in the names Rust spells them.
+///
+/// A name the host uses that Rust does not know is dropped rather than
+/// refused outright: it is the same "can never be granted" case the module
+/// gate's spelling test exists to catch, and dropping it here means the
+/// worker is told what it holds and refuses that one itself.
+fn capabilities_in(needs: Option<&Value>) -> Vec<crate::action::Capability> {
+    needs
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|name| serde_json::from_value(name.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn views_in(sessions: &HashMap<String, Session>) -> Vec<String> {
     sessions
         .iter()
@@ -729,5 +852,55 @@ mod what_is_running_costs {
             joined(&sessions, vec![reading("killed")]).is_empty(),
             "a reading outlived its session and was drawn anyway"
         );
+    }
+}
+
+#[cfg(test)]
+mod what_the_window_is_told {
+    use super::*;
+
+    /// The window gets the sentence; the stack stays in the log.
+    #[test]
+    fn a_crash_is_one_line_without_the_stack() {
+        let reason = "Error: sill: this extension is not allowed to make web requests, so \"http\" is unavailable. Grant it in Settings, under Extensions, then run the command again.
+    at refuseUnlessAllowed (C:/Sill/host/dist/host.js:23923:10)
+    at Module.patchedLoad (C:/Sill/host/dist/host.js:24013:25)";
+
+        assert_eq!(
+            headline(reason),
+            "this extension is not allowed to make web requests, so \"http\" is unavailable. Grant it in Settings, under Extensions, then run the command again."
+        );
+    }
+
+    #[test]
+    fn a_reason_with_nothing_in_it_still_says_something() {
+        assert_eq!(headline(""), "unknown");
+        assert_eq!(headline("\n  \n"), "unknown");
+        // Only a prefix, and nothing after it: the prefix is better than nothing.
+        assert_eq!(headline("Error:"), "Error:");
+    }
+
+    #[test]
+    fn a_plain_reason_is_left_alone() {
+        assert_eq!(headline("worker exited with code 1"), "worker exited with code 1");
+    }
+
+    /// The worker asks in the names Rust spells, and a name it does not
+    /// know is dropped rather than turning the whole question into nothing.
+    #[test]
+    fn a_workers_question_is_read_in_rusts_spelling() {
+        use crate::action::Capability;
+
+        let asked = capabilities_in(Some(&json!(["fileRead", "fileWrite", "network"])));
+        assert_eq!(
+            asked,
+            vec![Capability::FileRead, Capability::FileWrite, Capability::Network]
+        );
+
+        let partly = capabilities_in(Some(&json!(["network", "teleport"])));
+        assert_eq!(partly, vec![Capability::Network]);
+
+        assert!(capabilities_in(None).is_empty());
+        assert!(capabilities_in(Some(&json!("network"))).is_empty());
     }
 }

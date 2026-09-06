@@ -166,6 +166,7 @@ pub(crate) fn host_js(app: &AppHandle) -> PathBuf {
     for (source, candidate) in candidates {
         let Some(path) = candidate else { continue };
         if path.exists() {
+            let path = without_extended_prefix(path);
             println!("[sill] extension host: {} ({source})", path.display());
             return path;
         }
@@ -178,6 +179,30 @@ pub(crate) fn host_js(app: &AppHandle) -> PathBuf {
         bundled.display()
     );
     bundled
+}
+
+/// Windows' extended-length prefix, taken off before Node is handed the path.
+///
+/// `AppHandle::path().resolve` canonicalises, and on Windows canonicalising
+/// yields `\\?\C:\...`. Node cannot use one of those as its entry script: it
+/// reads the leading `\\` as a UNC root, takes `?` for the server and `C:` for
+/// the share, and `resolveMainPath` then calls `realpath` on `C:` and dies
+/// with `EISDIR: illegal operation on a directory, lstat 'C:'`.
+///
+/// That kills the host before a line of it has run, so **every** extension
+/// fails to start, and the message names neither the host nor the extension
+/// nor the path it choked on. It reads as one extension being broken.
+///
+/// Only the plain disk form is unwrapped. `\\?\UNC\server\share` shortens to
+/// `\\server\share`, which is a different rewrite and a second thing to be
+/// wrong about, so it is left as it is.
+fn without_extended_prefix(path: PathBuf) -> PathBuf {
+    let shortened = path.to_str().and_then(|text| {
+        let rest = text.strip_prefix(r"\\?\")?;
+        (!rest.starts_with(r"UNC\")).then(|| PathBuf::from(rest))
+    });
+
+    shortened.unwrap_or(path)
 }
 
 /// How long the host may sit unused before it is shut down.

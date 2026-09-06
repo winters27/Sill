@@ -453,6 +453,50 @@ export interface AiTurn {
   text: string;
   /** What was handed over with it, so a reopened conversation still shows it. */
   attachments: AiAttached[];
+  /** How an answer came about, in order. Empty on a question. */
+  parts: AiPart[];
+}
+
+/**
+ * One thing that happened on the way to an answer.
+ *
+ * Text, thinking and steps interleave in the order a model produced them:
+ * it says what it is about to do, does it, and says what it found. Rust
+ * records them; the window draws them.
+ */
+export type AiPart =
+  | { kind: "text"; text: string }
+  | {
+      kind: "thinking";
+      text: string;
+      /** How long it thought for, once something else followed. */
+      ms?: number;
+    }
+  | {
+      kind: "step";
+      /** The call's own id, which its result is labelled with. */
+      id: string;
+      tool: string;
+      /** What it was used on. Empty for the tools that take no arguments. */
+      subject: string;
+      /** Whether it worked. Absent while it runs, and after a stopped turn. */
+      ok?: boolean;
+    };
+
+/** What one request cost, in tokens. */
+export interface AiUsage {
+  input: number;
+  output: number;
+}
+
+/** What a turn cost, said once it is over. Every field can be empty. */
+export interface AiFinished {
+  /** Which model actually answered. Empty when the service did not say. */
+  model: string;
+  usage: AiUsage | null;
+  durationMs: number;
+  /** In dollars, when the service says. Only Claude Code does. */
+  cost: number | null;
 }
 
 /** Whether asking would work, and who would answer. */
@@ -727,9 +771,17 @@ export function aiOutstanding(): Promise<AiAsking | null> {
 
 /** One tool the model reached for, as the window draws it. */
 export interface AiStep {
+  /** The call's own id, which its result is labelled with. */
+  id: string;
   tool: string;
   /** What it was used on. Empty for the tools that take no arguments. */
   subject: string;
+}
+
+/** One tool finished, and whether it managed. */
+export interface AiUsed {
+  id: string;
+  ok: boolean;
 }
 
 /** One conversation, as the list of them draws it. */
@@ -999,6 +1051,13 @@ export interface FileHit {
   name: string;
   path: string;
   isDir: boolean;
+  /**
+   * The line inside the file that answered a `content:` search.
+   *
+   * Absent for every other search. Rust leaves the field out rather than
+   * sending a null, because this row crosses the boundary once per keystroke.
+   */
+  snippet?: string;
 }
 
 /** Why file search cannot answer, or nothing when it can. */
@@ -1051,13 +1110,6 @@ export function listDrives(): Promise<Drive[]> {
     orElse("settings", "which drives are on this machine", [], "files"),
   );
 }
-  /**
-   * The line inside the file that answered a `content:` search.
-   *
-   * Absent for every other search. Rust leaves the field out rather than
-   * sending a null, because this row crosses the boundary once per keystroke.
-   */
-  snippet?: string;
 
 /**
  * Starts or stops indexing one folder.
@@ -1371,6 +1423,31 @@ export function dismiss(): Promise<void> {
  * notification-area menu. The launcher hears `sill://run` on arrival and
  * decides what the command looks like; the caller only states the intent.
  */
+/**
+ * What a command's fields were left set to last time.
+ *
+ * Raycast's `storeValue`: a picker or a form field marked with it opens on
+ * what somebody last chose rather than on what its author defaulted to. Asked
+ * for once as a command starts, so the first draw is already right; asking
+ * per field would be one round trip per control on a form.
+ */
+export function storedFields(
+  extension: string,
+  command: string,
+): Promise<Record<string, unknown>> {
+  return invoke<Record<string, unknown>>("extension_stored_fields", { extension, command });
+}
+
+/** Remembers what one field was set to, for the next time the command runs. */
+export function rememberField(
+  extension: string,
+  command: string,
+  id: string,
+  value: unknown,
+): Promise<void> {
+  return invoke<void>("remember_extension_field", { extension, command, id, value });
+}
+
 export function summonWith(command?: string): Promise<void> {
   return invoke("summon_with", { command: command ?? null });
 }

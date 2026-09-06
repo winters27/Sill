@@ -113,9 +113,17 @@ installed extension's own folder.
 ## What an extension is allowed to reach
 
 An extension starts with nothing beyond drawing in the window. Everything
-else is a permission somebody agrees to when they install it and can take
+else is a permission somebody agrees to, either on the screen that installs
+it or on a card the first time the extension reaches for it, and can take
 back in Settings, under Extensions. Taking one back reaches a command that is
 already running, not only the next launch.
+
+The card is the same one Sill's own AI is answered on, and it is raised at
+the moment it matters: an extension that requires `http` without holding the
+network is stopped inside that `require`, the card names the permission, and
+the extension carries on or is refused depending on the answer. A yes is
+remembered; a no is not, so the same command asks again next time rather
+than staying broken with no way back but Settings.
 
 **Node's own modules are an allowlist, not a blocklist.** A built-in is handed
 over if it is named free below, needs its permission if it is named gated, and
@@ -169,7 +177,7 @@ native code runs outside every permission there is and there is nothing to
 grant.
 
 `fetch`, `WebSocket`, `XMLHttpRequest` and `EventSource` are globals rather
-than modules, and they ask for the same network permission. So do
+than modules, and they ask for the same network permission, on the same card. So do
 `process.kill`, which signals other programs, and `process.report.writeReport`,
 which writes a file wherever it is pointed. A refusal names the permission and
 says where to grant it, rather than failing as though the extension were
@@ -586,3 +594,63 @@ reading it has no way to tell.
 
 The prose in the right-hand column is not guarded and cannot be. If you
 change what a component draws, change the sentence too.
+
+### What the tables cannot tell you
+
+They describe Sill against itself: every name here is one the host answers or
+the window draws. Nothing in them is compared to what `@raycast/api` actually
+declares, so a component or a prop Sill has never heard of is absent from both
+the code and the table, and absent twice looks like agreement.
+
+Two reports answer that, and neither is part of `npm run verify`: both need
+the sparse checkout the view gate draws, and one needs a network.
+
+```bash
+npm run extensions:fetch
+node scripts/audit-api.mjs --props
+```
+
+`audit-api.mjs` reads Raycast's own type declarations out of the checkout and
+reports, component by component, which of its props are read anywhere in the
+window or the host, and how much of each enum has somewhere to land. A prop it
+calls missing is missing. **A prop it calls read may still be read wrongly**:
+the test is that the name appears, which over-reports on purpose, because the
+alternative is a second implementation of the renderer's own logic that would
+agree with itself and with nothing on screen.
+
+```bash
+node scripts/audit-extensions.mjs
+```
+
+That is the other half: what real extensions reach for, ranked by how many of
+them want each one. It covers APIs the host does not answer, permissions
+refused at load, icon names drawn as letters, and assets the window cannot
+resolve.
+
+**"APIs the host does not answer" is measured against the runner, not against
+Rust.** `run-extension.mjs` has no Rust behind it and serves the API from its
+own table, so a method Rust answers and that table does not is reported as a
+hole in Sill. It said `UI/getSelectedText`, which had been implemented for a
+week, along with `Storage/clear` and `Application/getDefault`. A report that
+invents missing features is worse than no report, because the next reader
+builds something that is already there.
+
+`the_view_gate_stub_answers_everything_rust_answers` in
+`src-tauri/tests/exthost.rs` is what stops that. It dispatches every method the
+host can call against the real implementation and fails if Rust answers one the
+runner's table has no case for. Its sibling guards the opposite direction,
+which is the one that shipped a bug.
+
+**An icon name with no drawing is the one gap nothing else can see.** It is
+not a failed call and raises nothing: it falls back to a letter tile and the
+extension runs perfectly, so an extension can be reported as supported by
+every other measure while every row of it draws a letter.
+
+That is why the icon table is complete rather than sampled. It held the 106
+names the store's extensions were measured asking for, which is a real answer
+to a real question and the wrong place to stop: an extension is written
+against the whole vocabulary, so the next one installed brings back the
+letters. All 469 names Raycast publishes now have a mark, and
+`src-tauri/src/exthost/icons.rs` is the list. A name still reaching the letter
+tile is a relative path into an extension's own assets, which is a different
+gap with a different fix.

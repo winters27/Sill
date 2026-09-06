@@ -251,6 +251,33 @@ pub trait Permits: Send + Sync {
     /// refused. An extension that gets a flat "denied" cannot tell somebody
     /// what to turn on.
     async fn allow(&self, extension: &str, needs: &[Capability]) -> Result<(), String>;
+
+    /// The same question for a whole module, on one card.
+    ///
+    /// `require("fs")` costs reading and writing together, and asking twice
+    /// for one line of somebody else's code is two cards where one sentence
+    /// would do. `plainly` is that sentence, the gate's own: "read and change
+    /// files directly". A permit that asks per capability may ignore it and
+    /// answer through [`allow`](Self::allow), which is what this does unless
+    /// overridden.
+    async fn allow_together(
+        &self,
+        extension: &str,
+        needs: &[Capability],
+        _plainly: &str,
+    ) -> Result<(), String> {
+        self.allow(extension, needs).await
+    }
+
+    /// Everything this extension holds right now, as a list to hand a worker.
+    ///
+    /// Read after a card is answered, so the worker waiting on it can be told
+    /// the whole answer rather than the one thing it asked about. Nothing by
+    /// default, which is right for a permit that records nothing: it has no
+    /// list to give, and the caller adds what it just allowed.
+    fn held(&self, _extension: &str) -> Vec<Capability> {
+        Vec::new()
+    }
 }
 
 /// Everything is allowed and nothing is recorded.

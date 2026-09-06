@@ -124,7 +124,11 @@ async fn the_most_installed_extensions_install_and_say_what_they_needed() {
             }
         }
 
-        let prepared = match install::prepare(&root, listing, None).await {
+        // A hundred extensions fetched in a row, so the progress is dropped
+        // rather than printed: what this audit reports is what each one asked
+        // for, and a download bar per extension would bury it.
+        let quietly = |_: sill_lib::extension_install::Progress| {};
+        let prepared = match install::prepare(&root, listing, None, &quietly).await {
             Ok(prepared) => prepared,
             Err(err) => {
                 println!("FETCH FAILED  {err}");

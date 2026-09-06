@@ -305,6 +305,169 @@ try {
     "and it really did reach the disk",
   );
 
+  // ---- a callback that is not at the top of the prop bag ----
+  //
+  // `serializeProps` used to look only at the top level, so `onAction` became
+  // a handler id and `pagination.onLoadMore` did not: it stayed a function,
+  // JSON dropped it on the way out, and the window received a list that said
+  // there was more and named nobody to ask. Nothing failed. The list simply
+  // ended one page in, exactly as a list with no more pages does.
+  const nested = await request("Manager/load", {
+    opts: {
+      mode: "View",
+      env: "Development",
+      entrypoint: resolve(root, "test/fixture/nests-a-callback.js"),
+      extension_name: "nesty",
+      command_name: "paged",
+      is_raycast: true,
+      preferences: {},
+      arguments: {},
+      launch_type: "User",
+      capabilities: [],
+    },
+  });
+  const nestedSession = nested.result?.session_id;
+
+  send({ jsonrpc: "2.0", id: 9200, method: "Manager/ready", params: { session_id: nestedSession } });
+
+  const paged = await waitFor(
+    (m) =>
+      m.method === "Manager/extensionMessage" &&
+      m.params.session_id === nestedSession &&
+      JSON.parse(m.params.payload).method === "UI/render",
+    "the list that paginates drew",
+  );
+
+  const withPagination = JSON.parse(paged.params.payload)
+    .params.ops.find((op) => op.props?.pagination);
+
+  assert(withPagination !== undefined, "the pagination prop crossed at all");
+  assert(
+    withPagination.props.pagination.hasMore === true &&
+      withPagination.props.pagination.pageSize === 20,
+    "the plain values inside it came through unchanged",
+  );
+  assert(
+    typeof withPagination.props.pagination.onLoadMore?.$handler === "string",
+    `the callback inside it became a handler id (${JSON.stringify(withPagination.props.pagination.onLoadMore)})`,
+  );
+
+  // And it is a handler the window can actually activate, which is the half a
+  // shape check would miss: an id that maps to nothing looks identical.
+  await request("Manager/messageExtension", {
+    session_id: nestedSession,
+    payload: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 9201,
+      method: "EventCore/handlerActivated",
+      params: { id: withPagination.props.pagination.onLoadMore.$handler, args: [] },
+    }),
+  });
+
+  await waitForSaid(/nesty\/paged: asked for more/, "the nested callback ran when activated");
+  assert(/nesty\/paged: asked for more/.test(said), "activating it reached the extension's own function");
+
+  await request("Manager/unload", { session_id: nestedSession });
+
+  // ---- asking, from inside require ----
+  //
+  // The same fixture a third and fourth time, launched the way Sill launches
+  // it: with nothing granted and `asks` set. Instead of dying at `require`
+  // the worker puts the question up, and this test plays the Rust side that
+  // answers it. Both answers are checked, because a gate that asks and then
+  // ignores the answer would pass either one alone.
+  const loadAsking = () =>
+    request("Manager/load", {
+      opts: {
+        mode: "View",
+        env: "Development",
+        entrypoint: resolve(root, "test/fixture/reads-disk.js"),
+        extension_name: "disky",
+        command_name: "read",
+        is_raycast: true,
+        preferences: {},
+        arguments: {},
+        launch_type: "User",
+        capabilities: [],
+        asks: true,
+      },
+    });
+
+  const askingYes = await loadAsking();
+  const askingYesSession = askingYes.result?.session_id;
+
+  const asked = await waitFor(
+    (m) => m.method === "Manager/extensionAsks" && m.params.session_id === askingYesSession,
+    "an extension with no permission asked for it rather than crashing",
+  );
+  assert(
+    JSON.stringify(asked.params.needs) === JSON.stringify(["fileRead", "fileWrite"]),
+    `it asked for exactly what fs costs (${JSON.stringify(asked.params.needs)})`,
+  );
+  assert(
+    asked.params.plainly === "read and change files directly",
+    `and said what fs is for, in the gate's own words (${asked.params.plainly})`,
+  );
+  assert(
+    !inbox.some(
+      (m) => m.method === "Manager/extensionCrash" && m.params.session_id === askingYesSession,
+    ),
+    "and nothing crashed while the question was up",
+  );
+
+  // Rust says yes by saying what the extension holds now.
+  const granted = await request("Manager/setCapabilities", {
+    session_id: askingYesSession,
+    capabilities: ["fileRead", "fileWrite"],
+  });
+  assert(granted.result === true, "the answer reached the session");
+
+  send({
+    jsonrpc: "2.0",
+    id: 9101,
+    method: "Manager/ready",
+    params: { session_id: askingYesSession },
+  });
+
+  const drewAfterAsking = await waitFor(
+    (m) =>
+      m.method === "Manager/extensionMessage" &&
+      m.params.session_id === askingYesSession &&
+      JSON.parse(m.params.payload).method === "UI/render",
+    "the extension went on and drew once the card was answered yes",
+  );
+  assert(
+    JSON.stringify(JSON.parse(drewAfterAsking.params.payload).params.ops).includes(
+      "reached the disk",
+    ),
+    "and the require it was waiting on really did hand over fs",
+  );
+
+  await request("Manager/unload", { session_id: askingYesSession });
+
+  // And the other answer: what it holds is still nothing.
+  const askingNo = await loadAsking();
+  const askingNoSession = askingNo.result?.session_id;
+
+  await waitFor(
+    (m) => m.method === "Manager/extensionAsks" && m.params.session_id === askingNoSession,
+    "the second launch asked too",
+  );
+
+  await request("Manager/setCapabilities", {
+    session_id: askingNoSession,
+    capabilities: [],
+  });
+
+  const refusedAfterAsking = await waitFor(
+    (m) => m.method === "Manager/extensionCrash" && m.params.session_id === askingNoSession,
+    "answered no, the extension is refused the way it always was",
+  );
+  assert(
+    /not allowed to read and change files/.test(refusedAfterAsking.params.reason),
+    `and the refusal still names the permission (${refusedAfterAsking.params.reason})`,
+  );
+
   // ---- the ways round the front door ----
   //
   // The gate used to sit on `Module.prototype.require`, and three supported

@@ -18,7 +18,7 @@
    */
   import "$lib/theme/theme.css";
   import LaunchIcon from "$lib/components/LaunchIcon.svelte";
-  import SettingsIcon from "$lib/components/SettingsIcon.svelte";
+  import SettingsIcon, { PANEL_ICONS } from "$lib/components/SettingsIcon.svelte";
   import Toggle from "$lib/components/Toggle.svelte";
   import Segmented from "$lib/components/settings/Segmented.svelte";
   import Slider from "$lib/components/settings/Slider.svelte";
@@ -27,8 +27,20 @@
   import Row from "$lib/components/settings/Row.svelte";
   import ThemeCards from "$lib/components/settings/ThemeCards.svelte";
   import Instead from "$lib/components/Instead.svelte";
+  import ExtIcon from "$lib/components/ExtIcon.svelte";
+  import { MARKS } from "$lib/components/marks";
   import type { Standing } from "$lib/instead";
   import { popover, swap } from "$lib/motion";
+
+  /**
+   * Every icon name Raycast publishes, in the order it publishes them.
+   *
+   * The point of drawing all of them at once is the thing no single row can
+   * show: whether they read as one family. A mark that is right on its own and
+   * heavier than its neighbours is still wrong, and the only way to see that
+   * is a sheet of them.
+   */
+  const ICON_NAMES = Object.keys(MARKS);
 
   /** One of each, so the three are compared side by side rather than found. */
   const STATES: [Standing, string, string][] = [
@@ -388,10 +400,74 @@
     {/each}
   </div>
 
+  <h2>Every settings panel icon ({PANEL_ICONS.length}), at both sizes it is used</h2>
+  <div class="icons">
+    {#each PANEL_ICONS as name (name)}
+      <div class="icon panel-icon">
+        <SettingsIcon {name} size={38} />
+        <SettingsIcon {name} size={26} />
+        <span>{name}</span>
+      </div>
+    {/each}
+  </div>
+
+  <h2>Every Raycast icon name ({ICON_NAMES.length}), and the mark it draws</h2>
+  <div class="icons">
+    {#each ICON_NAMES as name (name)}
+      <div class="icon">
+        <ExtIcon icon={{ kind: "mark", name }} />
+        <span>
+          {name}
+          <em>{MARKS[name]}</em>
+        </span>
+      </div>
+    {/each}
+  </div>
+
   <div class="foot">Development route. Not part of the app.</div>
 </div>
 
 <style>
+  /* The two sizes side by side, because the etch is drawn at one and
+     dropped at the other and that is the pair worth comparing. */
+  .panel-icon {
+    gap: var(--space-2);
+  }
+
+  .icons {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    gap: var(--space-2);
+  }
+
+  .icon {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--fill-1);
+    color: var(--text-1);
+    font-size: var(--text-micro);
+  }
+
+  .icon span {
+    display: grid;
+    min-width: 0;
+    color: var(--text-1);
+  }
+
+  /* The mark under the name, because a sheet of pictures is only checkable
+     against what each one was supposed to be. */
+  .icon em {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-3);
+    font-style: normal;
+  }
+
   .page {
     min-height: 100vh;
     padding: var(--space-6) var(--space-6) var(--space-10);

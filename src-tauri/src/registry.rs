@@ -1595,7 +1595,14 @@ pub fn snippet_record(snippet: &crate::snippets::store::Snippet) -> CommandRecor
         .collect(),
         icon: None,
         toggle: None,
-        panel: None,
+        // The Snippets panel's own mark.
+        //
+        // A snippet carried neither an icon nor a panel, so every one of them
+        // drew a lettered tile of the first character of its name, and a
+        // letter says nothing: "A" is the same tile whether the row is a
+        // snippet, an application or a file. The panel it is managed on is
+        // the one true thing available to say about it.
+        panel: Some("snippets".to_string()),
         // Only extension commands carry any.
         preferences: serde_json::Value::Null,
         manifest: None,

@@ -45,6 +45,44 @@ const commands = JSON.parse(readFileSync(manifestPath, "utf8"));
 const TIMEOUT_MS = 30_000;
 
 /**
+ * One kind of finding, off the runner's own summary lines.
+ *
+ * The runner prints `audit: <key>=<value>,<value>` for each kind it found
+ * something of, and prints nothing for a kind it found none of, so an absent
+ * line means "none" rather than "did not look". Values may carry a count as
+ * `name:count`; a value without one counts as one.
+ *
+ * **This replaced scraping the prose above it, and the reason is worth
+ * keeping.** The pattern it used, `/unimplemented:?\s+([\w/.]+)/i`, matched the
+ * runner's own headline, "Unimplemented API surface this extension needs",
+ * and captured the word "API". Every extension reported one gap called API,
+ * including the extensions with no gaps at all, because the summary line
+ * "no unimplemented API was needed" matched too. The ranking this whole
+ * script exists to produce was a single meaningless row, and nothing failed,
+ * because prose that has changed shape still reads as prose.
+ *
+ * `verify:source` holds these keys to the ones the runner emits, in both
+ * directions, so a finding added on one side cannot be dropped on the other.
+ */
+function found(output, key) {
+  const line = new RegExp(`^audit: ${key}=(.*)$`, "gm");
+
+  return [...output.matchAll(line)].flatMap((match) =>
+    match[1]
+      .split(",")
+      .filter(Boolean)
+      .map((value) => {
+        const at = value.lastIndexOf(":");
+        const counted = at > 0 && /^\d+$/.test(value.slice(at + 1));
+        return {
+          name: counted ? value.slice(0, at) : value,
+          count: counted ? Number(value.slice(at + 1)) : 1,
+        };
+      }),
+  );
+}
+
+/**
  * Runs one command and returns what it needed.
  *
  * The runner prints a line per unimplemented API and a summary count, so the
@@ -59,6 +97,16 @@ function run(entry) {
       entry.extension,
     ];
     if (entry.mode === "no-view") args.push("--no-view");
+
+    /*
+     * Long enough for one network round trip.
+     *
+     * Most of these fetch, and a view that has drawn its empty list is not a
+     * view that has finished. At the gate's own quiet window this report said
+     * "0 rows, no icons" for every extension whose rows come over the wire,
+     * which is most of the interesting ones.
+     */
+    args.push("--settle", "5000");
 
     // The permissions installing granted. Without these the run measures the
     // default-deny path rather than what somebody who accepted an install
@@ -82,9 +130,7 @@ function run(entry) {
     child.on("close", () => {
       clearTimeout(timer);
 
-      // The runner names each one it could not answer. Its own words, so a
-      // new gap needs no change here to be counted.
-      const gaps = [...output.matchAll(/unimplemented:?\s+([\w/.]+)/gi)].map((m) => m[1]);
+      const gaps = found(output, "unimplemented").map((one) => one.name);
 
       /*
        * A refused permission is its own outcome, and it has to be, because it
@@ -114,6 +160,8 @@ function run(entry) {
                 : "nothing",
         denied: [...new Set(denied)],
         gaps: [...new Set(gaps)],
+        lettered: found(output, "lettered-icon"),
+        unresolved: found(output, "unresolved-icon"),
         output,
       });
     });
@@ -135,6 +183,26 @@ const byOutcome = new Map();
 const byGap = new Map();
 const byDenial = new Map();
 
+/**
+ * Icon names, by how many extensions want one and how often it is drawn.
+ *
+ * Two numbers because they answer different questions. **How many extensions**
+ * decides what to draw next: one name in forty extensions is worth an
+ * afternoon and one name in one is not. **How many rows** says how much of a
+ * screen it is: an icon on every row of a thirty row list is the whole list
+ * reading as letters, which is what this looks like to somebody using it.
+ */
+const byIcon = new Map();
+const byUnresolved = new Map();
+
+const tally = (into, findings, extension) => {
+  for (const { name, count } of findings) {
+    if (!into.has(name)) into.set(name, { who: new Set(), rows: 0 });
+    into.get(name).who.add(extension);
+    into.get(name).rows += count;
+  }
+};
+
 for (const result of results) {
   byOutcome.set(result.outcome, (byOutcome.get(result.outcome) ?? 0) + 1);
   for (const gap of result.gaps) {
@@ -145,6 +213,8 @@ for (const result of results) {
     if (!byDenial.has(denial)) byDenial.set(denial, new Set());
     byDenial.get(denial).add(result.extension);
   }
+  tally(byIcon, result.lettered ?? [], result.extension);
+  tally(byUnresolved, result.unresolved ?? [], result.extension);
 }
 
 console.log("outcomes");
@@ -167,6 +237,46 @@ if (byGap.size === 0) {
 } else {
   for (const [gap, who] of [...byGap].sort((a, b) => b[1].size - a[1].size)) {
     console.log(`  ${String(who.size).padStart(4)}  ${gap}  (${[...who].join(", ")})`);
+  }
+}
+
+/*
+ * The half no other report can see.
+ *
+ * An icon name the window has no drawing for is not a failed call and raises
+ * nothing at all: it falls back to a letter tile and the extension runs
+ * perfectly. So an extension can be reported as fully supported by everything
+ * above while every row of it draws a letter, which is the state Hacker News
+ * shipped in.
+ */
+const ranked = (counted) =>
+  [...counted].sort((a, b) => b[1].who.size - a[1].who.size || b[1].rows - a[1].rows);
+
+console.log("\nIcon names drawn as letters, by how many extensions want one");
+if (byIcon.size === 0) {
+  console.log("  none");
+} else {
+  for (const [name, { who, rows }] of ranked(byIcon)) {
+    console.log(
+      `  ${String(who.size).padStart(4)}  ${name.padEnd(24)} ${String(rows).padStart(5)} row(s)  (${[...who].join(", ")})`,
+    );
+  }
+}
+
+/*
+ * A different problem with the same symptom. These are extensions pointing at
+ * a file they shipped, which the window cannot resolve because it does not
+ * know where an installed extension lives on disk. No amount of artwork fixes
+ * one; a route to those bytes does.
+ */
+console.log("\nExtension assets the window cannot resolve, by how many want one");
+if (byUnresolved.size === 0) {
+  console.log("  none");
+} else {
+  for (const [name, { who, rows }] of ranked(byUnresolved)) {
+    console.log(
+      `  ${String(who.size).padStart(4)}  ${name.padEnd(40)} ${String(rows).padStart(5)} row(s)  (${[...who].join(", ")})`,
+    );
   }
 }
 

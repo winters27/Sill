@@ -467,6 +467,22 @@ Search had no rule at all and drew a white control on dark glass. One `Select`
 and one `TextField` decide it once now, and `verify:source` refuses a
 hand-rolled picker in settings.
 
+### The chat, as Dosage's, 2026-09-05
+
+A model at work used to be a line that said Thinking and a grey list of
+tool names. Now the window shows what it is thinking, folded to one line
+once the answer starts; each tool it reaches for, in words, with whether it
+managed; the words arriving at a steady pace rather than in clumps; and an
+orb, in the theme's own colours, that moves only while a turn is live.
+
+Rust records all of it in the order it happened, as `parts` on the stored
+answer, so a conversation reopened tomorrow shows the working as well as the
+words. Both transports record through one path, which is what makes a Claude
+Code turn look like an HTTP turn: it used to run six tools in silence. Stop
+now kills the Claude Code process rather than leaving it to finish unread.
+
+The launcher's inline chat and the chat window draw the same components,
+which used to be two copies of the same rows with different scroll rules.
 ### P3.12, the extension store
 
 Deferred since P1.11 with a note saying a registry is "a different problem,

@@ -15,6 +15,7 @@ import type { Readable } from "node:stream";
 import { encodeFrame, FrameDecoder } from "./proto/framing";
 import { RpcPeer, type RpcParams } from "./proto/rpc";
 import { workerMain, type LaunchData } from "./worker/worker";
+import { answer, askBuffer } from "./worker/ask";
 
 /**
  * Renders anything throwable as readable text. Rejections arriving over RPC
@@ -272,6 +273,8 @@ class ExtensionOutput {
 interface Warm {
   worker: Worker;
   output: ExtensionOutput;
+  /** Made with the worker, because `workerData` is handed over once at birth. */
+  ask: SharedArrayBuffer;
 }
 
 /** What a worker says about its own memory, in bytes. */
@@ -333,6 +336,14 @@ interface Session {
   /** Who this is, so a message about it can say so in the person's words. */
   extension: string;
   command: string;
+  /**
+   * Where an answer to a permission question is written for this worker.
+   *
+   * Shared memory rather than a message, because the worker asks from inside
+   * `require` and is holding its own event loop while it waits. See
+   * `worker/ask.ts`.
+   */
+  ask: SharedArrayBuffer;
 }
 
 class ExtensionHost {
@@ -369,10 +380,12 @@ class ExtensionHost {
   }
 
   private spawnWorker(): Warm {
+    const ask = askBuffer();
     const worker = new Worker(__filename, {
       resourceLimits: { maxOldGenerationSizeMb: WORKER_MAX_HEAP_MB },
       stdout: true,
       stderr: true,
+      workerData: { ask },
     });
 
     // Read from the moment the worker exists rather than from the moment a
@@ -382,7 +395,7 @@ class ExtensionHost {
     output.carry(worker.stdout);
     output.carry(worker.stderr);
 
-    return { worker, output };
+    return { worker, output, ask };
   }
 
   /** Takes the warm worker and immediately starts warming the next one. */
@@ -578,6 +591,7 @@ class ExtensionHost {
       hotMs: 0,
       extension: String(opts.extension_name ?? opts.extension_id ?? "an extension"),
       command: String(opts.command_name ?? ""),
+      ask: warm.ask,
     };
     this.sessions.set(sessionId, session);
     this.watchForRunaways();
@@ -629,6 +643,26 @@ class ExtensionHost {
       void this.unload(sessionId);
     });
 
+    /*
+     * The worker wants something it was not granted, and is now waiting.
+     *
+     * Passed up to Rust, which owns what an extension holds and is the only
+     * side with a person to ask. The answer does not come back down this
+     * path: Rust says what the extension holds now through
+     * `Manager/setCapabilities`, and that is what writes the shared memory
+     * the worker is blocked on. Refused or allowed, the list arrives, and
+     * the worker reads its answer off what is in it.
+     */
+    control.on("Lifecycle/ask", (p: RpcParams) => {
+      this.rpc.emit("Manager/extensionAsks", {
+        session_id: sessionId,
+        needs: Array.isArray(p.needs) ? p.needs.map(String) : [],
+        // What the gate would have said in its refusal, for the card to say
+        // instead: one question per module, in the module's own terms.
+        plainly: typeof p.plainly === "string" ? p.plainly : "",
+      });
+    });
+
     const data: LaunchData = {
       entrypoint: String(opts.entrypoint ?? ""),
       extensionName: String(opts.extension_name ?? ""),
@@ -648,6 +682,10 @@ class ExtensionHost {
       capabilities: Array.isArray(opts.capabilities)
         ? (opts.capabilities as string[])
         : [],
+      // Only Sill says so. A script driving the host leaves it out and gets
+      // a gate that refuses at once rather than one waiting for a card
+      // nobody will answer.
+      asks: opts.asks === true,
       // The thing this command was run on, when it was run as an action. Rust
       // leaves the field out entirely for an ordinary launch, and absent is
       // what `@sill/api`'s `actionTarget` answers with.
@@ -712,9 +750,16 @@ class ExtensionHost {
     const session = this.sessions.get(String(params.session_id));
     if (!session) return false;
 
-    session.control.emit("Lifecycle/capabilities", {
-      capabilities: Array.isArray(params.capabilities) ? params.capabilities : [],
-    });
+    const capabilities = Array.isArray(params.capabilities)
+      ? params.capabilities.map(String)
+      : [];
+
+    // Both routes, always. A worker blocked in `require` waiting on a card
+    // reads its answer out of the shared memory, and one that is running
+    // hears it on the port. Writing both costs a few bytes and means the
+    // manager never has to know which state the worker is in.
+    answer(session.ask, capabilities);
+    session.control.emit("Lifecycle/capabilities", { capabilities });
     return true;
   }
 

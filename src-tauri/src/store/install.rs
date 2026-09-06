@@ -273,6 +273,7 @@ pub async fn prepare(
     data_dir: &Path,
     listing: &Listing,
     token: Option<&str>,
+    report: crate::extension_install::Report<'_>,
 ) -> Result<Preparation, String> {
     let name = safe_name(&listing.name)
         .ok_or_else(|| format!("{} is not a name this can install", listing.name))?;
@@ -290,7 +291,8 @@ pub async fn prepare(
     let client = crate::dictation::fetch::client();
     let files = source::list(&client, &listing.folder, &listing.revision, token).await?;
     let fetched =
-        source::download(&client, &listing.folder, &listing.revision, &files, &staged).await?;
+        source::download(&client, &listing.folder, &listing.revision, &files, &staged, report)
+            .await?;
 
     let manifest_text = std::fs::read_to_string(staged.join("package.json"))
         .map_err(|_| format!("{name} has no package.json at {}", listing.revision))?;
@@ -673,6 +675,15 @@ pub fn uninstall(
     storage
         .clear(extension)
         .map_err(|err| format!("could not clear what {extension} had saved: {err}"))?;
+
+    // And what the launcher remembered on its behalf, which is kept under a
+    // name of Sill's own and so is not covered by the line above. Somebody's
+    // last choice of feed is their data by the same argument as everything
+    // else here: leaving it keeps it on their machine after they asked for the
+    // thing that collected it to go.
+    storage
+        .forget_fields(extension)
+        .map_err(|err| format!("could not forget what {extension} remembered: {err}"))?;
 
     // The same argument, for the other two places an extension leaves things:
     // what somebody typed into its settings, which for half the store is an

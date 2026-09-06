@@ -112,10 +112,4 @@
     color: var(--text-1);
   }
 
-  /* The list Windows opens is its own window and starts white. Without this
-     the labels are light text on it and only the highlighted row can be read. */
-  select option {
-    background: var(--core-secondary-background);
-    color: var(--text-1);
-  }
 </style>

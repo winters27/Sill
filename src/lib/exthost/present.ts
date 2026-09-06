@@ -73,6 +73,29 @@ function drawable(src: string): boolean {
 }
 
 /**
+ * An SVG data URI as a browser will actually read it.
+ *
+ * Extensions write these by hand, unencoded, and a colour inside one ends the
+ * URL: `data:image/svg+xml,<svg ... fill="#DD7949" ...>` is a picture up to
+ * the `#` and a fragment identifier after it, so what loads is a truncated
+ * document that draws nothing. Hacker News numbers its rows this way and drew
+ * thirty empty tiles.
+ *
+ * Only `#`, and only for a payload that is not already base64. It is the one
+ * character that truncates rather than merely being untidy: `<`, `>` and
+ * quotes are forbidden by a strict reading and accepted by every browser, and
+ * encoding them would rewrite strings that already work. An author who
+ * correctly wrote `%23` has no bare `#` left for this to touch, so running it
+ * over an encoded payload changes nothing.
+ */
+function readable(src: string): string {
+  const head = /^data:image\/svg\+xml([^,]*),/i.exec(src);
+  if (!head || /;base64/i.test(head[1])) return src;
+
+  return src.slice(0, head[0].length) + src.slice(head[0].length).replaceAll("#", "%23");
+}
+
+/**
  * Whether a string is a character to print rather than a name to look up.
  *
  * Emoji are the common case and an extension passes them bare. Length is the
@@ -97,7 +120,7 @@ function printable(value: string): boolean {
 export function iconOf(value: unknown, tint?: string): ExtIcon | undefined {
   if (typeof value === "string") {
     if (!value) return undefined;
-    if (drawable(value)) return { kind: "image", src: value, tint };
+    if (drawable(value)) return { kind: "image", src: readable(value), tint };
     if (printable(value)) return { kind: "glyph", text: value, tint };
     // Everything else is a name: `Icon.Star` is the string "Star", and a
     // relative asset path is a name Sill has no picture for either.
@@ -307,11 +330,36 @@ function str(node: ElementNode, key: string): string {
 export interface Dropdown {
   /** The node, so a caller can tell one picker from the next one. */
   id: number;
+  /**
+   * What the extension calls this picker, when it names it.
+   *
+   * Raycast's own `id`, and the key its remembered value is kept under. A
+   * picker with no name has nowhere to be remembered, which is why this is
+   * optional and why `storeValue` on one that omitted it does nothing.
+   */
+  name?: string;
+  /** Whether the extension asked for the last choice to be remembered. */
+  storeValue: boolean;
   tooltip: string;
   /** The handler to activate with the chosen value. */
   onChange?: string;
-  /** What the extension says is chosen, when it says. */
+  /**
+   * What the extension is driving, while it drives it.
+   *
+   * Only `value`. An extension passing this owns the selection and is told
+   * nothing it did not already decide.
+   */
   value?: string;
+  /**
+   * What the picker should open on when the extension is not driving it.
+   *
+   * `defaultValue`, kept apart from `value` rather than folded into it,
+   * because the two mean opposite things to whoever has to decide whether the
+   * extension already knows what is selected. Folded together, a dropdown
+   * that merely suggested a starting point was indistinguishable from one
+   * being driven, and the extension was told about neither.
+   */
+  initial?: string;
   options: { value: string; title: string; section?: string; icon?: ExtIcon }[];
 }
 
@@ -342,14 +390,56 @@ export function dropdownOf(tree: ViewTree, node: ElementNode): Dropdown | undefi
   walk(picker, undefined);
 
   const onChange = picker.props.onChange;
-  const value = picker.props.value ?? picker.props.defaultValue;
+  const value = picker.props.value;
+  const initial = picker.props.defaultValue;
 
   return {
     id: picker.id,
+    name: str(picker, "id") || undefined,
+    storeValue: picker.props.storeValue === true,
     tooltip: str(picker, "tooltip") || str(picker, "placeholder"),
     onChange: isHandlerRef(onChange) ? onChange.$handler : undefined,
     value: typeof value === "string" ? value : undefined,
+    initial: typeof initial === "string" ? initial : undefined,
     options,
+  };
+}
+
+/**
+ * What a list says about there being more of it.
+ *
+ * Raycast's `pagination` is `{ pageSize, hasMore, onLoadMore }` and it is how
+ * every list longer than one request is written: the extension renders what it
+ * has, says whether there is more, and waits to be asked. A launcher that
+ * never asks draws the first page and calls it the whole answer, which reads
+ * as an extension that only found twenty things.
+ *
+ * `pageSize` is carried but nothing here decides with it. It is the
+ * extension's own account of how many rows a request brings back, useful to a
+ * reader and to a future decision about how early to ask; the asking is driven
+ * by where the cursor is, which is a fact about the person rather than about
+ * the request.
+ */
+export interface Pagination {
+  /** Whether asking again would bring more. */
+  hasMore: boolean;
+  /** How many rows the extension says one request adds. */
+  pageSize: number;
+  /** The handler that asks for the next page. */
+  onLoadMore?: string;
+}
+
+export function paginationOf(node: ElementNode): Pagination | undefined {
+  const given = node.props.pagination;
+  if (!given || typeof given !== "object") return undefined;
+
+  const record = given as Record<string, unknown>;
+  const onLoadMore = record.onLoadMore;
+
+  return {
+    hasMore: record.hasMore === true,
+    pageSize: typeof record.pageSize === "number" ? record.pageSize : 0,
+    onLoadMore: isHandlerRef(onLoadMore) ? onLoadMore.$handler : undefined,
   };
 }
 

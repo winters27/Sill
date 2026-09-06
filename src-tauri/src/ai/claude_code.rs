@@ -49,6 +49,18 @@ use super::provider::Provider;
 pub enum Event {
     /// More of the answer.
     Text(String),
+    /// More of what it is thinking before it answers.
+    Thinking(String),
+    /// Which model is answering, from the first event of each message.
+    Model(String),
+    /// A tool is being reached for. The arguments follow in pieces.
+    CallBegun { at: usize, id: String, name: String },
+    /// A piece of the arguments, JSON a few characters at a time.
+    CallInput { at: usize, json: String },
+    /// The block at this position is complete, whatever kind it was.
+    BlockDone { at: usize },
+    /// What a tool answered, and whether it managed.
+    CallAnswered { id: String, failed: bool },
     /// Which conversation this is, so a follow-up can continue it.
     Session(String),
     /// The turn is over.
@@ -62,9 +74,15 @@ pub enum Event {
 /// Reads one line of `--output-format stream-json`.
 ///
 /// Anything unrecognised is ignored rather than treated as a failure. The
-/// stream carries tool calls, retries, plugin loads and subagent traffic, and
-/// a chat window needs none of it; a new event type in a future release must
-/// not break the answer arriving.
+/// stream carries retries, plugin loads and subagent traffic, and a chat
+/// window needs none of it; a new event type in a future release must not
+/// break the answer arriving.
+///
+/// Tool calls are read now, because a turn that runs six tools in silence
+/// looks exactly like a turn that has hung. Each call arrives as a block:
+/// begun with its name and id, its arguments in pieces, then stopped. Blocks
+/// are numbered from zero within each message, so a position is only meaning
+/// something until its stop.
 pub fn parse_event(line: &str) -> Event {
     let line = line.trim();
     if line.is_empty() {
@@ -80,15 +98,27 @@ pub fn parse_event(line: &str) -> Event {
     let kind = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
     match kind {
-        // A token, which is the only thing a chat window is really waiting for.
-        "stream_event" => {
-            let delta = value.pointer("/event/delta");
-            let is_text =
-                delta.and_then(|d| d.get("type")).and_then(|t| t.as_str()) == Some("text_delta");
+        "stream_event" => read_stream_event(value.get("event").unwrap_or(&serde_json::Value::Null)),
 
-            match delta.and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
-                Some(text) if is_text => Event::Text(text.to_string()),
-                _ => Event::Ignored,
+        // What a tool answered, sent back to the model as a user message.
+        "user" => {
+            let Some(blocks) = value.pointer("/message/content").and_then(|c| c.as_array()) else {
+                return Event::Ignored;
+            };
+
+            let result = blocks.iter().find(|block| {
+                block.get("type").and_then(|t| t.as_str()) == Some("tool_result")
+            });
+
+            match result.and_then(|r| r.get("tool_use_id")).and_then(|id| id.as_str()) {
+                Some(id) => Event::CallAnswered {
+                    id: id.to_string(),
+                    failed: result
+                        .and_then(|r| r.get("is_error"))
+                        .and_then(|e| e.as_bool())
+                        .unwrap_or(false),
+                },
+                None => Event::Ignored,
             }
         }
 
@@ -123,6 +153,121 @@ pub fn parse_event(line: &str) -> Event {
         }
 
         _ => Event::Ignored,
+    }
+}
+
+/// One of the raw events `--include-partial-messages` passes through.
+fn read_stream_event(event: &serde_json::Value) -> Event {
+    // An event carrying a delta is a delta, whether or not it says so. Older
+    // builds left the type off, and a token is a token either way.
+    let kind = event
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or(if event.get("delta").is_some() {
+            "content_block_delta"
+        } else {
+            ""
+        });
+    let at = || {
+        event
+            .get("index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize
+    };
+
+    match kind {
+        "content_block_delta" => {
+            let delta = event.get("delta");
+            let delta_kind = delta.and_then(|d| d.get("type")).and_then(|t| t.as_str());
+            let field = |name: &str| {
+                delta
+                    .and_then(|d| d.get(name))
+                    .and_then(|t| t.as_str())
+                    .map(str::to_string)
+            };
+
+            match delta_kind {
+                Some("text_delta") => field("text").map(Event::Text),
+                Some("thinking_delta") => field("thinking").map(Event::Thinking),
+                Some("input_json_delta") => field("partial_json").map(|json| Event::CallInput {
+                    at: at(),
+                    json,
+                }),
+                _ => None,
+            }
+            .unwrap_or(Event::Ignored)
+        }
+
+        "content_block_start" => {
+            let block = event.get("content_block");
+            let is_call = block.and_then(|b| b.get("type")).and_then(|t| t.as_str())
+                == Some("tool_use");
+            let text = |name: &str| {
+                block
+                    .and_then(|b| b.get(name))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            };
+
+            if is_call {
+                Event::CallBegun {
+                    at: at(),
+                    id: text("id"),
+                    name: text("name"),
+                }
+            } else {
+                Event::Ignored
+            }
+        }
+
+        "content_block_stop" => Event::BlockDone { at: at() },
+
+        "message_start" => event
+            .pointer("/message/model")
+            .and_then(|m| m.as_str())
+            .filter(|m| !m.is_empty())
+            .map(|m| Event::Model(m.to_string()))
+            .unwrap_or(Event::Ignored),
+
+        _ => Event::Ignored,
+    }
+}
+
+/// What the last line says the turn cost.
+///
+/// Read separately from `parse_event`, which only says the turn is over: the
+/// numbers are worth having but nothing about the turn depends on them, so a
+/// result line missing any of them still ends the turn cleanly.
+pub fn outcome(line: &str) -> super::chat::Finished {
+    let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap_or_default();
+    let number = |key: &str| value.get(key).and_then(serde_json::Value::as_u64);
+
+    let usage = match (
+        value.pointer("/usage/input_tokens").and_then(serde_json::Value::as_u64),
+        value.pointer("/usage/output_tokens").and_then(serde_json::Value::as_u64),
+    ) {
+        (None, None) => None,
+        (input, output) => Some(super::openai::Usage {
+            input: input.unwrap_or(0),
+            output: output.unwrap_or(0),
+        }),
+    };
+
+    // The one model this turn used, when there was one. A turn that used two
+    // is a turn with a subagent in it, and naming the first is close enough.
+    let model = value
+        .get("modelUsage")
+        .and_then(|m| m.as_object())
+        .and_then(|m| m.keys().next())
+        .cloned()
+        .unwrap_or_default();
+
+    super::chat::Finished {
+        model,
+        usage,
+        duration_ms: number("duration_ms").unwrap_or(0),
+        cost: value.get("total_cost_usd").and_then(serde_json::Value::as_f64),
     }
 }
 
@@ -724,11 +869,105 @@ mod tests {
             assert_eq!(parse_event(line), Event::Text("Hello".into()));
         }
 
-        /// Thinking and other deltas are not the answer.
+        /// A signature and other deltas are not the answer. This used to hold
+        /// a thinking delta, before thinking was shown.
         #[test]
         fn a_delta_that_is_not_text_is_not_text() {
-            let line = r#"{"type":"stream_event","event":{"delta":{"type":"thinking_delta","thinking":"hmm"}}}"#;
+            let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"abc"}}}"#;
             assert_eq!(parse_event(line), Event::Ignored);
+        }
+
+        #[test]
+        fn thinking_comes_out_as_thinking() {
+            let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}}"#;
+            assert_eq!(parse_event(line), Event::Thinking("hmm".into()));
+        }
+
+        /// A tool arrives as a block: begun with its name, then its
+        /// arguments in pieces, then stopped.
+        #[test]
+        fn a_tool_being_reached_for_is_named() {
+            let line = r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"mcp__sill__list_windows","input":{}}}}"#;
+            assert_eq!(
+                parse_event(line),
+                Event::CallBegun {
+                    at: 1,
+                    id: "toolu_1".into(),
+                    name: "mcp__sill__list_windows".into()
+                }
+            );
+
+            // A text block beginning is not a call.
+            let line = r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#;
+            assert_eq!(parse_event(line), Event::Ignored);
+        }
+
+        #[test]
+        fn the_arguments_arrive_in_pieces() {
+            let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"que"}}}"#;
+            assert_eq!(
+                parse_event(line),
+                Event::CallInput {
+                    at: 1,
+                    json: "{\"que".into()
+                }
+            );
+
+            let line = r#"{"type":"stream_event","event":{"type":"content_block_stop","index":1}}"#;
+            assert_eq!(parse_event(line), Event::BlockDone { at: 1 });
+        }
+
+        /// What the tool answered goes back to the model as a user message,
+        /// and that is the only place the stream says whether it worked.
+        #[test]
+        fn a_tool_result_says_whether_it_worked() {
+            let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"eleven","is_error":false}]}}"#;
+            assert_eq!(
+                parse_event(line),
+                Event::CallAnswered {
+                    id: "toolu_1".into(),
+                    failed: false
+                }
+            );
+
+            let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"no such folder","is_error":true}]}}"#;
+            assert_eq!(
+                parse_event(line),
+                Event::CallAnswered {
+                    id: "toolu_2".into(),
+                    failed: true
+                }
+            );
+        }
+
+        #[test]
+        fn the_first_event_of_a_message_names_the_model() {
+            let line = r#"{"type":"stream_event","event":{"type":"message_start","message":{"model":"claude-sonnet-5","content":[]}}}"#;
+            assert_eq!(parse_event(line), Event::Model("claude-sonnet-5".into()));
+        }
+
+        /// The numbers on the last line, none of which the turn depends on.
+        #[test]
+        fn the_result_line_says_what_the_turn_cost() {
+            let line = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":4321,"total_cost_usd":0.0123,"usage":{"input_tokens":100,"output_tokens":40},"modelUsage":{"claude-sonnet-5":{"inputTokens":100}},"result":"eleven"}"#;
+            let cost = outcome(line);
+
+            assert_eq!(cost.duration_ms, 4321);
+            assert_eq!(cost.cost, Some(0.0123));
+            assert_eq!(
+                cost.usage,
+                Some(crate::ai::openai::Usage {
+                    input: 100,
+                    output: 40
+                })
+            );
+            assert_eq!(cost.model, "claude-sonnet-5");
+
+            // A bare result line still reads, with nothing in it.
+            let bare = outcome(r#"{"type":"result","is_error":false}"#);
+            assert_eq!(bare.duration_ms, 0);
+            assert_eq!(bare.usage, None);
+            assert_eq!(bare.model, "");
         }
 
         #[test]

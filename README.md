@@ -241,6 +241,7 @@ MIT. See [LICENSE](LICENSE).
 
 Three third-party works travel with this project under their own terms, and
 [resources/NOTICE](resources/NOTICE) names each: a Windows settings catalogue
-from Microsoft PowerToys (MIT), the menu glyphs from Phosphor Icons (MIT), and
+from Microsoft PowerToys (MIT), the marks and menu glyphs from Phosphor Icons
+(MIT), and
 the Satoshi typeface from Indian Type Foundry, which is not open source and is
 fetched rather than committed.

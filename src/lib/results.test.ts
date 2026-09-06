@@ -10,7 +10,15 @@
  */
 import { describe, expect, test } from "vitest";
 import type { RankedCommand } from "$lib/exthost/commands";
-import { LISTBOX, isBrowsing, itemId, optionId, selectionAfter } from "$lib/results";
+import {
+  LISTBOX,
+  NEARLY_AT_THE_END,
+  isBrowsing,
+  itemId,
+  optionId,
+  selectionAfter,
+  shouldLoadMore,
+} from "$lib/results";
 
 function result(id: string, strong = false): RankedCommand {
   return {
@@ -176,5 +184,55 @@ describe("keeping the selection while the list changes", () => {
   test("nothing held starts where it was, if that still exists", () => {
     expect(selectionAfter({ id: undefined, index: 2 }, rows("a", "b", "c"), true)).toBe(2);
     expect(selectionAfter({ id: undefined, index: 9 }, rows("a", "b", "c"), true)).toBe(0);
+  });
+});
+
+describe("asking a list for its next page", () => {
+  const paging = { hasMore: true, onLoadMore: "h1" };
+
+  /** Nothing has been asked for yet, which is what -1 means. */
+  const fresh = -1;
+
+  test("asks once the cursor is near the end", () => {
+    expect(shouldLoadMore(paging, 95, 100, fresh)).toBe(true);
+    expect(shouldLoadMore(paging, 100 - NEARLY_AT_THE_END, 100, fresh)).toBe(true);
+  });
+
+  test("says nothing while the cursor is still in the middle", () => {
+    expect(shouldLoadMore(paging, 40, 100, fresh)).toBe(false);
+  });
+
+  /*
+   * The guard that is easy to leave out and impossible to notice.
+   *
+   * An extension answers by rendering more rows, and until it does the cursor
+   * is still near the end and every other condition still holds. Without this
+   * the launcher asks again on every redraw for as long as somebody sits at
+   * the bottom of a list, which is a request per keystroke to somebody else's
+   * server.
+   */
+  test("does not ask twice for the same page", () => {
+    expect(shouldLoadMore(paging, 98, 100, 100)).toBe(false);
+  });
+
+  test("asks again once the answer has arrived and made the list longer", () => {
+    expect(shouldLoadMore(paging, 118, 120, 100)).toBe(true);
+  });
+
+  test("stops at the end of the list", () => {
+    expect(shouldLoadMore({ hasMore: false, onLoadMore: "h1" }, 98, 100, fresh)).toBe(false);
+  });
+
+  /* A list that never mentioned pagination, and one whose handler never
+     registered: both are lists with no next page to ask for. */
+  test("says nothing when there is nobody to ask", () => {
+    expect(shouldLoadMore(undefined, 98, 100, fresh)).toBe(false);
+    expect(shouldLoadMore({ hasMore: true }, 98, 100, fresh)).toBe(false);
+  });
+
+  /* An empty list is not a list whose end has been reached. Asking here would
+     fire on every command that renders nothing while it loads. */
+  test("an empty list is not near its end", () => {
+    expect(shouldLoadMore(paging, 0, 0, fresh)).toBe(false);
   });
 });

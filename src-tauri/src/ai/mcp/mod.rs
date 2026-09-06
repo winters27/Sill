@@ -97,6 +97,16 @@ pub fn allowed() -> Vec<String> {
         .collect()
 }
 
+/// A tool's own name, out of the namespaced one a client calls it by.
+///
+/// The window reads a step by the name in the catalogue, and a client reaches
+/// the same tool as `mcp__sill__<name>`. Anything not namespaced this way is
+/// somebody else's tool and keeps its name.
+pub fn short_name(namespaced: &str) -> &str {
+    let prefix = format!("mcp__{}__", protocol::SERVER);
+    namespaced.strip_prefix(prefix.as_str()).unwrap_or(namespaced)
+}
+
 /// The document `--mcp-config` reads.
 pub fn config(bridge: &Path, port: u16, token: &str) -> Value {
     json!({
@@ -212,6 +222,25 @@ mod tests {
             for tool in crate::ai::tools::CATALOGUE {
                 let expected = format!("mcp__sill__{}", tool.name);
                 assert!(allowed.contains(&expected), "{expected} is not allowed");
+            }
+        }
+
+        /// The name that comes back on the stream is the namespaced one,
+        /// and the window's word table is keyed by the plain one.
+        #[test]
+        fn a_sill_tool_loses_its_server_prefix() {
+            assert_eq!(short_name("mcp__sill__list_windows"), "list_windows");
+            assert_eq!(short_name("Bash"), "Bash");
+            assert_eq!(short_name("mcp__other__read"), "mcp__other__read");
+
+            for name in allowed() {
+                let plain = short_name(&name);
+                assert!(
+                    crate::ai::tools::CATALOGUE
+                        .iter()
+                        .any(|tool| tool.name == plain),
+                    "{name} does not shorten to a tool: {plain}",
+                );
             }
         }
 

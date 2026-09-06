@@ -5,121 +5,66 @@
    * ## Three things, drawn three ways
    *
    * A picture is a picture. A character the extension supplied is printed. A
-   * name is a mark, and the marks below are Sill's own: one viewBox, one
-   * stroke width, one join, so a list of them reads as a family rather than as
-   * a dozen drawings that happen to be the same size. That is the same rule
-   * `MarkupIcon` follows and it is why they can sit in one list together.
+   * name is a mark, and the marks are Phosphor Icons at regular weight, which
+   * is the family this launcher already draws its own menus with.
    *
    * ## Which name is which mark is not decided here
    *
-   * Rust decides it, in `src-tauri/src/exthost/icons.rs`, and the map below is
-   * held to that file by `npm run verify:source`. See the comment on it.
+   * Rust decides it, in `src-tauri/src/exthost/icons.rs`. The table itself
+   * lives in `./marks.ts` beside this file, and `npm run verify:source` holds
+   * the two to each other in every direction they can come apart. See the
+   * comment on the Rust table.
    *
-   * ## The names that are not here
+   * ## All 469 of them, and the three ways one gets drawn
    *
-   * Raycast publishes around two hundred and fifty icon names and this draws
-   * the ones the store actually reaches for. A name with no mark falls back to
-   * its own first letter on a tile, which is the launcher's existing answer
-   * for an application whose icon the shell will not give up, so an unfamiliar
-   * name looks like something Sill drew rather than like something that
-   * failed. The remaining names are artwork, and artwork is a separate job.
+   * Most are a Phosphor outline, looked up by mark name. A hundred and two are
+   * characters in a rounded square, because `Icon.Number42` is a picture of
+   * the number forty-two and a hundred hand copies of one drawing is a hundred
+   * chances to get one wrong. The last fourteen are drawn below, because they
+   * are a quantity rather than a thing: four bars with some of them filled, a
+   * ring filled a quarter of the way round, one exclamation mark or three.
    *
-   * A relative path into an extension's own assets arrives here as a name too,
-   * and gets the same tile. The window does not know where an installed
-   * extension lives, so the alternative would be a broken image on every row.
+   * Those fourteen are stroked at 1.5 on a 24 box, which is the same optical
+   * thickness as Phosphor's regular outline on its 256 box, so a list mixing
+   * the two reads as one family rather than as two.
+   *
+   * ## What still letters itself
+   *
+   * A relative path into an extension's own assets arrives here as a name, and
+   * there is nothing to look it up as. It falls back to its own first letter
+   * on a tile, which is the launcher's existing answer for an application
+   * whose icon the shell will not give up, so it looks like something Sill
+   * drew rather than like something that failed. The window does not know
+   * where an installed extension lives, so the alternative would be a broken
+   * image on every row.
    */
   import type { ExtIcon } from "$lib/exthost/present";
+  import { GLYPHS, MARKS, TEXT_MARKS } from "./marks";
 
   interface Props {
     icon: ExtIcon;
     /** Small enough to sit inside an accessory pill, when it has to. */
     small?: boolean;
+    /**
+     * What this is an icon of, for the tile a failed picture falls back to.
+     *
+     * Only a picture needs it: a name is its own label and a character is
+     * already the thing being drawn. Absent where there is nothing sensible
+     * to letter, which is an accessory pill: an "A" beside a number, standing
+     * in for an arrow that would not load, is worse than the arrow's absence.
+     */
+    label?: string;
   }
 
-  let { icon, small = false }: Props = $props();
-
-  /** The letter a name with no mark falls back to. */
-  const initial = $derived(
-    icon.kind === "mark" ? ((icon.name.trim()[0] ?? "?").toUpperCase()) : "",
-  );
-
-  /**
-   * Which mark each Raycast name is, which is a fact Rust owns.
-   *
-   * The names are somebody else's vocabulary and several of them are one
-   * picture: `Cog` and `Gear` are the same drawing, `Warning` and
-   * `ExclamationMark` are the same triangle. Deciding that is interpretation,
-   * so it is decided once, in `src-tauri/src/exthost/icons.rs`, and this is
-   * that table rather than a second opinion about it.
-   *
-   * `npm run verify:source` reads both files and fails in every direction the
-   * pair can come apart: a name Rust has and this does not, a name here that
-   * Rust does not have, a name whose mark differs between them, a mark with no
-   * arm below, and an arm for a mark nothing names. So this cannot drift out
-   * of step with Rust; it is not a copy anybody has to remember.
-   *
-   * A map rather than a set, and arms keyed by the mark rather than by the
-   * name, because that is what makes the folding checkable. Two names sharing
-   * a picture is one row each here and one arm below; a chain of `||` in the
-   * markup could say the same thing while agreeing with nothing.
-   *
-   * A name with no row falls back to its own first letter on a tile, which is
-   * a decision the markup makes on purpose rather than a case falling off the
-   * end of a chain.
-   */
-  const MARKS: Record<string, string> = {
-    AppWindow: "window",
-    Bolt: "bolt",
-    Bookmark: "bookmark",
-    Calendar: "calendar",
-    Checkmark: "checkmark",
-    CheckCircle: "check-circle",
-    Circle: "circle",
-    Clipboard: "clipboard",
-    Clock: "clock",
-    Code: "terminal",
-    Cog: "gear",
-    CopyClipboard: "clipboard",
-    Document: "document",
-    Dot: "dot",
-    Download: "download",
-    Envelope: "envelope",
-    ExclamationMark: "warning",
-    Eye: "eye",
-    Folder: "folder",
-    Gear: "gear",
-    Globe: "globe",
-    Heart: "heart",
-    House: "house",
-    Image: "image",
-    Info: "info",
-    Key: "key",
-    Link: "link",
-    List: "list",
-    Lock: "lock",
-    MagnifyingGlass: "magnifying-glass",
-    Minus: "minus",
-    Music: "music",
-    Pencil: "pencil",
-    Person: "person",
-    PersonCircle: "person",
-    Play: "play",
-    Plus: "plus",
-    Star: "star",
-    StarCircle: "star",
-    Tag: "tag",
-    Terminal: "terminal",
-    Text: "document",
-    Trash: "trash",
-    Upload: "upload",
-    Video: "video",
-    Warning: "warning",
-    Window: "window",
-    Xmark: "xmark",
-    XMarkCircle: "xmark-circle",
-  };
+  let { icon, small = false, label }: Props = $props();
 
   const drawn = $derived(icon.kind === "mark" ? (MARKS[icon.name] ?? "") : "");
+
+  /** The outline, when the mark is one of the ones Phosphor has. */
+  const outline = $derived(GLYPHS[drawn] ?? "");
+
+  /** The characters, when the mark is a numeral or a letter pair. */
+  const printed = $derived(TEXT_MARKS[drawn] ?? "");
 
   /**
    * A picture that would not load, remembered so it is not drawn again.
@@ -135,163 +80,162 @@
   let refused = $state("");
 
   const broke = $derived(icon.kind === "image" && refused === icon.src);
+
+  /**
+   * The letter on the tile, for the two things that have no picture to draw.
+   *
+   * A name with no mark letters itself, which is the launcher's existing
+   * answer and was already here. **A picture that would not load letters its
+   * label**, which was not: the comment above `refused` says a broken image
+   * "falls back to the letter tile", and it reached the tile with no letter
+   * in it, so a row whose icon failed drew an empty grey square. That is the
+   * one outcome worse than either alternative, because it looks like a
+   * decision rather than a failure.
+   */
+  const initial = $derived.by(() => {
+    if (icon.kind === "mark") return (icon.name.trim()[0] ?? "?").toUpperCase();
+    if (broke) return (label?.trim()[0] ?? "").toUpperCase();
+    return "";
+  });
+
+  /**
+   * A failed picture with nothing to letter is drawn as nothing at all.
+   *
+   * An empty tile is a shape somebody has to interpret. A row with no icon is
+   * a row with no tile, and a picture that did not arrive is closer to that
+   * than to a blank one somebody might read as the icon itself.
+   */
+  const nothing = $derived(broke && !initial);
 </script>
 
-<span
-  class="ext-icon"
-  class:small
-  class:lettered={(icon.kind === "mark" && !drawn) || broke}
-  style={icon.tint ? `color: ${icon.tint}` : undefined}
->
-  {#if icon.kind === "image" && !broke}
-    <img src={icon.src} alt="" onerror={() => (refused = icon.src)} />
-  {:else if icon.kind === "glyph"}
-    <span class="glyph">{icon.text}</span>
-  {:else if drawn}
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.75"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      {#if drawn === "star"}
-        <path d="M12 4.5 14.3 9.4l5.2.7-3.8 3.7.9 5.2-4.6-2.5-4.6 2.5.9-5.2L4.5 10l5.2-.7Z" />
-      {:else if drawn === "circle"}
-        <circle cx="12" cy="12" r="7.5" />
-      {:else if drawn === "dot"}
-        <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
-      {:else if drawn === "check-circle"}
-        <circle cx="12" cy="12" r="7.5" />
-        <path d="m8.8 12.2 2.2 2.2 4.2-4.6" />
-      {:else if drawn === "checkmark"}
-        <path d="m5.5 12.6 4 4L18.5 7" />
-      {:else if drawn === "xmark-circle"}
-        <circle cx="12" cy="12" r="7.5" />
-        <path d="m9.4 9.4 5.2 5.2M14.6 9.4l-5.2 5.2" />
-      {:else if drawn === "xmark"}
-        <path d="m6.5 6.5 11 11M17.5 6.5l-11 11" />
-      {:else if drawn === "clipboard"}
-        <rect x="6" y="5" width="12" height="15" rx="2" />
-        <path d="M9.5 5V3.8h5V5" />
-      {:else if drawn === "document"}
-        <path d="M7 4h6.5L18 8.5V20H7Z" />
-        <path d="M13.2 4v4.8H18" />
-      {:else if drawn === "folder"}
-        <path d="M4 7.5h5.4l1.8 2H20V19H4Z" />
-      {:else if drawn === "globe"}
-        <circle cx="12" cy="12" r="7.5" />
-        <path d="M4.6 12h14.8M12 4.6c2 2.2 3 4.7 3 7.4s-1 5.2-3 7.4c-2-2.2-3-4.7-3-7.4s1-5.2 3-7.4Z" />
-      {:else if drawn === "link"}
-        <path d="M10 14a3.6 3.6 0 0 1 0-5l2.4-2.4a3.6 3.6 0 0 1 5 5L16 13" />
-        <path d="M14 10a3.6 3.6 0 0 1 0 5L11.6 17.4a3.6 3.6 0 0 1-5-5L8 11" />
-      {:else if drawn === "person"}
-        <circle cx="12" cy="9" r="3.2" />
-        <path d="M5.8 19.4a6.4 6.4 0 0 1 12.4 0" />
-      {:else if drawn === "calendar"}
-        <rect x="4.5" y="6" width="15" height="13.5" rx="2" />
-        <path d="M4.5 10.4h15M9 4.4v3.2M15 4.4v3.2" />
-      {:else if drawn === "clock"}
-        <circle cx="12" cy="12" r="7.5" />
-        <path d="M12 7.8V12l3 1.8" />
-      {:else if drawn === "gear"}
-        <circle cx="12" cy="12" r="2.8" />
-        <path
-          d="M12 4.2v2M12 17.8v2M19.8 12h-2M6.2 12h-2M17.5 6.5l-1.4 1.4M7.9 16.1l-1.4 1.4M17.5 17.5l-1.4-1.4M7.9 7.9 6.5 6.5"
-        />
-      {:else if drawn === "trash"}
-        <path d="M5.5 7.5h13M9.5 7.5V5.4h5v2.1M7.2 7.5 8 19.6h8l.8-12.1" />
-      {:else if drawn === "plus"}
-        <path d="M12 5.8v12.4M5.8 12h12.4" />
-      {:else if drawn === "minus"}
-        <path d="M5.8 12h12.4" />
-      {:else if drawn === "magnifying-glass"}
-        <circle cx="11" cy="11" r="5.6" />
-        <path d="m15.2 15.2 4 4" />
-      {:else if drawn === "pencil"}
-        <path d="M4.8 19.2 5.5 15 15.9 4.7a1.9 1.9 0 0 1 2.7 2.7L8.2 17.8Z" />
-      {:else if drawn === "terminal"}
-        <rect x="4" y="5" width="16" height="14" rx="2" />
-        <path d="m8 10 2.4 2.2L8 14.4M12.8 15h3.4" />
-      {:else if drawn === "download"}
-        <path d="M12 4.8v9.6M8.2 11l3.8 3.6 3.8-3.6M5.5 18.6h13" />
-      {:else if drawn === "upload"}
-        <path d="M12 15.6V6M8.2 9.4 12 5.8l3.8 3.6M5.5 18.6h13" />
-      {:else if drawn === "tag"}
-        <path d="M4.6 11.4V5h6.4l8.4 8.4-6.4 6.4Z" />
-        <circle cx="8.2" cy="8.4" r="1.1" fill="currentColor" stroke="none" />
-      {:else if drawn === "bookmark"}
-        <path d="M6.6 4.6h10.8v15L12 15.8l-5.4 3.8Z" />
-      {:else if drawn === "envelope"}
-        <rect x="3.8" y="6" width="16.4" height="12" rx="2" />
-        <path d="m4.4 7.4 7.6 5.6 7.6-5.6" />
-      {:else if drawn === "eye"}
-        <path d="M2.8 12S6.4 6.4 12 6.4 21.2 12 21.2 12 17.6 17.6 12 17.6 2.8 12 2.8 12Z" />
-        <circle cx="12" cy="12" r="2.6" />
-      {:else if drawn === "heart"}
-        <path
-          d="M12 19.2 5.4 12.8a3.9 3.9 0 0 1 5.5-5.5l1.1 1 1.1-1a3.9 3.9 0 0 1 5.5 5.5Z"
-        />
-      {:else if drawn === "house"}
-        <path d="M4.4 11 12 4.6l7.6 6.4v8.4H4.4Z" />
-      {:else if drawn === "key"}
-        <circle cx="8.4" cy="9.6" r="3.6" />
-        <path d="m11 12.2 7 7M15.4 16.6l1.8-1.8M17.6 18.8l1.8-1.8" />
-      {:else if drawn === "lock"}
-        <rect x="5.5" y="10.4" width="13" height="9.2" rx="2" />
-        <path d="M8.6 10.4V8a3.4 3.4 0 0 1 6.8 0v2.4" />
-      {:else if drawn === "bolt"}
-        <path d="M13.4 3.6 6.6 13.2h4.6L10.6 20.4l6.8-9.6h-4.6Z" />
-      {:else if drawn === "info"}
-        <circle cx="12" cy="12" r="7.5" />
-        <path d="M12 11.2v4.6" />
-        <circle cx="12" cy="8.4" r="0.9" fill="currentColor" stroke="none" />
-      {:else if drawn === "warning"}
-        <path d="M12 4.4 20.6 19.4H3.4Z" />
-        <path d="M12 10.2v3.6" />
-        <circle cx="12" cy="16.4" r="0.9" fill="currentColor" stroke="none" />
-      {:else if drawn === "window"}
-        <rect x="3.8" y="5" width="16.4" height="14" rx="2" />
-        <path d="M3.8 9.2h16.4" />
-      {:else if drawn === "list"}
-        <path d="M8.4 7.4h11M8.4 12h11M8.4 16.6h11M4.8 7.4h.02M4.8 12h.02M4.8 16.6h.02" />
-      {:else if drawn === "image"}
-        <rect x="3.8" y="5.4" width="16.4" height="13.2" rx="2" />
-        <path d="m4.6 16 4.2-4.2 3.4 3.4 2.6-2.6 4.4 4.4" />
-        <circle cx="9" cy="9.4" r="1.3" />
-      {:else if drawn === "video"}
-        <rect x="3.4" y="6.6" width="12.4" height="10.8" rx="2" />
-        <path d="m16.2 12 4.4-2.8v5.6Z" />
-      {:else if drawn === "music"}
-        <path d="M9.4 17.4V6.4l8-1.6v11" />
-        <circle cx="7.2" cy="17.4" r="2.2" />
-        <circle cx="15.2" cy="15.8" r="2.2" />
-      {:else if drawn === "play"}
-        <path d="M8.4 5.6 18.6 12 8.4 18.4Z" />
-      {/if}
-    </svg>
-  {:else}
-    <!-- Empty when a picture refused to load: there is no name to take a
-         letter from, and the tile alone is the launcher's own way of saying a
-         row has no icon rather than that something went wrong. -->
-    <span class="initial">{initial}</span>
-  {/if}
-</span>
+{#if !nothing}
+  <span
+    class="ext-icon"
+    class:small
+    class:lettered={(icon.kind === "mark" && !drawn) || broke}
+    style={icon.tint ? `color: ${icon.tint}` : undefined}
+  >
+    {#if icon.kind === "image" && !broke}
+      <img src={icon.src} alt="" onerror={() => (refused = icon.src)} />
+    {:else if icon.kind === "glyph"}
+      <span class="glyph">{icon.text}</span>
+    {:else if outline}
+      <!--
+        Phosphor's regular weight is a filled outline rather than a stroked
+        one, so the box carries `fill` and no stroke settings at all: nothing
+        it sits inside can thicken it by inheriting one.
+      -->
+      <svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+        <path d={outline} />
+      </svg>
+    {:else if printed}
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="3.2" y="3.2" width="17.6" height="17.6" rx="4.6" />
+        <text
+          x="12"
+          y="12.5"
+          text-anchor="middle"
+          dominant-baseline="middle"
+          font-size="9.4"
+          font-weight="600"
+          fill="currentColor"
+          stroke="none">{printed}</text
+        >
+      </svg>
+    {:else if drawn}
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <!--
+          A quantity, not a thing. Four bars with the first few lit, which is
+          how a strength reading is read everywhere else; the unlit ones stay
+          on the drawing because the gap between two bars and four is the
+          whole message.
+
+          Raycast's signal names land here too. Phosphor has a cell-signal
+          family and its "none" is an antenna base and nothing else, which at
+          sixteen pixels is a speck on an otherwise empty tile: the reading
+          that most needs to be legible drawn as almost nothing.
+        -->
+        {#if drawn === "bars-0"}
+          <path stroke-width="2.6" opacity=".28" d="M4.8 20v-3.4M9.2 20v-6.8M13.6 20v-10.2M18 20v-13.6" />
+        {:else if drawn === "bars-1"}
+          <path stroke-width="2.6" d="M4.8 20v-3.4" />
+          <path stroke-width="2.6" opacity=".28" d="M9.2 20v-6.8M13.6 20v-10.2M18 20v-13.6" />
+        {:else if drawn === "bars-2"}
+          <path stroke-width="2.6" d="M4.8 20v-3.4M9.2 20v-6.8" />
+          <path stroke-width="2.6" opacity=".28" d="M13.6 20v-10.2M18 20v-13.6" />
+        {:else if drawn === "bars-3"}
+          <path stroke-width="2.6" d="M4.8 20v-3.4M9.2 20v-6.8M13.6 20v-10.2" />
+          <path stroke-width="2.6" opacity=".28" d="M18 20v-13.6" />
+        {:else if drawn === "bars-4"}
+          <!-- Four of four draws no faint bars, which is the point of it. -->
+          <path stroke-width="2.6" d="M4.8 20v-3.4M9.2 20v-6.8M13.6 20v-10.2M18 20v-13.6" />
+        {:else if drawn === "progress-0"}
+          <circle cx="12" cy="12" r="8" opacity=".28" />
+        {:else if drawn === "progress-25"}
+          <circle cx="12" cy="12" r="8" opacity=".28" />
+          <path d="M12 4a8 8 0 0 1 8 8" />
+        {:else if drawn === "progress-50"}
+          <circle cx="12" cy="12" r="8" opacity=".28" />
+          <path d="M12 4a8 8 0 0 1 0 16" />
+        {:else if drawn === "progress-75"}
+          <circle cx="12" cy="12" r="8" opacity=".28" />
+          <path d="M12 4a8 8 0 0 1 0 16 8 8 0 0 1-8-8" />
+        {:else if drawn === "progress-100"}
+          <circle cx="12" cy="12" r="8" />
+        {:else if drawn === "shout-1"}
+          <path d="M12 5.4v8.4" />
+          <circle cx="12" cy="17.8" r="1.1" fill="currentColor" stroke="none" />
+        {:else if drawn === "shout-2"}
+          <path d="M9.2 5.4v8.4M14.8 5.4v8.4" />
+          <circle cx="9.2" cy="17.8" r="1.1" fill="currentColor" stroke="none" />
+          <circle cx="14.8" cy="17.8" r="1.1" fill="currentColor" stroke="none" />
+        {:else if drawn === "shout-3"}
+          <path d="M6.8 5.4v8.4M12 5.4v8.4M17.2 5.4v8.4" />
+          <circle cx="6.8" cy="17.8" r="1.1" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="17.8" r="1.1" fill="currentColor" stroke="none" />
+          <circle cx="17.2" cy="17.8" r="1.1" fill="currentColor" stroke="none" />
+        {:else if drawn === "chess-piece"}
+          <circle cx="12" cy="7" r="2.6" />
+          <path d="M9.7 10.3h4.6l-1 1.9c1.7 1.3 2.7 3.2 2.9 5.1H7.8c.2-1.9 1.2-3.8 2.9-5.1Z" />
+          <path d="M6.6 17.3h10.8v2.3H6.6Z" />
+        {:else if drawn === "star-disabled"}
+          <!--
+            The star kept and struck through rather than swapped for another
+            shape: a plain star would say the row is starred, which is the
+            opposite of what the name asks for.
+          -->
+          <path
+            opacity=".4"
+            d="M12 4.5 14.3 9.4l5.2.7-3.8 3.7.9 5.2-4.6-2.5-4.6 2.5.9-5.2L4.5 10l5.2-.7Z"
+          />
+          <path d="m5.2 5.2 13.6 13.6" />
+        {/if}
+      </svg>
+    {:else}
+      <span class="initial">{initial}</span>
+    {/if}
+  </span>
+{/if}
 
 <style>
-  /*
-   * The slot every row's icon sits in, which is the launcher's own.
-   *
-   * An extension's list and the root list are the same list to look down, so
-   * an extension's icon is the size an application's icon is. The small
-   * variant is the one that goes inside an accessory pill, where the text
-   * beside it sets the height.
-   */
   .ext-icon {
-    flex: none;
     display: grid;
+    flex: none;
     place-items: center;
     width: var(--icon-tile);
     height: var(--icon-tile);

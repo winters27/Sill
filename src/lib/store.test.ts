@@ -12,7 +12,7 @@
  * yesterday.
  */
 import { describe, expect, test } from "vitest";
-import { ago, installs, shortRevision, weight } from "$lib/store";
+import { ago, installs, progressFraction, progressLine, shortRevision, weight } from "$lib/store";
 
 describe("how many people have it", () => {
   test("a small number is itself", () => {
@@ -85,5 +85,57 @@ describe("when the catalogue was fetched", () => {
    */
   test("a fetch stamped in the future reads as just now", () => {
     expect(ago(now + 5000, now)).toBe("just now");
+  });
+});
+
+describe("how far along an install is", () => {
+  /*
+   * The half that was silent. Fetching an extension is one request per file
+   * and a large one is a hundred of them, so this is where the wait starts;
+   * before it reported anything the screen said "Fetching" and then nothing
+   * at all until npm began, and a slow network read as a launcher that had
+   * stopped.
+   */
+  test("the download counts files and takes the first share of the bar", () => {
+    expect(progressFraction({ stage: "fetching", done: 0, total: 40 })).toBe(0);
+    expect(progressLine({ stage: "fetching", done: 12, total: 40 })).toBe(
+      "Fetching 12 of 40 files",
+    );
+
+    const half = progressFraction({ stage: "fetching", done: 20, total: 40 });
+    expect(half).toBeGreaterThan(0);
+    expect(half, "the download alone must never fill the bar").toBeLessThan(0.5);
+  });
+
+  /*
+   * One wait, not two. Building starts where fetching stopped, so the bar
+   * carries on rather than emptying and filling a second time, which would
+   * read as a second install.
+   */
+  test("building carries on from where the download left off, and reaches the end", () => {
+    const fetched = progressFraction({ stage: "fetching", done: 40, total: 40 });
+    const starting = progressFraction({ stage: "building", command: "a", done: 0, total: 4 });
+
+    expect(starting).toBe(fetched);
+    expect(progressFraction({ stage: "building", command: "d", done: 4, total: 4 })).toBe(1);
+  });
+
+  /*
+   * npm and esbuild report lines and no position. A bar that guessed at their
+   * share would move without meaning, so they answer null and the window holds
+   * the last position it was given.
+   */
+  test("what cannot be measured says so rather than guessing", () => {
+    expect(progressFraction({ stage: "dependencies", said: "added 40 packages" })).toBeNull();
+    expect(progressFraction({ stage: "bundling", said: "index.js 40kb" })).toBeNull();
+  });
+
+  /** Nothing to count is not the same as nothing to say. */
+  test("an empty fetch is a position rather than a division by zero", () => {
+    expect(progressFraction({ stage: "fetching", done: 0, total: 0 })).toBe(0);
+    expect(progressLine({ stage: "fetching", done: 0, total: 0 })).toBe("Fetching");
+    expect(progressFraction({ stage: "building", command: "a", done: 0, total: 0 })).toBe(
+      progressFraction({ stage: "fetching", done: 1, total: 1 }),
+    );
   });
 });

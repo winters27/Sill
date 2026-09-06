@@ -22,6 +22,11 @@ The shape of this process follows from that.
   tree the window keeps its own copy of.
 - **Permissions are read per call, not per launch.** Revoking one in Settings
   reaches a command that is running right now.
+- **A gate that refuses asks first, when there is somebody to ask.** A worker
+  wanting `fs` inside `require` cannot yield, so it posts the question up the
+  control channel and blocks on shared memory until Rust says what it holds
+  now (`src/worker/ask.ts`). Only a launch that says `asks` gets that; a
+  script driving the host is refused at once, as before.
 
 ## Layout
 

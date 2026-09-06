@@ -16,6 +16,7 @@ import {
   emptyViewOf,
   iconOf,
   metadataOf,
+  paginationOf,
 } from "./present";
 import { ROOT_ID, ViewTree, type Op } from "./tree";
 
@@ -57,6 +58,42 @@ describe("icons, in every shape one arrives in", () => {
    */
   test("a data URI is a picture", () => {
     expect(iconOf("data:image/svg+xml;base64,AAAA")).toMatchObject({ kind: "image" });
+
+    /*
+     * The one character that truncates rather than merely being untidy.
+     *
+     * Extensions write these by hand and put a colour in them, and `#` starts
+     * a fragment: the browser loads the document up to it and draws nothing.
+     * Hacker News numbers its rows this way, and drew thirty empty tiles.
+     */
+    expect(
+      iconOf(`data:image/svg+xml,<svg><rect fill="#DD7949"/></svg>`),
+      "a colour inside an unencoded SVG ends the URL at the #",
+    ).toMatchObject({
+      kind: "image",
+      src: `data:image/svg+xml,<svg><rect fill="%23DD7949"/></svg>`,
+    });
+
+    // Parameters before the comma are common and must not stop it being read.
+    expect(
+      iconOf(`data:image/svg+xml;charset=utf-8,<svg fill="#fff"/>`),
+    ).toMatchObject({ src: `data:image/svg+xml;charset=utf-8,<svg fill="%23fff"/>` });
+
+    // An author who encoded it correctly has no bare # left to touch, so this
+    // is safe to run over a payload that is already right.
+    expect(iconOf(`data:image/svg+xml,<svg fill="%23fff"/>`)).toMatchObject({
+      src: `data:image/svg+xml,<svg fill="%23fff"/>`,
+    });
+
+    // base64 carries its own encoding and must be left exactly as it is.
+    expect(iconOf("data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjZmZmIi8+")).toMatchObject({
+      src: "data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjZmZmIi8+",
+    });
+
+    // Everything else is somebody else's URL and is not rewritten.
+    expect(iconOf("https://example.test/a.png#frag")).toMatchObject({
+      src: "https://example.test/a.png#frag",
+    });
   });
 
   test("an emoji is printed rather than looked up", () => {
@@ -196,6 +233,32 @@ describe("the dropdown beside the field", () => {
     expect(dropdownOf(tree, top()!)?.onChange).toBe("h7");
   });
 
+  /*
+   * The two are opposite claims and were folded into one field.
+   *
+   * `value` is an extension driving its own picker and needing no telling;
+   * `defaultValue` is an extension suggesting a start and waiting to be told
+   * what it got. Read as the same thing, a dropdown that only suggested was
+   * treated as driven, nobody told the extension anything, and a command
+   * whose fetch waits on that first report drew an empty list forever.
+   */
+  test("driving the picker and suggesting a start are not the same field", () => {
+    const driven = picker([{ tag: "List.Dropdown.Item", props: { value: "b" } }], {
+      value: "b",
+    });
+    expect(dropdownOf(driven.tree, driven.top()!)?.value).toBe("b");
+    expect(dropdownOf(driven.tree, driven.top()!)?.initial).toBeUndefined();
+
+    const suggested = picker([{ tag: "List.Dropdown.Item", props: { value: "b" } }], {
+      defaultValue: "b",
+    });
+    expect(dropdownOf(suggested.tree, suggested.top()!)?.initial).toBe("b");
+    expect(
+      dropdownOf(suggested.tree, suggested.top()!)?.value,
+      "a suggested start reads as the extension driving it",
+    ).toBeUndefined();
+  });
+
   test("a list with no accessory has no dropdown", () => {
     const { tree, top } = grow({ tag: "List" });
     expect(dropdownOf(tree, top()!)).toBeUndefined();
@@ -249,4 +312,64 @@ describe("metadata", () => {
       ]);
     });
   }
+});
+
+describe("a list that says there is more of it", () => {
+  /*
+   * Every list longer than one request is written this way: the extension
+   * renders what it has, says whether there is more, and waits to be asked.
+   * A launcher that never reads this draws the first page and calls it the
+   * whole answer, which reads as an extension that only found twenty things.
+   */
+  test("its three parts are carried, and the handler is the asking", () => {
+    const { tree, top } = grow({
+      tag: "List",
+      props: {
+        pagination: { pageSize: 20, hasMore: true, onLoadMore: { $handler: "h3" } },
+      },
+    });
+
+    expect(paginationOf(top()!)).toEqual({ hasMore: true, pageSize: 20, onLoadMore: "h3" });
+  });
+
+  /*
+   * The end of a list, which is the state that has to be told apart from the
+   * middle of one: `hasMore: false` means asking again brings nothing, and a
+   * launcher that asked anyway would spin on the last page forever.
+   */
+  test("a list at its end says so", () => {
+    const { tree, top } = grow({
+      tag: "List",
+      props: { pagination: { pageSize: 20, hasMore: false, onLoadMore: { $handler: "h3" } } },
+    });
+
+    expect(paginationOf(top()!)?.hasMore).toBe(false);
+  });
+
+  test("a list that never mentioned it has none", () => {
+    const { tree, top } = grow({ tag: "List" });
+    expect(paginationOf(top()!)).toBeUndefined();
+  });
+
+  /*
+   * Absent is not false. A `hasMore` nobody set is a list that is not paginated
+   * rather than one that has run out, and a `pageSize` nobody set is a number
+   * this must not invent.
+   */
+  test("what an extension left out is not guessed at", () => {
+    const { tree, top } = grow({ tag: "List", props: { pagination: {} } });
+
+    expect(paginationOf(top()!)).toEqual({ hasMore: false, pageSize: 0, onLoadMore: undefined });
+  });
+
+  /* A handler that is not one cannot be activated, and pretending otherwise
+     would have the window asking a worker to run an id it never registered. */
+  test("a handler that is not a handler is not carried", () => {
+    const { tree, top } = grow({
+      tag: "List",
+      props: { pagination: { hasMore: true, onLoadMore: "loadMore" } },
+    });
+
+    expect(paginationOf(top()!)?.onLoadMore).toBeUndefined();
+  });
 });

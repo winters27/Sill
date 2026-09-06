@@ -51,6 +51,16 @@
   .pinned {
     display: flex;
     align-items: center;
+    /*
+     * Never squeezed. A widget is a reading, and half a reading is not a
+     * shorter reading, it is a wrong one: 91 clipped down its middle is a
+     * number somebody can act on and it is not the number. The status line
+     * beside it is prose and gives way instead.
+     *
+     * `overflow: hidden` stays for the case this cannot control, which is a
+     * window narrow enough that nothing fits however the space is shared.
+     */
+    flex: none;
     min-width: 0;
     overflow: hidden;
   }

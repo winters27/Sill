@@ -7,13 +7,14 @@
  * to understand what an extension is saying, only who it is saying it to.
  */
 
-import { parentPort } from "node:worker_threads";
+import { parentPort, workerData } from "node:worker_threads";
 import { getHeapStatistics } from "node:v8";
 import { createElement, type ReactElement } from "react";
 import { RpcPeer, type RpcParams } from "../proto/rpc";
 import { createRenderer } from "../render/renderer";
 import { getBridge, setBridge, type Environment, type SillObject } from "../api/bridge";
 import { gateGlobals, Held, patchRequire } from "./patch-require";
+import { makeAsker } from "./ask";
 
 export interface LaunchData {
   entrypoint: string;
@@ -36,6 +37,16 @@ export interface LaunchData {
    * disk, rather than one that can.
    */
   capabilities?: string[];
+  /**
+   * Whether there is somebody to ask when a gate refuses.
+   *
+   * True when Sill started this command: a permission the extension does not
+   * hold goes on a card, and the worker waits for the answer. Absent for a
+   * script or a test driving the host, which has nobody to put a card in
+   * front of; there a gate refuses at once, as every gate did before asking
+   * existed, rather than waiting on an answer that cannot come.
+   */
+  asks?: boolean;
   /**
    * The thing this command was run on, when it was run as an action.
    *
@@ -137,6 +148,21 @@ export function workerMain(): void {
     const data = params.data as unknown as LaunchData;
 
     held.replace(data.capabilities ?? []);
+
+    /*
+     * The way to ask, given only when both halves are there: a launch that
+     * says somebody will answer, and the shared memory the manager made for
+     * the answer to arrive in. The question itself goes up the control
+     * channel like any other lifecycle event; only the answer takes the
+     * shared route, because the thread that asked is holding `require`.
+     */
+    const shared = (workerData as { ask?: unknown } | null)?.ask;
+    if (data.asks === true && shared instanceof SharedArrayBuffer) {
+      held.askWith(
+        makeAsker(shared, (needs, plainly) => control.emit("Lifecycle/ask", { needs, plainly })),
+      );
+    }
+
     patchRequire(held);
     gateGlobals(held);
 

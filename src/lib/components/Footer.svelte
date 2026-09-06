@@ -267,6 +267,27 @@
     background: var(--hairline-strong);
   }
 
+  /*
+ * The status line, which is the only thing down here made of prose.
+ *
+ * It had no rule at all, so it was a flex item at its natural width with the
+ * default `min-width: auto`, which means it could not be made narrower than
+ * its own sentence. A long one ate the spacer, and then the only item in the
+ * row that *could* give was the widget chin, which is set to hide what does
+ * not fit: "Hacker News closed: the launcher was put away" cut the clock and
+ * the weather in half against the edge of the window.
+ *
+ * Prose is the right thing to shorten. It is the one item here that still
+ * says something with its tail missing, and the ellipsis says a tail is
+ * missing; half a temperature reading looks like a different temperature.
+ */
+  .toast {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .spacer {
     flex: 1;
   }

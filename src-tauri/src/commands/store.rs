@@ -226,7 +226,21 @@ pub(crate) async fn store_prepare(
 
     let token = token_of(&prefs).await;
 
-    install::prepare(&crate::state::data_dir(&app), &listing, token.as_deref()).await
+    // The same event the install half reports on, so the screen has one place
+    // to read from and the wait is continuous rather than starting over when
+    // somebody accepts.
+    let reporting = app.clone();
+    install::prepare(
+        &crate::state::data_dir(&app),
+        &listing,
+        token.as_deref(),
+        &|progress| {
+            if let Err(err) = reporting.emit(INSTALL_PROGRESS, &progress) {
+                crate::say!("could not say how the fetch is going: {err}");
+            }
+        },
+    )
+    .await
 }
 
 /// Step two: install what was prepared.

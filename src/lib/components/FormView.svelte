@@ -17,9 +17,33 @@
     session?: string;
     /** Called with the collected values, keyed by each field's id. */
     onsubmit: (values: Record<string, unknown>) => void;
+    /**
+     * What these fields were left set to last time, by field id.
+     *
+     * Raycast's `storeValue`. Handed in rather than fetched here, because the
+     * page is what knows which command is running and this component is also
+     * drawn by the preview route with no Rust behind it.
+     */
+    stored?: Record<string, unknown>;
+    /**
+     * Told what to remember, once the form is submitted.
+     *
+     * On submit rather than on change, which is what `storeValue` means on a
+     * form: a half-typed field is not a choice somebody made, and writing one
+     * per keystroke would be a write per keystroke.
+     */
+    onremember?: (id: string, value: unknown) => void;
   }
 
-  let { tree, node, version, session = "", onsubmit }: Props = $props();
+  let {
+    tree,
+    node,
+    version,
+    session = "",
+    onsubmit,
+    stored = {},
+    onremember,
+  }: Props = $props();
 
   /**
    * Field values, keyed by the `id` the extension gave each control.
@@ -48,37 +72,69 @@
    * Only untouched fields are seeded, so a re-render caused by something else
    * on the form cannot wipe what the user has already typed.
    */
+  /**
+   * What a field should open on: what somebody left it set to, or the
+   * author's default.
+   *
+   * `storeValue` is the extension asking for the first of those, and it only
+   * means anything for a field that named itself: a key that is not the same
+   * one next time is not a memory. `field-<node>` is the fallback `id` uses
+   * for an unnamed field, and it is a node number that changes, so it is
+   * deliberately not a key anything is remembered under.
+   */
+  function opensOn(field: ElementNode, key: string): unknown {
+    if (field.props.storeValue !== true) return field.props.defaultValue;
+    if (!str(field, "id")) return field.props.defaultValue;
+
+    const remembered = stored[key];
+    return remembered === undefined ? field.props.defaultValue : remembered;
+  }
+
   $effect(() => {
     for (const field of fields) {
       const key = id(field);
       if (key in values) continue;
 
+      const opening = opensOn(field, key);
+
       if (field.tag === "Form.Checkbox") {
-        values[key] = field.props.defaultValue === true;
+        values[key] = opening === true;
       } else if (field.tag === "Form.DatePicker") {
         // Raycast hands the extension a Date; over the wire it is the ISO
         // string a `<input type=date>` also speaks, so nothing is converted.
-        values[key] = str(field, "defaultValue");
+        values[key] = typeof opening === "string" ? opening : "";
       } else if (field.tag === "Form.TagPicker" || field.tag === "Form.FilePicker") {
         // Both hand the extension a list. A picker's is a list of paths, and
         // Raycast's own `defaultValue` for one is `string[]`, so an extension
         // reopening a form with what was chosen last time gets it back.
-        values[key] = Array.isArray(field.props.defaultValue) ? field.props.defaultValue : [];
+        values[key] = Array.isArray(opening) ? opening : [];
       } else if (field.tag === "Form.Dropdown") {
         const first = tree.elementChildren(field).find((c) => c.tag === "Form.Dropdown.Item");
-        values[key] = field.props.defaultValue ?? (first ? str(first, "value") : "");
+        values[key] = opening ?? (first ? str(first, "value") : "");
       } else if (
         field.tag === "Form.TextField" ||
         field.tag === "Form.TextArea" ||
         field.tag === "Form.PasswordField"
       ) {
-        values[key] = str(field, "defaultValue");
+        values[key] = typeof opening === "string" ? opening : "";
       }
     }
   });
 
   export function submit() {
-    onsubmit($state.snapshot(values));
+    const collected = $state.snapshot(values);
+
+    /*
+     * Remembered on the way out, which is what `storeValue` means on a form.
+     * Only the fields that asked, and only the ones that named themselves.
+     */
+    for (const field of fields) {
+      if (field.props.storeValue !== true) continue;
+      const name = str(field, "id");
+      if (name) onremember?.(name, collected[name]);
+    }
+
+    onsubmit(collected);
   }
 
   /** What is chosen in a tag picker, which is always a list. */
@@ -184,7 +240,21 @@
       <div class="row">
         <div class="label">{str(field, "title")}</div>
         <label class="checkbox">
-          <input type="checkbox" bind:checked={values[key] as boolean} />
+          <!--
+            Read one way and written by hand, rather than bound.
+
+            A two-way binding writes the control's own state into `values` as
+            it mounts, which is before the effect above has seeded anything.
+            The key then exists, the seeding skips it, and a checkbox the
+            extension declared as ticked draws unticked and submits `false`.
+            Nothing on screen says so: an unticked box is what an unticked box
+            looks like.
+          -->
+          <input
+            type="checkbox"
+            checked={values[key] === true}
+            onchange={(event) => (values[key] = event.currentTarget.checked)}
+          />
           <span>{str(field, "label")}</span>
         </label>
       </div>

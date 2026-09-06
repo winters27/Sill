@@ -43,3 +43,8 @@ vite.config.ts.timestamp-*
 # line existed.
 /src-tauri/target-audit/
 /target-audit/
+
+# Worktrees Claude Code creates for parallel agents. Each holds its own
+# node_modules and Cargo target, so one `git add -A` without this line would
+# commit tens of thousands of build artefacts.
+/.claude/worktrees/

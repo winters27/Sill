@@ -76,8 +76,16 @@ const HEADINGS: Record<string, string> = {
    */
   reminder: "Reminders",
   "reminder-shown": "Reminders",
-  view: "Commands",
-  "no-view": "Commands",
+  /*
+   * What an extension contributes, under a heading that says so.
+   *
+   * Both were "Commands", which put them beside `builtin`'s "Sill" as though
+   * the difference were which program they belong to rather than whether they
+   * ship with Sill at all. A screen and an action are both the extension's,
+   * and that is the useful thing to say about either.
+   */
+  view: "Extensions",
+  "no-view": "Extensions",
   builtin: "Sill",
   // Windows' own switches, under a heading that says so. Filed with Sill's
   // commands they read as Sill features, which is the opposite of true.

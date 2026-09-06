@@ -2280,6 +2280,8 @@ pub fn run() {
             commands::extensions::unload_extension,
             commands::extensions::install_extension,
             commands::extensions::extension_grants,
+            commands::extensions::extension_stored_fields,
+            commands::extensions::remember_extension_field,
             commands::extensions::extension_resources,
             commands::extensions::revoke_extension_grant,
             commands::extensions::pick_files,

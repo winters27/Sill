@@ -70,6 +70,7 @@
     "resources": {
       "resources/sounds/*": "resources/sounds/",
       "../host/dist/host.js": "host/host.js",
+      "../host/dist/package.json": "host/package.json",
       "../host/node_modules/@esbuild/win32-x64/esbuild.exe": "esbuild/esbuild.exe"
     }
   },

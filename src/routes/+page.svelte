@@ -29,11 +29,15 @@
   import Footer from "$lib/components/Footer.svelte";
   import SwitcherPreview from "$lib/components/SwitcherPreview.svelte";
   import FilePreview from "$lib/components/FilePreview.svelte";
-  import AiChat, { type Shown } from "$lib/components/AiChat.svelte";
+  import AiChat from "$lib/components/AiChat.svelte";
+  import { fromQuestion, fromTurn, type Shown } from "$lib/chat/parts";
+  import { begin, fresh, reset, type Live } from "$lib/chat/live";
+  import { listenToChat } from "$lib/chat/listen";
   import ScriptOutput, { type Ran } from "$lib/components/ScriptOutput.svelte";
   import KeySheet from "$lib/components/KeySheet.svelte";
+  import PermissionAsk from "$lib/components/PermissionAsk.svelte";
   import Welcome from "$lib/components/Welcome.svelte";
-  import { isBrowsing, selectionAfter } from "$lib/results";
+  import { isBrowsing, selectionAfter, shouldLoadMore } from "$lib/results";
   import { askedForTheKeys, deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
   import { asUrl, isPath, isUrl } from "$lib/typed";
   import { conversationRows as conversationsAsRows } from "$lib/conversations";
@@ -76,6 +80,8 @@
     activateHandler,
     dismiss,
     launchCommand,
+    rememberField,
+    storedFields,
     aiAsk,
     aiFollowUp,
     aiNew,
@@ -136,15 +142,13 @@
     undoAction,
     type ActionInfo,
     type AiConversation,
-    type AiAsking,
-    type AiStep,
     type AiReady,
     type AiTurn,
     type RankedCommand,
   } from "$lib/exthost/commands";
   import { ViewTree, isHandlerRef, type ElementNode, type Op } from "$lib/exthost/tree";
   import { SearchRelay, itemsOf, rowsOf, searchProps } from "$lib/exthost/search";
-  import { dropdownOf } from "$lib/exthost/present";
+  import { dropdownOf, paginationOf } from "$lib/exthost/present";
   import {
     applyAppearance,
     getPreferences,
@@ -761,11 +765,45 @@
    * drawn in the search row that the page owns and a list and a grid declare
    * it identically. One reading, one control, either kind of view.
    */
+  /**
+   * What a picker's remembered value is filed under.
+   *
+   * Its own `id` when it has one, and otherwise the slot it sits in. A list
+   * has exactly one picker beside its search field, so the slot names it
+   * unambiguously, and it has to: the extensions that ask to be remembered
+   * mostly do not name the control. Hacker News is the plain case, and
+   * refusing to remember an unnamed picker would have meant `storeValue`
+   * doing nothing for the extension that made it worth having.
+   *
+   * A form field is the other way round and is keyed by its own `id` only.
+   * A form has many fields, so there is no slot to fall back on, and Raycast
+   * requires the id there for the same reason.
+   */
+  function pickerKey(picker: { name?: string }): string {
+    return picker.name ?? "searchBarAccessory";
+  }
+
   const dropdown = $derived.by(() => {
     version;
     const node = tree.top();
     if (!node || (node.tag !== "List" && node.tag !== "Grid")) return undefined;
-    return dropdownOf(tree, node);
+
+    const picker = dropdownOf(tree, node);
+    if (!picker?.storeValue) return picker;
+
+    /*
+     * What was chosen last time, standing in for the author's default.
+     *
+     * That is the whole of `storeValue`: the extension says where to start and
+     * the launcher says where somebody actually left it, and the second wins.
+     * Folded in here rather than inside the control, because the control is
+     * also drawn by the preview route with no Rust behind it, and because a
+     * value the extension is driving is not this picker's to override.
+     */
+    const remembered = storedByField[pickerKey(picker)];
+    if (remembered === undefined || typeof remembered !== "string") return picker;
+
+    return { ...picker, initial: remembered };
   });
 
   /**
@@ -802,8 +840,81 @@
     return rowsOf(tree, node, narrow);
   });
 
+  /**
+   * What the running command's fields were left set to last time.
+   *
+   * Raycast's `storeValue`: a picker or a form field marked with it opens on
+   * what somebody last chose rather than on what its author defaulted to.
+   *
+   * Held here rather than asked for by the controls, and fetched as part of
+   * the launch rather than after it, because the first draw has to be right:
+   * a dropdown that opened on the author's default and corrected itself a
+   * moment later would tell the extension twice and fetch twice, once for an
+   * answer nobody asked for.
+   */
+  let storedByField = $state<Record<string, unknown>>({});
+
+  /** Which extension and command those belong to, for writing one back. */
+  let storedFor = $state<{ extension: string; command: string } | null>(null);
+
+  /**
+   * Remembers what a field was set to, if the extension asked to have it
+   * remembered and named the field.
+   *
+   * A field with no name has nowhere to be kept, so `storeValue` on one that
+   * omitted its `id` does nothing rather than inventing a key that would not
+   * be the same one next time.
+   */
+  function remember(name: string | undefined, wanted: boolean, value: unknown) {
+    if (!wanted || !name || !storedFor) return;
+
+    void rememberField(storedFor.extension, storedFor.command, name, value).catch(
+      (err: unknown) => {
+        status = `the launcher could not remember that: ${err}`;
+      },
+    );
+  }
+
   /** Selectable items, which is what the arrow keys count and Enter runs. */
   const items = $derived(itemsOf(rows));
+
+  /**
+   * What the running list says about there being more of it.
+   *
+   * Read here rather than inside `ListView` for the reason the dropdown is:
+   * a list and a grid declare it identically, and the cursor that decides
+   * when to ask is this page's.
+   */
+  const more = $derived.by(() => {
+    version;
+    const node = tree.top();
+    if (!node || (node.tag !== "List" && node.tag !== "Grid")) return undefined;
+    return paginationOf(node);
+  });
+
+  /**
+   * The row count the last request was made at.
+   *
+   * The guard against asking over and over. An extension answers by rendering
+   * more rows, and until it does the cursor is still near the end and the
+   * condition is still true; without this the launcher would ask on every
+   * keystroke and every redraw for as long as somebody sat at the bottom of
+   * the list. Reset by the count changing, which is the extension's answer
+   * arriving, and by a different command taking over.
+   */
+  let askedAtCount = $state(-1);
+
+  $effect(() => {
+    const paging = more;
+    const count = items.length;
+
+    if (!session || !shouldLoadMore(paging, selected, count, askedAtCount)) return;
+
+    askedAtCount = count;
+    void activateHandler(session, paging.onLoadMore, []).catch((err: unknown) => {
+      status = `the command could not fetch more: ${err}`;
+    });
+  });
 
   /**
    * The word an empty command view is allowed to blame.
@@ -1728,8 +1839,6 @@
         return;
       }
 
-      if (asked.what === "rename") {
-        // The registry, with what was typed as the action's argument. It was a
       if (asked.what === "layout") {
         if (!asked.of) return;
 
@@ -1768,6 +1877,8 @@
         return;
       }
 
+      if (asked.what === "rename") {
+        // The registry, with what was typed as the action's argument. It was a
         // command of its own that did the renaming itself, which made renaming
         // the one thing on this list no key could be bound to.
         if (!asked.of) return;
@@ -1871,13 +1982,13 @@
     if (mode === "ai") {
       // A card is the only thing on screen worth answering, so Enter answers
       // it rather than sending a question into a turn that is not listening.
-      if (asked) {
+      if (aiLive.asked) {
         decide(true);
         return;
       }
 
       const next = query.trim();
-      if (!next || asking) return;
+      if (!next || aiLive.asking) return;
 
       await askAi(next);
       return;
@@ -2428,6 +2539,26 @@
         // well as on the way out, because a command can be opened from a view
         // that never went through `goBack`.
         nav = NOT_NAVIGATED;
+        // A different command's row count says nothing about this one's.
+        askedAtCount = -1;
+
+        /*
+         * What this command's fields were left on, before anything draws.
+         *
+         * Awaited rather than fetched alongside, because a picker that opened
+         * on the author's default and corrected itself a moment later would
+         * report both to the extension, and an extension that fetches on that
+         * report would fetch twice: once for a feed nobody chose.
+         *
+         * A colon splits the id because that is how it is built:
+         * `<extension>:<command>`. Failing is not worth stopping a launch for,
+         * so a command whose last values could not be read opens on its
+         * author's defaults, which is what it did before any of this.
+         */
+        const [extensionName, ...rest] = command.id.split(":");
+        storedFor = { extension: extensionName, command: rest.join(":") };
+        storedByField = await storedFields(extensionName, rest.join(":")).catch(() => ({}));
+
         session = launched.session;
         launchedAt = { at: askedAt, session: launched.session };
         running = { title: launched.title, extensionTitle: launched.extensionTitle };
@@ -2650,8 +2781,6 @@
          */
         const whole = await clipboardEntry(entry.id);
         const text = whole?.text ?? entry.text;
-
-        try {
         const actionId = action.tag.slice("Sill.Action:".length);
 
         /*
@@ -2679,6 +2808,8 @@
           query = renaming ? (whole?.title ?? "") : text;
           return;
         }
+
+        try {
           const outcome = await runObjectAction(actionId, {
             id: String(entry.id),
             mode: "clipboard",
@@ -2809,8 +2940,6 @@
         return;
       }
 
-      if (chosen === "sill.file.rename") {
-        awaiting = {
       if (chosen === "sill.window.layout") {
         // The layout's name, asked for in the field the way a new file name
         // is. Rust finds the layout by it; the window holds only the word.
@@ -2827,6 +2956,8 @@
         return;
       }
 
+      if (chosen === "sill.file.rename") {
+        awaiting = {
           what: "rename",
           id: command.entrypoint,
           title: command.title,
@@ -3001,11 +3132,13 @@
    */
   let conversation = $state<Shown[]>([]);
 
-  /** The answer being written right now, before it becomes a turn. */
-  let answering = $state("");
-
-  /** Whether a question is in flight, so the composer can say so. */
-  let asking = $state(false);
+  /**
+   * The turn in flight: what has arrived, the card, the trouble.
+   *
+   * One object mutated through `$lib/chat/live`, which is what the chat
+   * window holds too, so the two cannot disagree about what a turn is.
+   */
+  let aiLive = $state<Live>(fresh());
 
   /** Who answers, and why not when nothing does. */
   let aiWhoNot = $state("");
@@ -3036,21 +3169,16 @@
    */
   let answersWith = $state<AiReady | null>(null);
 
-  /** What the model has looked at during the turn in flight. */
-  let steps = $state<AiStep[]>([]);
-
   /**
-   * What it wants to do, while nobody has said yes or no.
+   * Yes or no to the card.
    *
-   * At most one at a time, because the turn that raised it is paused: nothing
-   * else can be asked until this is answered.
+   * At most one is up at a time, because the turn that raised it is paused:
+   * nothing else can be asked until this is answered.
    */
-  let asked = $state<AiAsking | null>(null);
-
   function decide(allowed: boolean) {
-    if (!asked) return;
-    void aiDecide(asked.id, allowed);
-    asked = null;
+    if (!aiLive.asked) return;
+    void aiDecide(aiLive.asked.id, allowed);
+    aiLive.asked = null;
   }
 
   /**
@@ -3184,14 +3312,11 @@
     mode = "ai";
     selected = 0;
     aiWhoNot = "";
-    answering = "";
-    steps = [];
-    asked = null;
-    asking = true;
+    begin(aiLive);
 
     // Shown immediately, so the question is on screen before the answer
     // starts rather than after.
-    conversation = [...conversation, { role: "user", text: question, steps: [] }];
+    conversation = [...conversation, fromQuestion(question)];
     query = "";
 
     try {
@@ -3210,9 +3335,8 @@
    */
   async function resumeConversation(id: string, title: string) {
     try {
-      // A conversation reopened is the answers, not the working: the steps
-      // were provenance for the moment they happened in.
-      conversation = (await aiResume(id)).map((turn) => ({ ...turn, steps: [] }));
+      // The working comes back with the answers: Rust kept the parts.
+      conversation = (await aiResume(id)).map(fromTurn);
     } catch (err) {
       status = `${err}`;
       return;
@@ -3222,8 +3346,7 @@
     mode = "ai";
     selected = 0;
     aiWhoNot = "";
-    answering = "";
-    asking = false;
+    reset(aiLive);
     query = "";
   }
 
@@ -3236,8 +3359,7 @@
   async function freshConversation() {
     await aiNew();
     conversation = [];
-    answering = "";
-    asking = false;
+    reset(aiLive);
     aiWhoNot = "";
     cameFrom = "";
     query = "";
@@ -3247,7 +3369,7 @@
   async function newConversation() {
     await aiClear();
     conversation = [];
-    answering = "";
+    reset(aiLive);
     status = "";
   }
 
@@ -3335,7 +3457,7 @@
       // Escape answers the card before it leaves. A question nobody replied to
       // holds its turn open for a minute and a half, and the action would land
       // long after somebody moved on.
-      if (asked) {
+      if (aiLive.asked) {
         decide(false);
         return;
       }
@@ -3974,11 +4096,7 @@
     let changed: UnlistenFn | undefined;
     let ran: UnlistenFn | undefined;
     let hidden: (() => void) | undefined;
-    let said: UnlistenFn | undefined;
-    let using: UnlistenFn | undefined;
-    let wants: UnlistenFn | undefined;
-    let finished: UnlistenFn | undefined;
-    let wentWrong: UnlistenFn | undefined;
+    let chatHeard: UnlistenFn | undefined;
     let disposed = false;
 
     /*
@@ -4316,55 +4434,22 @@
       // page has to react to being opened this way even when it was already
       // sitting on something else.
       /*
-       * Each piece of an answer as it arrives.
+       * Everything about the turn in flight, heard into `aiLive`.
        *
-       * Appended to a separate string rather than to the last turn, so a
-       * half-written answer is visibly in progress and a failure part way
-       * through does not leave something that looks like a finished reply.
+       * The words, the thinking, each tool reached for and whether it
+       * managed, and the card that pauses the turn: all of it lands in the
+       * one object the panel draws from. What is left to do here is the end
+       * of a turn, which is where the launcher's own list changes.
        */
-      said = await listen<string>("sill://ai-said", ({ payload }) => {
-        answering += payload;
-      });
-
-      /*
-       * What the model reached for, said before it runs rather than after.
-       *
-       * Reading the screen takes a moment, and a window showing nothing during
-       * it looks like a window that has stopped. This is also the only place
-       * anybody can see that a question about their machine was answered by
-       * looking at their machine.
-       */
-      using = await listen<AiStep>("sill://ai-using", ({ payload }) => {
-        steps = [...steps, payload];
-      });
-
-      /*
-       * Something the model wants to do, waiting on a decision.
-       *
-       * The turn is genuinely paused behind this: it asked, the loop stopped,
-       * and nothing else happens until Enter or Escape answers it.
-       */
-      wants = await listen<AiAsking>("sill://ai-asking", ({ payload }) => {
-        asked = payload;
-      });
-
-      finished = await listen("sill://ai-done", () => {
-        if (answering) {
-          conversation = [...conversation, { role: "assistant", text: answering, steps }];
-        }
-        answering = "";
-        asking = false;
-      });
-
-      wentWrong = await listen<string>("sill://ai-failed", ({ payload }) => {
-        // Whatever arrived before it failed is kept: half an answer is often
-        // enough to see what went wrong.
-        if (answering) {
-          conversation = [...conversation, { role: "assistant", text: answering, steps }];
-        }
-        answering = "";
-        asking = false;
-        status = payload;
+      chatHeard = await listenToChat(aiLive, {
+        done(turn) {
+          if (turn) conversation = [...conversation, turn];
+        },
+        failed(turn) {
+          // Whatever arrived before it failed is kept: half an answer is
+          // often enough to see what went wrong. The panel says the rest.
+          if (turn) conversation = [...conversation, turn];
+        },
       });
 
       switcher = await listen("sill://switcher", () => {
@@ -4451,11 +4536,7 @@
       welcomed?.();
       changed?.();
       ran?.();
-      said?.();
-      using?.();
-      wants?.();
-      finished?.();
-      wentWrong?.();
+      chatHeard?.();
     };
   });
 </script>
@@ -4476,12 +4557,13 @@
     namingTitle={naming?.title}
     runningTitle={running?.extensionTitle}
     {answersWith}
-    {asking}
+    asking={aiLive.asking}
     conversationEmpty={conversation.length === 0}
     commandPlaceholder={String(view?.props.searchBarPlaceholder ?? "Search…")}
     {dropdown}
     onpick={(value) => {
       if (!session || !dropdown?.onChange) return;
+      remember(pickerKey(dropdown), dropdown.storeValue, value);
       void activateHandler(session, dropdown.onChange, [value]).catch((err: unknown) => {
         status = `the command could not change that: ${err}`;
       });
@@ -4533,16 +4615,7 @@
       oncollection={(open) => (openCollection = open)}
     />
   {:else if mode === "ai"}
-    <AiChat
-      {conversation}
-      {answering}
-      {asking}
-      {asked}
-      {steps}
-      {answersWith}
-      ondecide={decide}
-      onoffer={offer}
-    />
+    <AiChat {conversation} live={aiLive} {answersWith} ondecide={decide} onoffer={offer} />
 
   <!--
     Not `isListMode`. This set is not the same one: `alias` draws the list too,
@@ -4702,6 +4775,8 @@
       {version}
       session={session ?? ""}
       onsubmit={submitForm}
+      stored={storedByField}
+      onremember={(id, value) => remember(id, true, value)}
     />
   {:else if view?.tag === "Detail"}
     <!--
@@ -4755,6 +4830,12 @@
     onupdate={() => void startUpdate()}
   />
 </main>
+
+<!--
+  An extension's permission card, in front of whatever mode is up. The AI
+  conversation draws its own, so this stands down there.
+-->
+<PermissionAsk hidden={mode === "ai"} />
 
 <style>
   /*

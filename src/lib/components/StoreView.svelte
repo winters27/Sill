@@ -17,6 +17,7 @@
   import {
     ago,
     installs,
+    progressFraction,
     progressLine,
     shortRevision,
     storeBrowse,
@@ -127,6 +128,15 @@
    * several times a second reads as a fault.
    */
   let detail = $state("");
+
+  /**
+   * How far along the install is, or nothing before anything has said.
+   *
+   * Zero is a real position and means "starting", so this is null until the
+   * first stage that counts something reports, and null again once the install
+   * is over. A bar sitting at zero is a bar that looks stuck.
+   */
+  let howFar = $state<number | null>(null);
 
   const rows = $derived(browse?.rows ?? []);
   const current = $derived(rows[selected] ?? null);
@@ -275,6 +285,18 @@
     const listening = listen<InstallProgress>(INSTALL_PROGRESS, (event) => {
       const line = progressLine(event.payload);
       if (line) detail = line;
+
+      /*
+       * Held rather than replaced by nothing.
+       *
+       * npm and esbuild report lines and no position, so a bar driven straight
+       * off every message would vanish for the longest part of the wait and
+       * come back near the end. Keeping the last position means it holds still
+       * while npm works, which is the truth: nothing measurable is happening
+       * to it.
+       */
+      const far = progressFraction(event.payload);
+      if (far !== null) howFar = far;
     });
 
     return () => void listening.then((stop) => stop());
@@ -385,6 +407,7 @@
     } finally {
       working = null;
       workingOn = null;
+      howFar = null;
     }
   }
 
@@ -424,6 +447,7 @@
       if (!refetched && said.includes("staged")) {
         working = null;
         workingOn = null;
+        howFar = null;
         onstatus(`Fetching ${asked.title} again`);
         // Silent, because the line below says it: a failed refetch falls
         // through to `onstatus(said)` with the real error, in the panel the
@@ -440,6 +464,7 @@
       working = null;
       workingOn = null;
       detail = "";
+      howFar = null;
     }
   }
 
@@ -561,7 +586,33 @@
         </button>
         <button onclick={cancel} disabled={working !== null}>Cancel</button>
       </div>
+
     </div>
+
+    <!--
+      Pinned, because this panel scrolls and its buttons are below the fold on
+      an ordinary extension. An install that reports into the scrolling part
+      reports somewhere nobody is looking: the first attempt at this drew the
+      line under the Install button and it was off the bottom of the window
+      for the whole minute the install took.
+    -->
+    {#if working}
+      <p class="progress pinned">
+        <span class="busy">{detail || `${working} ${deciding.title}…`}</span>
+        {#if howFar !== null}
+          <span
+            class="bar wide"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(howFar * 100)}
+            aria-label="{working} {deciding.title}"
+          >
+            <span class="far" style="width: {Math.round(howFar * 100)}%"></span>
+          </span>
+        {/if}
+      </p>
+    {/if}
   {:else}
     {#if !ready}
       <!-- Said here rather than at the moment an install fails. Browsing works
@@ -670,6 +721,23 @@
                        than a keystroke has to be visible where the eye
                        already is, not only in the status bar. -->
                   <span class="busy">{detail || `${working}…`}</span>
+                  <!--
+                    A position, where there is one to give. Fetching counts
+                    files and building counts commands; npm reports lines and
+                    no position at all, so the bar holds rather than guessing.
+                  -->
+                  {#if howFar !== null}
+                    <span
+                      class="bar"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(howFar * 100)}
+                      aria-label="{working} {row.title}"
+                    >
+                      <span class="far" style="width: {Math.round(howFar * 100)}%"></span>
+                    </span>
+                  {/if}
                 {:else}
                   <!--
                     A row the store does not carry has no download count, and
@@ -758,6 +826,18 @@
       <span class="keys">
         {#if working}
           <span class="busy">{detail || `${working} ${current?.title ?? ""}…`}</span>
+          {#if howFar !== null}
+            <span
+              class="bar wide"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(howFar * 100)}
+              aria-label="{working} {current?.title ?? ""}"
+            >
+              <span class="far" style="width: {Math.round(howFar * 100)}%"></span>
+            </span>
+          {/if}
         {:else}
           {#if !current?.native}
             <span><b>Enter</b> {current ? verb(current) : "install"}</span>
@@ -1059,6 +1139,61 @@
      the one thing on screen that is actually happening. */
   .busy {
     color: var(--accent);
+  }
+
+  /*
+   * How far along, beside the words saying what is happening.
+   *
+   * A hairline rather than a block: this sits inside a row of an ordinary list
+   * and a solid bar would be the loudest thing on a screen whose subject is
+   * the extension above it. The accent is allowed here for the same reason it
+   * is allowed on `.busy`, which it sits next to: this is the one thing on
+   * screen that is actually happening.
+   */
+  /*
+   * What the install is doing, on the screen the install runs on.
+   *
+   * The only thing that said so was the word on a disabled button, and that
+   * button is below the fold on any extension with more than a few
+   * capabilities. npm and esbuild take most of a minute between them, and a
+   * screen that says nothing for that long is one that has stopped.
+   */
+  .progress {
+    display: flex;
+    align-items: center;
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-meta);
+  }
+
+  /* Above the chin, out of the part that scrolls. */
+  .pinned {
+    flex: none;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    border-top: 1px solid var(--hairline);
+  }
+
+  .bar {
+    display: inline-block;
+    width: 5rem;
+    height: 2px;
+    margin-left: var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--fill-2);
+    vertical-align: middle;
+    overflow: hidden;
+  }
+
+  .bar.wide {
+    width: 8rem;
+  }
+
+  .far {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    /* Files land several at a time, so the position arrives in jumps. */
+    transition: width var(--motion-state) linear;
   }
 
   /* ------------------------------------------------------------- deciding */

@@ -430,3 +430,47 @@ mod what_they_cost {
         assert_eq!(costs[0].cold_ms, None);
     }
 }
+
+/// What a command's fields were left set to last time.
+///
+/// Raycast's `storeValue`: a dropdown or a form field marked with it opens on
+/// what somebody last chose rather than on what its author defaulted to. The
+/// window asks for these when a command starts and applies them itself, which
+/// is where they have to be applied: it is what holds a dropdown's selection
+/// and a form's values, and an extension is never told anything but the answer.
+///
+/// Empty for a command nobody has used, which is the same shape as one whose
+/// fields are all fresh, and the window treats both the same way.
+#[tauri::command]
+pub(crate) fn extension_stored_fields(
+    state: State<'_, HostState>,
+    extension: String,
+    command: String,
+) -> serde_json::Map<String, Value> {
+    state.api.storage().fields_for(&extension, &command)
+}
+
+/// Remembers what a field was set to, for the next time the command runs.
+///
+/// Failures are reported and not returned. The caller is somebody choosing a
+/// feed from a dropdown, the choice has already been made and acted on, and
+/// there is nothing they could do with "the launcher could not write that
+/// down" except see an error about something that worked.
+#[tauri::command]
+pub(crate) fn remember_extension_field(
+    state: State<'_, HostState>,
+    extension: String,
+    command: String,
+    id: String,
+    value: Value,
+) {
+    let key = crate::exthost::storage::field_key(&extension, &command, &id);
+
+    if let Err(err) = state
+        .api
+        .storage()
+        .set(crate::exthost::storage::FIELDS, &key, &value)
+    {
+        crate::say!("could not remember {key}: {err}");
+    }
+}

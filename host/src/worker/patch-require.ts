@@ -203,6 +203,26 @@ const BINDINGS: Record<string, string> = {
 export class Held {
   private granted: Set<string>;
 
+  /**
+   * How to ask for what is not held, when there is somebody to ask.
+   *
+   * Absent for a worker driven by a script or a test, which has nobody to
+   * put a card in front of, and present for one started by Sill. Absent
+   * means a gate refuses at once, which is what every gate did before asking
+   * existed.
+   */
+  private asker: ((needs: string[], plainly: string) => string[] | null) | null = null;
+
+  /**
+   * What was asked for in this worker and refused.
+   *
+   * Somebody who said no to the network has said no to the network. A bundle
+   * that requires `http` and then `https` would otherwise put the same card
+   * up twice in a row, and an extension that retries a fetch on a timer would
+   * put it up forever.
+   */
+  private readonly refused = new Set<string>();
+
   constructor(granted: readonly string[] = []) {
     this.granted = new Set(granted);
   }
@@ -210,6 +230,43 @@ export class Held {
   has(need: string): boolean {
     return this.granted.has(need);
   }
+
+  /** Gives this worker a way to ask. See [`makeAsker`](./ask.ts). */
+  askWith(asker: (needs: string[], plainly: string) => string[] | null): void {
+    this.asker = asker;
+  }
+
+  /**
+   * Whether every need is held, asking for the ones that are not.
+   *
+   * This is what a gate calls. It is the old `every(has)` check with one
+   * more step: a need that is not held is put on a card, and what comes back
+   * is what the extension holds now, refused or not. Asked once per need per
+   * worker; a no is remembered here and not asked again.
+   *
+   * `plainly` is what the gate would say in its refusal, and it is what the
+   * card says instead: one card reading "read and change files directly"
+   * for `fs`, rather than one for reading and a second for writing.
+   */
+  allows(needs: readonly string[], plainly: string): boolean {
+    if (needs.every((need) => this.granted.has(need))) return true;
+    if (!this.asker) return false;
+
+    const wanted = needs.filter((need) => !this.granted.has(need));
+    if (wanted.some((need) => this.refused.has(need))) return false;
+
+    const now = this.asker(wanted, plainly);
+    if (now) this.replace(now);
+
+    const held = needs.every((need) => this.granted.has(need));
+    if (!held) {
+      for (const need of wanted) {
+        if (!this.granted.has(need)) this.refused.add(need);
+      }
+    }
+    return held;
+  }
+
 
   /**
    * Everything it holds, for `@sill/api` to report back to the extension.
@@ -371,7 +428,10 @@ export function patchRequire(held: Held): void {
       );
     }
 
-    if (verdict.needs.every((need) => held.has(need))) return;
+    // Asks for what is missing before refusing, when there is somebody to
+    // ask. `require` cannot yield, so the asking blocks this thread on shared
+    // memory until the card is answered; see `ask.ts`.
+    if (held.allows(verdict.needs, verdict.plainly)) return;
 
     throw refusal(verdict.plainly, `"${id}"`);
   };
@@ -577,7 +637,9 @@ export function gateGlobals(held: Held): void {
       configurable: true,
       writable: true,
       value: (...args: unknown[]): Promise<unknown> =>
-        held.has("network") ? call.apply(globals, args) : Promise.reject(why("fetch")),
+        held.allows(["network"], "open network connections")
+          ? call.apply(globals, args)
+          : Promise.reject(why("fetch")),
     });
   }
 
@@ -595,7 +657,7 @@ export function gateGlobals(held: Held): void {
       // its own prototype, not a wrapper that fails `instanceof` somewhere
       // deep inside a dependency.
       value: function gated(...args: unknown[]): object {
-        if (!held.has("network")) throw why(name);
+        if (!held.allows(["network"], "open network connections")) throw why(name);
         return Reflect.construct(Real, args, Real);
       },
     });
@@ -622,7 +684,9 @@ export function gateGlobals(held: Held): void {
 
   const realKill = process_.kill.bind(process);
   process_.kill = (pid: number, signal?: string | number) => {
-    if (!held.has("processLaunch")) throw refusal("start other programs", "process.kill");
+    if (!held.allows(["processLaunch"], "start other programs")) {
+      throw refusal("start other programs", "process.kill");
+    }
     return realKill(pid, signal);
   };
 
@@ -631,7 +695,7 @@ export function gateGlobals(held: Held): void {
 
   if (report && realWrite) {
     report.writeReport = (...args: unknown[]) => {
-      if (!held.has("fileWrite")) {
+      if (!held.allows(["fileWrite"], "read and change files directly")) {
         throw refusal("read and change files directly", "process.report.writeReport");
       }
       return realWrite(...args);

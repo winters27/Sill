@@ -130,6 +130,7 @@ export interface Done {
  * package it is fetching, esbuild names the file it is on.
  */
 export type InstallProgress =
+  | { stage: "fetching"; done: number; total: number }
   | { stage: "dependencies"; said: string }
   | { stage: "building"; command: string; done: number; total: number }
   | { stage: "bundling"; said: string };
@@ -139,6 +140,12 @@ export const INSTALL_PROGRESS = "store:install";
 
 /** One line for the window, or nothing when there is nothing worth saying. */
 export function progressLine(progress: InstallProgress): string {
+  if (progress.stage === "fetching") {
+    return progress.total === 0
+      ? "Fetching"
+      : `Fetching ${progress.done} of ${progress.total} files`;
+  }
+
   if (progress.stage === "building") {
     return `Building ${progress.command} (${progress.done} of ${progress.total})`;
   }
@@ -398,3 +405,33 @@ export function ago(seconds: number, now = Date.now() / 1000): string {
   if (passed < 2 * 86400) return "yesterday";
   return `${Math.round(passed / 86400)} days ago`;
 }
+
+/**
+ * How far along an install is, from nothing to one, or nothing at all.
+ *
+ * Only the two stages that count something can answer this. npm and esbuild
+ * report lines rather than positions, and a bar that guessed at their share
+ * would be a bar that moves without meaning: what those two get is the line
+ * they wrote, which says more than an invented fraction would.
+ *
+ * The two halves are weighted rather than each drawn as a full sweep. Fetching
+ * is the first part of one wait and building is the last, so a bar that filled,
+ * emptied and filled again would read as two installs. Fetching takes the first
+ * third because it is usually the shorter half, and npm sits between them with
+ * nothing to report, which is why the bar holds rather than jumps.
+ */
+export function progressFraction(progress: InstallProgress): number | null {
+  if (progress.stage === "fetching") {
+    return progress.total === 0 ? 0 : (progress.done / progress.total) * FETCH_SHARE;
+  }
+
+  if (progress.stage === "building") {
+    const built = progress.total === 0 ? 0 : progress.done / progress.total;
+    return FETCH_SHARE + built * (1 - FETCH_SHARE);
+  }
+
+  return null;
+}
+
+/** How much of the bar the download is worth. */
+const FETCH_SHARE = 0.34;

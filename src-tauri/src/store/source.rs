@@ -368,8 +368,10 @@ pub async fn download(
     revision: &str,
     files: &[Wanted],
     destination: &Path,
+    report: crate::extension_install::Report<'_>,
 ) -> Result<Fetched, String> {
     use futures_util::StreamExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     let bytes = within_bounds(files)?;
 
@@ -401,8 +403,22 @@ pub async fn download(
         })
         .collect();
 
+    /*
+     * Counted as they land rather than as they are started.
+     *
+     * These run several at a time, so "started" would reach the total while
+     * the last few were still arriving and the bar would sit full through the
+     * slowest part of the wait. Shared because the futures are concurrent and
+     * each finishes on its own.
+     */
+    let done = AtomicUsize::new(0);
+    let total = files.len();
+    report(crate::extension_install::Progress::Fetching { done: 0, total });
+
     let results: Vec<Result<(), String>> = futures_util::stream::iter(jobs)
-        .map(|(url, path, out)| async move {
+        .map(|(url, path, out)| {
+            let done = &done;
+            async move {
             let response = client
                 .get(&url)
                 .header(reqwest::header::USER_AGENT, USER_AGENT)
@@ -420,7 +436,14 @@ pub async fn download(
                 .map_err(|err| format!("{path} did not finish arriving: {err}"))?;
 
             std::fs::write(&out, &body)
-                .map_err(|err| format!("could not write {}: {err}", out.display()))
+                .map_err(|err| format!("could not write {}: {err}", out.display()))?;
+
+            report(crate::extension_install::Progress::Fetching {
+                done: done.fetch_add(1, Ordering::Relaxed) + 1,
+                total,
+            });
+            Ok(())
+            }
         })
         .buffer_unordered(AT_ONCE)
         .collect()

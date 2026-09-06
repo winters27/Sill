@@ -243,6 +243,63 @@ const { accessoriesOf, detailOf, dropdownOf, emptyViewOf, iconOf, showsDetail } 
 );
 
 /**
+ * Tells the extension what its dropdown opened on, the way the window does.
+ *
+ * `ExtDropdown.svelte` reports the settled value once, unprompted, because the
+ * launcher is what knows it and Raycast reports it too. A harness that does
+ * not is a harness driving a different launcher, and the difference is not
+ * academic: a good share of the store gates its first fetch on that report,
+ * as `usePromise(fetch, [choice], { execute: !!choice })`. Without it such a
+ * command draws its picker, fetches nothing, and reports as working, which is
+ * exactly how `hacker-news` passed this gate while listing nothing.
+ *
+ * Called after every render rather than once, because that is when a dropdown
+ * appears and it is what the window's own effect does. Guarded by the value
+ * already sent, so a re-render is not a second report and an extension that
+ * answers by setting state does not loop.
+ *
+ * Only when the extension is not driving the picker, which is the window's
+ * condition too: one passing `value` chose it and needs no telling.
+ */
+let announced;
+
+function announceDropdown() {
+  const top = tree.top();
+  const picker = top ? dropdownOf(tree, top) : undefined;
+  if (!picker?.onChange || picker.value !== undefined) return;
+
+  const opening = picker.initial ?? picker.options[0]?.value;
+  if (!opening || announced === opening) return;
+
+  announced = opening;
+  activate(picker.onChange, [opening]);
+}
+
+/**
+ * Every Raycast icon name the window has a drawing for.
+ *
+ * Read out of `src-tauri/src/exthost/icons.rs`, which is the file that owns
+ * the map: the Svelte component mirrors it and `verify:source` holds the two
+ * together, so either would answer, and the owner is the one to ask.
+ *
+ * Parsed rather than imported because this is a Rust table, and the parse is
+ * held honest by its own count: a table that suddenly reads as empty would
+ * otherwise report every icon in the store as missing.
+ */
+function marksSillDraws() {
+  const text = readFileSync(join(root, "src-tauri", "src", "exthost", "icons.rs"), "utf8");
+  const table = text.split("pub const MARKS")[1] ?? "";
+  const names = new Set([...table.matchAll(/\("([A-Za-z0-9]+)",\s*"/g)].map((m) => m[1]));
+
+  if (names.size < 20) {
+    throw new Error(
+      `only found ${names.size} icon names in exthost/icons.rs, so this is parsing rather than reading`,
+    );
+  }
+  return names;
+}
+
+/**
  * Whether to say what this extension costs as well as what it draws.
  *
  * Off by default, because it opens the command a second time and asks the host
@@ -365,6 +422,7 @@ function serveApi(method, params) {
       tree.apply(params.ops ?? []);
       renders += 1;
       lastRenderAt = Date.now();
+      announceDropdown();
       return null;
     case "Storage/get":
       return storage.has(params.key) ? storage.get(params.key) : null;
@@ -373,6 +431,12 @@ function serveApi(method, params) {
       return null;
     case "Storage/remove":
       storage.delete(params.key);
+      return null;
+    case "Storage/clear":
+      // Only the extension's own keys, which is all this map holds. The
+      // values a form remembered live under a different owner in Rust and an
+      // extension clearing its storage must not reach them.
+      storage.clear();
       return null;
     case "Storage/list":
       return Object.fromEntries(storage);
@@ -416,8 +480,20 @@ function serveApi(method, params) {
       return null;
     case "Clipboard/readContent":
       return { text: "", html: null, file: null };
+    case "UI/getSelectedText":
+      // Nothing is selected, because nothing is in front: this runs headless
+      // with no window over anything. An empty string is what Rust returns in
+      // that case too, so an extension gets the answer it would get for real
+      // rather than a fiction that only exists in the harness.
+      return "";
     case "Application/list":
       return [];
+    case "Application/getDefault":
+      // Null, for the same reason `Application/list` is empty: there is no
+      // index here to ask. Rust answers null when nothing is registered, so
+      // an extension takes the same branch it would take on a real machine
+      // with no handler for that address.
+      return null;
     case "UI/confirmAlert":
       return true;
     default:
@@ -541,6 +617,21 @@ const waits = [];
  * Faster than the sleep it replaces in the ordinary case, which is the point
  * of a condition over a guess.
  */
+/**
+ * How long a view has to stop changing before it counts as finished.
+ *
+ * A second and a half is right for a gate, where the assertion is the wait and
+ * quiet is only the fallback. It is wrong for a report: an extension that
+ * fetches over the network draws its empty list at once, and whether the rows
+ * arrive at 600 ms or at three seconds is somebody else's server rather than
+ * anything about the extension. Reporting the empty list as what it draws is
+ * how an extension gets recorded as fine while every row of it is missing.
+ *
+ * So the audit asks for longer. Not longer by default, because every gate line
+ * would then pay it.
+ */
+const quietFor = Number(argAfter("--settle") ?? 1_500);
+
 function rowsDrawnNow() {
   const top = tree.top();
   if (!top || (top.tag !== "List" && top.tag !== "Grid")) return 0;
@@ -549,7 +640,7 @@ function rowsDrawnNow() {
 
 async function untilDrawn({
   patience = 20_000,
-  quiet = 1_500,
+  quiet = quietFor,
   // What this run is about to assert on: enough rows, enough dropdown options,
   // a toast whose title is about to be read. Answered once, the wait is over.
   arrived = undefined,
@@ -1154,6 +1245,78 @@ if (top && (top.tag === "List" || top.tag === "Grid")) {
   console.log(`  EmptyView: ${drawn.empty}`);
 }
 
+/**
+ * Every icon anywhere in the drawn view, and what the window would do with it.
+ *
+ * The whole tree rather than the list rows, because an icon sits in six
+ * places: a row, an accessory, a dropdown option, a metadata label, an
+ * EmptyView and an action. Walking the nodes catches all of them and needs no
+ * list of where to look, which is the kind of list that goes stale.
+ *
+ * **This is the one gap the audit could never see.** An icon name the window
+ * has no drawing for is not a failed call and raises nothing: it falls back to
+ * a letter tile and the extension runs perfectly. So an extension can look
+ * completely supported in every report while every row of it draws a letter.
+ */
+function iconsAsked() {
+  const asked = [];
+  const seen = new Set();
+
+  const visit = (node) => {
+    if (!node || node.id === undefined || seen.has(node.id)) return;
+    seen.add(node.id);
+
+    if (node.props) {
+      const own = iconOf(node.props.icon);
+      if (own) asked.push(own);
+      for (const accessory of accessoriesOf(node)) {
+        if (accessory.icon) asked.push(accessory.icon);
+      }
+    }
+
+    for (const child of tree.children(node) ?? []) visit(child);
+  };
+
+  visit(tree.root());
+  return asked;
+}
+
+/**
+ * What the launcher would letter rather than draw, counted.
+ *
+ * Two kinds, and they are different problems. A **name** is one of Raycast's
+ * own that Sill has no mark for, and the fix is artwork. A **path** is an
+ * extension pointing at a file in its own assets, which the window cannot
+ * resolve because it does not know where an installed extension lives; the fix
+ * is a route to those bytes, not a drawing.
+ */
+const lettered = { names: new Map(), paths: new Map() };
+{
+  const drawnMarks = marksSillDraws();
+
+  for (const icon of iconsAsked()) {
+    if (icon.kind !== "mark" || drawnMarks.has(icon.name)) continue;
+
+    // A Raycast name is a bare word. Anything carrying a separator or a
+    // suffix is a file the extension shipped.
+    const where = /^[A-Za-z][A-Za-z0-9]*$/.test(icon.name)
+      ? lettered.names
+      : lettered.paths;
+
+    where.set(icon.name, (where.get(icon.name) ?? 0) + 1);
+  }
+
+  if (lettered.names.size || lettered.paths.size) {
+    console.log("\nIcons the launcher would letter rather than draw:");
+    for (const [name, count] of [...lettered.names].sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${name} x${count}`);
+    }
+    for (const [path, count] of [...lettered.paths].sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${path} x${count} (an asset, not a name)`);
+    }
+  }
+}
+
 if (hud !== null) {
   console.log(`\nHUD: ${JSON.stringify(hud)}`);
 }
@@ -1201,6 +1364,37 @@ if (gaps.size) {
   console.log("\nUnimplemented API surface this extension needs:");
   for (const g of [...gaps].sort()) console.log(`  ${g}`);
 }
+
+/*
+ * The same findings again, on lines meant to be read by a program.
+ *
+ * `audit-extensions.mjs` runs this over a hundred commands and ranks what it
+ * finds, and it used to do that by scraping the prose above. That is why this
+ * block exists: the pattern it scraped with, `/unimplemented:?\s+([\w/.]+)/i`,
+ * matched this section's own headline and captured the word "API", for every
+ * extension, including the ones with nothing missing. The ranking it produced
+ * was one row deep and said nothing, and nothing failed, because prose that
+ * has changed shape still reads as prose.
+ *
+ * So the contract is a line rather than a paragraph: `audit: <key>=<values>`,
+ * one key per kind of finding, absent when there is nothing to say. Empty is
+ * not printed, so a reader can tell "found none" from "did not look".
+ * `verify:source` holds the keys here to the keys the audit reads, in both
+ * directions, so a finding added on one side cannot be dropped on the other.
+ */
+const summarise = (key, values) => {
+  if (values.length) console.log(`audit: ${key}=${values.join(",")}`);
+};
+
+summarise("unimplemented", [...gaps].sort());
+summarise(
+  "lettered-icon",
+  [...lettered.names].sort((a, b) => b[1] - a[1]).map(([name, count]) => `${name}:${count}`),
+);
+summarise(
+  "unresolved-icon",
+  [...lettered.paths].sort((a, b) => b[1] - a[1]).map(([path, count]) => `${path}:${count}`),
+);
 
 // Optional assertions, so this doubles as a regression gate rather than only
 // a reporting tool.

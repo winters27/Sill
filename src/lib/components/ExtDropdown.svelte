@@ -24,6 +24,22 @@
    * extension may pass `value` and drive it, or pass `defaultValue` and let
    * the launcher hold it. Holding it here and yielding to `value` when it
    * arrives serves both without asking the extension which it is.
+   *
+   * ## Why it speaks before anybody touches it
+   *
+   * A picker the launcher holds knows something the extension does not: what
+   * it opened on. Raycast tells the extension that, and extensions are
+   * written expecting to hear it. Hacker News is the plain case, and it is
+   * the shape half the store uses:
+   *
+   *     const [topic, setTopic] = useState(null);
+   *     usePromise(getStories, [topic], { execute: !!topic });
+   *     <List.Dropdown defaultValue={FrontPage} onChange={setTopic}>
+   *
+   * Nothing fetches until the dropdown reports a selection. Reporting only
+   * what a person picked left that extension drawing its picker, its fifteen
+   * feeds and an empty list forever, with no error anywhere: it had not
+   * failed, it was still waiting to be told which feed it was on.
    */
   import type { Dropdown } from "$lib/exthost/present";
   import { hint } from "$lib/hint";
@@ -59,12 +75,38 @@
    *
    * The extension's own `value` wins while it is passing one, because an
    * extension that drives its dropdown expects the screen to agree with it.
-   * Otherwise whatever was chosen here, and otherwise the first option, which
-   * is what a select with no value would land on anyway.
+   * Otherwise whatever was chosen here, then the starting point the extension
+   * suggested, and otherwise the first option, which is what a select with no
+   * value would land on anyway.
    */
   const showing = $derived(
-    dropdown.value ?? picked ?? dropdown.options[0]?.value ?? "",
+    dropdown.value ?? picked ?? dropdown.initial ?? dropdown.options[0]?.value ?? "",
   );
+
+  /**
+   * What the extension has already been told, so it is told once.
+   *
+   * A plain variable rather than state: nothing draws from it, and a reactive
+   * one would re-run the effect that writes it. The value is kept beside the
+   * id because that is what makes this safe against a picker being rebuilt: a
+   * new node carrying a selection the extension has already been given is not
+   * news, and announcing it again is how a re-render becomes a loop.
+   */
+  let announced: { id: number; value: string } | null = null;
+
+  $effect(() => {
+    const id = dropdown.id;
+    const opening = showing;
+
+    // Nothing to say: the extension is driving this, or there is nothing to
+    // choose from yet, or it has already heard this.
+    if (dropdown.value !== undefined) return;
+    if (!opening || dropdown.options.length === 0) return;
+    if (announced && announced.id === id && announced.value === opening) return;
+
+    announced = { id, value: opening };
+    onpick(opening);
+  });
 
   /** The options, grouped the way the extension grouped them. */
   const groups = $derived.by(() => {
@@ -86,6 +128,9 @@
   onchange={(event) => {
     const value = event.currentTarget.value;
     picked = value;
+    // Written down here as well, or the effect above would see a value it has
+    // not announced and say it a second time.
+    announced = { id: dropdown.id, value };
     onpick(value);
   }}
 >

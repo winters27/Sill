@@ -82,29 +82,68 @@ export function createRendererState(hooks: RendererHooks): RendererState {
     let ids = handlerIds.get(target);
     const seen = new Set<string>();
 
-    for (const [key, value] of Object.entries(props)) {
-      if (SKIPPED_PROPS.has(key)) continue;
+    /**
+     * Whether this is an object whose insides are worth walking.
+     *
+     * A plain one only. A `Date` is an object and its insides are not props;
+     * anything with a prototype of its own is a value the extension built
+     * rather than a bag it filled in, and rebuilding it here would hand the
+     * window a copy that has lost whatever made it that kind of thing.
+     */
+    const plain = (value: unknown): value is Record<string, unknown> => {
+      if (!value || typeof value !== "object") return false;
+      const proto = Object.getPrototypeOf(value);
+      return proto === Object.prototype || proto === null;
+    };
 
+    /**
+     * One prop, with any callback inside it replaced by an id.
+     *
+     * **Nesting is the whole point.** This used to look only at the top of the
+     * prop bag, so `onAction` became an id and `pagination.onLoadMore` did
+     * not: it fell through as a function, JSON dropped it on the way out, and
+     * the window received a list that said there was more and named nobody to
+     * ask for it. Nothing failed. The list simply ended, one page in, exactly
+     * as a list with no more pages does.
+     *
+     * The path is the id's key, so `pagination.onLoadMore` keeps its own id
+     * across renders for the same instance, which is what stops a re-render
+     * invalidating a handler the window is about to activate.
+     */
+    const serialize = (path: string, value: unknown): unknown => {
       if (typeof value === "function") {
         if (!ids) {
           ids = new Map();
           handlerIds.set(target, ids);
         }
-        const existing = ids.get(key);
+        const existing = ids.get(path);
         if (existing) {
           callbacks.rebind(existing, value as Callback);
-          out[key] = { $handler: existing };
           seen.add(existing);
-        } else {
-          const id = callbacks.register(value as Callback);
-          ids.set(key, id);
-          out[key] = { $handler: id };
-          seen.add(id);
+          return { $handler: existing };
         }
-        continue;
+        const id = callbacks.register(value as Callback);
+        ids.set(path, id);
+        seen.add(id);
+        return { $handler: id };
       }
 
-      out[key] = value;
+      if (Array.isArray(value)) {
+        return value.map((entry, at) => serialize(`${path}.${at}`, entry));
+      }
+
+      if (plain(value)) {
+        return Object.fromEntries(
+          Object.entries(value).map(([key, inner]) => [key, serialize(`${path}.${key}`, inner)]),
+        );
+      }
+
+      return value;
+    };
+
+    for (const [key, value] of Object.entries(props)) {
+      if (SKIPPED_PROPS.has(key)) continue;
+      out[key] = serialize(key, value) as SerializedProps[string];
     }
 
     // Handlers that disappeared from this render are released next commit.

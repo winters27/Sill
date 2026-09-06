@@ -117,7 +117,13 @@ async fn a_real_extension_installs_from_the_store() {
     );
 
     // ------------------------------------------------------------ step one
-    let prepared = install::prepare(&root, &listing, None)
+    //
+    // The progress reports go to the console rather than nowhere. A fetch
+    // that stalls looks identical to one that is slow, and this test waits on
+    // a network, so the one thing worth having in its output is how far it
+    // got before it stopped.
+    let watching = |progress: sill_lib::extension_install::Progress| println!("  {progress:?}");
+    let prepared = install::prepare(&root, &listing, None, &watching)
         .await
         .expect("the source is fetched");
 

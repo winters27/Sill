@@ -327,9 +327,15 @@
       // about which program it belongs to.
       case "sill-setting":
         return "Sill Setting";
-      case "view":
+      // Sill's own. An extension's command says whose it is instead, below.
       case "builtin":
         return "Command";
+      // Not "Command", which is what Sill's own rows say and what this used
+      // to say as well. Two rows reading "Command" where one ships with Sill
+      // and the other came from a store is the one thing somebody looking at
+      // this list needs told apart, and it was the only thing it did not say.
+      case "view":
+        return "Extension";
       case "no-view":
         return "Action";
       // "Windows Settings", "Control Panel" or "Windows Tools", as Windows

@@ -78,6 +78,15 @@ pub struct LoadOptions {
     /// Empty is the safe default and stays the default: a caller that forgets
     /// to fill it in gets an extension that can draw and nothing else.
     pub capabilities: Vec<Capability>,
+    /// Whether a gate that refuses may put a card up and wait for it.
+    ///
+    /// True for every launch Sill makes: an extension that requires `http`
+    /// without holding the network is asked, on the card an RPC call is asked
+    /// on, rather than dying at `require`. The host reads it as a promise that
+    /// somebody will answer, so a script driving the host leaves it out and
+    /// gets the immediate refusal it can actually handle.
+    #[serde(default)]
+    pub asks: bool,
     /// The thing this command was run on, when it was run as an action.
     ///
     /// Absent for every ordinary launch, which is what somebody picking the
@@ -150,6 +159,7 @@ impl LoadOptions {
             arguments: json!({}),
             launch_type: LaunchType::User,
             capabilities: Vec::new(),
+            asks: true,
             on: None,
             cwd: None,
         }

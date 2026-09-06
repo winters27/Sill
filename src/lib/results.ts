@@ -148,3 +148,54 @@ export function fileSearchRow(why: FileSearchMissing): RankedCommand {
     matched: [],
   };
 }
+
+/**
+ * How close to the end the cursor has to get before the next page is asked for.
+ *
+ * Far enough that the rows are usually there by the time somebody arrives,
+ * near enough that a list nobody is scrolling never asks. Counted in rows
+ * rather than as a share of the list, because what decides it is how many more
+ * presses of the arrow key are left, and that does not change with the size of
+ * the list.
+ */
+export const NEARLY_AT_THE_END = 5;
+
+/** What a list says about there being more of it, as far as this decides. */
+interface Paging {
+  hasMore: boolean;
+  onLoadMore?: string;
+}
+
+/**
+ * Whether the running list should be asked for its next page.
+ *
+ * Raycast's `pagination` is how every list longer than one request is written:
+ * the extension renders what it has, says whether there is more, and waits to
+ * be asked. Two things have to be true to ask, and one has to be false.
+ *
+ * **The one that is easy to leave out is `askedAt`.** An extension answers by
+ * rendering more rows, and until it does the cursor is still near the end and
+ * every other condition still holds, so without it the launcher asks again on
+ * every redraw for as long as somebody sits at the bottom of a list. The count
+ * at the moment of asking is what says "this answer has not arrived yet",
+ * because the arrival is the count changing.
+ *
+ * Written as a type predicate rather than as a plain boolean, because "there
+ * is a next page to ask for" and "there is a handler to ask it with" are the
+ * same claim: a caller that has been told yes should not have to check the
+ * handler again, and one that checks it again invites the two answers to
+ * disagree.
+ */
+export function shouldLoadMore(
+  paging: Paging | undefined,
+  selected: number,
+  count: number,
+  askedAt: number,
+): paging is Paging & { onLoadMore: string } {
+  if (!paging?.hasMore || !paging.onLoadMore) return false;
+  // Nothing to be near the end of, and nothing to page after.
+  if (count === 0) return false;
+  if (askedAt === count) return false;
+
+  return selected >= count - NEARLY_AT_THE_END;
+}

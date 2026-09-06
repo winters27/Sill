@@ -48,10 +48,16 @@ Phosphor Icons, regular weight (https://phosphoricons.com).
 Copyright (c) 2023 Phosphor Icons.
 Licensed under the MIT License.
 
-Vendored as path data rather than taken as a dependency: a handful of paths is
-a few kilobytes, and a package would pull a build step and a tree-shaking
-question for drawings that change about never. Vendoring does not shorten the
-licence, so the notice lives here.
+Vendored as path data rather than taken as a dependency: a package would pull a
+build step and a tree-shaking question for drawings that change about never,
+and the lookup an extension row does on every keystroke is a frozen object.
+Vendoring does not shorten the licence, so the notice lives here.
+
+Two places use it. The tray and launcher menus carry a handful of paths inline.
+`src/lib/components/marks.ts` carries 296 of them, which is what Raycast's 469
+icon names resolve to once the ones that are the same picture are folded
+together, so an extension asking for any name Raycast publishes gets a drawing
+rather than a letter on a tile.
 
 --------------------------------------------------------------------------
 

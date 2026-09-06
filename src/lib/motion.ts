@@ -115,9 +115,16 @@ export function popover(_node: Element, options: PopoverOptions = {}) {
  * `scrollHeight` is read once when the transition starts rather than per
  * frame, so this measures the layout once and then only writes to it.
  */
-export function drawer(node: Element, options: { out?: boolean } = {}) {
+export function drawer(
+  node: Element,
+  options: { out?: boolean } = {},
+  // Svelte says which way a `transition:` is running. Read so one directive
+  // can serve both directions and still leave faster than it arrives.
+  going: { direction?: "in" | "out" | "both" } = {},
+) {
   const ms = durations();
   const el = node as HTMLElement;
+  const out = options.out || going.direction === "out";
 
   // Read before the first frame writes anything, so this is one measurement
   // and not a read/write cycle per frame.
@@ -127,7 +134,7 @@ export function drawer(node: Element, options: { out?: boolean } = {}) {
   const padBottom = Number.parseFloat(style.paddingBottom) || 0;
 
   return {
-    duration: reduced() ? 0 : options.out ? ms.exit : ms.enter,
+    duration: reduced() ? 0 : out ? ms.exit : ms.enter,
     easing: cubicOut,
     css: (t: number) =>
       `overflow: hidden;` +

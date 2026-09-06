@@ -160,7 +160,9 @@
         {#if iconOf(row.node.props.icon)}
           {@const icon = iconOf(row.node.props.icon)}
           {#if icon}
-            <ExtIcon {icon} />
+            <!-- The title, so a picture that will not load falls back to the
+                 row's own letter rather than to an empty tile. -->
+            <ExtIcon {icon} label={str(row.node, "title")} />
           {/if}
         {/if}
 

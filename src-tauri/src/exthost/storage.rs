@@ -143,6 +143,68 @@ impl Storage {
 }
 
 /// Where the store lives, given the app's data directory.
+/**
+Where a field's remembered value is kept, and under whose name.
+
+Raycast's `storeValue` asks the launcher to remember what somebody chose in a
+dropdown or typed in a form and to open on it next time. That is the
+launcher's own bookkeeping about a person's last choice, not the extension's
+data, so it is kept under a name of Sill's rather than in the extension's
+`LocalStorage`.
+
+**Not the extension's own store**, and the reason is that store's other two
+methods. `list` hands an extension every key it has, and an extension that
+round-trips its whole storage would find keys it never wrote; `clear` is an
+extension emptying its own store, and somebody's last choice of feed is not
+the extension's to throw away. Under a separate name neither can see this.
+
+What that costs is that removing an extension has to sweep this too, which
+`forget_fields` does and `uninstall` calls. See the note there about why
+leaving somebody's data behind is worse than the tidying.
+*/
+pub const FIELDS: &str = "sill:field";
+
+/// The key one field's value is remembered under.
+///
+/// Keyed by the command as well as the extension, because two commands of one
+/// extension can each have a dropdown called `type` and they are not the same
+/// question.
+pub fn field_key(extension: &str, command: &str, id: &str) -> String {
+    format!("{extension}/{command}/{id}")
+}
+
+impl Storage {
+    /// Every field value remembered for one command, by field id.
+    pub fn fields_for(&self, extension: &str, command: &str) -> Map<String, Value> {
+        let prefix = format!("{extension}/{command}/");
+
+        self.list(FIELDS)
+            .into_iter()
+            .filter_map(|(key, value)| {
+                key.strip_prefix(&prefix)
+                    .map(|id| (id.to_string(), value))
+            })
+            .collect()
+    }
+
+    /// Forgets every field value one extension remembered.
+    ///
+    /// What uninstalling has to do. A person's last choice of feed is their
+    /// data, and leaving it behind keeps it on their machine after they asked
+    /// for the thing that collected it to go, exactly as leaving `LocalStorage`
+    /// behind would.
+    pub fn forget_fields(&self, extension: &str) -> rusqlite::Result<()> {
+        let prefix = format!("{extension}/");
+
+        for key in self.list(FIELDS).keys() {
+            if key.starts_with(&prefix) {
+                self.remove(FIELDS, key)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 pub fn path(data_dir: &Path) -> std::path::PathBuf {
     data_dir.join("extension-storage.db")
 }
@@ -151,6 +213,106 @@ pub fn path(data_dir: &Path) -> std::path::PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The pair that has to agree, or a field is remembered and never found.
+    ///
+    /// One function writes the key and another reads it back by prefix, which
+    /// is the shape that comes apart silently: the value is written, the read
+    /// finds nothing, and the field opens on its author's default exactly as
+    /// it would if nobody had ever chosen anything. There is no error and
+    /// nothing on screen to notice.
+    #[test]
+    fn what_one_command_remembered_comes_back_to_that_command() {
+        let store = Storage::memory().expect("in-memory store");
+
+        store
+            .set(FIELDS, &field_key("hacker-news", "frontpage", "topic"), &json!("newest"))
+            .expect("writes");
+
+        assert_eq!(
+            store.fields_for("hacker-news", "frontpage").get("topic"),
+            Some(&json!("newest")),
+        );
+    }
+
+    /// Two commands of one extension can each have a dropdown called `type`,
+    /// and they are not the same question.
+    #[test]
+    fn one_commands_answer_is_not_another_commands() {
+        let store = Storage::memory().expect("in-memory store");
+
+        store
+            .set(FIELDS, &field_key("ext", "one", "type"), &json!("a"))
+            .expect("writes");
+        store
+            .set(FIELDS, &field_key("ext", "two", "type"), &json!("b"))
+            .expect("writes");
+
+        assert_eq!(store.fields_for("ext", "one").get("type"), Some(&json!("a")));
+        assert_eq!(store.fields_for("ext", "two").get("type"), Some(&json!("b")));
+        assert!(store.fields_for("ext", "three").is_empty());
+    }
+
+    /// And one extension's are not another's, which is the scoping the whole
+    /// table is built on holding for Sill's own rows too.
+    #[test]
+    fn one_extensions_answers_are_not_anothers() {
+        let store = Storage::memory().expect("in-memory store");
+
+        store
+            .set(FIELDS, &field_key("a", "cmd", "topic"), &json!("x"))
+            .expect("writes");
+
+        assert!(store.fields_for("b", "cmd").is_empty());
+    }
+
+    /// Removing an extension takes what the launcher remembered for it.
+    ///
+    /// Somebody's last choice of feed is their data by the same argument as
+    /// everything else an uninstall clears: leaving it keeps it on their
+    /// machine after they asked for the thing that collected it to go.
+    #[test]
+    fn forgetting_an_extension_takes_what_was_remembered_for_it() {
+        let store = Storage::memory().expect("in-memory store");
+
+        store
+            .set(FIELDS, &field_key("going", "cmd", "topic"), &json!("x"))
+            .expect("writes");
+        store
+            .set(FIELDS, &field_key("staying", "cmd", "topic"), &json!("y"))
+            .expect("writes");
+
+        store.forget_fields("going").expect("forgets");
+
+        assert!(store.fields_for("going", "cmd").is_empty());
+        assert_eq!(
+            store.fields_for("staying", "cmd").get("topic"),
+            Some(&json!("y")),
+            "one extension's removal took another's",
+        );
+    }
+
+    /// An extension listing its own storage must not find Sill's bookkeeping,
+    /// and clearing its own must not throw away what was remembered for it.
+    #[test]
+    fn an_extension_never_sees_what_the_launcher_remembered() {
+        let store = Storage::memory().expect("in-memory store");
+
+        store
+            .set(FIELDS, &field_key("ext", "cmd", "topic"), &json!("newest"))
+            .expect("writes");
+        store.set("ext", "its-own", &json!(1)).expect("writes");
+
+        assert_eq!(store.list("ext").len(), 1, "the launcher's row leaked into the extension's store");
+        assert!(store.list("ext").contains_key("its-own"));
+
+        store.clear("ext").expect("clears");
+        assert_eq!(
+            store.fields_for("ext", "cmd").get("topic"),
+            Some(&json!("newest")),
+            "an extension clearing its own store threw away somebody's last choice",
+        );
+    }
 
     /// The header records which shape this build left the file in.
     #[test]

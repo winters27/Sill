@@ -30,20 +30,46 @@
 //! being written.
 
 use std::sync::Mutex;
+use std::time::Instant;
 
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
-use super::openai::{Attached, Message};
+use super::openai::{Attached, Message, Part, Usage};
 use super::provider::{Provider, Wire};
 
 /// One tool being used, as the window draws it.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Step {
+    /// The call's own id, which its result is labelled with.
+    pub id: String,
     pub tool: String,
     /// What it is being used on. Empty when the tool takes no arguments.
     pub subject: String,
+}
+
+/// One tool finished, and whether it managed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Used {
+    pub id: String,
+    pub ok: bool,
+}
+
+/// What a turn cost, said once it is over.
+///
+/// Every field can be missing: a local model names no cost, a service that
+/// was not asked names no usage, and the turn is no less finished for it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Finished {
+    /// Which model actually answered. Empty when the service did not say.
+    pub model: String,
+    pub usage: Option<Usage>,
+    pub duration_ms: u64,
+    /// In dollars, when the service says. Only Claude Code does.
+    pub cost: Option<f64>,
 }
 
 /// One exchange, as the window draws it.
@@ -57,6 +83,157 @@ pub struct Turn {
     /// the picture that was asked about rather than a question with no
     /// subject.
     pub attachments: Vec<Attached>,
+    /// How an answer came about, in order. Empty on a question.
+    pub parts: Vec<Part>,
+}
+
+/// How much thinking is kept with one answer, in characters.
+///
+/// Some models think for pages before answering a question about the
+/// clipboard. The window shows it folded and the file holds it forever, so
+/// the first few thousand characters are the part worth keeping: enough to
+/// see what it was weighing, not the whole of it.
+const KEEP_THINKING: usize = 4 * 1024;
+
+/// How many parts one answer keeps.
+///
+/// A loop bounded at six rounds cannot produce this many, so it is a bound on
+/// a mistake rather than a target. Steps go first; the words never do.
+const KEEP_PARTS: usize = 64;
+
+/// One thing that happened on the way to an answer, as the loop saw it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Told {
+    Text(String),
+    Thinking(String),
+    Using(Step),
+    Used(Used),
+}
+
+/// What one turn has recorded so far.
+///
+/// Both transports record through this, so an answer is the same shape
+/// whichever way it came and the window learns nothing about which it was.
+/// Recording and telling the window are separate so the recording can be
+/// proved without a window to tell.
+#[derive(Debug, Default)]
+pub struct Telling {
+    pub parts: Vec<Part>,
+    /// Every word, in one string, which is what the conversation keeps as
+    /// the message and what a follow-up is answered from.
+    pub whole: String,
+    /// When the thinking part now being written began, so it can be stamped
+    /// with how long it took once something else follows.
+    thinking_began: Option<Instant>,
+}
+
+impl Telling {
+    pub fn record(&mut self, told: Told) {
+        match told {
+            Told::Text(piece) => {
+                self.whole.push_str(&piece);
+                self.close_thinking();
+                match self.parts.last_mut() {
+                    Some(Part::Text { text }) => text.push_str(&piece),
+                    // Whitespace on its own starts nothing. A model that
+                    // sends a newline between two tool calls would otherwise
+                    // leave an empty paragraph between two steps.
+                    _ if piece.trim().is_empty() => {}
+                    _ => self.parts.push(Part::Text { text: piece }),
+                }
+            }
+            Told::Thinking(piece) => match self.parts.last_mut() {
+                Some(Part::Thinking { text, .. }) => {
+                    let room = KEEP_THINKING.saturating_sub(text.len());
+                    text.push_str(&piece[..cut_at(&piece, room)]);
+                }
+                _ => {
+                    self.thinking_began = Some(Instant::now());
+                    let kept = &piece[..cut_at(&piece, KEEP_THINKING)];
+                    self.parts.push(Part::Thinking {
+                        text: kept.to_string(),
+                        ms: None,
+                    });
+                }
+            },
+            Told::Using(step) => {
+                self.close_thinking();
+                self.parts.push(Part::Step {
+                    id: step.id,
+                    tool: step.tool,
+                    subject: step.subject,
+                    ok: None,
+                });
+                self.bound();
+            }
+            Told::Used(used) => {
+                for part in self.parts.iter_mut().rev() {
+                    if let Part::Step { id, ok, .. } = part {
+                        if *id == used.id {
+                            *ok = Some(used.ok);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Stamps the thinking part being written with how long it took.
+    fn close_thinking(&mut self) {
+        let Some(began) = self.thinking_began.take() else {
+            return;
+        };
+        if let Some(Part::Thinking { ms, .. }) = self.parts.last_mut() {
+            *ms = Some(began.elapsed().as_millis() as u64);
+        }
+    }
+
+    /// Drops the oldest steps once there are too many parts. Words stay.
+    fn bound(&mut self) {
+        while self.parts.len() > KEEP_PARTS {
+            let Some(at) = self
+                .parts
+                .iter()
+                .position(|part| matches!(part, Part::Step { .. }))
+            else {
+                return;
+            };
+            self.parts.remove(at);
+        }
+    }
+
+    pub fn finish(mut self) -> Vec<Part> {
+        self.close_thinking();
+        self.parts
+    }
+}
+
+/// The largest byte index at or below `most` that is a character boundary.
+fn cut_at(text: &str, most: usize) -> usize {
+    let mut at = most.min(text.len());
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
+}
+
+/// Records one thing and tells the window about it.
+fn tell(app: &tauri::AppHandle, telling: &mut Telling, told: Told) {
+    let _ = match &told {
+        Told::Text(piece) => app.emit(SAID, piece),
+        Told::Thinking(piece) => app.emit(THINKING, piece),
+        Told::Using(step) => app.emit(USING, step),
+        Told::Used(used) => app.emit(USED, used),
+    };
+    telling.record(told);
+}
+
+/// What one turn produced, whichever way it came.
+struct Answer {
+    text: String,
+    parts: Vec<Part>,
+    finished: Finished,
 }
 
 /// How long the offer to go back to a conversation lasts, in seconds.
@@ -395,6 +572,7 @@ impl Chat {
                 role: message.role.clone(),
                 text: message.content.clone(),
                 attachments: message.attachments.clone(),
+                parts: message.parts.clone(),
             })
             .collect()
     }
@@ -639,8 +817,13 @@ fn shorten(question: &str) -> String {
 
 /// What the window is told while an answer is being written.
 const SAID: &str = "sill://ai-said";
+/// What the model is thinking before it writes, for services that say.
+const THINKING: &str = "sill://ai-thinking";
 /// One tool being reached for, so the window can say what is happening.
 const USING: &str = "sill://ai-using";
+/// That tool finished, and whether it managed.
+const USED: &str = "sill://ai-used";
+/// The turn is over, with what it cost.
 const DONE: &str = "sill://ai-done";
 const FAILED: &str = "sill://ai-failed";
 
@@ -670,6 +853,8 @@ pub async fn ask(
         crate::state::now_seconds(),
     );
 
+    let began = Instant::now();
+
     let answer = match provider.wire {
         Wire::ClaudeCode => through_the_cli(app, provider, question).await,
         Wire::OpenAi => over_http(app, provider, &chat.context()).await,
@@ -684,10 +869,19 @@ pub async fn ask(
     };
 
     match answer {
-        Ok(text) => {
-            chat.said(Message::assistant(&text), crate::state::now_seconds());
-            let _ = app.emit(DONE, ());
-            Ok(text)
+        Ok(mut answer) => {
+            // Measured here rather than by either transport, so the two
+            // cannot disagree about what a turn's length means. Claude Code
+            // says how long it took as well, and this one includes starting
+            // it, which is the number somebody waited through.
+            answer.finished.duration_ms = began.elapsed().as_millis() as u64;
+
+            chat.said(
+                Message::assistant(&answer.text).with_parts(answer.parts),
+                crate::state::now_seconds(),
+            );
+            let _ = app.emit(DONE, &answer.finished);
+            Ok(answer.text)
         }
         Err(why) => {
             let _ = app.emit(FAILED, &why);
@@ -715,7 +909,9 @@ async fn over_http(
     app: &tauri::AppHandle,
     provider: &Provider,
     messages: &[Message],
-) -> Result<String, String> {
+) -> Result<Answer, String> {
+    use super::openai::Piece;
+
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(15))
         .build()
@@ -723,7 +919,8 @@ async fn over_http(
 
     let tools = super::tools::as_request();
     let mut conversation = messages.to_vec();
-    let mut whole = String::new();
+    let mut telling = Telling::default();
+    let mut finished = Finished::default();
 
     // The number this turn started at. Everything below asks whether it has
     // moved, which is the only thing "stop" means.
@@ -733,6 +930,34 @@ async fn over_http(
     let since = app.state::<super::approval::Halt>().mark();
     let give_up = || app.state::<super::approval::Halt>().stopped(since);
 
+    let heard = |telling: &mut Telling, piece: Piece| match piece {
+        Piece::Text(text) => tell(app, telling, Told::Text(text)),
+        Piece::Thinking(thought) => tell(app, telling, Told::Thinking(thought)),
+    };
+
+    // The cost of a turn is the cost of every request in it.
+    let add_up = |finished: &mut Finished, said: &super::openai::Said| {
+        if !said.model.is_empty() {
+            finished.model = said.model.clone();
+        }
+        if let Some(usage) = said.usage {
+            let so_far = finished.usage.unwrap_or(Usage {
+                input: 0,
+                output: 0,
+            });
+            finished.usage = Some(Usage {
+                input: so_far.input + usage.input,
+                output: so_far.output + usage.output,
+            });
+        }
+    };
+
+    let done = |telling: Telling, finished: Finished| Answer {
+        text: telling.whole.clone(),
+        parts: telling.finish(),
+        finished,
+    };
+
     for step in 0..MOST_STEPS {
         let said = super::openai::ask(
             &client,
@@ -740,24 +965,23 @@ async fn over_http(
             &conversation,
             Some(&tools),
             &give_up,
-            |piece| {
-                whole.push_str(&piece);
-                let _ = app.emit(SAID, &piece);
-            },
+            |piece| heard(&mut telling, piece),
         )
         .await?;
+
+        add_up(&mut finished, &said);
 
         // What arrived is still an answer. Somebody who stops a reply has
         // usually read enough of it, and throwing it away would be its own
         // small betrayal.
         if said.stopped || said.calls.is_empty() {
-            return Ok(whole);
+            return Ok(done(telling, finished));
         }
 
         // Checked again between steps: a stop pressed while a tool was running
         // should not be followed by another request.
         if give_up() {
-            return Ok(whole);
+            return Ok(done(telling, finished));
         }
 
         // The turn back in full: what it said, then the calls it asked for.
@@ -767,22 +991,35 @@ async fn over_http(
 
         for call in &said.calls {
             let name = call.function.name.clone();
+            let arguments: serde_json::Value =
+                serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
 
             // Said before the tool runs rather than after. Reading the screen
             // takes a moment, and a window showing nothing during it looks
             // like a window that has stopped.
-            let _ = app.emit(
-                USING,
-                &Step {
+            tell(
+                app,
+                &mut telling,
+                Told::Using(Step {
+                    id: call.id.clone(),
                     tool: name.clone(),
-                    subject: subject_of(call),
-                },
+                    subject: subject_in(&arguments),
+                }),
             );
 
-            let arguments: serde_json::Value =
-                serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
-
             let found = super::tools::run(app, &name, &arguments).await;
+
+            // A tool never fails as an `Err`; it answers with an `error`
+            // field, which is what a failure looks like from here.
+            tell(
+                app,
+                &mut telling,
+                Told::Used(Used {
+                    id: call.id.clone(),
+                    ok: found.get("error").is_none(),
+                }),
+            );
+
             conversation.push(Message::answered(&call.id, found.to_string()));
         }
 
@@ -797,18 +1034,19 @@ async fn over_http(
     }
 
     if give_up() {
-        return Ok(whole);
+        return Ok(done(telling, finished));
     }
 
     // One more, with no tools, so a model that kept calling them still ends
     // with words rather than with nothing.
     let said = super::openai::ask(&client, provider, &conversation, None, &give_up, |piece| {
-        whole.push_str(&piece);
-        let _ = app.emit(SAID, &piece);
+        heard(&mut telling, piece)
     })
     .await?;
 
-    Ok(if whole.is_empty() { said.text } else { whole })
+    add_up(&mut finished, &said);
+
+    Ok(done(telling, finished))
 }
 
 /// What a tool is about to be used on, for the line that says so.
@@ -816,11 +1054,7 @@ async fn over_http(
 /// The argument a person would recognise, which is nearly always the first
 /// string in it. Nothing at all for the tools that take no arguments, where
 /// the name already says everything.
-fn subject_of(call: &super::openai::ToolCall) -> String {
-    let Ok(arguments) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) else {
-        return String::new();
-    };
-
+fn subject_in(arguments: &serde_json::Value) -> String {
     // In the order a person would read them. `target` is what an action acts
     // on, and it is the only one of these that is worth saying twice.
     for key in ["query", "path", "target"] {
@@ -879,7 +1113,8 @@ async fn through_the_cli(
     app: &tauri::AppHandle,
     provider: &Provider,
     question: &str,
-) -> Result<String, String> {
+) -> Result<Answer, String> {
+    use super::claude_code::Event;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     let binary = super::claude_code::locate().ok_or_else(|| {
@@ -944,35 +1179,99 @@ async fn through_the_cli(
         drop(stdin);
     }
 
-    let mut whole = String::new();
+    let mut telling = Telling::default();
+    let mut finished = Finished::default();
     let mut failure = None;
+    let mut stopped = false;
+
+    // Calls being assembled, by the position the stream numbers them with.
+    // A position means something only until its block stops, and positions
+    // start again from zero with each message, so a finished block leaves
+    // the map at once.
+    let mut calls: std::collections::HashMap<usize, (String, String, String)> =
+        std::collections::HashMap::new();
+
+    // Same rule as over HTTP: stop is the counter having moved. Checked per
+    // line received, which is where this loop wakes up anyway; a stop pressed
+    // while the CLI is silent takes effect on its next line.
+    let since = app.state::<super::approval::Halt>().mark();
+    let give_up = || app.state::<super::approval::Halt>().stopped(since);
 
     if let Some(stdout) = child.stdout.take() {
         let mut lines = BufReader::new(stdout).lines();
 
         while let Ok(Some(line)) = lines.next_line().await {
+            if give_up() {
+                // Killed rather than left to finish. A stopped turn that kept
+                // its process would keep spending on an answer nobody reads.
+                let _ = child.kill().await;
+                stopped = true;
+                break;
+            }
+
             match super::claude_code::parse_event(&line) {
-                super::claude_code::Event::Text(piece) => {
-                    whole.push_str(&piece);
-                    let _ = app.emit(SAID, &piece);
+                Event::Text(piece) => tell(app, &mut telling, Told::Text(piece)),
+                Event::Thinking(piece) => tell(app, &mut telling, Told::Thinking(piece)),
+                Event::Model(model) => finished.model = model,
+                Event::CallBegun { at, id, name } => {
+                    calls.insert(at, (id, name, String::new()));
                 }
-                super::claude_code::Event::Session(id) => chat.set_session(id),
-                super::claude_code::Event::Failed(why) => failure = Some(why),
-                super::claude_code::Event::Done | super::claude_code::Event::Ignored => {}
+                Event::CallInput { at, json } => {
+                    if let Some((_, _, arguments)) = calls.get_mut(&at) {
+                        arguments.push_str(&json);
+                    }
+                }
+                Event::BlockDone { at } => {
+                    if let Some((id, name, arguments)) = calls.remove(&at) {
+                        let arguments: serde_json::Value =
+                            serde_json::from_str(&arguments).unwrap_or(serde_json::Value::Null);
+                        tell(
+                            app,
+                            &mut telling,
+                            Told::Using(Step {
+                                id,
+                                tool: super::mcp::short_name(&name).to_string(),
+                                subject: subject_in(&arguments),
+                            }),
+                        );
+                    }
+                }
+                Event::CallAnswered { id, failed } => {
+                    tell(app, &mut telling, Told::Used(Used { id, ok: !failed }))
+                }
+                Event::Session(id) => chat.set_session(id),
+                Event::Failed(why) => failure = Some(why),
+                Event::Done => {
+                    let cost = super::claude_code::outcome(&line);
+                    if !cost.model.is_empty() {
+                        finished.model = cost.model;
+                    }
+                    finished.usage = cost.usage;
+                    finished.cost = cost.cost;
+                }
+                Event::Ignored => {}
             }
         }
     }
 
     let _ = child.wait().await;
 
+    let answer = Answer {
+        text: telling.whole.clone(),
+        parts: telling.finish(),
+        finished,
+    };
+
     match failure {
         Some(why) => Err(why),
-        None if whole.trim().is_empty() => Err(
+        // What arrived before the stop is still an answer, however little.
+        None if stopped => Ok(answer),
+        None if answer.text.trim().is_empty() => Err(
             "Claude Code answered with nothing. It may need signing in: run \
                  `claude` once in a terminal."
                 .to_string(),
         ),
-        None => Ok(whole),
+        None => Ok(answer),
     }
 }
 
@@ -1597,6 +1896,195 @@ mod tests {
         }
     }
 
+    mod what_a_turn_records {
+        use super::super::{Step, Telling, Told, Used, KEEP_PARTS, KEEP_THINKING};
+        use super::*;
+        use crate::ai::openai::Part;
+
+        fn a_step(id: &str) -> Told {
+            Told::Using(Step {
+                id: id.to_string(),
+                tool: "read_file".to_string(),
+                subject: "notes.txt".to_string(),
+            })
+        }
+
+        /// Words arrive a few characters at a time and are one paragraph,
+        /// not one part per delta.
+        #[test]
+        fn text_that_arrives_in_pieces_is_one_part() {
+            let mut telling = Telling::default();
+            telling.record(Told::Text("Hel".into()));
+            telling.record(Told::Text("lo".into()));
+
+            assert_eq!(telling.whole, "Hello");
+            assert_eq!(
+                telling.finish(),
+                vec![Part::Text {
+                    text: "Hello".into()
+                }]
+            );
+        }
+
+        /// A newline between two calls is not a paragraph.
+        #[test]
+        fn whitespace_on_its_own_starts_nothing() {
+            let mut telling = Telling::default();
+            telling.record(a_step("a"));
+            telling.record(Told::Text("\n".into()));
+            telling.record(a_step("b"));
+
+            let parts = telling.finish();
+            assert_eq!(parts.len(), 2, "{parts:?}");
+            assert!(parts.iter().all(|part| matches!(part, Part::Step { .. })));
+        }
+
+        /// A step after words starts a new paragraph after it, so the order
+        /// on screen is the order it happened.
+        #[test]
+        fn a_step_between_words_keeps_them_apart() {
+            let mut telling = Telling::default();
+            telling.record(Told::Text("Looking.".into()));
+            telling.record(a_step("a"));
+            telling.record(Told::Text("Found it.".into()));
+
+            let parts = telling.finish();
+            assert_eq!(parts.len(), 3, "{parts:?}");
+            assert!(matches!(&parts[0], Part::Text { text } if text == "Looking."));
+            assert!(matches!(&parts[1], Part::Step { .. }));
+            assert!(matches!(&parts[2], Part::Text { text } if text == "Found it."));
+        }
+
+        #[test]
+        fn thinking_is_capped() {
+            let mut telling = Telling::default();
+            for _ in 0..(KEEP_THINKING / 100 + 2) {
+                telling.record(Told::Thinking("x".repeat(100)));
+            }
+
+            let parts = telling.finish();
+            let Some(Part::Thinking { text, .. }) = parts.first() else {
+                panic!("no thinking: {parts:?}");
+            };
+            assert_eq!(text.len(), KEEP_THINKING);
+            assert_eq!(parts.len(), 1);
+        }
+
+        /// The cap must not land inside a character.
+        #[test]
+        fn the_cap_lands_on_a_character_boundary() {
+            let mut telling = Telling::default();
+            telling.record(Told::Thinking("é".repeat(KEEP_THINKING)));
+
+            let parts = telling.finish();
+            let Some(Part::Thinking { text, .. }) = parts.first() else {
+                panic!("no thinking: {parts:?}");
+            };
+            assert!(text.len() <= KEEP_THINKING);
+            assert!(text.chars().all(|c| c == 'é'));
+        }
+
+        /// Thinking is timed from its first piece to whatever follows it.
+        #[test]
+        fn thinking_is_timed_once_something_follows() {
+            let mut telling = Telling::default();
+            telling.record(Told::Thinking("hmm".into()));
+            telling.record(Told::Text("eleven".into()));
+
+            let parts = telling.finish();
+            assert!(
+                matches!(&parts[0], Part::Thinking { ms: Some(_), .. }),
+                "{parts:?}"
+            );
+        }
+
+        #[test]
+        fn a_step_is_marked_finished_by_its_id() {
+            let mut telling = Telling::default();
+            telling.record(a_step("a"));
+            telling.record(a_step("b"));
+            telling.record(Told::Used(Used {
+                id: "a".into(),
+                ok: false,
+            }));
+
+            let parts = telling.finish();
+            assert!(matches!(&parts[0], Part::Step { ok: Some(false), .. }), "{parts:?}");
+            assert!(matches!(&parts[1], Part::Step { ok: None, .. }), "{parts:?}");
+        }
+
+        /// A result for a call nobody recorded is not a problem.
+        #[test]
+        fn a_result_for_an_unknown_call_is_ignored() {
+            let mut telling = Telling::default();
+            telling.record(Told::Used(Used {
+                id: "nobody".into(),
+                ok: true,
+            }));
+            assert!(telling.finish().is_empty());
+        }
+
+        /// Too many steps drop the oldest steps. The words stay.
+        #[test]
+        fn too_many_parts_drop_the_oldest_steps_first() {
+            let mut telling = Telling::default();
+            telling.record(Told::Text("first".into()));
+            for n in 0..(KEEP_PARTS + 5) {
+                telling.record(a_step(&n.to_string()));
+            }
+
+            let parts = telling.finish();
+            assert_eq!(parts.len(), KEEP_PARTS);
+            assert!(matches!(&parts[0], Part::Text { text } if text == "first"));
+            assert!(matches!(&parts[1], Part::Step { id, .. } if id == "6"), "{:?}", parts[1]);
+        }
+
+        /// The working comes back with the answer after a restart, which is
+        /// the whole reason it is stored rather than held by the window.
+        #[test]
+        fn parts_survive_a_restart() {
+            let dir = std::env::temp_dir().join(format!(
+                "sill-chat-parts-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("a directory");
+
+            let mut telling = Telling::default();
+            telling.record(Told::Thinking("hmm".into()));
+            telling.record(a_step("a"));
+            telling.record(Told::Used(Used {
+                id: "a".into(),
+                ok: true,
+            }));
+            telling.record(Told::Text("eleven".into()));
+
+            let chat = Chat::new();
+            chat.load(&dir);
+            chat.begin("what is in notes", 0);
+            chat.said(Message::user("what is in notes"), 0);
+            chat.said(Message::assistant("eleven").with_parts(telling.finish()), 0);
+            chat.write_to(&dir).expect("written");
+
+            let after = Chat::new();
+            after.load(&dir);
+            let id = after.summaries(1)[0].id.clone();
+            assert!(after.resume(&id, 1));
+
+            let turns = after.transcript();
+            assert_eq!(turns.len(), 2);
+            assert_eq!(turns[0].parts.len(), 0, "a question has no parts");
+            assert_eq!(turns[1].parts.len(), 3, "{:?}", turns[1].parts);
+            assert!(matches!(&turns[1].parts[1], Part::Step { ok: Some(true), .. }));
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
     mod bounding_a_conversation {
         use super::super::{trim, KEEP_ATTACHED_BYTES, KEEP_TURNS};
         use crate::ai::openai::{Attached, Message};
@@ -1608,6 +2096,7 @@ mod tests {
                 tool_calls: Vec::new(),
                 tool_call_id: None,
                 attachments: Vec::new(),
+                parts: Vec::new(),
             }
         }
 

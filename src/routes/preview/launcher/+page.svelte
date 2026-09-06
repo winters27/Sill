@@ -12,7 +12,9 @@
    * of a window on mount, which is a thing this page has no answer for.
    */
   import "$lib/theme/theme.css";
-  import AiChat, { type Shown } from "$lib/components/AiChat.svelte";
+  import AiChat from "$lib/components/AiChat.svelte";
+  import { fresh } from "$lib/chat/live";
+  import type { Shown } from "$lib/chat/parts";
   import ScriptOutput from "$lib/components/ScriptOutput.svelte";
   import Welcome from "$lib/components/Welcome.svelte";
   import RootList from "$lib/components/RootList.svelte";
@@ -98,13 +100,35 @@
   let taken = $state(0);
 
   const conversation: Shown[] = [
-    { role: "user", text: "What windows do I have open?", steps: [] },
+    { role: "user", text: "What windows do I have open?", parts: [], attachments: [] },
     {
       role: "assistant",
       text: "Four: **Zen**, a terminal, Obsidian and Sill's own settings window.\n\n- Zen is on the second display\n- The terminal is running `cargo test`",
-      steps: [{ tool: "list_windows", subject: "" } as never],
+      parts: [
+        { kind: "thinking", text: "The question is about open windows, so list them.", ms: 1240 },
+        { kind: "step", id: "call_1", tool: "list_windows", subject: "", ok: true },
+        {
+          kind: "text",
+          text: "Four: **Zen**, a terminal, Obsidian and Sill's own settings window.\n\n- Zen is on the second display\n- The terminal is running `cargo test`",
+        },
+      ],
+      attachments: [],
     },
   ];
+
+  /**
+   * A turn part way through, for the pieces that only exist while one is
+   * being written: the wait, the open timeline, the thinking as it arrives.
+   */
+  const writing = {
+    ...fresh(),
+    asking: true,
+    parts: [
+      { kind: "thinking" as const, text: "Two folders to look in, Downloads first." },
+      { kind: "step" as const, id: "call_2", tool: "list_directory", subject: "C:\\Users\\you\\Downloads", ok: true },
+      { kind: "step" as const, id: "call_3", tool: "find_files", subject: "*.iso" },
+    ],
+  };
 </script>
 
 <div class="stage">
@@ -173,10 +197,33 @@
     <div class="window">
       <AiChat
         conversation={[]}
-        answering=""
-        asking={false}
-        asked={null}
-        steps={[]}
+        live={fresh()}
+        {answersWith}
+        ondecide={() => {}}
+        onoffer={() => {}}
+      />
+    </div>
+  </section>
+
+  <section>
+    <h2>Waiting for the first thing to arrive</h2>
+    <div class="window">
+      <AiChat
+        conversation={[conversation[0]]}
+        live={{ ...fresh(), asking: true }}
+        {answersWith}
+        ondecide={() => {}}
+        onoffer={() => {}}
+      />
+    </div>
+  </section>
+
+  <section>
+    <h2>An answer being written: thinking, then two tools, one still running</h2>
+    <div class="window">
+      <AiChat
+        conversation={[conversation[0]]}
+        live={writing}
         {answersWith}
         ondecide={() => {}}
         onoffer={() => {}}
@@ -189,15 +236,15 @@
     <div class="window">
       <AiChat
         {conversation}
-        answering=""
-        asking={false}
-        asked={{
-          id: "1",
-          title: "Move a file",
-          subject: "C:\\Users\\you\\Downloads\\notes.md",
-          touches: "moves a file on this machine",
-        } as never}
-        steps={[]}
+        live={{
+          ...fresh(),
+          asked: {
+            id: "1",
+            title: "Move a file",
+            subject: "C:\\Users\\you\\Downloads\\notes.md",
+            touches: "moves a file on this machine",
+          },
+        }}
         {answersWith}
         ondecide={() => {}}
         onoffer={() => {}}

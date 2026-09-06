@@ -48,6 +48,13 @@ use crate::registry::CommandRecord;
 pub struct Manifest {
     pub name: String,
     pub title: Option<String>,
+    /// The extension's own picture, named relative to its `assets` directory.
+    ///
+    /// Every store extension has one and Raycast requires it, so an extension
+    /// whose icon is not read is every extension drawing as a letter tile in
+    /// the launcher while the store screen beside it shows the real thing.
+    #[serde(default)]
+    pub icon: Option<String>,
     #[serde(default)]
     pub commands: Vec<ManifestCommand>,
     #[serde(default)]
@@ -67,6 +74,13 @@ pub struct ManifestCommand {
     pub subtitle: Option<String>,
     pub description: Option<String>,
     pub mode: String,
+    /// A picture for this command alone, instead of the extension's.
+    ///
+    /// Raycast lets a command override it, and several store extensions do:
+    /// one icon for the extension and a distinct one per command, which is
+    /// what makes two commands of the same extension tell apart in a list.
+    #[serde(default)]
+    pub icon: Option<String>,
     #[serde(default)]
     pub keywords: Vec<String>,
     #[serde(default)]
@@ -416,6 +430,51 @@ pub fn declared_api(manifest: &Manifest) -> Option<&str> {
 /// the index is read back into exactly that type. A second struct here would
 /// be two spellings of one file format with nothing keeping them in step, and
 /// the failure would be an extension that installs and cannot be found.
+/// Where a command's picture sits once the extension is installed.
+///
+/// Raycast resolves an icon against the extension's own `assets` directory,
+/// and a command may name one instead of taking the extension's. Derived from
+/// the entrypoint rather than looked up on disk, because this record is
+/// written **before** the directory it describes is in place: the bundles and
+/// the assets arrive together in the swap that follows, so asking whether the
+/// file exists here would answer no for every install.
+///
+/// A name that climbs out of `assets` is refused rather than resolved. A
+/// manifest is somebody else's file and this value reaches an icon loader
+/// that reads whatever path it is handed, so `../../..` here would put a
+/// picture of a file nobody offered into the launcher.
+fn icon_beside(
+    entrypoint: &Path,
+    manifest: &Manifest,
+    command: &ManifestCommand,
+) -> Option<String> {
+    let named = command
+        .icon
+        .as_deref()
+        .or(manifest.icon.as_deref())
+        .map(str::trim)
+        .filter(|named| !named.is_empty())?;
+
+    let relative = Path::new(named);
+    if !relative
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+
+    Some(
+        entrypoint
+            .parent()?
+            .join("assets")
+            .join(relative)
+            // Forward slashes for the same reason the entrypoint takes them:
+            // this is written to a file the window reads back.
+            .to_string_lossy()
+            .replace('\\', "/"),
+    )
+}
+
 pub fn record_for(
     manifest: &Manifest,
     command: &ManifestCommand,
@@ -441,7 +500,7 @@ pub fn record_for(
         // Forward slashes, because this string is handed to Node.
         entrypoint: entrypoint.to_string_lossy().replace('\\', "/"),
         keywords: command.keywords.clone(),
-        icon: None,
+        icon: icon_beside(entrypoint, manifest, command),
         toggle: None,
         panel: None,
         preferences: default_preferences(manifest, command),
@@ -662,6 +721,14 @@ pub struct Installed {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "stage", rename_all = "camelCase")]
 pub enum Progress {
+    /// The source itself is arriving, this many files of that many.
+    ///
+    /// The first half of an install and the only half that was silent. Fetching
+    /// an extension is one request per file and a large one is a hundred of
+    /// them, so this is where the wait starts; without it the screen said
+    /// "Fetching" and nothing else until npm began, and a slow network looked
+    /// like a launcher that had stopped.
+    Fetching { done: usize, total: usize },
     /// npm is fetching this extension's dependencies. `said` is its own line.
     Dependencies { said: String },
     /// esbuild is on one command, this many of that many.
@@ -680,7 +747,13 @@ pub enum Progress {
 /// building an extension has to know a window exists. The command layer passes
 /// the closure that emits, which is the same seam `finish` already keeps with
 /// esbuild and Node.
-pub type Report<'a> = &'a dyn Fn(Progress);
+/// `Send + Sync` because the fetch half reports from inside an async task.
+///
+/// The build half is synchronous and needed neither, but downloading a
+/// hundred files is concurrent and the closure is held across every await in
+/// it. Without the bounds the whole command's future stops being `Send` and
+/// Tauri refuses to register it, several files from here.
+pub type Report<'a> = &'a (dyn Fn(Progress) + Send + Sync);
 
 /// How long esbuild gets for one command.
 ///
@@ -1135,6 +1208,75 @@ mod tests {
             "got {}",
             record.entrypoint
         );
+    }
+
+    /// The picture every store extension has, and none of them showed.
+    ///
+    /// This was hardcoded to nothing, so a command installed from the store
+    /// drew as a letter tile in the launcher while the store screen it was
+    /// installed from drew the real logo, from the same file, one keypress
+    /// earlier.
+    #[test]
+    fn a_command_takes_the_extensions_picture_out_of_its_assets() {
+        let parsed = manifest(
+            r#"{ "name": "demo", "icon": "icon.png",
+                 "commands": [{ "name": "run", "mode": "view" }] }"#,
+        );
+
+        let record = record_for(
+            &parsed,
+            &parsed.commands[0],
+            Path::new(r"C:\Users\x\extensions\demo\run.js"),
+        );
+
+        assert_eq!(
+            record.icon.as_deref(),
+            Some("C:/Users/x/extensions/demo/assets/icon.png"),
+        );
+    }
+
+    /// Two commands of one extension are told apart by their own pictures.
+    #[test]
+    fn a_commands_own_picture_beats_the_extensions() {
+        let parsed = manifest(
+            r#"{ "name": "demo", "icon": "icon.png",
+                 "commands": [{ "name": "run", "mode": "view", "icon": "run.png" }] }"#,
+        );
+
+        let record = record_for(&parsed, &parsed.commands[0], Path::new("ext/demo/run.js"));
+
+        assert_eq!(
+            record.icon.as_deref(),
+            Some("ext/demo/assets/run.png"),
+            "the command named one and was given the extension's"
+        );
+    }
+
+    #[test]
+    fn an_extension_that_names_no_picture_gets_none() {
+        let parsed =
+            manifest(r#"{ "name": "demo", "commands": [{ "name": "run", "mode": "view" }] }"#);
+
+        assert!(record_for(&parsed, &parsed.commands[0], Path::new("ext/demo/run.js")).icon.is_none());
+    }
+
+    /// A manifest is somebody else's file, and this value reaches a loader
+    /// that reads whatever path it is handed and draws the bytes.
+    #[test]
+    fn a_picture_that_climbs_out_of_the_assets_folder_is_refused() {
+        for named in ["../../../../Windows/System32/x.png", "/etc/passwd", "C:/secrets.png"] {
+            let parsed = manifest(&format!(
+                r#"{{ "name": "demo", "icon": "{named}",
+                      "commands": [{{ "name": "run", "mode": "view" }}] }}"#
+            ));
+
+            assert!(
+                record_for(&parsed, &parsed.commands[0], Path::new("ext/demo/run.js"))
+                    .icon
+                    .is_none(),
+                "{named} was resolved into a path the launcher would read",
+            );
+        }
     }
 
     fn record(id: &str, title: &str) -> CommandRecord {
