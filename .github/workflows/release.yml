@@ -257,3 +257,30 @@ jobs:
           # away every signature and skipped the manifest. A release with no
           # `latest.json` is one no installed Sill can ever see.
           args: --bundles nsis,msi --config src-tauri/tauri.release.conf.json
+
+      # `tauri-action` writes `latest.json` while the release is still a draft,
+      # and a draft's assets have no public download link, so it falls back to
+      # `api.github.com/.../releases/assets/<id>`. Those are rate limited to
+      # sixty unauthenticated requests an hour for a whole address: two people
+      # behind one connection, and an update fails with a 403 naming nothing
+      # anybody could act on. A download link has no such limit, and resolves
+      # the moment the release is published, which is before anything reads it.
+      #
+      # Listing the releases rather than asking for the tag, because the REST
+      # API does not return drafts by tag name and this runs while it is one.
+      - name: The manifest points at download links, not API links
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq "[.[] | select(.tag_name == \"$tag\")][0] | {assets: [.assets[] | {id, name, url}]}" \
+            > assets.json
+
+          gh release download "$tag" --pattern latest.json --clobber
+          node scripts/manifest-urls.mjs latest.json assets.json "$GITHUB_REPOSITORY" "$tag"
+          gh release upload "$tag" latest.json --clobber
