@@ -19,6 +19,14 @@ IPC surface, the dependencies added, and every commit body in full. What goes
 in a section here is the subset of that which somebody would notice, said
 differently.
 
+## 0.1.1
+
+**Updating works.** An installed Sill can now see that a newer one exists.
+The release carries the signed manifest the updater reads, which 0.1.0 shipped
+without, so 0.1.0 is the last version that has to be replaced by hand.
+
+Nothing else changed. This release exists to be the one 0.1.0 updates to.
+
 ## 0.1.0
 
 The first build with an installer. Everything before this was cloned and

@@ -1,6 +1,6 @@
 [package]
 name = "sill"
-version = "0.1.0"
+version = "0.1.1"
 description = "Sill: a Raycast-compatible launcher for Windows"
 authors = ["Brandon Winters"]
 edition = "2021"
