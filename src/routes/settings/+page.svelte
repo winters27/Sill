@@ -2146,11 +2146,18 @@
                   This used to credit the framework for the index and the
                   ranking, which are written here, so it read as though the
                   parts that took the longest had come out of a box.
+
+                  The two searches are separate and the sentence keeps them
+                  apart. `catalog.rs` walks the folders in Settings and is
+                  Sill's own; `files.rs` hands the whole disk to Everything and
+                  has no substitute, so "when it is running" would promise a
+                  fallback that does not exist.
                 -->
                 <p class="credits">
                   Written in Rust and Svelte, on Tauri. Extensions run on a bundled Node,
-                  each command in its own worker. Searching the whole disk is handed to
-                  Everything, by voidtools, when it is running.
+                  each command in its own worker. Sill indexes the folders you point it at;
+                  searching the whole disk is Everything's, by voidtools, and needs it
+                  installed and running.
                 </p>
               </div>
             </div>
