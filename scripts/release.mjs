@@ -15,9 +15,12 @@
  * 3. `CHANGELOG.md` has a section for it. This is the one part nobody can
  *    generate: the diff says what changed, and a person says what of that
  *    somebody would notice.
- * 4. Every version in the tree is set, and the cost page is regenerated,
- *    because both are checked by the build and both go stale on a bump.
- * 5. `verify` locally, so a failure costs a minute here rather than a tag.
+ * 4. `verify`, on the tree as it stands, so a failure costs minutes here
+ *    rather than a tag that has to be deleted and moved.
+ * 5. Every version in the tree is set and the cost page is regenerated, then
+ *    the two checks a bump can break are run again. Both take seconds, and
+ *    running them after the slow part is what leaves a failed run with the
+ *    tree exactly as it found it.
  * 6. Commit, tag, and push both.
  *
  * The workflow does the rest: it builds, waits for `verify` on the same
@@ -36,6 +39,13 @@ if (!version) {
   console.error("usage: npm run release <version> [--dry-run]");
   process.exit(2);
 }
+
+/**
+ * `npm` on Windows is `npm.cmd`, a shell script rather than an executable, and
+ * `execFile` will not run one without a shell. What it says instead is `ENOENT`
+ * against the name `npm`, which reads like npm is not installed.
+ */
+const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
 
 /** Runs something and lets its output through, or stops. */
 function run(command, commandArgs) {
@@ -113,7 +123,16 @@ if (dryRun) {
   process.exit(0);
 }
 
-// ---- 4. The copies of the version, and the page that carries it ----------
+// ---- 4. The tests, before anything is written ---------------------------
+
+// Before the bump rather than after it, so a failure here leaves the tree
+// exactly as this found it and the whole command can be run again. What the
+// bump changes afterwards is version strings and one generated page, and the
+// two checks at the end of step 5 cover precisely those.
+console.log("\nverifying before tagging. This is the slow part.\n");
+run(NPM, ["run", "verify"]);
+
+// ---- 5. The copies of the version, and the page that carries it ----------
 
 run("node", ["scripts/set-version.mjs", version]);
 
@@ -122,10 +141,11 @@ run("node", ["scripts/set-version.mjs", version]);
 // in. It takes no readings; it reassembles the page from what is recorded.
 run("node", ["scripts/benchmark-page.mjs"]);
 
-// ---- 5. The tests, before the tag rather than after it -------------------
-
-console.log("\nverifying before tagging. This is the slow part.\n");
-run("npm", ["run", "verify"]);
+// Every other version in the tree is a copy that cannot read package.json, and
+// this is what refuses to let them drift. Seconds, and they are the first two
+// things the release build checks.
+run("node", ["scripts/verify-source.mjs"]);
+run("node", ["scripts/benchmark-page.mjs", "--check"]);
 
 // ---- 6. Out -------------------------------------------------------------
 
