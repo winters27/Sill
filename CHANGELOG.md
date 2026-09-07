@@ -19,6 +19,19 @@ IPC surface, the dependencies added, and every commit body in full. What goes
 in a section here is the subset of that which somebody would notice, said
 differently.
 
+## 0.1.4
+
+**Sill notices a new version within half an hour of it existing.** The check
+happens when you open the launcher and an answer used to last a full day, so a
+Sill left open since the morning would say it was current all afternoon about a
+version released at noon. The only ways out were the button in settings and a
+restart.
+
+**A newer Sill is offered as a pill on the bottom row.** It says what pressing
+it does and which version it goes to, in one piece rather than a sentence and a
+button, which together were wider than the row and arrived with the sentence cut
+off mid-word.
+
 ## 0.1.3
 
 **An update that fails to download can be tried again.** A download that did
