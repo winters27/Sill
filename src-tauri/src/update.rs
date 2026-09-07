@@ -14,8 +14,8 @@
 //! every background system has to answer why it is waking up. A daily timer
 //! has no answer. So nothing here has a thread, a timer or a task: the check
 //! happens when the window is summoned, which is a moment the user created,
-//! and at most once a day after that. Sitting closed, this module costs a
-//! `Mutex` around a small enum.
+//! and at most once every [`GOOD_FOR`] after that. Sitting closed, this module
+//! costs a `Mutex` around a small enum.
 //!
 //! ## Why nothing is downloaded until it is asked for
 //!
@@ -35,10 +35,18 @@ use tauri_plugin_updater::UpdaterExt;
 
 /// How long an answer is good for.
 ///
-/// A day, because a launcher is opened dozens of times a day and none of those
-/// is a reason to ask again. The first summon after this has passed pays for a
-/// request that is usually a 404 or a "same version", and nothing else does.
-const GOOD_FOR: Duration = Duration::from_secs(60 * 60 * 24);
+/// Half an hour, and the ceiling that matters is not this number: nothing here
+/// has a timer, so a check only happens on a summon, and an answer half an
+/// hour old costs one request the next time somebody opens the launcher.
+/// Somebody who never opens it never pays, and somebody who lives in it pays
+/// forty-eight times a day for a few hundred bytes each.
+///
+/// It was a day, on the reasoning that a launcher is opened dozens of times a
+/// day and none of those is a reason to ask again. That is true of the socket
+/// and false of the person: this is also the longest a release can exist
+/// before the running Sill will look, and a build left open since the morning
+/// answered "up to date" all afternoon about a version published at noon.
+const GOOD_FOR: Duration = Duration::from_secs(60 * 30);
 
 /// Where the check has got to, as the two windows draw it.
 ///
@@ -371,7 +379,7 @@ mod tests {
         );
     }
 
-    /// The first summon of a run asks, and the ones after it do not.
+    /// The first summon of a run asks, and the ones just after it do not.
     #[test]
     fn the_first_summon_asks_and_the_rest_do_not() {
         let updates = Updates::default();
@@ -379,6 +387,19 @@ mod tests {
         assert!(updates.worth_asking(false));
         updates.asked_now();
         assert!(!updates.worth_asking(false));
+    }
+
+    /// How long somebody can be running a Sill that a release has passed.
+    ///
+    /// The number itself, because it is the whole feature from the outside: a
+    /// launcher that is open all day and asks once is a launcher that says
+    /// nothing about anything published after breakfast.
+    #[test]
+    fn an_answer_goes_stale_within_the_hour() {
+        assert!(
+            GOOD_FOR <= Duration::from_secs(60 * 60),
+            "an update nobody can see for longer than an hour is one nobody sees"
+        );
     }
 
     /// A percentage that has not moved is not worth waking two windows for.
