@@ -19,6 +19,13 @@ IPC surface, the dependencies added, and every commit body in full. What goes
 in a section here is the subset of that which somebody would notice, said
 differently.
 
+## 0.1.5
+
+**Nothing in Sill itself changed.** To use, this is 0.1.4. What changed is how
+a release is made: the build now creates its own release, waits for the tests
+that ran on the same commit, and publishes only once they have passed. An
+installer that reaches you has been through all of it.
+
 ## 0.1.4
 
 **Sill notices a new version within half an hour of it existing.** The check
