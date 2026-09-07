@@ -352,8 +352,20 @@
       color var(--motion-state) var(--ease);
   }
 
-  /* Only the pressable one answers the cursor, and it answers by lighting
-     further rather than by changing into something else. */
+  /*
+   * Only the pressable one answers the cursor, and it answers by lighting
+   * further rather than by turning into something else.
+   *
+   * The one hand cursor in this row. Everything else down here is the label of
+   * a key that does the same thing, and a hand over "Open ↵" would be offering
+   * the mouse as the way to do what the key beside it just told you to press.
+   * This has no key and no place in the tab order, so the pointer is the only
+   * way in and the cursor should say so.
+   */
+  button.update {
+    cursor: pointer;
+  }
+
   button.update:hover {
     background-color: var(--info-fill-strong);
     color: var(--text-1);
