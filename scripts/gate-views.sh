@@ -23,6 +23,42 @@ set -e
 DREW=()
 drew() { DREW+=("$1"); }
 
+# Whether a server this gate does not own is answering.
+#
+# Some of the extensions below are real store extensions that fetch their rows
+# from somebody else's host, and what they draw is not a fact about Sill when
+# that host is down. Asking first is what separates "their API is out" from
+# "the extension host stopped rendering rows", and only the second is a failure
+# here. Both used to arrive as the same red line, and one of them held up a
+# release for a reason nobody could act on.
+#
+# No `-f`: the exit code wanted is "something answered", and a GraphQL endpoint
+# replies to a bare GET with a 400 that proves the host is up. Non-zero is DNS,
+# a refused connection, or the timeout, which are the three ways it is not.
+answering() {
+  curl -sS --max-time 15 -o /dev/null "$1" 2>/dev/null
+}
+
+# The one third-party host anything here depends on for its content.
+POKEAPI="https://graphql.pokeapi.co/v1beta2"
+
+# What is still true of a fetching extension when its server is not answering.
+#
+# The case runs either way, because most of what it covers has nothing to do
+# with the data: the command builds, loads, mounts, renders a root view and
+# asks for no API Sill lacks. Only the counts made out of fetched rows are set
+# aside, and the note below says so rather than passing quietly.
+if answering "$POKEAPI"; then
+  POKEDEX_ROWS="--expect-icons 20 --expect-accessories 40"
+  POKEDEX_DETAIL="--expect-detail"
+else
+  echo "note: $POKEAPI is not answering."
+  echo "      Pokedex draws its rows out of it, so this run checks the view"
+  echo "      and the API surface rather than what is in the rows."
+  POKEDEX_ROWS=""
+  POKEDEX_DETAIL=""
+fi
+
 SEED=$(python -c "
 import json
 hist = [
@@ -90,16 +126,18 @@ node scripts/run-extension.mjs extensions/build/hacker-news/frontpage.js hacker-
   --grant fileRead,fileWrite,network,processLaunch --expect-dropdown 10
 drew hacker-news
 
-# Twenty-five rows, each with an icon and a pair of accessories, out of data the
-# extension ships rather than fetches. The heaviest real icon count here that
-# does not need a network.
+# Twenty-five rows, each with an icon and a pair of accessories. The heaviest
+# real icon count here, and every row of it comes from `fetchNatures`, which is
+# a GraphQL query to somebody else's server. This said the opposite, that the
+# data was shipped rather than fetched, and the counts below were written as
+# though they could not depend on a network.
 echo
 echo "--- Icons and accessories of a real extension: pokedex natures ---"
 node scripts/build-extension.mjs extensions/raycast-src/extensions/pokedex nature > /dev/null
 node scripts/run-extension.mjs extensions/build/pokedex/nature.js pokedex \
   --grant fileRead,fileWrite,network,processLaunch \
   --assets extensions/raycast-src/extensions/pokedex/assets \
-  --expect-root List --expect-icons 20 --expect-accessories 40
+  --expect-root List $POKEDEX_ROWS
 drew pokedex
 
 # A detail pane beside a list, on somebody else's extension. Every other check
@@ -112,7 +150,7 @@ node scripts/build-extension.mjs extensions/raycast-src/extensions/pokedex weakn
 node scripts/run-extension.mjs extensions/build/pokedex/weakness.js pokedex \
   --grant fileRead,fileWrite,network,processLaunch \
   --assets extensions/raycast-src/extensions/pokedex/assets \
-  --expect-root List --expect-detail --expect-dropdown 15
+  --expect-root List $POKEDEX_DETAIL --expect-dropdown 15
 
 # A Grid, an EmptyView and a dropdown, on a real extension. Every other Grid
 # check here is a fixture, and this one is a store extension drawing tiles: it
