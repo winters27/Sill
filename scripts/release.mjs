@@ -41,11 +41,24 @@ if (!version) {
 }
 
 /**
- * `npm` on Windows is `npm.cmd`, a shell script rather than an executable, and
- * `execFile` will not run one without a shell. What it says instead is `ENOENT`
- * against the name `npm`, which reads like npm is not installed.
+ * Runs an npm script, which on Windows is not as simple as running `npm`.
+ *
+ * Two failures in a row, and neither message says what is wrong. `npm` is
+ * `npm.cmd`, a batch script rather than an executable, so `execFile` answers
+ * `ENOENT` against the name, which reads like npm is not installed. Naming
+ * `npm.cmd` gets past that and into `EINVAL`, which is Node refusing to spawn
+ * a `.cmd` at all without a shell: it has done that since the argument-quoting
+ * hole in the Windows batch parser was closed, and the refusal is the fix.
+ *
+ * So the shell is the answer rather than the workaround, and the whole line
+ * goes to it as one string: passing an args array alongside `shell: true`
+ * concatenates without escaping, which Node now warns about. `script` is a
+ * literal at every call, never a path or anything somebody typed.
  */
-const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
+function npmRun(script) {
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  execFileSync(`${npm} run ${script}`, { stdio: "inherit", shell: true });
+}
 
 /** Runs something and lets its output through, or stops. */
 function run(command, commandArgs) {
@@ -130,7 +143,7 @@ if (dryRun) {
 // bump changes afterwards is version strings and one generated page, and the
 // two checks at the end of step 5 cover precisely those.
 console.log("\nverifying before tagging. This is the slow part.\n");
-run(NPM, ["run", "verify"]);
+npmRun("verify");
 
 // ---- 5. The copies of the version, and the page that carries it ----------
 
