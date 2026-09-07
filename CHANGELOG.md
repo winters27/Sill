@@ -67,6 +67,17 @@ word rather than a shimmer crossing the word itself. It also stays painted:
 Windows was being allowed to put that window's renderer to sleep, and it is the
 one panel with no other way back on screen.
 
+**Sill checks for updates through `sill.winters.app`, and the checks are
+counted.** GitHub still holds the release and still serves the installer; the
+address in the middle passes the question through unchanged so there is a way
+to know roughly how many people run this, without accounts and without asking.
+The count is the day plus a scrambled form of your address with the day mixed
+into it, so it changes at midnight and no two days can be joined into a history
+of one machine. Sill sends no identifier, the request is the one it always made,
+and nothing about what you search for, copy or open is involved. The worker is
+in the repository under `updates/`. If it is ever down, Sill asks GitHub
+directly and updates carry on.
+
 ## 0.1.6
 
 **The update offer shows a hand cursor.** It is the one thing along the bottom

@@ -372,6 +372,27 @@ It opens at the size Raycast opens its settings at, about two thirds of a
 Rows sit on the window itself, full width, one idea each, with a hairline
 between them and a plain heading over each group.
 
+## Updates, and the one thing Sill counts
+
+Sill checks for a newer version while you are using it, and an answer is good
+for half an hour. That check is the only thing Sill sends anywhere on its own.
+
+It asks `sill.winters.app`, which passes the question to GitHub and hands the
+answer back unchanged. GitHub still holds the release and still serves the
+installer; the address in the middle exists so the checks can be counted, which
+is the only way to know roughly how many people run this without asking anyone
+to make an account.
+
+**What that count is made of:** the day, and a scrambled form of your address
+that has the day mixed into it. So it changes at midnight, two days cannot be
+joined together into a history of one machine, and nothing anywhere can turn it
+back into an address. Sill itself sends no identifier, and the request is the
+same one it has always made. Nothing about what you search for, copy, type or
+open is involved in any way.
+
+The worker that does it is in the repository, in `updates/`, and is about
+sixty lines. If it is ever down, Sill asks GitHub directly and updates carry on.
+
 ## When something is not working
 
 Sill reports trouble rather than logging it where nobody looks. A key it

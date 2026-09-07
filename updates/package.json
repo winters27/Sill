@@ -1,0 +1,17 @@
+{
+  "name": "@sill/updates",
+  "private": true,
+  "description": "The update endpoint Sill asks for latest.json, which proxies GitHub and counts the checks",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail",
+    "schema": "wrangler d1 execute sill-updates --remote --file schema.sql",
+    "count": "wrangler d1 execute sill-updates --remote --command \"SELECT day, COUNT(*) AS machines FROM checks GROUP BY day ORDER BY day DESC LIMIT 30\""
+  },
+  "devDependencies": {
+    "wrangler": "^4.42.0"
+  }
+}

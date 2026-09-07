@@ -80,6 +80,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI3ODlGQzQyNEQ0NzVCNEUKUldST1cwZE5RdnlKdDFRck5LK2hzelkwNXZYczVsSlg5ZDQ1SG9BRzdTTTJ4NzMvblJ4bElOcUYK",
       "endpoints": [
+        "https://sill.winters.app/latest.json",
         "https://github.com/winters27/Sill/releases/latest/download/latest.json"
       ],
       "windows": {

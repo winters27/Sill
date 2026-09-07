@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sill-updates",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-07",
+
+  // The hostname is compiled into every Sill that ships, so it cannot move
+  // without leaving older installs asking an address that answers nothing.
+  // `tauri.conf.json` lists GitHub behind it for exactly that reason.
+  "routes": [
+    {
+      "pattern": "sill.winters.app/latest.json",
+      "custom_domain": false,
+      "zone_name": "winters.app"
+    }
+  ],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sill-updates",
+      // Filled in by `wrangler d1 create sill-updates`.
+      "database_id": ""
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}
