@@ -119,6 +119,7 @@
   --accent-red: #ef4444;
   --accent-red-rgb: 239, 68, 68;
   --accent-green-rgb: 34, 197, 94;
+  --accent-blue-rgb: 107, 157, 255;
   --accent-yellow: #eab308;
 
   --list-selection-background: rgba(var(--accent-rgb), 0.16);
@@ -145,6 +146,26 @@
      conversation has cost sits on this, at the alpha `--danger-fill` uses. */
   --success-fill: rgba(var(--accent-green-rgb), 0.14);
   --info: var(--accent-blue);
+  /* The wash behind something being told, at the alpha its two neighbours use. */
+  --info-fill: rgba(var(--accent-blue-rgb), 0.13);
+  /* The same face, pressed further under the cursor. */
+  --info-fill-strong: rgba(var(--accent-blue-rgb), 0.22);
+  /*
+   * Light through a tinted pane, for a control that has to be found on a row
+   * nobody is reading.
+   *
+   * The bevel's own recipe in a colour, which is the pair of opposing insets
+   * this file opens by naming: light landing on the top edge, the underside in
+   * shadow, and a rim between them. That pair is what gives an edge thickness,
+   * and thickness is the whole difference between a pane and a painted shape.
+   * The bloom outside is last and slight. Alone it is a lamp behind a shape
+   * and reads as neon; over a lit edge it reads as the pane being lit.
+   */
+  --info-lit:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(var(--accent-blue-rgb), 0.22),
+    0 0 10px 0 rgba(var(--accent-blue-rgb), 0.22);
 
   /*
    * ---- The neutral ramp -------------------------------------------------

@@ -35,8 +35,11 @@
      * component holds no opinion about which states deserve a line. Most do
      * not: being current is not news and a failed check belongs in settings,
      * and both arrive here as `null`.
+     *
+     * One half or the other is null too. A state with something to press says
+     * it in the button and says it once.
      */
-    update: { words: string; button: string | null } | null;
+    update: { words: string | null; button: string | null } | null;
     prefs: Preferences | null;
     /** The tag of a running command's view, so a form says Submit. */
     viewTag: string | undefined;
@@ -120,18 +123,32 @@
       Sill is about the application and can wait for the line to be free. It
       is held in Rust rather than here, so it returns when the line frees up
       rather than being lost.
+
+      One half or the other, never both: an update that can be pressed says
+      so in the button and nowhere else. The words and a button together are
+      wider than what is left of this row once the readings and the keys have
+      taken theirs, and prose is what gives way, so the sentence arrived
+      clipped mid-word.
     -->
-    <span class="toast" data-style="info">{update.words}</span>
     {#if update.button}
       <button
         type="button"
-        class="toast-action"
+        class="update"
         tabindex="-1"
         onmousedown={(e) => e.preventDefault()}
         onclick={onupdate}
       >
         {update.button}
       </button>
+    {:else if update.words}
+      <!--
+        The same pill, not pressable.
+
+        A download in flight has nothing to offer, because a second press
+        would start a second download. It keeps the shape so the row does not
+        change size under the cursor at the moment somebody presses it.
+      -->
+      <span class="update">{update.words}</span>
     {/if}
   {/if}
   <span class="spacer"></span>
@@ -298,6 +315,48 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /*
+   * A newer Sill, which is the one thing down here that is neither a reply to
+   * what was just pressed nor a key that is always on the row.
+   *
+   * The action pill's shape, in lit glass rather than in the row's own grey.
+   * Everything else down here is either answering a press or is a key that is
+   * always there, and both can afford to be found only when looked for. This
+   * one has to be noticed by somebody who came to type something else, on the
+   * quietest row in the window, so it is the one place `--info-lit` is used:
+   * a tinted face, a catch along its top edge and a short bloom off it.
+   */
+  .update {
+    display: flex;
+    align-items: center;
+    flex: none;
+    height: var(--control-height);
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: var(--radius-lg);
+    /* The face, and the light lying across it. `--sheen` is the gradient the
+       window's own glass uses, so the pill is lit from the same direction as
+       everything it sits on. */
+    background-color: var(--info-fill);
+    background-image: var(--sheen);
+    box-shadow: var(--info-lit);
+    color: var(--info);
+    font: inherit;
+    font-size: var(--text-meta);
+    white-space: nowrap;
+    cursor: default;
+    transition:
+      background-color var(--motion-state) var(--ease),
+      color var(--motion-state) var(--ease);
+  }
+
+  /* Only the pressable one answers the cursor, and it answers by lighting
+     further rather than by changing into something else. */
+  button.update:hover {
+    background-color: var(--info-fill-strong);
+    color: var(--text-1);
   }
 
   .spacer {

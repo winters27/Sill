@@ -135,35 +135,43 @@ export function whenUpdateChanges(run: (progress: Progress) => void): Promise<Un
 }
 
 /**
- * The one line the chin shows, or nothing at all.
+ * The one thing the chin shows, or nothing at all.
  *
  * Returns `null` for every state the launcher has no business interrupting
  * somebody about. That is most of them: being up to date is not news, a failed
  * check belongs in settings, and "unknown" is what the first second of every
  * launch looks like. The chin speaks only when there is something to press.
  *
+ * Either half may be null. A state with something to press says it in the
+ * button and says it once; a state with nothing to press has only words.
+ *
  * Written here rather than in the component so it can be tested without
- * rendering anything, and so the settings window can use the same words.
+ * rendering anything.
  */
-export function chinLine(progress: Progress): { words: string; button: string | null } | null {
+export function chinLine(
+  progress: Progress,
+): { words: string | null; button: string | null } | null {
   switch (progress.kind) {
     case "available":
-      return {
-        words: `Sill ${progress.version} is available`,
-        button: "Update and restart",
-      };
+      // The button alone, naming the version it goes to. A sentence beside it
+      // would say the same thing twice, and the chin does not have the width
+      // for it: the menu, the readings, Escape and the pill are all on this
+      // row already, and prose is the item set to give way, so "Sill 0.1.3 is
+      // available" beside a button arrives as "Sill 0.1.3 is a...".
+      return { words: null, button: `Update to ${progress.version}` };
     case "downloading":
       return {
         words:
           progress.percent === null
-            ? `Downloading Sill ${progress.version}`
-            : `Downloading Sill ${progress.version}, ${progress.percent}%`,
+            ? `Updating to ${progress.version}`
+            : `Updating to ${progress.version}, ${progress.percent}%`,
         // No button while it is arriving. A second press would start a second
-        // download, and there is nothing else useful to offer mid-flight.
+        // download, and there is nothing else useful to offer mid-flight. The
+        // line has room for the words precisely because of that.
         button: null,
       };
     case "ready":
-      return { words: `Sill ${progress.version} is ready`, button: "Restart now" };
+      return { words: null, button: `Restart for ${progress.version}` };
     case "unknown":
     case "upToDate":
     case "failed":

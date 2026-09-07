@@ -50,23 +50,27 @@ function draw(over: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("the chin says there is a newer Sill", () => {
-  it("draws the words and the button an available update carries", () => {
+  it("draws the button an available update carries, and no sentence beside it", () => {
     const target = draw({
       update: chinLine({ kind: "available", version: "0.3.0", notes: null }),
     });
 
-    expect(target.textContent).toContain("Sill 0.3.0 is available");
-    const button = [...target.querySelectorAll("button")].find(
-      (b) => b.textContent?.trim() === "Update and restart",
-    );
-    expect(button, "the press that installs it").toBeTruthy();
+    // A pill, in the shape the action pill next to it uses, and pressable.
+    const pill = target.querySelector("button.update");
+    expect(pill?.textContent?.trim()).toBe("Update to 0.3.0");
+
+    // The half that is not drawn. Both at once is wider than what is left of
+    // the row, and the sentence is the item that gets clipped for it.
+    expect(target.querySelector(".toast")).toBeNull();
   });
 
   it("offers a restart once it is downloaded", () => {
     const target = draw({ update: chinLine({ kind: "ready", version: "0.3.0" }) });
 
-    expect(target.textContent).toContain("Sill 0.3.0 is ready");
-    expect(target.textContent).toContain("Restart now");
+    expect(target.querySelector("button.update")?.textContent?.trim()).toBe(
+      "Restart for 0.3.0",
+    );
+    expect(target.querySelector(".toast")).toBeNull();
   });
 
   /**
@@ -78,9 +82,12 @@ describe("the chin says there is a newer Sill", () => {
       update: chinLine({ kind: "downloading", version: "0.3.0", percent: 42 }),
     });
 
-    expect(target.textContent).toContain("Downloading Sill 0.3.0, 42%");
-    const buttons = [...target.querySelectorAll("button")].map((b) => b.textContent?.trim());
-    expect(buttons).not.toContain("Update and restart");
+    // The same pill, so the row does not resize under the cursor, but not a
+    // button: a second press would start a second download.
+    const pill = target.querySelector(".update");
+    expect(pill?.textContent?.trim()).toBe("Updating to 0.3.0, 42%");
+    expect(pill?.tagName).toBe("SPAN");
+    expect(target.querySelector("button.update")).toBeNull();
   });
 
   /**
@@ -94,13 +101,12 @@ describe("the chin says there is a newer Sill", () => {
     });
 
     expect(target.textContent).toContain("Alpha stopped");
-    expect(target.textContent).not.toContain("Sill 0.3.0 is available");
+    expect(target.textContent).not.toContain("Update to 0.3.0");
   });
 
   it("says nothing at all when there is nothing newer", () => {
     const target = draw({ update: chinLine({ kind: "upToDate" }) });
 
-    expect(target.textContent).not.toContain("available");
-    expect(target.textContent).not.toContain("Sill 0.");
+    expect(target.querySelector(".update")).toBeNull();
   });
 });

@@ -32,13 +32,16 @@ describe("what the chin shows", () => {
   });
 
   it("offers a button for an update and for one already downloaded", () => {
+    // The button carries the whole message. A sentence beside it would say the
+    // same thing twice into a row that has no width to spare, and prose is the
+    // item down there set to give way, so both together arrive clipped.
     expect(chinLine({ kind: "available", version: "0.3.0", notes: null })).toEqual({
-      words: "Sill 0.3.0 is available",
-      button: "Update and restart",
+      words: null,
+      button: "Update to 0.3.0",
     });
     expect(chinLine({ kind: "ready", version: "0.3.0" })).toEqual({
-      words: "Sill 0.3.0 is ready",
-      button: "Restart now",
+      words: null,
+      button: "Restart for 0.3.0",
     });
   });
 
@@ -53,15 +56,25 @@ describe("what the chin shows", () => {
     // words have to work without a number rather than show "null%".
     const unknownSize = chinLine({ kind: "downloading", version: "0.3.0", percent: null });
     expect(unknownSize?.button).toBeNull();
-    expect(unknownSize?.words).toBe("Downloading Sill 0.3.0");
+    expect(unknownSize?.words).toBe("Updating to 0.3.0");
   });
 
-  it("names the version in every line it does show", () => {
+  it("names the version in whichever half it does show", () => {
     // Otherwise the chin says "an update is ready" and the reader has to go to
-    // settings to find out ready for what.
+    // settings to find out ready for what. Which half carries it depends on
+    // whether there is anything to press, so this asks the line as a whole.
     for (const progress of EVERY) {
       const line = chinLine(progress);
-      if (line) expect(line.words).toContain("0.3.0");
+      if (line) expect(`${line.words ?? ""}${line.button ?? ""}`).toContain("0.3.0");
+    }
+  });
+
+  it("never draws the words and a button at the same time", () => {
+    // The row is shared with the readings, Escape and the pill. Two items from
+    // this one state is what overran it.
+    for (const progress of EVERY) {
+      const line = chinLine(progress);
+      if (line) expect(line.words === null || line.button === null).toBe(true);
     }
   });
 });
