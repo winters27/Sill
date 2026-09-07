@@ -7,7 +7,7 @@ table is the command that takes those readings on your own machine. Where a
 cost has no reading, or no command that would take one, the row says that
 instead.
 
-Generated for version 0.1.3 on 2026-09-03. Nothing on this page is written by
+Generated for version 0.1.4 on 2026-09-03. Nothing on this page is written by
 hand: it is assembled from what the measuring scripts concluded, and the build
 refuses a copy that has been edited.
 
