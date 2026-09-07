@@ -77,16 +77,119 @@ pub fn show(app: &AppHandle, status: PanelStatus) -> Result<()> {
     window
         .show()
         .map_err(|e| DictationError::Platform(format!("show dictation panel: {e}")))?;
+    keep_on_top(&window);
 
     // Emitted AFTER showing: a hidden window's webview may not be running,
     // and an event delivered to a window that is not listening yet is lost
     // with no error anywhere.
     app.emit("dictation:status", status)
         .map_err(|e| DictationError::Platform(format!("emit dictation:status: {e}")))?;
-    crate::say!("panel shown ({status:?})");
+    report_shown(&window, status);
 
     Ok(())
 }
+
+/// Says what the show achieved, rather than that it was attempted.
+///
+/// `show()` returning `Ok` means the message was accepted and nothing more.
+/// This panel is transparent, undecorated and never focused, so three separate
+/// things have to be true before any of it is on screen: the window up, the
+/// renderer painting, and the window above what it covers. A panel that is
+/// missing for any of those reasons looks the same as one that is missing for
+/// the others, and this line used to read `panel shown` for all of them.
+///
+/// The renderer's own visibility is not here. It lives behind `with_webview`,
+/// which hands its closure to another thread and returns nothing, so
+/// `sleep::wake` reports that half itself on the line above this one.
+fn report_shown(window: &tauri::WebviewWindow, status: PanelStatus) {
+    let up = window
+        .is_visible()
+        .map_or_else(|e| format!("unreadable ({e})"), |on| on.to_string());
+
+    let on_top = topmost(window).map_or_else(|| "unreadable".to_string(), |on| on.to_string());
+
+    // Read back rather than recomputed. `position_at_bottom_center` says where
+    // the panel was asked to go; this says where it is, which is the number
+    // that settles whether it landed on a screen somebody is looking at.
+    let at = match (window.outer_position(), window.outer_size()) {
+        (Ok(at), Ok(size)) => format!("{},{} {}x{}", at.x, at.y, size.width, size.height),
+        _ => "unreadable".to_string(),
+    };
+
+    crate::say!("panel shown ({status:?}) window={up} topmost={on_top} at {at}");
+}
+
+/// Whether the window carries `WS_EX_TOPMOST` at this moment.
+///
+/// `always_on_top(true)` is set once when the window is built and nothing in
+/// the tree ever asserts it again, so this is read rather than assumed.
+/// `windowing::is_on_top` asks the same question of another application's
+/// window and has to look the handle up by id first; this one is handed a
+/// window Sill owns.
+#[cfg(windows)]
+fn topmost(window: &tauri::WebviewWindow) -> Option<bool> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST};
+
+    let handle = window.hwnd().ok()?;
+
+    // SAFETY: the handle comes from the window this is called on, which is
+    // alive for the length of the call.
+    let style =
+        unsafe { GetWindowLongPtrW(HWND(handle.0 as *mut core::ffi::c_void), GWL_EXSTYLE) } as u32;
+    Some(style & WS_EX_TOPMOST.0 != 0)
+}
+
+#[cfg(not(windows))]
+fn topmost(_window: &tauri::WebviewWindow) -> Option<bool> {
+    None
+}
+
+/// Puts the panel back on top of the stack without activating it.
+///
+/// This is the one Sill window with no other way to the front. Every other
+/// show calls `set_focus`, and three of them call `summon::force_foreground`,
+/// either of which reorders the stack as a side effect. This one deliberately
+/// does neither, so nothing has re-asserted its position since the window was
+/// built.
+///
+/// `SWP_NOACTIVATE` is the whole reason this is safe here: without it the call
+/// takes the foreground, and the transcript then pastes into the panel rather
+/// than into whatever was being dictated into.
+#[cfg(windows)]
+fn keep_on_top(window: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    };
+
+    let Ok(handle) = window.hwnd() else {
+        return;
+    };
+
+    // Position and size are left alone, so the zero rectangle is never read.
+    //
+    // SAFETY: the handle comes from the window this is called on, and the
+    // flags are valid for this call.
+    let placed = unsafe {
+        SetWindowPos(
+            HWND(handle.0 as *mut core::ffi::c_void),
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        )
+    };
+
+    if let Err(err) = placed {
+        crate::say!("dictation panel would not go on top: {err}");
+    }
+}
+
+#[cfg(not(windows))]
+fn keep_on_top(_window: &tauri::WebviewWindow) {}
 
 /// Pushes one frame of band energies, each 0.0 to 1.0.
 ///

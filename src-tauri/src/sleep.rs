@@ -69,6 +69,35 @@ use tauri::WebviewWindow;
 /// person is still walking.
 const SLEEP_AFTER: Duration = Duration::from_secs(20);
 
+/// Windows whose renderer is never made invisible while they are hidden.
+///
+/// Since `TrySuspend` was removed this module reclaims no memory at all, so
+/// the only thing `suspend` still buys is stopping a hidden renderer from
+/// painting. That is worth having for a page with live things on it. The
+/// dictation panel has none: its only moving part is a canvas that exists
+/// solely while the panel is up, and `dictation:hide` destroys it, so the page
+/// is already idle by the time this would run.
+///
+/// So that window carried the whole risk of the mechanism for none of its
+/// benefit, and the risk is not theoretical. `73e2173` records the same
+/// failure on the capture overlay: a transparent always-on-top window shown
+/// again over a renderer that painted nothing. That one calls `set_focus` on
+/// show, which reorders and repaints as a side effect. The dictation panel
+/// deliberately never takes focus, because the transcript pastes wherever
+/// focus is, so `SetIsVisible(true)` is the only thing that can bring it back
+/// and a single one that fails to land leaves the window invisible for the
+/// rest of the process.
+const NEVER_SUSPENDED: &[&str] = &["dictation"];
+
+/// Whether this window's renderer may be made invisible behind it.
+///
+/// Split out from [`suspend`] so the decision can be tested at all: everything
+/// else in that function needs a live webview and a COM call, which is why the
+/// tests here cover the generation bookkeeping and nothing else.
+fn may_suspend(label: &str) -> bool {
+    !NEVER_SUSPENDED.contains(&label)
+}
+
 /// Which dismissal a pending sleep belongs to, per window.
 ///
 /// A timer cannot be cancelled once it is sleeping, so it is disarmed instead:
@@ -203,17 +232,44 @@ pub fn wake(window: &WebviewWindow) {
         *all.entry(window.label().to_string()).or_insert(0) += 1;
     }
 
+    /*
+     * Both results used to be thrown away here, and that is what made an
+     * invisible window unreadable from the outside.
+     *
+     * `suspend` says when it put a renderer away. Nothing said whether one
+     * came back, so a window shown over a renderer that never woke logged
+     * exactly what a healthy show logs. On a transparent window that
+     * difference is the difference between the thing being on screen and
+     * there being nothing there at all.
+     *
+     * Failure is loud and success is `detail!`: this runs on every summon,
+     * and a line per summon at the normal level rotates away the hour
+     * somebody wanted. `with_webview` returning `Err` gets a line of its own,
+     * because that is the case where the closure never runs, which from the
+     * log alone is otherwise indistinguishable from it working.
+     */
     #[cfg(windows)]
-    let _ = window.with_webview(|webview| {
-        let controller = webview.controller();
+    {
+        let label = window.label().to_string();
 
-        unsafe {
-            // Nothing to resume: this module stopped suspending, so the
-            // renderer was only ever made invisible. Undoing that is the whole
-            // of waking now.
-            let _ = controller.SetIsVisible(true);
+        let reached = window.with_webview(move |webview| {
+            let controller = webview.controller();
+
+            unsafe {
+                // Nothing to resume: this module stopped suspending, so the
+                // renderer was only ever made invisible. Undoing that is the
+                // whole of waking now.
+                match controller.SetIsVisible(true) {
+                    Ok(()) => crate::detail!("{label} renderer awake"),
+                    Err(err) => crate::say!("{label} renderer would not wake: {err}"),
+                }
+            }
+        });
+
+        if let Err(err) = reached {
+            crate::say!("{} has no webview to wake: {err}", window.label());
         }
-    });
+    }
 
     #[cfg(not(windows))]
     let _ = window;
@@ -233,6 +289,11 @@ difference was what the page happened to be doing.
 */
 #[cfg(windows)]
 fn suspend(label: &str, window: &WebviewWindow, armed: u64) {
+    // Some windows are only ever hidden, never unpainted. See `NEVER_SUSPENDED`.
+    if !may_suspend(label) {
+        return;
+    }
+
     let label = label.to_string();
     let watched = window.clone();
 
@@ -285,6 +346,25 @@ mod tests {
             SLEEP_AFTER >= Duration::from_secs(10),
             "a grace period shorter than a pause for thought puts the renderer \
              to sleep between two keystrokes of the same task"
+        );
+    }
+
+    /// The dictation panel's renderer is never made invisible.
+    ///
+    /// It is the one window with no way back to being painted other than
+    /// `SetIsVisible(true)`, because it never takes focus and so nothing else
+    /// about showing it forces a repaint. `NEVER_SUSPENDED` carries the rest
+    /// of the argument.
+    ///
+    /// This pins the decision and not the mechanism: whether the panel is
+    /// actually on screen is only answerable on a device, which is most of
+    /// why it stayed missing for as long as it did.
+    #[test]
+    fn the_dictation_panel_is_never_left_unpainted() {
+        assert!(!may_suspend("dictation"));
+        assert!(
+            may_suspend("main"),
+            "this is one window's exemption, not the end of the module"
         );
     }
 

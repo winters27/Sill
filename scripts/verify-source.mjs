@@ -863,6 +863,38 @@ for (const file of sources("src-tauri/src")) {
   });
 }
 
+/*
+ * The exemption list is consulted, not merely present.
+ *
+ * `NEVER_SUSPENDED` names the windows whose renderer is never made invisible,
+ * and a unit test pins what is in it. Neither notices if `suspend` stops
+ * asking: the list still reads correctly, the test still passes, and the
+ * window it protects goes straight back to being shown over a renderer that
+ * paints nothing. That was tried, and the suite stayed green, which is why
+ * the call site is held here rather than in a test.
+ */
+{
+  const sleepFile = "src-tauri/src/sleep.rs";
+  const sleepSource = readFileSync(sleepFile, "utf8");
+
+  // The Windows one. The other is a stub taking `_label`, with nothing to ask.
+  const opens = sleepSource.indexOf("fn suspend(label: &str");
+  const closes = sleepSource.indexOf("\n}\n", opens);
+  const body = sleepSource.slice(opens, closes === -1 ? sleepSource.length : closes);
+
+  if (opens === -1) {
+    fail(sleepFile, 1, "`fn suspend` is gone, so the check below holds nothing");
+  } else if (!body.includes("may_suspend(label)")) {
+    fail(
+      sleepFile,
+      lineOf(sleepSource, opens),
+      "`suspend` no longer asks `may_suspend`, so the windows `NEVER_SUSPENDED` " +
+        "exempts have their renderers made invisible again; the dictation panel " +
+        "never takes focus, so nothing else about showing it would repaint it",
+    );
+  }
+}
+
 for (const file of sources("scripts")) {
   const text = readFileSync(file, "utf8");
 
