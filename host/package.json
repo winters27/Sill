@@ -1,6 +1,6 @@
 {
   "name": "@sill/host",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Extension host: runs Raycast-compatible extensions in worker threads and speaks Sill's JSON-RPC protocol over stdio",
   "license": "MIT",
