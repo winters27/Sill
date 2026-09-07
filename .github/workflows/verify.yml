@@ -8,7 +8,17 @@ name: verify
 # 87 runs over four days came to roughly 2,384 billed minutes against a
 # 2,000-minute allowance. Sill is public as of 2026-09-04, Actions are free on
 # public repos, and the reason to hold back went with it.
-on: [push, pull_request, workflow_dispatch]
+#
+# Branches, not tags. A release tag points at a commit that was pushed to main
+# a moment earlier, so a tag build ran the same tree twice: thirteen Windows
+# minutes for an answer already on the board, and two runs for one commit that
+# can disagree when one of them flakes. The release workflow waits on this by
+# commit, so it finds the branch run and there is only ever the one.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
 
 # A second push while the first is still running makes the first answer a
 # question nobody is asking any more, and these are paid minutes.

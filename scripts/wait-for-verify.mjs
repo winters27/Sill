@@ -67,17 +67,28 @@ while (Date.now() - startedAt < GIVE_UP_AFTER) {
 
   const done = found.filter((run) => run.status === "completed");
 
-  if (done.length > 0) {
-    const [newest] = done;
-    console.log(`verify ${newest.conclusion}: ${newest.url}`);
-    process.exit(newest.conclusion === "success" ? 0 : 1);
+  // Every finished run has to have passed, not the newest one.
+  //
+  // A commit can carry more than one: `verify` used to run on the branch push
+  // and again on the tag push, and a flake in one of them would leave two runs
+  // for the same tree disagreeing. Taking the newest made publishing depend on
+  // which of them happened to finish last, which is a coin toss standing where
+  // a gate is supposed to be.
+  if (done.length > 0 && done.length === found.length) {
+    for (const run of done) console.log(`verify ${run.conclusion}: ${run.url}`);
+    const failed = done.filter((run) => run.conclusion !== "success");
+    if (failed.length === 0) {
+      process.exit(0);
+    }
+    console.error(`::error::${failed.length} of ${done.length} verify run(s) did not pass`);
+    process.exit(1);
   }
 
   const waited = Math.round((Date.now() - startedAt) / 1000);
   console.log(
     found.length === 0
       ? `no verify run for ${sha.slice(0, 10)} yet, ${waited}s`
-      : `verify is ${found[0].status}, ${waited}s`,
+      : `${done.length} of ${found.length} verify run(s) finished, ${waited}s`,
   );
   await sleep(ASK_EVERY);
 }
