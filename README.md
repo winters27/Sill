@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  An open-source command palette. Search apps, files, settings, windows,
-  clipboard history and snippets, then act on what you find without reaching
-  for the mouse. Speech to text runs on your own machine, the AI provider is
-  yours to pick, and Raycast extensions run unmodified.
+  An open-source command palette, written in Rust. Search apps, files,
+  settings, windows, clipboard history and snippets, then act on what you find
+  without reaching for the mouse. Speech to text runs on your own machine, the
+  AI provider is yours to pick, and Raycast extensions run unmodified.
 </p>
 
 <p align="center">
@@ -32,6 +32,9 @@
   <a href="https://github.com/winters27/Sill/stargazers"><img
     src="https://img.shields.io/github/stars/winters27/Sill?style=flat"
     alt="stars"></a>
+  <a href="docs/benchmark.md"><img
+    src="https://img.shields.io/badge/built%20in-Rust-CE422B?logo=rust&logoColor=white"
+    alt="Built in Rust"></a>
   <img src="https://img.shields.io/badge/Windows-11-0078D4?logo=windows11&logoColor=white"
     alt="Windows 11">
 </p>
@@ -59,7 +62,7 @@ and it finds the program, file, setting, window, snippet or switch you meant,
 ranked by what you actually open. Press Enter and it does the obvious thing.
 Press Escape and it is gone.
 
-It is written in Rust with a Svelte interface, so it starts fast, stays small,
+The core is Rust and the interface is Svelte, so it starts fast, stays small,
 and costs close to nothing while it waits. It runs on Windows 11 and is MIT
 licensed.
 
