@@ -1,10 +1,15 @@
 # A tag becomes an installer.
 #
-# `git tag v0.2.0 && git push origin v0.2.0` builds Sill on a clean Windows
-# runner and attaches the NSIS setup and the MSI to a draft release, with the
-# CHANGELOG section for that version as the body. Draft, because `verify` runs
-# on the same tag push and this does not wait for it: publishing is the moment
-# somebody looks at both and decides.
+# `npm run release 0.2.0` bumps every version in the tree, tags and pushes.
+# This builds Sill on a clean Windows runner, attaches the NSIS setup and the
+# MSI with the CHANGELOG section for that version as the body, waits for the
+# `verify` run started by the same push, and publishes if it passed.
+#
+# It is drafted first and published last, rather than published outright. The
+# manifest has to be rewritten before anybody can read it, and a build that
+# cannot show `verify` green leaves a draft rather than a release: an installed
+# Sill treats whatever is published as the newest there is, so publishing is
+# the step that has to be earned.
 #
 # `workflow_dispatch` does the same build and creates no release. That is the
 # rehearsal, and it exists because a release pipeline nobody has run is a
@@ -284,3 +289,31 @@ jobs:
           gh release download "$tag" --pattern latest.json --clobber
           node scripts/manifest-urls.mjs latest.json assets.json "$GITHUB_REPOSITORY" "$tag"
           gh release upload "$tag" latest.json --clobber
+
+      # The tests, which started from the same push and run beside this one.
+      #
+      # A release build takes the best part of an hour and `verify` a quarter
+      # of it, so this has almost always already finished. Almost: a cold cache
+      # or a queue can put it behind, and the answer is worth waiting for.
+      # Failing here leaves the draft exactly as it is, with every asset on it,
+      # so a fixed tree and a moved tag is the whole recovery.
+      - name: The tests passed on this commit
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/wait-for-verify.mjs "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+
+      # Published only now: after the manifest points somewhere usable and
+      # after the tests have said so. `--latest` is what the updater endpoint
+      # resolves through, so this is the line that puts a new Sill in front of
+      # every installed one.
+      - name: Publish
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release edit "${{ github.ref_name }}" --draft=false --latest
+          echo "published ${{ github.ref_name }}"
