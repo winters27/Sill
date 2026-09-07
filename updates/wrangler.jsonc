@@ -7,11 +7,16 @@
   // The hostname is compiled into every Sill that ships, so it cannot move
   // without leaving older installs asking an address that answers nothing.
   // `tauri.conf.json` lists GitHub behind it for exactly that reason.
+  //
+  // A custom domain rather than a route, because the subdomain is this worker
+  // and nothing else, so Cloudflare owns the DNS record and there is no
+  // placeholder to keep in step by hand. It means every path arrives here,
+  // which is why the worker answers one and refuses the rest: a crawler
+  // counted as a machine running Sill is the number going wrong quietly.
   "routes": [
     {
-      "pattern": "sill.winters.app/latest.json",
-      "custom_domain": false,
-      "zone_name": "winters.app"
+      "pattern": "sill.winters.app",
+      "custom_domain": true
     }
   ],
 
@@ -19,8 +24,9 @@
     {
       "binding": "DB",
       "database_name": "sill-updates",
-      // Filled in by `wrangler d1 create sill-updates`.
-      "database_id": ""
+      // From `wrangler d1 create sill-updates`. Not a secret: it names the
+      // database, and reaching it still needs the account.
+      "database_id": "87561c4a-b623-44d2-bb13-5aa2e0a36f33"
     }
   ],
 

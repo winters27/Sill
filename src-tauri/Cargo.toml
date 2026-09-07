@@ -92,3 +92,23 @@ ignore = "0.4.33"
 notify = "8.2.0"
 tauri-plugin-updater = "2.11.0"
 
+
+# Incremental compilation is off because it does not work on this crate.
+#
+# On rustc 1.91.1 it produces errors that name anything except itself:
+# `no resolution for an import`, `E0786: found invalid metadata files for crate
+# sill_lib`, `crate <dep> required to be available in rlib format`, `cannot find
+# type Vec`, `no global memory allocator found`, and a compiler panic in
+# `rustc_passes/src/dead.rs`. Every one of those reads as the code being broken
+# and none of them is.
+#
+# Settled by elimination rather than guessed at: a full `cargo clean` followed
+# by `cargo test` still failed, and the same clean tree with incremental off
+# passed the whole suite first run. Deleting `target/debug/incremental` by hand
+# only helps until the next build writes it again.
+#
+# It costs slower rebuilds while iterating. A build that works is worth more,
+# and it also means `npm run verify` and `npm run release` no longer need
+# `CARGO_INCREMENTAL=0` in front of them to be trusted.
+[profile.dev]
+incremental = false

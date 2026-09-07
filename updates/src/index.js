@@ -51,8 +51,22 @@ const CACHE_SECONDS = 300;
  */
 const KEEP_DAYS = 180;
 
+/**
+ * The one path this answers.
+ *
+ * The hostname is a custom domain, so every path on it reaches this worker.
+ * Answering all of them would mean a crawler, a link preview or somebody
+ * typing the address counted as a machine running Sill, which is the number
+ * this exists to get right. Anything else is a 404 and is not counted.
+ */
+const PATH = "/latest.json";
+
 export default {
   async fetch(request, env, ctx) {
+    if (new URL(request.url).pathname !== PATH) {
+      return new Response("Not found", { status: 404 });
+    }
+
     // Asked for before anything else can fail, so the proxy is what happens
     // even when the counting cannot.
     const answer = proxy();
