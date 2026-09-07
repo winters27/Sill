@@ -19,6 +19,12 @@ IPC surface, the dependencies added, and every commit body in full. What goes
 in a section here is the subset of that which somebody would notice, said
 differently.
 
+## 0.1.6
+
+**The update offer shows a hand cursor.** It is the one thing along the bottom
+row that can only be pressed with the mouse, and it looked like the labels
+beside it, which name keys.
+
 ## 0.1.5
 
 **Nothing in Sill itself changed.** To use, this is 0.1.4. What changed is how
