@@ -19,6 +19,54 @@ IPC surface, the dependencies added, and every commit body in full. What goes
 in a section here is the subset of that which somebody would notice, said
 differently.
 
+## 0.2.0
+
+**A screenshot opens the editor.** It always could, and the setting saying so
+was called "After taking one", which is not a thing anybody searches for. It is
+now "Open the editor after taking one", it is on unless you turned it off, and
+the picture still reaches the clipboard either way.
+
+**The editor draws straight lines and solid shapes, and can put back what you
+undid.** Boxes and ellipses fill as well as outline, Ctrl+Y and Ctrl+Shift+Z
+both redo, and every tool has a letter: V picks a mark up, B is a box, L a line,
+A an arrow, and so on down the row. Each tooltip says which.
+
+**A colour can be taken out of the picture.** The pipette beside the swatches
+reads the next pixel you click, and the colour it finds joins the six until you
+close the window. The swatch after those opens the system picker for anything
+else.
+
+**A marked-up picture can go to a file, or be left floating on top of
+everything.** Ctrl+S saves it. The pin is a small window that stays above other
+programs until you press Escape or double-click it: drag it anywhere, scroll to
+resize it. It is for reading one thing while working in another.
+
+**A picture can be uploaded, with the link copied.** Off until you name a
+service, and no account ships with Sill. Imgur needs a client ID you register
+yourself; anything else takes an address, the form field to send under, and
+where the link sits in the answer, which is the shape services already publish
+for ShareX. This is the only thing Sill does that puts a picture of your screen
+on a machine that is not yours, it never happens on its own, and private mode
+refuses it exactly as it refuses a screenshot.
+
+**A screenshot key that stops working now says why.** Sill takes a global key
+two ways, its own keyboard watcher and a registration with Windows behind it,
+and some keys Windows will not take at all: the Menu key is one, so it had one
+layer instead of two, and nothing said so. The setting now does. A key the
+watcher believed was still held could also be swallowed for a press with
+nothing happening at all, not even in the program underneath; that is fixed,
+and both dead ends write a line naming themselves. A screenshot blocked by a
+window running as administrator reports itself the way the summon key already
+did, instead of doing nothing quietly.
+
+**The dictation pill stops flinching, and shows the wait as a row.** It was one
+height while recording and a shorter one the moment it finished, and because it
+sits centred in its own window it shrank from the top and bottom at once. It is
+one size now, and while the model runs a pulse travels along a row under the
+word rather than a shimmer crossing the word itself. It also stays painted:
+Windows was being allowed to put that window's renderer to sleep, and it is the
+one panel with no other way back on screen.
+
 ## 0.1.6
 
 **The update offer shows a hand cursor.** It is the one thing along the bottom
