@@ -11,6 +11,8 @@
 
 export type Tool =
   | "arrow"
+  /** A plain segment, for underlining and for pointing without a head. */
+  | "line"
   | "box"
   | "ellipse"
   | "pen"
@@ -21,6 +23,9 @@ export type Tool =
   | "step"
   /** Trims the picture, rather than drawing on it. */
   | "crop";
+
+/** Which tools a fill means anything for. */
+export const CAN_FILL: Tool[] = ["box", "ellipse"];
 
 export interface Point {
   x: number;
@@ -44,7 +49,26 @@ export interface Shape {
    * survive a box being drawn between two of them.
    */
   number?: number;
+  /**
+   * Only for the tools in [`CAN_FILL`]: solid rather than an outline.
+   *
+   * Optional rather than defaulted to false, so a mark saved before this
+   * existed reads as an outline, which is what it was drawn as.
+   */
+  fill?: boolean;
 }
+
+/**
+ * One thing that can be taken back, and put back again.
+ *
+ * A crop is undoable and is not a shape, so a stack of shapes alone loses the
+ * ordering between the two: undoing a crop and then a box has to redo the box
+ * and then the crop, and a list that only holds shapes cannot say where the
+ * crop went.
+ */
+export type Step =
+  | { did: "mark"; shape: Shape }
+  | { did: "crop"; crop: { x: number; y: number; w: number; h: number } | null };
 
 /** How coarse the blocks are when hiding something, relative to the stroke. */
 export const HIDE_BLOCK = 6;
@@ -107,6 +131,29 @@ export function worthKeeping(shape: Shape): boolean {
   return box.w > 2 || box.h > 2;
 }
 
+/**
+ * The key that reaches each tool, so a hand on the mouse can change tool.
+ *
+ * One letter each, chosen from the tool's own name where the letter was free.
+ * `x` for hide, because `h` is highlight and both start the same way; `v` for
+ * select, which is what every editor uses for the arrow.
+ *
+ * Exported so a test can hold that every tool has one and no two share.
+ */
+export const TOOL_KEYS: Record<string, Tool | "select"> = {
+  v: "select",
+  b: "box",
+  l: "line",
+  a: "arrow",
+  e: "ellipse",
+  p: "pen",
+  h: "highlight",
+  x: "hide",
+  t: "text",
+  s: "step",
+  c: "crop",
+};
+
 /** The colours offered, which are the ones that show up on a screenshot. */
 export const COLOURS = [
   { name: "Red", value: "#ff3b30" },
@@ -159,6 +206,16 @@ export function touches(shape: Shape, point: Point, slack: number): boolean {
     return shape.points.some((at) => Math.hypot(at.x - point.x, at.y - point.y) <= reach);
   }
 
+  // The rectangle a line describes is nearly all of it empty: a diagonal from
+  // one corner of the picture to the other would be pickable anywhere on the
+  // screen. So a line is hit near the line, not near its bounding box.
+  if (shape.tool === "line" || shape.tool === "arrow") {
+    const [from, to] = shape.points;
+    if (!from || !to) return false;
+
+    return nearSegment(from, to, point) <= reach;
+  }
+
   if (shape.tool === "text") {
     const size = Math.max(12, shape.weight * 6);
     const wide = (shape.text ?? "").length * size * 0.6;
@@ -185,6 +242,31 @@ export function touches(shape: Shape, point: Point, slack: number): boolean {
     point.y >= box.y - reach &&
     point.y <= box.y + box.h + reach
   );
+}
+
+/**
+ * How far a point is from a segment, not from the infinite line through it.
+ *
+ * The difference is the whole point: a click a long way past the end of a short
+ * arrow is close to that arrow's line and nowhere near the arrow.
+ *
+ * A segment of no length is a point, and the projection would divide by zero,
+ * so that case answers with the distance to the point it is.
+ */
+export function nearSegment(from: Point, to: Point, point: Point): number {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = dx * dx + dy * dy;
+
+  if (length === 0) return Math.hypot(point.x - from.x, point.y - from.y);
+
+  // Where the point lands along the segment, clamped to its two ends.
+  const along = Math.max(
+    0,
+    Math.min(1, ((point.x - from.x) * dx + (point.y - from.y) * dy) / length),
+  );
+
+  return Math.hypot(point.x - (from.x + along * dx), point.y - (from.y + along * dy));
 }
 
 /** Moves a shape by an offset, leaving the original alone. */

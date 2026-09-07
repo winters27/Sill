@@ -984,6 +984,7 @@ mod tests {
         "sk-provider-1111",
         "sk-tts-2222",
         "ghp_store3333",
+        "imgur-client-4444",
     ];
 
     /// Preferences with a credential in every sealed slot.
@@ -1007,6 +1008,7 @@ mod tests {
         ];
         prefs.tts.provider.api_key = Some(KEYS[2].to_string());
         prefs.store.github_token = Some(KEYS[3].to_string());
+        prefs.screenshot.upload.imgur_client_id = KEYS[4].to_string();
 
         prefs
     }
@@ -1222,6 +1224,7 @@ mod tests {
         assert_eq!(back.dictation.provider.api_key.as_deref(), None);
         assert_eq!(back.tts.provider.api_key.as_deref(), None);
         assert_eq!(back.store.github_token.as_deref(), None);
+        assert!(back.screenshot.upload.imgur_client_id.is_empty());
         assert!(back.ai.providers.iter().all(|one| one.api_key.is_empty()));
         assert_eq!(summary.kept_keys, 0);
     }
@@ -1238,6 +1241,7 @@ mod tests {
         assert_eq!(back.dictation.provider.api_key.as_deref(), Some(KEYS[0]));
         assert_eq!(back.tts.provider.api_key.as_deref(), Some(KEYS[2]));
         assert_eq!(back.store.github_token.as_deref(), Some(KEYS[3]));
+        assert_eq!(back.screenshot.upload.imgur_client_id, KEYS[4]);
         assert_eq!(
             back.ai
                 .providers
@@ -1247,7 +1251,7 @@ mod tests {
             Some(KEYS[1])
         );
 
-        assert_eq!(summary.kept_keys, 4);
+        assert_eq!(summary.kept_keys, KEYS.len());
     }
 
     /// A key the file does carry wins over the one already here.
@@ -1262,8 +1266,8 @@ mod tests {
         let (back, summary) = apply(&mine, &patch).expect("it applies");
 
         assert_eq!(back.store.github_token.as_deref(), Some("ghp_the_new_one"));
-        // The other three were not mentioned, so they were kept.
-        assert_eq!(summary.kept_keys, 3);
+        // Every other one was not mentioned, so they were kept.
+        assert_eq!(summary.kept_keys, KEYS.len() - 1);
     }
 
     /// A provider's key follows its id rather than its place in the list.

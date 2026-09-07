@@ -213,6 +213,27 @@ export interface Screenshot {
   weight: number;
   /** The number the first badge shows. */
   stepFrom: number;
+  /** Where a picture goes when somebody asks for a link to it. */
+  upload: Upload;
+}
+
+/**
+ * Where a screenshot goes when somebody asks for a link to it.
+ *
+ * Off until a provider is named, and no credential ships with Sill. This is
+ * the only setting here that sends anything anywhere.
+ */
+export interface Upload {
+  /** `""` for off, `"imgur"`, or `"custom"`. */
+  provider: string;
+  /** The Imgur application id, sealed on its way to disk. */
+  imgurClientId: string;
+  /** Where a custom uploader posts, as a whole URL. */
+  customUrl: string;
+  /** The form field the picture is sent as. */
+  customField: string;
+  /** A dotted path to the link in the answer, or empty for the whole body. */
+  customJsonPath: string;
 }
 
 export interface FileSearch {

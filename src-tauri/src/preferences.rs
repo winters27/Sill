@@ -624,6 +624,10 @@ pub(crate) const SEALED: &[&[&str]] = &[
     // money, and still a credential that can read whatever the account it
     // belongs to can read.
     &["store", "githubToken"],
+    // The upload provider's registration. Anonymous uploads are still charged
+    // against somebody's application id, and a file that syncs is the wrong
+    // place for one.
+    &["screenshot", "upload", "imgurClientId"],
 ];
 
 /// The step in a path that means "every element of this array".
@@ -861,11 +865,54 @@ impl Default for WebSearch {
 #[serde(rename_all = "camelCase")]
 pub enum AfterCapture {
     /// Straight to the clipboard, which is the fast path.
-    #[default]
     Copy,
-    /// Straight into the editor, for anybody who marks up most of what they
-    /// take. It reaches the clipboard from there.
+    /// Straight into the editor. It reaches the clipboard from there either
+    /// way, so this costs the person who never marks anything up one Escape,
+    /// and saves the person who does from having to find the picture again.
+    ///
+    /// The default, because a screenshot somebody wanted to draw on is the
+    /// common one and the editor is the only place the drawing exists. Copying
+    /// silently is the version of this feature that is easy to miss having.
+    #[default]
     Edit,
+}
+
+/// Where a screenshot goes when somebody asks for a link to it.
+///
+/// **Off by default, and there is no shipped credential.** Uploading a picture
+/// of somebody's screen to a third party is the one thing Sill otherwise never
+/// does, so it happens only after a person has named where, and only when they
+/// press the button. Private mode refuses it the same way it refuses a capture.
+///
+/// No provider is built in with Sill's own key. A shipped client id would be
+/// one quota shared by everybody who installed it and a credential sitting in
+/// a public repository, and the first person to abuse it would break it for
+/// the rest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Upload {
+    /// `""` for off, `"imgur"`, or `"custom"`.
+    ///
+    /// A string rather than an enum with an `Off`, because the two other
+    /// values each need their own fields and a person switching between them
+    /// should not lose what they typed for the other one.
+    pub provider: String,
+    /// The Imgur application id, which is the account the upload is charged to.
+    ///
+    /// Anonymous as far as Imgur is concerned, and still somebody's
+    /// registration, so it is sealed rather than left readable in the file.
+    pub imgur_client_id: String,
+    /// Where a custom uploader posts, as a whole URL.
+    pub custom_url: String,
+    /// The form field the picture is sent as. ShareX calls this the file form
+    /// name, and every service names it something different.
+    pub custom_field: String,
+    /// A dotted path to the link inside the JSON that comes back.
+    ///
+    /// `data.link` reads `{"data":{"link":"..."}}`. Empty means the whole
+    /// response body is the link, which is what the simplest services answer
+    /// with.
+    pub custom_json_path: String,
 }
 
 /// One key standing in for four modifiers.
@@ -947,17 +994,27 @@ pub struct Screenshot {
     /// Somebody writing the second half of a walkthrough starts at seven, and
     /// the alternative is placing six badges and deleting them.
     pub step_from: u32,
+    /// Where a picture goes when somebody asks for a link to it.
+    #[serde(default)]
+    pub upload: Upload,
 }
 
 impl Default for Screenshot {
     fn default() -> Self {
         Self {
-            after: AfterCapture::Copy,
+            // The editor, because the clipboard gets the picture either way
+            // and the editor is the only route to the marks. Somebody who
+            // never draws presses Escape; somebody who does would otherwise
+            // have to go and find the picture again.
+            after: AfterCapture::Edit,
             click_a_window: true,
             tool: "box".to_string(),
             colour: "#ff3b30".to_string(),
             weight: 4,
             step_from: 1,
+            // Nothing named, which is off. Sill does not choose a service to
+            // send somebody's screen to on their behalf.
+            upload: Upload::default(),
         }
     }
 }
@@ -1444,6 +1501,50 @@ mod tests {
         assert!(
             !parsed.clipboard.encrypt_images,
             "and a promise about encryption is never made by default"
+        );
+    }
+
+    /// A screenshot opens the editor unless the file says otherwise.
+    ///
+    /// This default moved, from copying quietly to opening the editor, and a
+    /// default that moves is only safe if it reaches the people who never chose
+    /// and nobody else. Somebody who set this to copying set it because they
+    /// wanted copying, and a release that silently starts opening a window on
+    /// them is the version of this change that is a bug.
+    ///
+    /// **Three separate lines decide this and they are easy to mistake for
+    /// one.** A machine with no file reads `impl Default for Screenshot`. A
+    /// file whose `screenshot` section exists but does not mention this field
+    /// reads `AfterCapture::default()`, because the field carries its own
+    /// `#[serde(default)]` and a field-level one wins over the container's.
+    /// A file that states a value reads that. `what_an_unknown_value_falls_back
+    /// _to_is_what_a_fresh_install_gets` pins the first two against each other;
+    /// this exercises all three, so a change to either default is caught here
+    /// by the assertion it actually breaks.
+    #[test]
+    fn the_editor_opens_after_a_screenshot_unless_the_file_says_otherwise() {
+        assert_eq!(
+            Preferences::default().screenshot.after,
+            AfterCapture::Edit,
+            "a machine with no preferences file at all is the fresh install, and \
+             it reads the struct's own `Default`"
+        );
+
+        let never_chose: Preferences =
+            serde_json::from_str(r#"{"screenshot":{"clickAWindow":true}}"#).expect("parses");
+        assert_eq!(
+            never_chose.screenshot.after,
+            AfterCapture::Edit,
+            "a section written before anybody touched this field reads the enum's \
+             `#[default]`, which is a different line"
+        );
+
+        let chose_copying: Preferences =
+            serde_json::from_str(r#"{"screenshot":{"after":"copy"}}"#).expect("parses");
+        assert_eq!(
+            chose_copying.screenshot.after,
+            AfterCapture::Copy,
+            "a default that moved has overridden somebody's stated choice"
         );
     }
 

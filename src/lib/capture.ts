@@ -98,9 +98,57 @@ export function finishMarkup(png: string): Promise<string> {
   return invoke<string>("finish_markup", { png });
 }
 
+/**
+ * Writes the marked-up picture to a file, and answers with where it went.
+ *
+ * `null` means the dialog was closed without choosing, which is somebody
+ * changing their mind rather than anything going wrong. The window stays open
+ * either way: saving is not the same act as finishing.
+ */
+export function saveMarkup(png: string): Promise<string | null> {
+  return invoke<string | null>("save_markup", { png });
+}
+
 /** Closes the markup window, keeping nothing. */
 export function cancelMarkup(): Promise<void> {
   return invoke("cancel_markup");
+}
+
+/**
+ * Sends the picture to the configured service and answers with the link.
+ *
+ * Rejects when no service is named, which is every install until somebody
+ * names one. This is the only call in Sill that sends a picture of the screen
+ * anywhere, so it is never made on the application's own initiative.
+ */
+export function uploadMarkup(png: string): Promise<string> {
+  return invoke<string>("upload_markup", { png });
+}
+
+/** Leaves a picture floating over everything until it is closed. */
+export function pinShot(png: string): Promise<void> {
+  return invoke("pin_shot", { png });
+}
+
+/** The picture the pin window should be showing, as a data URI. */
+export function pinImage(): Promise<string | null> {
+  return invoke<string | null>("pin_image");
+}
+
+/**
+ * Scales the pin, and answers with the scale that was actually applied.
+ *
+ * Answered rather than assumed. Rust bounds it, so a page that kept its own
+ * number would run away past a bound that quietly refused it and the next
+ * step would appear to do nothing.
+ */
+export function scalePin(scale: number): Promise<number> {
+  return invoke<number>("scale_pin", { scale });
+}
+
+/** Takes the pin off the screen. */
+export function closePin(): Promise<void> {
+  return invoke("close_pin");
 }
 
 /**

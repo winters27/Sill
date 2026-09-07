@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "pin",
+  "description": "The one thing a pinned picture does that Rust cannot do for it: move when somebody drags it. Its size, its position on opening and its closing are all Rust's, so this window is granted no way to size, place, show or close itself. A pin is a picture of somebody's screen left on top of everything, which makes it the window with the least business being able to move itself somewhere it cannot be seen.",
+  "windows": ["pin"],
+  "permissions": ["core:window:allow-start-dragging"]
+}

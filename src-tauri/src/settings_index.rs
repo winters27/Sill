@@ -688,8 +688,8 @@ pub const SETTINGS: &[Setting] = &[
     s(
         "screenshot",
         "Screenshots",
-        "After taking one",
-        "screenshot capture editor markup open copy",
+        "Open the editor after taking one",
+        "screenshot capture editor markup open copy automatically after annotate draw edit",
     ),
     s(
         "screenshot",
@@ -720,6 +720,36 @@ pub const SETTINGS: &[Setting] = &[
         "Screenshots",
         "Stroke width",
         "screenshot editor markup default weight size",
+    ),
+    s(
+        "screenshot",
+        "Screenshots",
+        "Upload to",
+        "screenshot share upload link imgur host publish url service",
+    ),
+    s(
+        "screenshot",
+        "Screenshots",
+        "Imgur client ID",
+        "screenshot share upload imgur client id key account",
+    ),
+    s(
+        "screenshot",
+        "Screenshots",
+        "Upload address",
+        "screenshot share upload custom url address endpoint sharex",
+    ),
+    s(
+        "screenshot",
+        "Screenshots",
+        "Form field",
+        "screenshot share upload custom field name multipart sharex",
+    ),
+    s(
+        "screenshot",
+        "Screenshots",
+        "Where the link is",
+        "screenshot share upload custom json path response link sharex",
     ),
     // ------------------------------------------------- sources, the web
     s(

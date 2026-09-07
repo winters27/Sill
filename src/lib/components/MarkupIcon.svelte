@@ -3,6 +3,7 @@
     | "select"
     | "box"
     | "arrow"
+    | "line"
     | "ellipse"
     | "pen"
     | "highlight"
@@ -10,8 +11,15 @@
     | "text"
     | "step"
     | "crop"
+    | "fill"
+    | "dropper"
+    | "palette"
     | "undo"
+    | "redo"
     | "clear"
+    | "pin"
+    | "share"
+    | "save"
     | "close"
     | "copy";
 </script>
@@ -55,6 +63,9 @@
   {:else if name === "arrow"}
     <path d="M5 19 19 5" />
     <path d="M11 5h8v8" />
+  {:else if name === "line"}
+    <!-- The arrow's diagonal without its head, so the pair reads as a pair. -->
+    <path d="M5 19 19 5" />
   {:else if name === "ellipse"}
     <ellipse cx="12" cy="12" rx="8" ry="6" />
   {:else if name === "pen"}
@@ -79,13 +90,50 @@
     <!-- The two overlapping rules every crop tool is drawn as. -->
     <path d="M7 3v14h14" />
     <path d="M3 7h14v14" />
+  {:else if name === "fill"}
+    <!-- The box mark again, half of it solid, so the pair reads as one tool
+         in two states rather than as two unrelated drawings. -->
+    <rect x="4" y="6" width="16" height="12" rx="1.5" />
+    <path d="M4 12h16v4.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5Z" fill="currentColor" />
+  {:else if name === "dropper"}
+    <!-- The pipette every editor draws this as, nib pointing at the picture. -->
+    <path d="M15.5 4.5a2.5 2.5 0 0 1 4 3L12 15l-3 1 1-3Z" />
+    <path d="M4 20h5" />
+  {:else if name === "palette"}
+    <!-- The six swatches, standing for the ones this reaches past. -->
+    <circle cx="12" cy="12" r="8" />
+    <circle cx="12" cy="7.5" r="1.3" fill="currentColor" stroke="none" />
+    <circle cx="16" cy="12" r="1.3" fill="currentColor" stroke="none" />
+    <circle cx="8" cy="12" r="1.3" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="16.5" r="1.3" fill="currentColor" stroke="none" />
   {:else if name === "undo"}
     <path d="M4 10h10a5 5 0 0 1 0 10h-4" />
     <path d="M8 6 4 10l4 4" />
+  {:else if name === "redo"}
+    <!-- Undo's mirror, deliberately: the two are read as a pair and a redo
+         drawn differently is a redo somebody has to stop and identify. -->
+    <path d="M20 10H10a5 5 0 0 0 0 10h4" />
+    <path d="m16 6 4 4-4 4" />
   {:else if name === "clear"}
     <path d="M5 7h14" />
     <path d="M9 7V5h6v2" />
     <path d="M7 7v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7" />
+  {:else if name === "share"}
+    <!-- Up and out of a tray: save's arrow reversed, because this is the same
+         act pointed at somewhere that is not the disk. -->
+    <path d="M12 16V6" />
+    <path d="m8 10 4-4 4 4" />
+    <path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3" />
+  {:else if name === "pin"}
+    <!-- A drawing pin seen from the side, pushed into the picture. -->
+    <path d="M9 4h6l-1 6 3 3H7l3-3Z" />
+    <path d="M12 13v7" />
+  {:else if name === "save"}
+    <!-- Down into a tray, rather than a floppy disk: the arrow says where the
+         picture is going to somebody who has never owned one. -->
+    <path d="M12 4v10" />
+    <path d="m8 10 4 4 4-4" />
+    <path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3" />
   {:else if name === "close"}
     <path d="M7 7 17 17" />
     <path d="M17 7 7 17" />

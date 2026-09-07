@@ -37,7 +37,9 @@
     COLOURS,
     croppedTo,
     fitted,
+    CAN_FILL,
     HIDE_BLOCK,
+    TOOL_KEYS,
     roomFor,
     moved,
     nextNumber,
@@ -46,9 +48,17 @@
     worthKeeping,
     type Point,
     type Shape,
+    type Step,
     type Tool,
   } from "$lib/markup";
-  import { cancelMarkup, finishMarkup, markupImage } from "$lib/capture";
+  import {
+    cancelMarkup,
+    finishMarkup,
+    markupImage,
+    pinShot,
+    saveMarkup,
+    uploadMarkup,
+  } from "$lib/capture";
   import { applyAppearance, getPreferences } from "$lib/settings";
   import { hint } from "$lib/hint";
 
@@ -56,6 +66,14 @@
   let canvas = $state<HTMLCanvasElement | null>(null);
   let stage = $state<HTMLDivElement | null>(null);
   let shapes = $state<Shape[]>([]);
+  /**
+   * What undo has taken back, newest last, for redo to put in front again.
+   *
+   * Emptied by anything new, which is what every editor does: once a different
+   * mark exists, the marks that were undone no longer describe this picture and
+   * putting one back would land it after work it used to precede.
+   */
+  let undone = $state<Step[]>([]);
   let drawing = $state<Shape | null>(null);
   /** Which shape is picked up, or -1. */
   let chosen = $state(-1);
@@ -65,6 +83,20 @@
   let tool = $state<Tool | "select">("box");
   let colour = $state(COLOURS[0].value);
   let weight = $state(4);
+  /** Whether the next box or ellipse is solid rather than an outline. */
+  let fill = $state(false);
+  /** Whether the next click reads a colour out of the picture. */
+  let dropping = $state(false);
+  /** Whether an upload is in flight, so a second click cannot start another. */
+  let uploading = $state(false);
+  /**
+   * A colour chosen from the picker, kept beside the six offered.
+   *
+   * One slot rather than a growing list. Somebody working on one screenshot
+   * wants the colour they just picked, and a strip that grows every time it is
+   * used turns the quietest row in the window into the busiest.
+   */
+  let spare = $state<string | null>(null);
   let status = $state("");
   let typing = $state<{ at: Point; value: string } | null>(null);
   let typingField = $state<HTMLInputElement | null>(null);
@@ -88,8 +120,9 @@
   const TOOLS: { id: Tool | "select"; icon: MarkIcon; hint: string }[] = [
     { id: "select", icon: "select", hint: "Pick a mark up to move or delete" },
     { id: "box", icon: "box", hint: "Draw a rectangle" },
-    { id: "arrow", icon: "arrow", hint: "Point at something" },
     { id: "ellipse", icon: "ellipse", hint: "Draw an ellipse" },
+    { id: "line", icon: "line", hint: "Draw a straight line" },
+    { id: "arrow", icon: "arrow", hint: "Point at something" },
     { id: "pen", icon: "pen", hint: "Draw freehand" },
     { id: "highlight", icon: "highlight", hint: "Wash over it in colour" },
     { id: "hide", icon: "hide", hint: "Cover it up, permanently" },
@@ -97,6 +130,16 @@
     { id: "step", icon: "step", hint: "Drop a numbered badge" },
     { id: "crop", icon: "crop", hint: "Trim the picture" },
   ];
+
+  /**
+   * The key that reaches a tool, for its tooltip.
+   *
+   * Read off `TOOL_KEYS` rather than written beside each hint, so the tooltip
+   * and the key that actually works cannot say different things.
+   */
+  function keyFor(id: Tool | "select"): string | undefined {
+    return Object.keys(TOOL_KEYS).find((key) => TOOL_KEYS[key] === id)?.toUpperCase();
+  }
 
   $effect(() => {
     if (typing && typingField) typingField.focus();
@@ -183,6 +226,39 @@
     );
   }
 
+  /**
+   * The colour of one pixel of the picture, as it was captured.
+   *
+   * Read from a canvas holding nothing but the picture, not from the one on
+   * screen. The visible canvas has every mark composited onto it, so a dropper
+   * reading that one would pick up the last red box somebody drew rather than
+   * the thing underneath it, which is never what was meant.
+   *
+   * Drawn on demand and let go afterwards: a second full-size copy of a
+   * whole-screen capture is tens of megabytes, and this is used a few times a
+   * session at most.
+   */
+  function pixelAt(point: Point): string | null {
+    if (!picture) return null;
+
+    const x = Math.floor(point.x);
+    const y = Math.floor(point.y);
+    if (x < 0 || y < 0 || x >= picture.naturalWidth || y >= picture.naturalHeight) return null;
+
+    // One pixel wide, so nothing is copied but the pixel being asked about.
+    const sample = document.createElement("canvas");
+    sample.width = 1;
+    sample.height = 1;
+
+    const pen = sample.getContext("2d", { willReadFrequently: false });
+    if (!pen) return null;
+
+    pen.drawImage(picture, x, y, 1, 1, 0, 0, 1, 1);
+    const [r, g, b] = pen.getImageData(0, 0, 1, 1).data;
+
+    return `#${[r, g, b].map((one) => one.toString(16).padStart(2, "0")).join("")}`;
+  }
+
   function resize() {
     if (!picture || !stage) return;
 
@@ -223,6 +299,16 @@
     const point = at(event);
     canvas?.setPointerCapture(event.pointerId);
 
+    // Before every tool, and it disarms itself. Picking a colour is one act,
+    // not a mode: a dropper left armed turns the next mark somebody meant to
+    // draw into another colour change.
+    if (dropping) {
+      const found = pixelAt(point);
+      dropping = false;
+      if (found) restyle({ colour: found });
+      return;
+    }
+
     if (tool === "select") {
       // The slack is in the picture's pixels, so picking something up is as
       // easy on a shrunk-down capture as on a full-size one.
@@ -249,13 +335,22 @@
           number: nextNumber(shapes, stepFrom),
         },
       ];
+      undone = [];
       chosen = shapes.length - 1;
       paint();
       return;
     }
 
     chosen = -1;
-    drawing = { tool, colour, weight, points: [point, point] };
+    drawing = {
+      tool,
+      colour,
+      weight,
+      points: [point, point],
+      // Carried only where it means something, so a line or an arrow never
+      // arrives holding a flag nothing reads.
+      ...(CAN_FILL.includes(tool) ? { fill } : {}),
+    };
   }
 
   function move(event: PointerEvent) {
@@ -302,6 +397,7 @@
 
       if (area) {
         crop = area;
+        undone = [];
         // Back to drawing: leaving the crop tool selected invites a second
         // crop nobody wanted on the next click.
         tool = "box";
@@ -315,6 +411,7 @@
 
     if (worthKeeping(drawing)) {
       shapes = [...shapes, drawing];
+      undone = [];
       // Left picked up, so its colour and weight can be changed straight away.
       chosen = shapes.length - 1;
     }
@@ -340,7 +437,10 @@
       text: typing.value,
     };
 
-    if (worthKeeping(shape)) shapes = [...shapes, shape];
+    if (worthKeeping(shape)) {
+      shapes = [...shapes, shape];
+      undone = [];
+    }
     typing = null;
     paint();
   }
@@ -349,11 +449,40 @@
     // A crop is the most recent thing done when there is one, so it is what
     // undo takes back. Anything else would leave no way to lift it by keyboard.
     if (crop) {
+      undone = [...undone, { did: "crop", crop }];
       uncrop();
       return;
     }
 
+    const last = shapes[shapes.length - 1];
+    if (!last) return;
+
+    undone = [...undone, { did: "mark", shape: last }];
     shapes = renumbered(shapes.slice(0, -1), stepFrom);
+    chosen = -1;
+    paint();
+  }
+
+  /**
+   * Puts back the last thing undone.
+   *
+   * The stack holds crops and marks in one list because they interleave: undo a
+   * crop and then a box, and redo has to give back the box first. Two stacks
+   * could not say which came first.
+   */
+  function redo() {
+    const step = undone[undone.length - 1];
+    if (!step) return;
+
+    undone = undone.slice(0, -1);
+
+    if (step.did === "crop") {
+      crop = step.crop;
+      resize();
+      return;
+    }
+
+    shapes = renumbered([...shapes, step.shape], stepFrom);
     chosen = -1;
     paint();
   }
@@ -362,6 +491,10 @@
     shapes = [];
     chosen = -1;
     crop = null;
+    // Clearing is not a step that can be walked back one at a time, and a redo
+    // stack that survived it would put marks back into a picture somebody
+    // deliberately emptied.
+    undone = [];
     resize();
   }
 
@@ -378,13 +511,28 @@
   }
 
   /** Recolours or resizes whatever is picked up, or sets it for the next one. */
-  function restyle(next: { colour?: string; weight?: number }) {
-    if (next.colour !== undefined) colour = next.colour;
+  function restyle(next: { colour?: string; weight?: number; fill?: boolean }) {
+    if (next.colour !== undefined) {
+      colour = next.colour;
+      // A colour that is not one of the six gets the spare swatch, so what was
+      // just dropped or picked is still one click away for the next mark.
+      if (!COLOURS.some((swatch) => swatch.value === next.colour)) spare = next.colour;
+    }
     if (next.weight !== undefined) weight = next.weight;
+    if (next.fill !== undefined) fill = next.fill;
 
     if (chosen < 0 || !shapes[chosen]) return;
 
-    shapes[chosen] = { ...shapes[chosen], ...next };
+    // A fill on a shape that cannot take one would be a flag nothing reads and
+    // a difference the picture never shows, so it is dropped rather than set.
+    const picked = shapes[chosen];
+    if (next.fill !== undefined && !CAN_FILL.includes(picked.tool)) {
+      const { fill: _dropped, ...rest } = next;
+      shapes[chosen] = { ...picked, ...rest };
+    } else {
+      shapes[chosen] = { ...picked, ...next };
+    }
+
     shapes = shapes;
     paint();
   }
@@ -479,6 +627,9 @@
     switch (shape.tool) {
       case "box": {
         const box = boxOf(from, to);
+        // Filled and then stroked, so a filled box still has its own edge and
+        // reads at the same weight as an outlined one beside it.
+        if (shape.fill) pen.fillRect(box.x, box.y, box.w, box.h);
         pen.strokeRect(box.x, box.y, box.w, box.h);
         break;
       }
@@ -487,6 +638,15 @@
         const box = boxOf(from, to);
         pen.beginPath();
         pen.ellipse(box.x + box.w / 2, box.y + box.h / 2, box.w / 2, box.h / 2, 0, 0, Math.PI * 2);
+        if (shape.fill) pen.fill();
+        pen.stroke();
+        break;
+      }
+
+      case "line": {
+        pen.beginPath();
+        pen.moveTo(from.x, from.y);
+        pen.lineTo(to.x, to.y);
         pen.stroke();
         break;
       }
@@ -666,15 +826,83 @@
   async function done() {
     if (!canvas) return;
 
+    try {
+      status = await finishMarkup(exported());
+    } catch (err) {
+      status = `${err}`;
+    }
+  }
+
+  /**
+   * Writes the picture to a file, leaving the editor open.
+   *
+   * Deliberately not a second way of finishing. Somebody who saves a copy
+   * usually wants to keep working on it, and closing here would take the marks
+   * with it.
+   */
+  async function save() {
+    if (!canvas) return;
+
+    try {
+      const path = await saveMarkup(exported());
+      // Nothing chosen is somebody changing their mind, and a message about it
+      // would be the application arguing with them.
+      if (path) status = `Saved to ${path}`;
+    } catch (err) {
+      status = `${err}`;
+    }
+  }
+
+  /**
+   * Leaves the picture floating on top of everything, and closes the editor.
+   *
+   * Unlike saving, this does finish. A pin and the editor are two windows
+   * showing the same picture, and leaving both up is one window too many for
+   * something whose whole purpose is to sit beside another program.
+   */
+  async function pin() {
+    if (!canvas) return;
+
+    try {
+      await pinShot(exported());
+      await cancelMarkup();
+    } catch (err) {
+      status = `${err}`;
+    }
+  }
+
+  /**
+   * Sends the picture to whatever service was named, and copies the link.
+   *
+   * The editor stays open. An upload that failed and an upload that worked
+   * look the same once the window has gone, and this is the one action here
+   * that reaches a machine somebody else owns.
+   */
+  async function share() {
+    if (!canvas || uploading) return;
+
+    uploading = true;
+    status = "Uploading";
+
+    try {
+      status = `Copied ${await uploadMarkup(exported())}`;
+    } catch (err) {
+      // Said in full. The refusals name the settings row that fixes them, and
+      // truncating that would leave somebody with "no upload service" and
+      // nowhere to go.
+      status = `${err}`;
+    } finally {
+      uploading = false;
+    }
+  }
+
+  /** The picture as it should leave this window, marks and all. */
+  function exported(): string {
     // Nothing picked up, or the marching ants end up in the picture.
     chosen = -1;
     paint();
 
-    try {
-      status = await finishMarkup(canvas.toDataURL("image/png"));
-    } catch (err) {
-      status = `${err}`;
-    }
+    return canvas?.toDataURL("image/png") ?? "";
   }
 
   function key(event: KeyboardEvent) {
@@ -710,13 +938,42 @@
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
-      undo();
+      // Shift+Ctrl+Z is the other half of the same key on most keyboards, and
+      // is what somebody who has never looked for a redo key will try first.
+      if (event.shiftKey) redo();
+      else undo();
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      redo();
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      // Ahead of the tool keys, and prevented, or the browser's own save
+      // dialog opens over the one Rust is about to put up.
+      event.preventDefault();
+      void save();
       return;
     }
 
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
       void done();
+      return;
+    }
+
+    // A tool key last, and only on its own. A bare letter is only a tool while
+    // nothing is being typed, which the guard at the top of this function has
+    // already established, and a modifier means it was meant as a chord.
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+    const wanted = TOOL_KEYS[event.key.toLowerCase()];
+    if (wanted) {
+      event.preventDefault();
+      tool = wanted;
     }
   }
 
@@ -769,7 +1026,7 @@
         <button
           class="icon"
           class:on={tool === option.id}
-          use:hint={option.hint}
+          use:hint={keyFor(option.id) ? `${option.hint} (${keyFor(option.id)})` : option.hint}
           aria-label={option.hint}
           aria-pressed={tool === option.id}
           onclick={() => (tool = option.id)}
@@ -782,12 +1039,21 @@
     <div class="group right">
       <button
         class="icon"
-        use:hint={"Undo the last mark"}
+        use:hint={"Undo the last mark (Ctrl Z)"}
         aria-label="Undo the last mark"
         onclick={undo}
-        disabled={shapes.length === 0}
+        disabled={shapes.length === 0 && !crop}
       >
         <MarkupIcon name="undo" />
+      </button>
+      <button
+        class="icon"
+        use:hint={"Put back what was undone (Ctrl Y)"}
+        aria-label="Put back what was undone"
+        onclick={redo}
+        disabled={undone.length === 0}
+      >
+        <MarkupIcon name="redo" />
       </button>
       {#if crop}
         <!-- Only while there is one, because there is nothing to undo
@@ -809,6 +1075,38 @@
         disabled={shapes.length === 0}
       >
         <MarkupIcon name="clear" />
+      </button>
+      <!--
+        Nine marks in a row read as one undifferentiated strip. The four to
+        the left change the picture; the four to the right decide where it
+        goes. A hairline is what this design system separates things with.
+      -->
+      <span class="split"></span>
+
+      <button
+        class="icon"
+        use:hint={"Upload it and copy the link"}
+        aria-label="Upload it and copy the link"
+        onclick={() => void share()}
+        disabled={uploading}
+      >
+        <MarkupIcon name="share" />
+      </button>
+      <button
+        class="icon"
+        use:hint={"Leave it floating on top of everything"}
+        aria-label="Leave it floating on top of everything"
+        onclick={() => void pin()}
+      >
+        <MarkupIcon name="pin" />
+      </button>
+      <button
+        class="icon"
+        use:hint={"Save it to a file (Ctrl S)"}
+        aria-label="Save it to a file"
+        onclick={() => void save()}
+      >
+        <MarkupIcon name="save" />
       </button>
       <button
         class="icon"
@@ -834,6 +1132,7 @@
           style:width="{shown.width}px"
           style:height="{shown.height}px"
           class:picking={tool === "select"}
+          class:dropping
           onpointerdown={down}
           onpointermove={move}
           onpointerup={up}
@@ -869,6 +1168,48 @@
           onclick={() => restyle({ colour: swatch.value })}
         ></button>
       {/each}
+
+      <!--
+        The seventh swatch is whatever was dropped or picked, and it only
+        appears once there is one. An empty slot sitting in the row from the
+        first frame is a control that looks broken until it is used.
+      -->
+      {#if spare}
+        <button
+          class="swatch"
+          class:on={colour === spare}
+          style:background={spare}
+          use:hint={spare}
+          aria-label="The colour taken out of the picture, {spare}"
+          aria-pressed={colour === spare}
+          onclick={() => restyle({ colour: spare as string })}
+        ></button>
+      {/if}
+
+      <button
+        class="icon"
+        class:on={dropping}
+        use:hint={"Take the next colour out of the picture"}
+        aria-label="Take the next colour out of the picture"
+        aria-pressed={dropping}
+        onclick={() => (dropping = !dropping)}
+      >
+        <MarkupIcon name="dropper" />
+      </button>
+
+      <!--
+        The browser's own picker, which is the one somebody already knows how
+        to use and the only one that reaches a colour Sill did not think of.
+      -->
+      <label class="custom" use:hint={"Any other colour"}>
+        <MarkupIcon name="palette" />
+        <input
+          type="color"
+          value={colour}
+          aria-label="Any other colour"
+          oninput={(e) => restyle({ colour: e.currentTarget.value })}
+        />
+      </label>
     </div>
 
     <label class="weight">
@@ -883,6 +1224,24 @@
       />
       <span class="number">{weight}</span>
     </label>
+
+    <!--
+      Only while it means something. A fill switch beside the arrow tool is a
+      control that does nothing, and one that does nothing here reads as one
+      that is broken rather than as one that does not apply.
+    -->
+    {#if CAN_FILL.includes(tool as Tool) || (chosen >= 0 && CAN_FILL.includes(shapes[chosen].tool))}
+      <button
+        class="icon"
+        class:on={fill}
+        use:hint={"Fill the shape instead of outlining it"}
+        aria-label="Fill the shape instead of outlining it"
+        aria-pressed={fill}
+        onclick={() => restyle({ fill: !fill })}
+      >
+        <MarkupIcon name="fill" />
+      </button>
+    {/if}
 
     <!--
       Keys are drawn as keys, using the same `.sill-key` cap the launcher and
@@ -900,6 +1259,8 @@
         Drag the part to keep
       {:else if tool === "step"}
         Click to drop badge {nextNumber(shapes, stepFrom)}
+      {:else if undone.length > 0}
+        <span class="sill-key">Ctrl</span><span class="sill-key">Y</span> puts it back
       {:else}
         <span class="sill-key">Ctrl</span><span class="sill-key">Z</span> undoes,
         <span class="sill-key">Ctrl</span><span class="sill-key">↵</span> copies
@@ -949,6 +1310,13 @@
 
   .right {
     margin-left: auto;
+  }
+
+  .split {
+    width: 1px;
+    height: var(--control-height);
+    margin: 0 var(--space-1);
+    background: var(--hairline);
   }
 
   .icon {
@@ -1020,6 +1388,44 @@
   }
 
   canvas.picking {
+    cursor: default;
+  }
+
+  /* Last, so it wins over `.picking`: the dropper is armed over every tool. */
+  canvas.dropping {
+    cursor: copy;
+  }
+
+  /*
+    The browser's colour input is a button in every engine and cannot be
+    restyled into one, so the swatch is the label around it and the input is
+    stretched over it invisibly. Clicking anywhere on the mark opens the
+    picker, which is what the label is for.
+  */
+  .custom {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: var(--control-height);
+    height: var(--control-height);
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    cursor: default;
+  }
+
+  .custom:hover {
+    color: var(--text-1);
+    background: var(--fill-1);
+  }
+
+  .custom input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    opacity: 0;
     cursor: default;
   }
 

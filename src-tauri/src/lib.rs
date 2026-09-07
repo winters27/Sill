@@ -102,6 +102,7 @@ pub mod timing;
 pub mod tts;
 pub mod uia;
 pub mod update;
+pub mod upload;
 pub mod utilities;
 pub mod weather;
 pub mod webchrome;
@@ -509,6 +510,17 @@ fn register_capture_shortcut(app: &AppHandle, accelerator: &str, whole_screen: b
                 if let Err(reason) = done {
                     crate::say!("capture key: {reason}");
                 }
+
+                /*
+                 * After the picture, never before it, for the reason the summon
+                 * key gives at the same call.
+                 *
+                 * This registration is the backstop. It only fires at all when
+                 * the hook did not take the key first, and the hook taking
+                 * every key is the whole design, so arriving here is itself the
+                 * evidence that something is wrong with the hook.
+                 */
+                hooks::check(&app, hooks::Cause::Typed);
             });
         });
 
@@ -1825,6 +1837,7 @@ pub fn run() {
         // to Claude Code, which on most days is never.
         .manage(ai::mcp::link::Link::new())
         .manage(commands::system::Marking::default())
+        .manage(commands::system::Pinning::default())
         .manage(commands::system::Choosing::default())
         .manage(sums::Sums::default())
         // Nothing is asked at rest: a lock around a `None` until somebody
@@ -2307,7 +2320,13 @@ pub fn run() {
             commands::system::open_markup,
             commands::system::markup_image,
             commands::system::finish_markup,
+            commands::system::save_markup,
+            commands::system::upload_markup,
             commands::system::cancel_markup,
+            commands::system::pin_shot,
+            commands::system::pin_image,
+            commands::system::scale_pin,
+            commands::system::close_pin,
             commands::search::search_windows,
             commands::search::system_states,
             commands::search::summon_painted,

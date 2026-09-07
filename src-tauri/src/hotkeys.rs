@@ -104,6 +104,51 @@ pub fn hit<'a>(hotkeys: &'a [Hotkey], vk: u32, held: Held) -> Option<&'a Hotkey>
     })
 }
 
+/// Whether a key is one somebody holds down while pressing another.
+///
+/// Both the left and the right of each pair, plus the two that stand for
+/// either. A chord is recorded against the unsided code, so the sided ones
+/// only ever appear as something held.
+pub fn is_modifier(vk: u32) -> bool {
+    matches!(
+        vk,
+        // Shift, Ctrl, Alt, either side.
+        0x10 | 0x11 | 0x12
+        // The two Windows keys.
+        | 0x5B | 0x5C
+        // Left and right Shift, Ctrl and Alt named separately.
+        | 0xA0..=0xA5
+    )
+}
+
+/// A bound key arrived while the hook still believed it was held down.
+///
+/// Said out loud because the branch that reports this swallows the key and
+/// dispatches nothing, so from the outside it is a key that has stopped
+/// working: the program underneath does not see it either.
+///
+/// On a thread of its own for the same reason `dispatch` uses one. This is
+/// called from inside a low-level hook callback.
+pub fn note_still_held(vk: u32) {
+    std::thread::spawn(move || crate::say!("hotkey vk {vk:#04x} swallowed, the hook still holds it"));
+}
+
+/// A bound key arrived with modifiers down, and no chord matched them.
+///
+/// The key falls through to whatever is in front, which is correct, and used
+/// to happen without a word. A modifier Windows still believes is down is one
+/// of the few ways a chord that is set correctly never fires, and the only way
+/// to tell is to print what was read.
+///
+/// **The caller decides when this is worth saying, and only calls it when
+/// something was held.** Chords are matched on the key first, so with
+/// `Ctrl+Alt+W` bound the calling branch is reached by every plain `w` typed
+/// anywhere on the machine. That is not the failure, and a thread spawned per
+/// keystroke to say so would be a real cost for no information.
+pub fn note_no_chord(vk: u32, held: Held) {
+    std::thread::spawn(move || crate::say!("hotkey vk {vk:#04x} seen, no chord matches {held:?}"));
+}
+
 /// Runs what a chord does, off the hook thread.
 ///
 /// A low-level hook callback is something Windows expects back promptly, so
@@ -415,5 +460,45 @@ mod tests {
         ));
         assert!(hit(&hotkeys, b'K' as u32, held(true, true)).is_none(), "Ctrl+Shift+K is not Ctrl+K");
         assert!(hit(&hotkeys, b'J' as u32, held(true, false)).is_none());
+    }
+
+    /// Every key somebody holds while pressing another is named as one.
+    ///
+    /// The hook clears its held-key latch when a key that is not a modifier
+    /// goes down, so a modifier this misses would clear the latch mid-chord
+    /// and let an auto-repeating hotkey fire twice. A key this wrongly claims
+    /// is a modifier can never clear a stuck latch, which is the failure the
+    /// latch clearing exists for.
+    #[test]
+    fn every_key_somebody_holds_is_named_as_one() {
+        for (vk, what) in [
+            (0x10, "Shift"),
+            (0x11, "Ctrl"),
+            (0x12, "Alt"),
+            (0x5B, "the left Windows key"),
+            (0x5C, "the right Windows key"),
+            (0xA0, "left Shift"),
+            (0xA1, "right Shift"),
+            (0xA2, "left Ctrl"),
+            (0xA3, "right Ctrl"),
+            (0xA4, "left Alt"),
+            (0xA5, "right Alt"),
+        ] {
+            assert!(is_modifier(vk), "{what} ({vk:#04x}) is held, not pressed");
+        }
+
+        for (vk, what) in [
+            (0x5D, "the Menu key"),
+            (0x2C, "Print Screen"),
+            (b'K' as u32, "a letter"),
+            (0x20, "Space"),
+            (0x1B, "Escape"),
+        ] {
+            assert!(
+                !is_modifier(vk),
+                "{what} ({vk:#04x}) is a key somebody binds, and one that can \
+                 never clear a stuck latch is a key that stays dead"
+            );
+        }
     }
 }

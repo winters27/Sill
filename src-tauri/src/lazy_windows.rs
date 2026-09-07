@@ -136,6 +136,30 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
             .build()
             .and_then(|window| window.set_ignore_cursor_events(true).map(|()| window)),
 
+        /*
+         * A picture left floating over everything else.
+         *
+         * On top and out of the taskbar, because it is a note somebody stuck
+         * to their screen rather than a program they switched to. Sized from
+         * Rust to the picture it holds, so the page never asks for a size and
+         * the window needs no permission to set one: the only thing it is
+         * granted is the drag, which cannot be done any other way.
+         *
+         * Opaque and shadowed, so it reads as a thing sitting on the desk
+         * rather than as part of whatever is behind it.
+         */
+        "pin" => builder("pin")
+            .title("Sill pin")
+            .inner_size(400.0, 300.0)
+            .resizable(false)
+            .transparent(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .shadow(true)
+            .maximizable(false)
+            .minimizable(false)
+            .build(),
+
         other => return Err(format!("{other} is not a window Sill builds on demand")),
     };
 
@@ -151,7 +175,7 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
 /// Public so a test can assert that every one of them is buildable and that
 /// none of them is still declared in the configuration, which is the mistake
 /// that would give a window a renderer again without anybody noticing.
-pub const DEFERRED: &[&str] = &["markup", "capture", "dictation", "note", "confetti"];
+pub const DEFERRED: &[&str] = &["markup", "capture", "dictation", "note", "confetti", "pin"];
 
 /**
 Puts one of these away, and lets its renderer go to sleep.

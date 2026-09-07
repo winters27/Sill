@@ -225,7 +225,7 @@ mod settings_reach_the_window {
             .get("screenshot")
             .unwrap_or_else(|| panic!("no screenshot key, only: {:?}", keys(&json)));
 
-        assert_eq!(section.get("after").and_then(|v| v.as_str()), Some("copy"));
+        assert_eq!(section.get("after").and_then(|v| v.as_str()), Some("edit"));
         assert_eq!(
             section.get("clickAWindow").and_then(|v| v.as_bool()),
             Some(true)

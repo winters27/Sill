@@ -406,6 +406,27 @@
   }
 
   /**
+   * What to say under a key Windows would not register, if it would not.
+   *
+   * Sill takes a global key on two layers: its own low-level keyboard hook
+   * first, and a registration with Windows behind that as a backstop. The
+   * registration is refused for a key another program already holds, and for a
+   * key the shortcut library cannot name at all, which is how `ContextMenu`
+   * comes to be carried by the hook alone with nothing said about it anywhere.
+   *
+   * That is not a dead key, so this reads as a fact rather than a warning. It
+   * is a key with one layer instead of two, and the difference only shows on
+   * the day the hook stops being called.
+   */
+  function backstopNote(chord: string): string | undefined {
+    if (chord.trim() === "" || !conflicts.includes(chord)) return undefined;
+    return (
+      "Windows would not take this key, so only Sill's own keyboard watcher carries it. " +
+      "It still works everywhere, but there is nothing behind it if that watcher stops."
+    );
+  }
+
+  /**
    * The panel a trouble is about, when it names one this window still has.
    *
    * Checked rather than trusted. The section is a string Rust chose beside the
@@ -1056,7 +1077,8 @@
           >
             <Row
               title="Summon hotkey"
-              description="Whatever application is in front. Escape while recording keeps the current key."
+              description={backstopNote(p.hotkey.summon) ??
+                "Whatever application is in front. Escape while recording keeps the current key."}
             >
               {#snippet control()}
                 <KeyRecorder
@@ -1073,7 +1095,8 @@
             </Row>
             <Row
               title="Window switcher hotkey"
-              description="Opens Sill straight onto the windows you have open, most recent first."
+              description={backstopNote(p.hotkey.switcher) ??
+                "Opens Sill straight onto the windows you have open, most recent first."}
             >
               {#snippet control()}
                 <KeyRecorder
@@ -1719,7 +1742,8 @@
           >
             <Row
               title="Screenshot hotkey"
-              description="Picks an area of the screen without opening Sill first. Drag an area, or click a window."
+              description={backstopNote(p.hotkey.capture) ??
+                "Picks an area of the screen without opening Sill first. Drag an area, or click a window."}
             >
               {#snippet control()}
                 <KeyRecorder
@@ -1741,7 +1765,8 @@
             </Row>
             <Row
               title="Whole screen hotkey"
-              description="Copies everything on every display at once, with nothing to pick."
+              description={backstopNote(p.hotkey.captureScreen) ??
+                "Copies everything on every display at once, with nothing to pick."}
             >
               {#snippet control()}
                 <KeyRecorder
@@ -1762,12 +1787,12 @@
               {/snippet}
             </Row>
             <Row
-              title="After taking one"
+              title="Open the editor after taking one"
               description="The editor draws boxes, arrows, highlights and blocks over anything you have hidden. It reaches the clipboard from there either way."
             >
               {#snippet control()}
                 <Segmented
-                  label="After taking one"
+                  label="Open the editor after taking one"
                   value={p.screenshot.after}
                   options={[
                     { value: "copy", label: "Copy it" },
@@ -1870,6 +1895,114 @@
                 />
               {/snippet}
             </Row>
+          </Section>
+
+          <Section
+            label="Sharing"
+            description="The editor can send a picture somewhere that answers with a link, and copy the link. Off until you name a service: this is the only thing Sill does that puts a picture of your screen on a machine that is not yours, and it never happens on its own."
+          >
+            <Row
+              title="Upload to"
+              description="No service is set up to begin with and no account ships with Sill, so the button says what is missing until this is filled in."
+            >
+              {#snippet control()}
+                <Select
+                  value={p.screenshot.upload.provider}
+                  options={[
+                    { value: "", label: "Nowhere" },
+                    { value: "imgur", label: "Imgur" },
+                    { value: "custom", label: "Your own" },
+                  ]}
+                  onchange={(next) => {
+                    if (!prefs) return;
+                    p.screenshot.upload.provider = next;
+                    void commit();
+                  }}
+                  ariaLabel="Upload to"
+                />
+              {/snippet}
+            </Row>
+
+            {#if p.screenshot.upload.provider === "imgur"}
+              <Row
+                title="Imgur client ID"
+                description="Registered at imgur.com/oauth2/addclient as an anonymous application. Sealed by Windows rather than left readable in the settings file."
+              >
+                {#snippet control()}
+                  <TextField
+                    value={p.screenshot.upload.imgurClientId}
+                    onchange={(next) => {
+                      if (!prefs) return;
+                      p.screenshot.upload.imgurClientId = next;
+                      void commit();
+                    }}
+                    placeholder="abc123def456789"
+                    ariaLabel="Imgur client ID"
+                    full
+                    secret
+                    mono
+                  />
+                {/snippet}
+              </Row>
+            {/if}
+
+            {#if p.screenshot.upload.provider === "custom"}
+              <Row
+                title="Upload address"
+                description="Where the picture is posted, as a whole address."
+              >
+                {#snippet control()}
+                  <TextField
+                    value={p.screenshot.upload.customUrl}
+                    onchange={(next) => {
+                      if (!prefs) return;
+                      p.screenshot.upload.customUrl = next;
+                      void commit();
+                    }}
+                    placeholder="https://example.com/upload"
+                    ariaLabel="Upload address"
+                    full
+                    mono
+                  />
+                {/snippet}
+              </Row>
+              <Row
+                title="Form field"
+                description="The name the picture is sent under. Most services call it file, which is what an empty box means."
+              >
+                {#snippet control()}
+                  <TextField
+                    value={p.screenshot.upload.customField}
+                    onchange={(next) => {
+                      if (!prefs) return;
+                      p.screenshot.upload.customField = next;
+                      void commit();
+                    }}
+                    placeholder="file"
+                    ariaLabel="Form field"
+                    mono
+                  />
+                {/snippet}
+              </Row>
+              <Row
+                title="Where the link is"
+                description="A dotted path into the answer, like data.link. Leave it empty when the whole answer is the link."
+              >
+                {#snippet control()}
+                  <TextField
+                    value={p.screenshot.upload.customJsonPath}
+                    onchange={(next) => {
+                      if (!prefs) return;
+                      p.screenshot.upload.customJsonPath = next;
+                      void commit();
+                    }}
+                    placeholder="data.link"
+                    ariaLabel="Where the link is"
+                    mono
+                  />
+                {/snippet}
+              </Row>
+            {/if}
           </Section>
           {:else if active === "scripts"}
           <Section

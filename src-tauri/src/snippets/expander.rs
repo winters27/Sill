@@ -787,24 +787,68 @@ mod windows_impl {
             return LRESULT(1);
         }
         if down {
+            let hotkeys = expander.inner.hotkeys.load();
+            let bound = hotkeys.iter().any(|one| one.chord.vk == vk);
+
             if holding == vk {
+                if bound {
+                    crate::hotkeys::note_still_held(vk);
+                }
                 return LRESULT(1);
             }
-            let hotkeys = expander.inner.hotkeys.load();
-            if hotkeys.iter().any(|one| one.chord.vk == vk) {
+
+            /*
+             * A latch whose key-up never reached this hook swallows that key
+             * for ever and dispatches nothing, which is indistinguishable from
+             * the key being dead: the program underneath never sees it either,
+             * so not even a context menu opens.
+             *
+             * Another ordinary key going down is proof the first one is not
+             * still held, and inside a hook it is the only evidence there is.
+             * Modifiers are excluded because they are pressed while a chord is
+             * held on purpose, and clearing on one would let an auto-repeating
+             * chord fire twice.
+             */
+            if holding != 0 && !crate::hotkeys::is_modifier(vk) {
+                expander.inner.hotkey_held.store(0, Ordering::Relaxed);
+            }
+
+            if bound {
                 let held = crate::hotkeys::held_now();
-                if let Some(hit) = crate::hotkeys::hit(&hotkeys, vk, held) {
-                    expander.inner.hotkey_held.store(vk, Ordering::Relaxed);
-                    // Swallowing Win+X leaves Windows a lone Win tap, which
-                    // opens the Start menu on release. A key that types
-                    // nothing, sent while Win is still down, makes it a chord.
-                    if hit.chord.win {
-                        crate::input::blank();
+                match crate::hotkeys::hit(&hotkeys, vk, held) {
+                    Some(hit) => {
+                        expander.inner.hotkey_held.store(vk, Ordering::Relaxed);
+                        // Swallowing Win+X leaves Windows a lone Win tap, which
+                        // opens the Start menu on release. A key that types
+                        // nothing, sent while Win is still down, makes it a chord.
+                        if hit.chord.win {
+                            crate::input::blank();
+                        }
+                        if let Some(app) = APP.get() {
+                            crate::hotkeys::dispatch(app, hit.target.clone());
+                        }
+                        return LRESULT(1);
                     }
-                    if let Some(app) = APP.get() {
-                        crate::hotkeys::dispatch(app, hit.target.clone());
+                    /*
+                     * Falls through to the program underneath, which is right,
+                     * and is said out loud only when something was held.
+                     *
+                     * The match above is on the key alone, so with `Ctrl+Alt+W`
+                     * bound this arm is reached by every plain `w` anybody
+                     * types anywhere. Reporting those is a line per keystroke
+                     * in the log and, worse, a thread spawned per keystroke on
+                     * the machine. They are also not the failure: a chord's own
+                     * key pressed with nothing down is somebody typing a letter.
+                     *
+                     * A chord that was attempted and did not fire had modifiers
+                     * down, and so does the failure this exists to name, where a
+                     * modifier Windows still believes is held stops a bare key
+                     * from ever matching.
+                     */
+                    None if held != crate::hotkeys::Held::default() => {
+                        crate::hotkeys::note_no_chord(vk, held);
                     }
-                    return LRESULT(1);
+                    None => {}
                 }
             }
         }

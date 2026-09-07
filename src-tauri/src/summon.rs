@@ -337,11 +337,48 @@ pub fn blocked_by(
 /// disagree about which failure they mean.
 const FOREGROUND_TROUBLE: &str = "summon-foreground";
 
+/// The same failure met while taking a picture rather than while summoning.
+///
+/// Its own name, because a screenshot key that could not take the keyboard must
+/// not have its report withdrawn by the next summon that could. They are two
+/// keys and they fail independently.
+const CAPTURE_FOREGROUND_TROUBLE: &str = "capture-foreground";
+
 /// Says out loud that the launcher is up but has not got the keyboard.
 #[cfg(windows)]
 fn report_focus(window: &WebviewWindow, took_focus: bool) {
     let app = window.app_handle();
 
+    match focus_message(took_focus, "the launcher") {
+        Some(message) => crate::status::report(app, FOREGROUND_TROUBLE, message, None),
+        None => crate::status::resolved(app, FOREGROUND_TROUBLE),
+    }
+}
+
+/// The same, for the window a screenshot key puts up.
+///
+/// The screenshot key is blocked by exactly the rule the summon key is, and
+/// until now it was the one of the two that failed without a word.
+#[cfg(windows)]
+pub(crate) fn report_capture_focus(window: &WebviewWindow, took_focus: bool) {
+    let app = window.app_handle();
+
+    match focus_message(took_focus, "the capture overlay") {
+        Some(message) => crate::status::report(app, CAPTURE_FOREGROUND_TROUBLE, message, None),
+        None => crate::status::resolved(app, CAPTURE_FOREGROUND_TROUBLE),
+    }
+}
+
+/// What to say about a window that is up without the keyboard, if anything.
+///
+/// The message and not the reporting, so each caller hands `status::report` its
+/// own named constant. A trouble id that arrives as a parameter cannot be
+/// checked against the place that withdraws it, and `verify:source` refuses one.
+///
+/// `what` names the window in the reader's terms rather than Sill's: the window
+/// label is an implementation detail and "capture" is not a noun anybody typed.
+#[cfg(windows)]
+fn focus_message(took_focus: bool, what: &str) -> Option<String> {
     // Cheap, and it is the whole happy path: nothing was wrong, so nothing is
     // said, and anything said last time stops being said.
     let Some(blocked) = blocked_by(took_focus, foreground_is_elevated, presenting) else {
@@ -350,26 +387,21 @@ fn report_focus(window: &WebviewWindow, took_focus: bool) {
         // report needs. It does not belong on the surface, which is for things
         // the reader can act on.
         if !took_focus {
-            crate::say!("the launcher did not get the foreground, and nothing says why");
+            crate::say!("{what} did not get the foreground, and nothing says why");
         }
 
-        crate::status::resolved(app, FOREGROUND_TROUBLE);
-        return;
+        return None;
     };
 
-    let message = match blocked {
-        Blocked::Elevated => {
-            "The window in front is running as administrator, so Windows will not let Sill \
-             take the keyboard from it. Sill has to be started as administrator too to work \
-             over that program."
-        }
+    Some(match blocked {
+        Blocked::Elevated => "The window in front is running as administrator, so Windows will \
+                              not let Sill take the keyboard from it. Sill has to be started as \
+                              administrator too to work over that program."
+            .to_string(),
         Blocked::FullScreen => {
-            "A program is running full screen, so the launcher opened behind it and did not \
-             get the keyboard."
+            format!("A program is running full screen, so {what} opened behind it and did not get the keyboard.")
         }
-    };
-
-    crate::status::report(app, FOREGROUND_TROUBLE, message, None);
+    })
 }
 
 /// Whether the window in front belongs to a process this one may not touch.

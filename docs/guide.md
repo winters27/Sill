@@ -220,6 +220,22 @@ opens it in a small editor. The editor keeps what you draw as a list of
 shapes rather than painting them into the picture, so undo stays instant
 however much you have drawn.
 
+Boxes, ellipses, lines, arrows, freehand, a highlighter, numbered badges, text
+and a crop, plus a block-out that averages the pixels away rather than blurring
+them, because a blur is something somebody can partly undo. Each tool has a
+letter, shown on its tooltip. Shapes can be filled, marks can be picked back up
+and moved, and a colour can be taken out of the picture itself.
+
+A finished picture goes to the clipboard, to a file, or onto a pin: a small
+window that floats over everything else until you close it, for when you want
+to keep looking at one thing while working in another. Whether the editor opens
+by itself after every screenshot is a setting, and it does by default.
+
+It can also upload a picture and copy the link, and that one is off until you
+name a service. It is the only thing Sill does that puts a picture of your
+screen on a machine that is not yours, no account ships with it, and it never
+happens without you pressing the button.
+
 It also reads text off the screen using the one Windows already has, so
 nothing is downloaded and nothing is sent anywhere.
 

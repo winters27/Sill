@@ -8,10 +8,13 @@
  */
 import { describe, expect, test } from "vitest";
 import {
+  CAN_FILL,
+  TOOL_KEYS,
   arrowHead,
   boxOf,
   croppedTo,
   fitted,
+  nearSegment,
   nextNumber,
   renumbered,
   moved,
@@ -21,6 +24,7 @@ import {
   windowUnder,
   worthKeeping,
   type Shape,
+  type Tool,
 } from "$lib/markup";
 
 function shape(over: Partial<Shape>): Shape {
@@ -457,5 +461,122 @@ describe("cropping", () => {
       w: 800,
       h: 600,
     });
+  });
+});
+
+describe("how far a point is from a segment", () => {
+  test("is measured to the segment, not to the line through it", () => {
+    const from = { x: 0, y: 0 };
+    const to = { x: 10, y: 0 };
+
+    // Straight out from the middle: the two answers agree here.
+    expect(nearSegment(from, to, { x: 5, y: 3 })).toBeCloseTo(3);
+
+    // Far past the end. The infinite line runs under this point, so a
+    // line-distance would call it zero away and a click a screen's width
+    // beyond a short arrow would pick that arrow up.
+    expect(nearSegment(from, to, { x: 110, y: 0 })).toBeCloseTo(100);
+  });
+
+  test("a segment of no length is the point it is", () => {
+    const at = { x: 7, y: 7 };
+
+    // The projection divides by the squared length, so this is the case that
+    // returns NaN if it is not handled, and NaN compares false against every
+    // threshold: the shape would silently become unpickable.
+    expect(nearSegment(at, at, { x: 10, y: 11 })).toBeCloseTo(5);
+  });
+});
+
+describe("picking up a line", () => {
+  test("is near the line, not anywhere in the box around it", () => {
+    const diagonal = shape({
+      tool: "line",
+      points: [
+        { x: 0, y: 0 },
+        { x: 400, y: 400 },
+      ],
+    });
+
+    expect(touches(diagonal, { x: 200, y: 202 }, 8)).toBe(true);
+
+    // Inside the bounding box and nowhere near the line. A box test would call
+    // this a hit, and on a full-screen diagonal that is most of the screen.
+    expect(touches(diagonal, { x: 380, y: 20 }, 8)).toBe(false);
+  });
+
+  test("and an arrow is picked up the same way", () => {
+    const arrow = shape({
+      tool: "arrow",
+      points: [
+        { x: 0, y: 0 },
+        { x: 400, y: 400 },
+      ],
+    });
+
+    expect(touches(arrow, { x: 380, y: 20 }, 8)).toBe(false);
+  });
+});
+
+describe("the keys that reach each tool", () => {
+  /**
+   * Named exhaustively on purpose.
+   *
+   * TypeScript requires every member of the union as a key here, so a tool
+   * added later fails to compile this file until somebody has decided what its
+   * key is. A list written out by hand would go stale in silence, which is the
+   * whole failure mode a keyboard shortcut has: it does nothing, and nothing
+   * says why.
+   */
+  const EVERY: Record<Tool | "select", true> = {
+    select: true,
+    box: true,
+    ellipse: true,
+    line: true,
+    arrow: true,
+    pen: true,
+    highlight: true,
+    hide: true,
+    text: true,
+    step: true,
+    crop: true,
+  };
+
+  test("cover every tool there is", () => {
+    const bound = new Set(Object.values(TOOL_KEYS));
+
+    for (const tool of Object.keys(EVERY)) {
+      expect(bound.has(tool as Tool | "select"), `${tool} has no key`).toBe(true);
+    }
+  });
+
+  test("and no two tools share one", () => {
+    const targets = Object.values(TOOL_KEYS);
+
+    // A clash is silent: the later entry wins and the earlier tool simply
+    // cannot be reached from the keyboard, with nothing on screen to say so.
+    expect(new Set(targets).size).toBe(targets.length);
+  });
+
+  test("and are single lowercase letters, because that is what is matched", () => {
+    for (const key of Object.keys(TOOL_KEYS)) {
+      expect(key, `${key} is not what event.key.toLowerCase() ever produces`).toMatch(/^[a-z]$/);
+    }
+  });
+});
+
+describe("filling a shape", () => {
+  test("is offered only where it changes the picture", () => {
+    // A fill on a line, an arrow or a pen stroke is a flag nothing draws.
+    expect(CAN_FILL).toEqual(["box", "ellipse"]);
+  });
+
+  test("and a mark saved before fills existed reads as an outline", () => {
+    const older = shape({ tool: "box" });
+
+    expect(older.fill).toBeUndefined();
+    // Falsy rather than false, which is what the drawing checks, so an old
+    // mark is drawn exactly as it was drawn.
+    expect(Boolean(older.fill)).toBe(false);
   });
 });

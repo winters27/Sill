@@ -151,9 +151,15 @@ pub(crate) async fn begin_capture(app: AppHandle) -> Result<(), String> {
     let _ = window.set_focus();
     #[cfg(windows)]
     if let Ok(handle) = window.hwnd() {
-        crate::summon::force_foreground(windows::Win32::Foundation::HWND(
+        let took = crate::summon::force_foreground(windows::Win32::Foundation::HWND(
             handle.0 as *mut core::ffi::c_void,
         ));
+
+        // The verdict used to be thrown away here, so a screenshot key blocked
+        // by an elevated window in front did nothing and said nothing, while
+        // the summon key in the same moment explained itself. Same rule, same
+        // report.
+        crate::summon::report_capture_focus(&window, took);
     }
 
     Ok(())
@@ -549,9 +555,11 @@ async fn after_capture(app: &AppHandle, shot: crate::capture::Shot) -> Result<()
 
             #[cfg(windows)]
             if let Ok(handle) = window.hwnd() {
-                crate::summon::force_foreground(windows::Win32::Foundation::HWND(
+                let took = crate::summon::force_foreground(windows::Win32::Foundation::HWND(
                     handle.0 as *mut core::ffi::c_void,
                 ));
+
+                crate::summon::report_capture_focus(&window, took);
             }
         }
     }
@@ -594,6 +602,175 @@ fn put_image_on_clipboard(app: &AppHandle, shot: crate::capture::Shot) -> Result
 /// replaces the first rather than queueing behind it.
 #[derive(Default)]
 pub(crate) struct Marking(pub std::sync::Mutex<Option<Vec<u8>>>);
+
+/// A pinned picture, and the size the window has to be to hold it.
+///
+/// The size is carried rather than worked out each time it is wanted. Scaling
+/// happens a step per notch of the wheel, and decoding a whole-screen PNG for
+/// its two dimensions is thirty megabytes allocated and thrown away per notch.
+pub(crate) struct Pinned {
+    pub png: Vec<u8>,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// The picture the pin window is showing, on the same terms as `Marking`.
+///
+/// Its own slot rather than a shared one. A pin outlives the editor that made
+/// it, so sharing would mean the next markup replaced a picture somebody had
+/// deliberately left on their screen.
+#[derive(Default)]
+pub(crate) struct Pinning(pub std::sync::Mutex<Option<Pinned>>);
+
+/// How small and how large a pinned picture may be scaled.
+///
+/// Bounded both ways because the scale arrives from a page. Below a quarter it
+/// is a smudge nobody can hit with a pointer to close it, and above twice it
+/// is a screenshot enlarged past its own pixels, which is only blurrier.
+const PIN_SCALE: std::ops::RangeInclusive<f64> = 0.25..=2.0;
+
+/// Leaves a picture floating over everything until it is closed.
+///
+/// Sized and placed here rather than in the page. The window then needs no
+/// permission to size itself, which is the whole of what `capabilities/pin.json`
+/// does not have to grant, and the arithmetic sits beside the picture's real
+/// dimensions rather than behind a round trip.
+#[tauri::command]
+pub(crate) async fn pin_shot(app: AppHandle, png: String) -> Result<(), String> {
+    let bytes = png_bytes(&png)?;
+    // The header only. It is read before anything is shown, so a picture that
+    // cannot be read fails here rather than as an empty window, and reading
+    // the header rather than the frame means the pixels are never decoded on
+    // this side at all: the window itself is the thing that draws them.
+    let (width, height) = png_size(&bytes)?;
+
+    {
+        let pending = app.state::<Pinning>();
+        let mut held = pending
+            .0
+            .lock()
+            .map_err(|_| "pin slot poisoned".to_string())?;
+        *held = Some(Pinned {
+            png: bytes,
+            width,
+            height,
+        });
+    }
+
+    let window = crate::lazy_windows::ensure(&app, "pin")?;
+    let _ = window.emit("sill://pin", ());
+
+    size_pin(&window, width, height, 1.0)?;
+
+    // Woken before it is shown, for the reason `begin_capture` gives at
+    // length: a renderer made invisible does not paint and does not take
+    // input, and a window shown over one is a rectangle nothing can close.
+    crate::sleep::wake(&window);
+    window
+        .show()
+        .map_err(|err| format!("could not show the pin: {err}"))?;
+
+    Ok(())
+}
+
+/// How big a PNG is, without decoding a pixel of it.
+///
+/// `read_info` stops at the header, which is the whole of what is wanted here.
+/// `bgra_from_png` would answer the same question and allocate the entire
+/// picture to do it.
+fn png_size(bytes: &[u8]) -> Result<(i32, i32), String> {
+    // Wrapped because the decoder seeks, and a byte slice on its own cannot.
+    let reader = png::Decoder::new(std::io::Cursor::new(bytes))
+        .read_info()
+        .map_err(|err| format!("that image could not be read: {err}"))?;
+
+    let info = reader.info();
+    Ok((info.width as i32, info.height as i32))
+}
+
+/// Makes the pin window the size of its picture, at a scale.
+///
+/// Signed dimensions because that is what the decoder answers with, and the
+/// conversion is where a negative or a zero would otherwise become an enormous
+/// unsigned number and ask Windows for a window the size of the address space.
+fn size_pin(
+    window: &tauri::WebviewWindow,
+    width: i32,
+    height: i32,
+    scale: f64,
+) -> Result<(), String> {
+    let scale = scale.clamp(*PIN_SCALE.start(), *PIN_SCALE.end());
+    let sized = |side: i32| ((side.max(1) as f64) * scale).round().max(1.0) as u32;
+
+    // Physical pixels, so a picture pins at one to one on the display it came
+    // from. Logical pixels would shrink it by the scale factor on a 150%
+    // screen, which is exactly the display somebody notices it on.
+    window
+        .set_size(tauri::PhysicalSize::new(sized(width), sized(height)))
+        .map_err(|err| format!("could not size the pin: {err}"))
+}
+
+/// The picture the pin window should be showing, as a data URI.
+#[tauri::command]
+pub(crate) async fn pin_image(app: AppHandle) -> Result<Option<String>, String> {
+    use base64::Engine;
+
+    let pending = app.state::<Pinning>();
+    let held = pending
+        .0
+        .lock()
+        .map_err(|_| "pin slot poisoned".to_string())?;
+
+    Ok(held.as_ref().map(|pinned| {
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&pinned.png)
+        )
+    }))
+}
+
+/// Scales the pinned picture, and the window with it.
+#[tauri::command]
+pub(crate) async fn scale_pin(app: AppHandle, scale: f64) -> Result<f64, String> {
+    // The two numbers, not the picture. This runs once per notch of the wheel.
+    let (width, height) = {
+        let pending = app.state::<Pinning>();
+        let held = pending
+            .0
+            .lock()
+            .map_err(|_| "pin slot poisoned".to_string())?;
+        held.as_ref()
+            .map(|pinned| (pinned.width, pinned.height))
+            .ok_or_else(|| "there is no pin".to_string())?
+    };
+
+    let window = app
+        .get_webview_window("pin")
+        .ok_or_else(|| "there is no pin window".to_string())?;
+
+    let clamped = scale.clamp(*PIN_SCALE.start(), *PIN_SCALE.end());
+    size_pin(&window, width, height, clamped)?;
+
+    // Answered rather than assumed, so the page draws at the scale that was
+    // actually applied instead of the one it asked for and was refused.
+    Ok(clamped)
+}
+
+/// Takes the pin off the screen and gives its picture back.
+#[tauri::command]
+pub(crate) async fn close_pin(app: AppHandle) -> Result<(), String> {
+    crate::lazy_windows::hide(&app, "pin");
+
+    // The same reason `forget_marking` exists: this is a picture of somebody's
+    // screen, and on this desk a whole-screen capture is a 3640x2241 PNG.
+    if let Some(pending) = app.try_state::<Pinning>() {
+        if let Ok(mut held) = pending.0.lock() {
+            *held = None;
+        }
+    }
+
+    Ok(())
+}
 
 /// The row number of the last picture copied.
 ///
@@ -676,19 +853,180 @@ pub(crate) async fn markup_image(app: AppHandle) -> Result<Option<String>, Strin
     }))
 }
 
-/// Takes the marked-up picture back, and puts it on the clipboard.
-#[tauri::command]
-pub(crate) async fn finish_markup(app: AppHandle, png: String) -> Result<String, String> {
+/// The bytes behind a `data:image/png;base64,...` URI.
+///
+/// One function, because both things the editor can do with a finished picture
+/// start here and a second copy would drift on the prefix.
+fn png_bytes(png: &str) -> Result<Vec<u8>, String> {
     use base64::Engine;
 
-    let bytes = png
-        .strip_prefix("data:image/png;base64,")
+    png.strip_prefix("data:image/png;base64,")
         .ok_or_else(|| "that is not a picture".to_string())
         .and_then(|body| {
             base64::engine::general_purpose::STANDARD
                 .decode(body)
                 .map_err(|err| format!("that picture could not be read: {err}"))
-        })?;
+        })
+}
+
+/// Writes the marked-up picture to a file somebody chooses.
+///
+/// **The dialog runs in Rust rather than in the window**, which is why nothing
+/// in `capabilities/` grants the markup window a save. A window that could
+/// choose where to write is a window that could be talked into writing
+/// somewhere. `export_preferences` is the same shape for the same reason, and
+/// `capabilities/file-picker.json` says so where somebody looking for the
+/// missing permission would find it.
+///
+/// The clipboard is not touched and the window stays open. Saving and copying
+/// are two intents rather than two names for one, and a save that closed the
+/// editor would cost the marks to anybody who wanted both.
+#[tauri::command]
+pub(crate) async fn save_markup(app: AppHandle, png: String) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    // Decoded before the dialog, so a picture that cannot be read says so
+    // rather than after somebody has chosen where to put it.
+    let bytes = png_bytes(&png)?;
+
+    let chosen = app
+        .dialog()
+        .file()
+        .set_title("Save screenshot")
+        // The stamp the diagnostics bundle already uses, rather than a second
+        // date format in the same application.
+        .set_file_name(format!("sill-{}.png", crate::bundle::filed()))
+        .add_filter("PNG picture", &["png"])
+        .blocking_save_file();
+
+    // Nothing chosen is not a failure. Somebody opened the dialog and changed
+    // their mind, which is an ordinary thing to do and needs no message.
+    let Some(target) = chosen else {
+        return Ok(None);
+    };
+
+    let path = target
+        .into_path()
+        .map_err(|err| format!("that location cannot be written to: {err}"))?;
+
+    std::fs::write(&path, bytes).map_err(|err| format!("could not write that file: {err}"))?;
+
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Sends the picture somewhere that answers with a link, and copies the link.
+///
+/// **The one thing in Sill that puts a picture of somebody's screen on a
+/// machine that is not theirs**, which is why three things have to be true
+/// before it runs: private mode is not on, a service has been named, and a
+/// person pressed the button. Nothing is configured out of the box and no
+/// credential is shipped, so on an install nobody has touched this refuses.
+///
+/// Private mode is asked the same way a capture asks. Refusing to photograph
+/// the screen while still being willing to publish a photograph of it would be
+/// a gap in the same promise.
+#[tauri::command]
+pub(crate) async fn upload_markup(app: AppHandle, png: String) -> Result<String, String> {
+    use crate::upload::Target;
+
+    crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
+
+    let settings = {
+        let prefs = app.state::<crate::state::PrefsState>();
+        let held = prefs.inner.lock().await;
+        held.screenshot.upload.clone()
+    };
+
+    let target = crate::upload::target(&settings).map_err(|why| why.reason().to_string())?;
+    let bytes = png_bytes(&png)?;
+
+    // Named after the moment rather than after the window, because this is
+    // what the service shows people and `blob` is not a name.
+    let filename = format!("sill-{}.png", crate::bundle::filed());
+
+    /*
+     * Bounded both ways, or a service that accepts the connection and never
+     * answers leaves the button disabled and the word "Uploading" on screen
+     * with no way out but closing the window.
+     *
+     * The overall bound is generous rather than tight: this is a whole-screen
+     * PNG, which is megabytes, and somebody on a slow link uploading a real
+     * picture must not be cut off at the same moment as somebody whose
+     * service is simply not there.
+     */
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|err| format!("could not prepare the upload: {err}"))?;
+
+    let (request, json_path) = match target {
+        Target::Imgur { client_id } => (
+            client
+                .post("https://api.imgur.com/3/image")
+                .header("Authorization", format!("Client-ID {client_id}"))
+                .multipart(reqwest::multipart::Form::new().part(
+                    "image",
+                    reqwest::multipart::Part::bytes(bytes)
+                        .file_name(filename)
+                        .mime_str("image/png")
+                        .map_err(|err| format!("could not describe the picture: {err}"))?,
+                )),
+            "data.link".to_string(),
+        ),
+
+        Target::Custom {
+            url,
+            field,
+            json_path,
+        } => (
+            client.post(url).multipart(
+                reqwest::multipart::Form::new().part(
+                    field,
+                    reqwest::multipart::Part::bytes(bytes)
+                        .file_name(filename)
+                        .mime_str("image/png")
+                        .map_err(|err| format!("could not describe the picture: {err}"))?,
+                ),
+            ),
+            json_path,
+        ),
+    };
+
+    let answer = request
+        .send()
+        .await
+        .map_err(|err| format!("the upload did not reach the service: {err}"))?;
+
+    // Read before the status is judged, because a service that refuses puts
+    // the reason in the body and the code alone names nothing.
+    let status = answer.status();
+    let body = answer
+        .text()
+        .await
+        .map_err(|err| format!("the service answered with something unreadable: {err}"))?;
+
+    if !status.is_success() {
+        return Err(format!("the service refused it: {status}"));
+    }
+
+    let link = crate::upload::link_in(&body, &json_path)?;
+
+    // The link is the whole point, so it goes where a link is used from.
+    {
+        use tauri_plugin_clipboard_manager::ClipboardExt;
+        app.clipboard()
+            .write_text(link.clone())
+            .map_err(|err| format!("could not copy the link: {err}"))?;
+    }
+
+    Ok(link)
+}
+
+/// Takes the marked-up picture back, and puts it on the clipboard.
+#[tauri::command]
+pub(crate) async fn finish_markup(app: AppHandle, png: String) -> Result<String, String> {
+    let bytes = png_bytes(&png)?;
 
     // Back through the same decode the recogniser uses, so the clipboard gets
     // real pixels rather than a file the plugin would have to parse.

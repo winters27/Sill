@@ -35,6 +35,7 @@ const ROUTES: &[(&str, &[&str])] = &[
     ("dictation", &["dictation/+page.svelte"]),
     ("markup", &["markup/+page.svelte"]),
     ("note", &["note/+page.svelte"]),
+    ("pin", &["pin/+page.svelte"]),
 ];
 
 /// A permission, and the thing in the frontend that needs it.

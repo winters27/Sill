@@ -2849,7 +2849,8 @@ mod sills_own_settings_are_findable {
             ("screenshot hotkey", "Screenshot hotkey"),
             ("badge", "Badges start at"),
             ("walkthrough", "Badges start at"),
-            ("markup", "After taking one"),
+            ("markup", "Open the editor after taking one"),
+            ("automatically", "Open the editor after taking one"),
         ] {
             let titles = found(query);
             assert!(
