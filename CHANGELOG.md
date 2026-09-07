@@ -55,7 +55,8 @@ and some keys Windows will not take at all: the Menu key is one, so it had one
 layer instead of two, and nothing said so. The setting now does. A key the
 watcher believed was still held could also be swallowed for a press with
 nothing happening at all, not even in the program underneath; that is fixed,
-and both dead ends write a line naming themselves. A screenshot blocked by a
+and both dead ends write a line naming themselves in Sill's own log file, on
+your machine. A screenshot blocked by a
 window running as administrator reports itself the way the summon key already
 did, instead of doing nothing quietly.
 
