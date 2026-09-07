@@ -1,0 +1,76 @@
+# What the workflow token can and cannot do to a release.
+#
+# Temporary. `tauri-action` began failing to create a release with
+# "Resource not accessible by integration" on a token the job log says holds
+# `Contents: write`, an hour after the same workflow and the same action
+# created one. This asks the API directly, so the answer is a status code
+# rather than a guess.
+name: token-probe
+
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: What this token is
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "--- rate limit resource, which names the token kind ---"
+          gh api rate_limit --jq '.resources.core' || true
+
+          echo "--- can it read releases ---"
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=1" --jq '.[0].tag_name' || true
+
+      - name: Creating a draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          code=$(curl -sS -o response.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases" \
+            -d '{"tag_name":"token-probe","name":"token probe","draft":true}')
+
+          echo "status: $code"
+          cat response.json
+          echo
+
+          if [ "$code" = "201" ]; then
+            id=$(node -p "require('./response.json').id")
+            echo "created $id, removing it"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+            echo "RESULT: the workflow token can create a release"
+          else
+            echo "RESULT: the workflow token cannot create a release ($code)"
+          fi
+
+      - name: Tagging, which is the other way contents:write is used
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          code=$(curl -sS -o ref.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/refs" \
+            -d "{\"ref\":\"refs/tags/token-probe\",\"sha\":\"$GITHUB_SHA\"}")
+
+          echo "status: $code"
+          cat ref.json
+          echo
+
+          if [ "$code" = "201" ]; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/token-probe"
+            echo "RESULT: the workflow token can write refs, so contents:write is real"
+          else
+            echo "RESULT: the workflow token cannot write refs either ($code)"
+          fi
