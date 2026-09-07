@@ -128,6 +128,38 @@ jobs:
 
           cat notes.md
 
+      # The release itself, made here rather than by the action further down.
+      #
+      # `tauri-action` creates one when it cannot find a draft for the tag, and
+      # that call started answering 403 "Resource not accessible by
+      # integration" on a token whose own job log reads `Contents: write`. The
+      # same POST from a step in this workflow answers 201, which is what the
+      # probe run was written to establish, so the permission is real and the
+      # action's route to it is what is not working. Three attempts at one tag
+      # failed there, after the whole build, with the installers already made.
+      #
+      # Making it here also puts the one call that can be refused among the
+      # cheap checks rather than an hour downstream of them, and leaves the
+      # action with only the upload, which is the half that has never failed.
+      - name: The draft this release fills
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+
+          # Drafts are included, which is the state this leaves it in, so a
+          # re-run of a build finds its own draft rather than making a second.
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "a release for $tag already exists"
+            exit 0
+          fi
+
+          gh release create "$tag" --draft             --title "Sill ${{ steps.version.outputs.version }}"             --notes-file notes.md
+          echo "drafted $tag"
+
       - run: npm ci
       - run: npm --prefix host ci
 
@@ -237,6 +269,9 @@ jobs:
           tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
           releaseName: ${{ github.event_name == 'push' && format('Sill {0}', steps.version.outputs.version) || '' }}
           releaseBody: ${{ steps.notes.outputs.body }}
+          # The draft above already exists, so this finds it and uploads. Kept
+          # true because it describes what the release is at this point, and
+          # the action reads it when deciding what to look for.
           releaseDraft: true
           prerelease: false
           # On as of P7-02. `latest.json` is what an installed Sill reads to
