@@ -539,6 +539,26 @@ impl ExtHost {
         self.sessions.lock().expect("sessions poisoned").len()
     }
 
+    /// Every session belonging to one extension.
+    ///
+    /// So an update can put that extension down before replacing the directory
+    /// it is running out of. Swapping underneath a live worker leaves it on the
+    /// old bundle with its assets gone, which is a command that keeps drawing
+    /// and stops working, and is worse than one that closed.
+    ///
+    /// Named by the extension's own name, which is what a session records,
+    /// rather than by store slug. The two are not the same string for every
+    /// extension and this is the side that has to be exact.
+    pub fn session_ids_of(&self, extension: &str) -> Vec<String> {
+        self.sessions
+            .lock()
+            .expect("sessions poisoned")
+            .iter()
+            .filter(|(_, session)| session.extension == extension)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
     /// Every session that is drawing something, so a dismissal can let it go.
     ///
     /// Views only, and that is the whole reason this exists next to

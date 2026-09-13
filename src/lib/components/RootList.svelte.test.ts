@@ -43,7 +43,11 @@ function row(id: string, title: string, mode = "app"): RankedCommand {
   } as RankedCommand;
 }
 
-function draw(commands: RankedCommand[], selected = 0) {
+function draw(
+  commands: RankedCommand[],
+  selected = 0,
+  working: { line: string; far: number | null } | null = null,
+) {
   const target = document.createElement("div");
   document.body.append(target);
 
@@ -55,6 +59,7 @@ function draw(commands: RankedCommand[], selected = 0) {
       onselect: () => {},
       onrun: () => {},
       live: {},
+      working,
     },
   });
 
@@ -62,6 +67,57 @@ function draw(commands: RankedCommand[], selected = 0) {
 }
 
 describe("drawing the result list", () => {
+  /**
+   * Pressing the row used to close the launcher, which is what a crash looks
+   * like. The work is Rust's and takes tens of seconds, so the row it was
+   * started from is where it reports.
+   */
+  it("draws a bar on the row that started an update", () => {
+    const target = draw(
+      [row("sill:extensions-behind", "Update 2 extensions", "extensions-behind")],
+      0,
+      { line: "Building run (1 of 4)", far: 0.5 },
+    );
+
+    const bar = target.querySelector('[role="progressbar"]');
+    expect(bar).not.toBeNull();
+    expect(bar?.getAttribute("aria-valuenow")).toBe("50");
+    expect(target.textContent).toContain("Building run (1 of 4)");
+  });
+
+  /**
+   * npm never says how much of itself is left and it is the longest stage.
+   * A bar stuck at zero for twenty seconds reads as broken, so it sweeps and
+   * reports no value rather than claiming one.
+   */
+  it("says nothing about how far when nothing knows", () => {
+    const target = draw(
+      [row("sill:extensions-behind", "Update 1 extension", "extensions-behind")],
+      0,
+      { line: "Dependencies: added 40 packages", far: null },
+    );
+
+    const bar = target.querySelector('[role="progressbar"]');
+    expect(bar?.hasAttribute("aria-valuenow")).toBe(false);
+    expect(target.querySelector(".far.unknown")).not.toBeNull();
+  });
+
+  /** No batch running, no bar. The row is a button again. */
+  it("draws no bar when nothing is being updated", () => {
+    const target = draw([
+      row("sill:extensions-behind", "Update 2 extensions", "extensions-behind"),
+    ]);
+
+    expect(target.querySelector('[role="progressbar"]')).toBeNull();
+  });
+
+  /** An ordinary row is untouched by a batch running elsewhere. */
+  it("puts no bar on a row that is not the update row", () => {
+    const target = draw([row("app:a", "Alpha")], 0, { line: "Fetching", far: 0.2 });
+
+    expect(target.querySelector('[role="progressbar"]')).toBeNull();
+  });
+
   it("draws a row for everything it was given", () => {
     const target = draw([row("app:a", "Alpha"), row("app:b", "Beta")]);
 

@@ -1794,6 +1794,82 @@ pub fn now_playing_record(now: &crate::media::NowPlaying) -> RankedCommand {
     }
 }
 
+/// The id of the row that says extensions are behind.
+///
+/// Named once, because the row is built here, placed in `search.rs` and run in
+/// `+page.svelte`, and the way a second spelling fails is silent: a row that
+/// matches nothing does nothing and says nothing about it.
+pub const EXTENSIONS_BEHIND: &str = "extensions-behind";
+
+/// The row at the top of the launcher when something installed is out of date.
+///
+/// **Not spliced, and not ranked.** `splice_suggestions` puts a row above the
+/// first weak match, which is the right placement for the emoji, the media row
+/// and the terminal profiles, because all of them answer a word somebody typed.
+/// This answers nothing anybody typed. On an empty query every row is classed
+/// `ExactTitle`, so there is no weak match to sit above and a spliced row lands
+/// at the **bottom** of the root list, which is where this one first appeared.
+///
+/// So it is put at the top of the root list, by the caller, and only there. A
+/// row that led while something was typed would take Enter from the thing
+/// somebody was reaching for, which is the argument the ranker already makes
+/// for why a pin only leads on an empty query.
+///
+/// `score` is not used, because nothing sorts this. It is set to the maximum
+/// anyway so that a later change which does sort it cannot quietly bury it.
+pub fn extensions_behind_record(count: usize, titles: &[String]) -> RankedCommand {
+    // Naming them is the difference between a row somebody trusts and a badge
+    // they have to go and investigate. Past three it stops being a list and
+    // starts being a paragraph in a row that has one line.
+    let named = match titles.len() {
+        0 => String::new(),
+        1..=3 => titles.join(", "),
+        _ => format!(
+            "{} and {} more",
+            titles[..2].join(", "),
+            titles.len() - 2
+        ),
+    };
+
+    RankedCommand {
+        class: MatchClass::ExactTitle,
+        command: CommandRecord {
+            id: builtin_id(EXTENSIONS_BEHIND),
+            extension: "sill".to_string(),
+            extension_title: "Extensions".to_string(),
+            command: EXTENSIONS_BEHIND.to_string(),
+            title: if count == 1 {
+                "Update 1 extension".to_string()
+            } else {
+                format!("Update {count} extensions")
+            },
+            subtitle: named,
+            description: String::new(),
+            // **Its own mode rather than `builtin`.** A `builtin` row is one
+            // the index carries, and `launch_command` looks those up; this one
+            // is built per search and is in no index, so borrowing that mode
+            // would be a row whose Enter answers "no such command". Every other
+            // row built this way has a mode of its own for the same reason, and
+            // `verify:source` holds the launcher to naming each of them.
+            mode: EXTENSIONS_BEHIND.to_string(),
+            entrypoint: EXTENSIONS_BEHIND.to_string(),
+            // Nothing types its way here. It is found by being at the top.
+            keywords: Vec::new(),
+            // None, so it wears the extensions panel's own mark. A row mark of
+            // its own would be a second drawing of the same subject, and
+            // `SearchRow` already falls back to the panel when there is no
+            // icon. This is the same thing the `store-updates` builtin does.
+            icon: None,
+            toggle: None,
+            panel: Some("extensions".to_string()),
+            preferences: serde_json::Value::Null,
+            manifest: None,
+        },
+        score: i64::MAX,
+        matched: Vec::new(),
+    }
+}
+
 /// One document out of a jump list, shaped as a row.
 ///
 /// **Deliberately an ordinary file row.** The mode is `file` or `folder`, the
@@ -3853,6 +3929,71 @@ pub fn is_hidden(command: &CommandRecord, hidden: &[String]) -> bool {
 /// Where the frecency file lives, given the app's data directory.
 pub fn frecency_path(data_dir: &Path) -> PathBuf {
     data_dir.join("frecency.json")
+}
+
+#[cfg(test)]
+mod behind_row {
+    use super::*;
+
+    /// One is one, not "1 extensions".
+    #[test]
+    fn one_extension_is_said_in_the_singular() {
+        let row = extensions_behind_record(1, &["Brew".to_string()]);
+        assert_eq!(row.command.title, "Update 1 extension");
+        assert_eq!(row.command.subtitle, "Brew");
+    }
+
+    /// A short list is named outright. A badge with a number is a thing
+    /// somebody has to go and investigate before they can decide.
+    #[test]
+    fn a_few_are_named_rather_than_counted() {
+        let row = extensions_behind_record(
+            3,
+            &["Brew".to_string(), "GitHub".to_string(), "Jira".to_string()],
+        );
+        assert_eq!(row.command.title, "Update 3 extensions");
+        assert_eq!(row.command.subtitle, "Brew, GitHub, Jira");
+    }
+
+    /// Past three the row has one line and the list does not fit on it.
+    #[test]
+    fn many_are_summarised_without_losing_the_count() {
+        let titles: Vec<String> = ["Brew", "GitHub", "Jira", "Linear", "Slack"]
+            .iter()
+            .map(|it| it.to_string())
+            .collect();
+
+        let row = extensions_behind_record(titles.len(), &titles);
+        assert_eq!(row.command.title, "Update 5 extensions");
+        assert_eq!(row.command.subtitle, "Brew, GitHub and 3 more");
+    }
+
+    /// The row is drawn by the extensions panel's own mark rather than art of
+    /// its own, so nothing has to be added to the icon set for it to appear.
+    #[test]
+    fn it_wears_the_panel_mark_rather_than_one_of_its_own() {
+        let row = extensions_behind_record(1, &["Brew".to_string()]);
+        assert_eq!(row.command.icon, None);
+        assert_eq!(row.command.panel.as_deref(), Some("extensions"));
+    }
+
+    /// The id is spelled in three files. This is the one that decides.
+    #[test]
+    fn the_id_is_the_builtin_spelling_of_the_shared_name() {
+        let row = extensions_behind_record(1, &["Brew".to_string()]);
+        assert_eq!(row.command.id, builtin_id(EXTENSIONS_BEHIND));
+    }
+
+    /// **Not `builtin`.** A `builtin` row is one the index carries and
+    /// `launch_command` can look up. This one is built per search and is in no
+    /// index, so borrowing that mode would be a row whose Enter answers "no
+    /// such command", which is the failure `verify:source` scans for.
+    #[test]
+    fn it_carries_a_mode_of_its_own_rather_than_borrowing_the_index_one() {
+        let row = extensions_behind_record(1, &["Brew".to_string()]);
+        assert_ne!(row.command.mode, "builtin");
+        assert_eq!(row.command.mode, EXTENSIONS_BEHIND);
+    }
 }
 
 #[cfg(test)]

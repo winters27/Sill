@@ -13,6 +13,7 @@
 pub mod ai;
 pub mod automation;
 pub mod diagnostics;
+pub mod extension_updates;
 pub mod extensions;
 pub mod launch;
 pub mod mcp;

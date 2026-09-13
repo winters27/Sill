@@ -877,6 +877,18 @@ pub const SETTINGS: &[Setting] = &[
         "GitHub token",
         "store rate limit api requests hour credential browse install",
     ),
+    s(
+        "extensions",
+        "Extensions",
+        "Check for extension updates",
+        "store outdated behind newer version revision notice summon interval",
+    ),
+    s(
+        "extensions",
+        "Extensions",
+        "Install extension updates automatically",
+        "store auto automatic update upgrade outdated behind unattended background",
+    ),
     // ------------------------------------------------------------ advanced
     s(
         "advanced",

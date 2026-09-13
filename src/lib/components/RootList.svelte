@@ -57,6 +57,18 @@
      * somebody in their first minute with Sill.
      */
     building?: boolean;
+    /**
+     * How an extension update that was started from the row is going.
+     *
+     * Null unless a batch is running. Its own prop rather than a `live`
+     * subtitle because there is a bar as well as a line, and because the row
+     * stops being pressable while it is set: pressing it again would start a
+     * second batch on top of the one already running.
+     *
+     * `far` is null while nothing has said how big the work is, which npm does
+     * for its whole stage, so the bar has to cope rather than sit at zero.
+     */
+    working?: { line: string; far: number | null } | null;
   }
 
   let {
@@ -69,6 +81,7 @@
     query = "",
     numeric = false,
     building = false,
+    working = null,
   }: Props = $props();
 
   /** What the list says with nothing in it, which depends on why. */
@@ -355,6 +368,11 @@
       // ships with Windows, and this is a thing you flip.
       case "system":
         return "System Control";
+      // Not "Command". This row is the only one in the list that is about the
+      // launcher needing something rather than about something you can launch,
+      // and the word on the right is where that gets said.
+      case "extensions-behind":
+        return "Update";
       // Text somebody captured, which is the only kind whose title is the
       // thing itself rather than a name for it.
       case "text":
@@ -560,6 +578,7 @@
         class="sill-row"
         class:answer={command.mode === "answer"}
         class:path={isPath(command)}
+        class:behind={command.mode === "extensions-behind"}
         class:selected={index === selected}
         role="option"
         aria-selected={index === selected}
@@ -641,13 +660,53 @@
               </span>
             {/if}
           </span>
-          {#if sourceOf(command)}
+          {#if command.mode === "extensions-behind" && working}
+            <!--
+              What the update is doing, under the row that started it.
+              Replaces the list of names, which is about to be out of date: the
+              question while it runs is what is happening now, not what was
+              behind a moment ago.
+            -->
+            <span class="extension">{working.line || "Updating"}</span>
+            <span
+              class="bar"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={working.far === null ? undefined : Math.round(working.far * 100)}
+              aria-label={working.line || "Updating extensions"}
+            >
+              <!--
+                An indeterminate bar while nothing has said how big the work
+                is, which is npm's whole stage. A bar sitting at zero for
+                twenty seconds reads as stuck; one that is moving reads as
+                working, which is the true thing to say.
+              -->
+              <span
+                class="far"
+                class:unknown={working.far === null}
+                style={working.far === null ? "" : `width: ${Math.round(working.far * 100)}%`}
+              ></span>
+            </span>
+          {:else if sourceOf(command)}
             <span class="extension">{sourceOf(command)}</span>
           {/if}
         </span>
 
         <span class="spacer"></span>
-        {#if command.toggle !== undefined}
+        {#if command.mode === "extensions-behind"}
+          <!--
+            A beacon, which is the fourth thing the accent is allowed to mean:
+            a state that is live. It is the one row here that is true right now
+            rather than a thing sitting in an index waiting to be launched, and
+            with nothing marking it, it read as another result.
+
+            A dot rather than a wash, a border or a glow. The row underneath is
+            still an ordinary row and the list is still a list.
+          -->
+          <span class="beacon" aria-hidden="true"></span>
+          <span class="kind">{kindOf(command)}</span>
+        {:else if command.toggle !== undefined}
           <!--
             A switch draws as a switch, in place of the category. The category
             on one of these says "System" every time, which the heading above
@@ -872,6 +931,94 @@
     color: var(--text-3);
     font-size: var(--text-meta);
     white-space: nowrap;
+  }
+
+  /*
+   * The one row that is a live state rather than a thing to launch.
+   *
+   * Accent because that is what rule 4 is for, and the same size and shape as
+   * the dot inside a switch so the two read as the same vocabulary. No glow
+   * and no tinted row behind it: the accent says which one, and a surface
+   * tinted to match is exactly what THE ONE RULE ABOUT COLOUR forbids.
+   */
+  .beacon {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    margin-right: var(--space-2);
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /*
+   * A hairline under it, so it reads as sitting above the list rather than
+   * inside it. One pixel, the same separator the rest of the interface uses,
+   * and only ever under this row: a second one anywhere would turn a list into
+   * a table.
+   */
+  .sill-row.behind {
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  /*
+   * How far an update has got, under the row that started it.
+   *
+   * The same two-pixel bar the store draws for an install, because it is the
+   * same work reported on the same event. Accent on the filled part for the
+   * same reason the beacon is accent: it is live state.
+   */
+  .bar {
+    display: block;
+    width: 8rem;
+    height: 2px;
+    margin-top: var(--space-1);
+    border-radius: var(--radius-sm);
+    background: var(--fill-2);
+    overflow: hidden;
+  }
+
+  .far {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    /* Files land several at a time, so the position arrives in jumps. */
+    transition: width var(--motion-state) linear;
+  }
+
+  /*
+   * npm never says how much of itself is left, and it is the longest stage.
+   *
+   * A bar sitting at zero for twenty seconds reads as stuck, which is the one
+   * thing it must not say while the work is fine. So it sweeps instead, and
+   * says only what is true: something is happening.
+   *
+   * It exists only while a batch is applying, which is a moment somebody
+   * created by pressing the row, and it goes with the row. Nothing animates at
+   * rest.
+   */
+  .far.unknown {
+    width: 40%;
+    transition: none;
+    animation: sweep var(--motion-pulse) var(--ease) infinite;
+  }
+
+  @keyframes sweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(250%);
+    }
+  }
+
+  /* Somebody who has asked for less movement gets a bar that holds still and
+     still says the work is under way. */
+  @media (prefers-reduced-motion: reduce) {
+    .far.unknown {
+      animation: none;
+      width: 100%;
+      opacity: 0.4;
+    }
   }
 
   /* Ctrl and a digit, on the first nine rows. A reminder that the binding

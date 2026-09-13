@@ -4,7 +4,12 @@
   import { onMount, setContext, tick as rendered, untrack } from "svelte";
   import { VIEW_SESSION, type SessionOf } from "$lib/exthost/assets";
   import StoreFilter from "$lib/components/StoreFilter.svelte";
-  import type { StoreFilterState } from "$lib/store";
+  import {
+    progressFraction,
+    progressLine,
+    type InstallProgress,
+    type StoreFilterState,
+  } from "$lib/store";
   import { beginCapture, captureScreen, lastImage, openMarkup } from "$lib/capture";
   import { onePerId } from "$lib/list";
   import { openQuicklink } from "$lib/quicklinks";
@@ -22,6 +27,12 @@
     whenUpdateChanges,
     type Progress,
   } from "$lib/update";
+  import {
+    applyExtensionUpdates,
+    checkExtensionUpdates,
+    whenExtensionUpdatesChange,
+    updatingWords,
+  } from "$lib/extensionUpdates";
   import ListView from "$lib/components/ListView.svelte";
   import GridView from "$lib/components/GridView.svelte";
   import FormView from "$lib/components/FormView.svelte";
@@ -736,6 +747,19 @@
   let storeFilter = $state<StoreFilterState | null>(null);
   /** Whether the store was opened on what has an update rather than on all. */
   let storeOnUpdates = $state(false);
+
+  /*
+   * How an extension update is going, for the row that started it.
+   *
+   * Rust reports an update on the same `store:install` event its store does,
+   * so the line and the fraction are the ones `$lib/store` already works out
+   * and the store view already draws. Held here rather than in `RootList`
+   * because the row list is replaced on every keystroke and anything written
+   * onto a row would go with it.
+   */
+  let updatingLine = $state("");
+  let updatingFar = $state<number | null>(null);
+  let updatingRow = $state(false);
 
   /**
    * A store listing as a row, so the panel can ask about it like any other.
@@ -2249,6 +2273,43 @@
         } catch (err) {
           status = `${err}`;
         }
+        return;
+      }
+
+      /*
+       * The one press, for the row that says extensions are behind.
+       *
+       * Rust applies every update that reaches nothing it was not already
+       * granted and stops on anything that grew, so this is not "open the
+       * store filtered to updates". That is the `Update Extensions` builtin,
+       * which still exists and is still what somebody gets by typing. This is
+       * the update, taken.
+       *
+       * **The launcher stays up.** The work is Rust's and outlives this
+       * window either way, so closing on the press would cost nothing and
+       * say nothing, and a window that vanishes the instant it is pressed is
+       * indistinguishable from one that crashed. The row that was pressed is
+       * where it reports. Escape still puts the launcher away and the batch
+       * carries on without it.
+       *
+       * A second press would find Rust already holding the staging directory
+       * and be refused, which is safe and silent. Refused and silent is the
+       * pair that reads as broken, so it is stopped here instead, where
+       * there is something on screen to stop it with.
+       */
+      if (command.mode === "extensions-behind") {
+        if (updatingRow) return;
+
+        // Set before the call rather than waiting for the first event.
+        // Rust answers within a frame or two, and a row that does nothing
+        // visible for even that long is the whole complaint in miniature.
+        updatingRow = true;
+        updatingLine = "";
+        updatingFar = null;
+
+        // Nothing is awaited: `apply_extension_updates` hands the batch off
+        // and returns, and every further word about it arrives on an event.
+        void applyExtensionUpdates();
         return;
       }
 
@@ -4116,6 +4177,8 @@
   onMount(() => {
     let unlisten: UnlistenFn | undefined;
     let updating: UnlistenFn | undefined;
+    let behindChanging: UnlistenFn | undefined;
+    let installing: UnlistenFn | undefined;
     let shown: UnlistenFn | undefined;
     let switcher: UnlistenFn | undefined;
     let selecting: UnlistenFn | undefined;
@@ -4149,6 +4212,62 @@
       updateProgress = (await updateState("launcher")).progress;
       updating = await whenUpdateChanges((progress) => {
         updateProgress = progress;
+      });
+
+      /*
+       * And when what is out of date changes.
+       *
+       * Not read on mount: the row is built in Rust inside the same search
+       * the list already runs, so the first root list of a run has it without
+       * this window asking anything. This is only for the row appearing, or
+       * going away, while somebody is already looking at the list.
+       *
+       * Refreshed only on the root. A redraw under a query somebody is typing
+       * would replace their results with the answer to a search they had
+       * already moved on from, and the row does not appear under a query
+       * anyway.
+       */
+      behindChanging = await whenExtensionUpdatesChange((standing) => {
+        /*
+         * Whether a batch is running, which is what turns the row into a
+         * progress row rather than a button.
+         *
+         * The count in the row comes down on its own as each one lands, so
+         * "3 extensions" becoming "2 extensions" is itself the coarse
+         * progress; the bar underneath is the fine one, for the tens of
+         * seconds npm takes on a single extension.
+         */
+        updatingRow = standing.doing.kind === "applying";
+
+        if (!updatingRow) {
+          updatingLine = "";
+          updatingFar = null;
+          // What is left to say once it is over: what could not be updated,
+          // and what is waiting because it asks for more than before.
+          const said = updatingWords(standing);
+          if (said) status = said;
+        } else {
+          updatingLine = updatingWords(standing) ?? "";
+        }
+
+        if (mode === "root" && !query) void refreshRoot();
+      });
+
+      /*
+       * The fine-grained half, on the store's own install event.
+       *
+       * Only read while a batch is running, so the store installing something
+       * of its own never writes onto the root list. The two cannot overlap
+       * anyway, because Rust holds one staging directory against both, but
+       * the guard is a line and the alternative is a bar appearing under a
+       * row nobody pressed.
+       */
+      installing = await listen<InstallProgress>("store:install", ({ payload }) => {
+        if (!updatingRow) return;
+        const line = progressLine(payload);
+        if (line) updatingLine = line;
+        const far = progressFraction(payload);
+        if (far !== null) updatingFar = far;
       });
 
       unlisten = await listen<UiEvent>("sill://ui", ({ payload }) => {
@@ -4406,6 +4525,21 @@
          */
         void checkForUpdate();
 
+        /*
+         * And whether anything installed from the store is behind.
+         *
+         * The same bargain, for the same reason: a summon is a moment
+         * somebody created, which is the question the constitution asks of
+         * anything that wakes up, and Rust throttles this to once every six
+         * hours. A machine with nothing installed from the store never opens a
+         * socket for it at all. There is no timer anywhere in this feature.
+         *
+         * The row it produces is drawn from a file on the first summon after a
+         * restart, so it is already there while this is deciding whether to
+         * ask anything.
+         */
+        void checkExtensionUpdates();
+
         // Re-asked on every summon. A file indexer can be started or stopped
         // between two uses of the launcher, and the alternative to asking here
         // is asking on every keystroke.
@@ -4557,6 +4691,8 @@
       stopTicking();
       unlisten?.();
       updating?.();
+      behindChanging?.();
+      installing?.();
       shown?.();
       hidden?.();
       finishedScript?.();
@@ -4753,6 +4889,7 @@
         {live}
         {query}
         {building}
+        working={updatingRow ? { line: updatingLine, far: updatingFar } : null}
         numeric={prefs?.navigation.numeric ?? false}
         asking={`${mode}:${query}`}
         onselect={(i) => (selected = i)}

@@ -454,6 +454,46 @@ pub(crate) async fn search_commands(
         results.insert(0, registry::answer_record(&answer.text, &answer.input));
     }
 
+    /*
+     * Extensions that are behind, at the very top of the root list.
+     *
+     * **Put there rather than spliced, and only with nothing typed.**
+     * `splice_suggestions` places a row above the first weak match, which is
+     * right for every other row that arrives this way because all of them
+     * answer a word somebody typed. This one answers nothing anybody typed.
+     * With an empty query `search_excluding` classes every row `ExactTitle`,
+     * so there is no weak match to sit above and a spliced row lands at the
+     * bottom of the list, which is the opposite of the one thing it is for.
+     *
+     * With something typed it does not appear at all. A row that led a real
+     * query would take Enter from what somebody was reaching for, which is the
+     * same argument the ranker makes about why a pin only leads on an empty
+     * query. "Update Extensions" is already a builtin and already answers the
+     * word, so nothing is lost.
+     *
+     * Costs a lock and a `Vec::is_empty` on every other keystroke. The service
+     * is read rather than asked: nothing here checks anything, and a check that
+     * has never run leaves this empty.
+     */
+    if query.trim().is_empty() {
+        let standing = app
+            .state::<crate::store::updates::ExtensionUpdates>()
+            .read(&crate::state::data_dir(&app));
+
+        if !standing.behind.is_empty() {
+            let titles: Vec<String> = standing
+                .behind
+                .iter()
+                .map(|it| it.title.clone())
+                .collect();
+
+            results.insert(
+                0,
+                registry::extensions_behind_record(standing.behind.len(), &titles),
+            );
+        }
+    }
+
     // Narrowed to what the window actually reads on the way out. The ranked
     // form carries the fields matching needs, which is most of the bytes and
     // none of the use once ranking is over.
@@ -2052,6 +2092,12 @@ mod tests {
         assert_eq!(ids(&results), ["s1", "s2", "e1", "e2", "w1", "w2"]);
     }
 
+    /// **This is also why the out-of-date row is inserted rather than spliced.**
+    ///
+    /// With nothing typed, `search_excluding` classes every row `ExactTitle`,
+    /// so the root list is entirely strong and this case is the one that
+    /// applies. A row whose whole purpose is to be the first thing seen would
+    /// be the last, and nothing about the calling code would look wrong.
     #[test]
     fn everything_strong_means_the_suggestions_go_last() {
         // Nothing to get above, so they read after what was asked for.

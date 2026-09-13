@@ -112,6 +112,34 @@ describe("what a row is filed under", () => {
     expect(groupOf(command("system"))).toBe("System Controls");
   });
 
+  /**
+   * The heading is what makes the row read as its own thing.
+   *
+   * It is inserted at the top of the root list rather than ranked into it, so
+   * without a label of its own it arrives as the first result for a search
+   * nobody ran.
+   */
+  test("extensions that are behind get a heading rather than the fallback", () => {
+    expect(groupOf(command("extensions-behind"))).toBe("Updates");
+    expect(groupOf(command("extensions-behind"))).not.toBe("Test");
+  });
+
+  /**
+   * `linesOf` labels in first-encounter order, so a row put at index 0 takes
+   * the first heading. That is the whole placement: the row is inserted at the
+   * front in Rust, and the heading follows it there rather than being ordered
+   * separately.
+   */
+  test("the row inserted first takes the first heading", () => {
+    const lines = linesOf([
+      command("extensions-behind", "Update 2 extensions"),
+      command("app", "Notepad"),
+    ]);
+
+    expect(lines[0]).toMatchObject({ kind: "header", label: "Updates" });
+    expect(lines[1]).toMatchObject({ kind: "row" });
+  });
+
   test("the row standing in for missing files sits with the files", () => {
     // It is there instead of file results, so a heading of its own would
     // point at the absence rather than at where the results should be.

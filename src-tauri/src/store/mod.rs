@@ -62,6 +62,7 @@ pub mod capability;
 pub mod catalog;
 pub mod install;
 pub mod source;
+pub mod updates;
 
 use serde::{Deserialize, Serialize};
 
@@ -260,6 +261,38 @@ impl Listing {
             native: true,
         }
     }
+
+    /// The least a listing has to be for [`install::prepare`] to fetch it.
+    ///
+    /// **This exists so that applying an update does not open the catalogue.**
+    /// `prepare` reads four things: where the source is, which commit, what to
+    /// call it, and whose it is. All four are recorded by the install itself or
+    /// established by the check, so requiring a catalogue entry here would put
+    /// seven requests and 3.8 MB behind a keypress whose entire promise is that
+    /// it is one keypress.
+    ///
+    /// Everything absent is absent because it describes a shelf rather than a
+    /// fetch. A description, a category and a download count are for deciding
+    /// whether to install something, and this is for something already
+    /// installed and already decided.
+    pub fn to_update(name: &str, folder: &str, author: &str, revision: &str, title: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            folder: folder.to_string(),
+            title: title.to_string(),
+            description: String::new(),
+            author: author.to_string(),
+            author_name: String::new(),
+            author_avatar: String::new(),
+            categories: Vec::new(),
+            platforms: vec!["Windows".to_string()],
+            revision: revision.to_string(),
+            downloads: 0,
+            icon: String::new(),
+            commands: Vec::new(),
+            native: false,
+        }
+    }
 }
 
 // ------------------------------------------------------------------- origin
@@ -296,6 +329,24 @@ pub struct Origin {
     /// where they differ. Empty for a folder install, which has no slug.
     #[serde(default)]
     pub listing: String,
+    /// The author's handle, because the store is addressed by it.
+    ///
+    /// **Not decoration, and not derivable from anything else here.** Asking
+    /// whether one extension has a newer version is a request to
+    /// `/extensions/{author}/{listing}`, so without the handle the only way to
+    /// answer that question is to fetch the whole catalogue: seven requests and
+    /// 3.8 MB to learn one commit hash.
+    ///
+    /// Recorded for the same reason [`Self::listing`] is. Nothing makes a
+    /// handle permanent, so reading it back from a catalogue fetched later is a
+    /// guess about what it was at install time, and a handle that has since
+    /// changed would quietly answer 404 forever.
+    ///
+    /// Empty for a folder install, and empty for anything installed before this
+    /// field existed. [`crate::store::updates`] falls back to the catalogue for
+    /// those rather than treating them as unanswerable.
+    #[serde(default)]
+    pub author: String,
     /// The capability ids somebody agreed to when installing this.
     ///
     /// **What was shown, not what a later scan would find.** The screen that
@@ -326,6 +377,7 @@ impl Origin {
             revision: String::new(),
             path: path.to_string_lossy().into_owned(),
             listing: String::new(),
+            author: String::new(),
             // A folder install shows no screen and so grants nothing. It is
             // asked on the card the first time it reaches for something, which
             // is the path that already existed.
@@ -338,6 +390,7 @@ impl Origin {
     pub fn store(
         listing: &str,
         folder: &str,
+        author: &str,
         revision: &str,
         capabilities: Vec<String>,
         at: i64,
@@ -347,6 +400,7 @@ impl Origin {
             revision: revision.to_string(),
             path: folder.to_string(),
             listing: listing.to_string(),
+            author: author.to_string(),
             capabilities,
             api: crate::extension_install::SILL_API_VERSION,
             installed_at: at,
@@ -401,31 +455,53 @@ pub fn origin_of(home: &std::path::Path, extension: &str) -> Option<Origin> {
 /// which is how somebody's own working copy of an extension still lines up
 /// with the store's row for it.
 pub fn pins(home: &std::path::Path) -> std::collections::HashMap<String, Origin> {
-    let Ok(entries) = std::fs::read_dir(home) else {
-        return std::collections::HashMap::new();
-    };
-
-    entries
-        .flatten()
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| {
-            let directory = entry.file_name().to_string_lossy().into_owned();
-            // An install builds into `.<name>.installing` beside its
-            // destination, and for the moment that exists it holds a complete
-            // origin. Nothing dot-prefixed is an installed extension: the
-            // names come from `safe_name`, which allows no leading dot.
-            if directory.starts_with('.') {
-                return None;
-            }
-            let origin = origin_of(home, &directory)?;
+    installed(home)
+        .into_iter()
+        .map(|(directory, origin)| {
             let key = if origin.listing.is_empty() {
                 directory
             } else {
                 origin.listing.clone()
             };
-            Some((key, origin))
+            (key, origin)
         })
         .collect()
+}
+
+/// Every installed extension, by the directory it is actually in.
+///
+/// The difference from [`pins`] is the key, and it matters more than it looks.
+/// `pins` is keyed by store slug wherever one was recorded, because the
+/// catalogue is keyed that way and joining them is what it is for. Anything
+/// that has to reach the extension itself needs the directory instead: the
+/// index, the worker and the grants all speak the name in its manifest, and the
+/// two are not the same string for every extension.
+///
+/// Nothing dot-prefixed is an installed extension. An install builds into
+/// `.<name>.installing` and replaces through `.<name>.replaced`, and both hold
+/// a complete origin while they exist; the names that are real come from
+/// [`install::safe_name`], which allows no leading dot.
+pub fn installed(home: &std::path::Path) -> Vec<(String, Origin)> {
+    let Ok(entries) = std::fs::read_dir(home) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<(String, Origin)> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let directory = entry.file_name().to_string_lossy().into_owned();
+            if directory.starts_with('.') {
+                return None;
+            }
+            Some((directory.clone(), origin_of(home, &directory)?))
+        })
+        .collect();
+
+    // Read order from a filesystem is not an order, and anything that reports
+    // what it did needs the same sequence twice running.
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    found
 }
 
 /// What one name is installed as, whichever of its two names it is.
@@ -915,9 +991,78 @@ pub struct StoreState {
     /// catalogue, so reopening the same listing draws its pictures without a
     /// second trip. Let go when the catalogue is, in `forget`.
     galleries: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
+    /// Who is using the one staging directory, when anybody is.
+    ///
+    /// See [`Staging`].
+    staging: std::sync::Mutex<Option<(Staging, std::time::Instant)>>,
 }
 
+/// Who is part-way through an install.
+///
+/// **There is one staging directory and there always was.**
+/// [`install::prepare`] opens by removing the whole of it, under a comment
+/// saying only one install is ever being decided at a time. That was true
+/// while the only way to start one was to press a key, and it stopped being
+/// true the moment updates could apply themselves.
+///
+/// Both halves of the collision are destructive. A background update starting
+/// while somebody is reading the capability screen deletes the source they are
+/// deciding about, and they accept an install that then reports nothing is
+/// staged. A person starting an install while a background update is between
+/// its two steps deletes the tree **npm is running inside**.
+///
+/// So the invariant is held rather than described. The rule is that the person
+/// wins: a background batch checks first and defers to the next check, because
+/// nobody is waiting on it and it has somewhere to go. A person is told to try
+/// again in a moment, which is a worse answer than succeeding and a much better
+/// one than either of the two above.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Staging {
+    /// Somebody is installing or updating from a window.
+    Person,
+    /// An update is applying itself.
+    Background,
+}
+
+/// How long a hold can go unreleased before it is assumed abandoned.
+///
+/// A hold is released when an install finishes, fails, or is discarded, so
+/// reaching this means a window went away between the two steps and the
+/// release never ran. Without it, one lost window would stop every future
+/// update on the machine and the only cure would be a restart.
+///
+/// Longer than [`install::NPM_DEADLINE`], deliberately. Anything shorter could
+/// expire a hold belonging to an install that is still legitimately running,
+/// which would reintroduce exactly the race this exists to remove.
+pub const STAGING_ABANDONED: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 impl StoreState {
+    /// Takes the staging directory, or says who already has it.
+    ///
+    /// A hold older than [`STAGING_ABANDONED`] is taken over rather than
+    /// honoured. See that constant for why that is safe.
+    pub fn hold_staging(&self, who: Staging) -> Result<(), Staging> {
+        let mut held = self.staging.lock().unwrap_or_else(|e| e.into_inner());
+
+        if let Some((holder, since)) = *held {
+            if since.elapsed() < STAGING_ABANDONED {
+                return Err(holder);
+            }
+            crate::say!("a {holder:?} install never released staging, taking it over");
+        }
+
+        *held = Some((who, std::time::Instant::now()));
+        Ok(())
+    }
+
+    /// Gives it back. Only the holder may, so a late release from an install
+    /// that already failed cannot free one that has since started.
+    pub fn release_staging(&self, who: Staging) {
+        let mut held = self.staging.lock().unwrap_or_else(|e| e.into_inner());
+        if held.is_some_and(|(holder, _)| holder == who) {
+            *held = None;
+        }
+    }
     /// What is held, if anything.
     ///
     /// Touches the clock, so a store somebody is using stays warm and a store
@@ -1272,7 +1417,7 @@ mod tests {
         let listings = vec![listing("here", "Here", 1)];
         let pinned = |name: &str| {
             (name == "here")
-                .then(|| Origin::store("here", "extensions/here", "old-sha", Vec::new(), 0))
+                .then(|| Origin::store("here", "extensions/here", "someone", "old-sha", Vec::new(), 0))
         };
 
         let out = browse(&listings, &[], pinned, &Query::default(), 0);
@@ -1302,6 +1447,7 @@ mod tests {
             "old" => Some(Origin::store(
                 "old",
                 "extensions/old",
+                "someone",
                 "behind",
                 Vec::new(),
                 0,
@@ -1309,6 +1455,7 @@ mod tests {
             "new" => Some(Origin::store(
                 "new",
                 "extensions/new",
+                "someone",
                 "aaaa",
                 Vec::new(),
                 0,
@@ -1453,13 +1600,69 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let home = dir.path();
 
-        let origin = Origin::store("translate", "extensions/google-translate", "sha", vec![], 0);
+        let origin = Origin::store("translate", "extensions/google-translate", "someone", "sha", vec![], 0);
         write_origin(home, "google-translate", &origin).expect("writes");
 
         assert_eq!(
             installed_as(home, "translate").as_deref(),
             Some("google-translate"),
             "the slug found nothing, so removing it would have removed nothing",
+        );
+    }
+
+    /// **The invariant `install::prepare` describes and never held.**
+    ///
+    /// It opens by deleting the whole staging directory, under a comment saying
+    /// only one install is ever being decided at a time. That was true while
+    /// the only way to start one was to press a key.
+    #[test]
+    fn two_installs_cannot_hold_the_one_staging_directory() {
+        let state = StoreState::default();
+
+        assert!(state.hold_staging(Staging::Person).is_ok());
+        assert_eq!(
+            state.hold_staging(Staging::Background),
+            Err(Staging::Person),
+            "a background update would have deleted the source somebody is deciding about",
+        );
+    }
+
+    /// And the other way round, which is the worse of the two: this one deletes
+    /// the tree npm is running inside.
+    #[test]
+    fn a_person_cannot_take_it_from_an_update_that_is_applying() {
+        let state = StoreState::default();
+
+        assert!(state.hold_staging(Staging::Background).is_ok());
+        assert_eq!(
+            state.hold_staging(Staging::Person),
+            Err(Staging::Background)
+        );
+    }
+
+    #[test]
+    fn releasing_lets_the_next_one_have_it() {
+        let state = StoreState::default();
+
+        state.hold_staging(Staging::Person).expect("the first");
+        state.release_staging(Staging::Person);
+
+        assert!(state.hold_staging(Staging::Background).is_ok());
+    }
+
+    /// A late release from an install that already gave up must not free a
+    /// hold that has since been taken by somebody else.
+    #[test]
+    fn only_the_holder_can_release_it() {
+        let state = StoreState::default();
+
+        state.hold_staging(Staging::Person).expect("the first");
+        state.release_staging(Staging::Background);
+
+        assert_eq!(
+            state.hold_staging(Staging::Background),
+            Err(Staging::Person),
+            "the person still has it",
         );
     }
 
@@ -1492,7 +1695,7 @@ mod tests {
         write_origin(
             home,
             "google-translate",
-            &Origin::store("translate", "extensions/google-translate", "sha", vec![], 0),
+            &Origin::store("translate", "extensions/google-translate", "someone", "sha", vec![], 0),
         )
         .expect("writes");
 
@@ -1511,7 +1714,7 @@ mod tests {
         write_origin(
             home,
             ".google-translate.installing",
-            &Origin::store("translate", "extensions/google-translate", "sha", vec![], 0),
+            &Origin::store("translate", "extensions/google-translate", "someone", "sha", vec![], 0),
         )
         .expect("writes");
 
@@ -1533,6 +1736,7 @@ mod tests {
         let origin = Origin::store(
             "demo",
             "extensions/demo",
+            "someone",
             "sha",
             vec!["clipboard".to_string()],
             1_700_000_000,

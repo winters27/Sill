@@ -2307,7 +2307,7 @@ mod installs_to_disk {
         let building = home.join(".demo.installing");
         crate::store::write_origin_into(
             &building,
-            &crate::store::Origin::store("demo", "extensions/demo", "sha", Vec::new(), 0),
+            &crate::store::Origin::store("demo", "extensions/demo", "someone", "sha", Vec::new(), 0),
         )
         .expect("an origin");
 

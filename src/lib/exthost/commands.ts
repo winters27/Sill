@@ -52,6 +52,14 @@ export interface RankedCommand {
     | "answer"
     | "snippet"
     | "sill-setting"
+    /**
+     * The row saying installed extensions are behind.
+     *
+     * Built per search rather than carried by the index, so like a window
+     * it cannot be launched by id: Enter on it is handled by mode. It only
+     * ever appears with nothing typed, at the very top.
+     */
+    | "extensions-behind"
     /** A quicklink that opens straight away. */
     | "quicklink"
     /** A quicklink with `{query}` in it, which takes over the field first. */
@@ -267,6 +275,14 @@ export interface LaunchedCommand {
     | "answer"
     | "snippet"
     | "sill-setting"
+    /**
+     * The row saying installed extensions are behind.
+     *
+     * Built per search rather than carried by the index, so like a window
+     * it cannot be launched by id: Enter on it is handled by mode. It only
+     * ever appears with nothing typed, at the very top.
+     */
+    | "extensions-behind"
     /** A quicklink that opens straight away. */
     | "quicklink"
     /** A quicklink with `{query}` in it, which takes over the field first. */

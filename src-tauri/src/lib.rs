@@ -1826,6 +1826,9 @@ pub fn run() {
         // A mutex around a small enum. Nothing is checked, downloaded or timed
         // until a summon asks, and then at most once a day.
         .manage(update::Updates::default())
+        // The same bargain for extensions. A mutex around a small struct, a
+        // file read once on the first summon of a run, and no timer.
+        .manage(store::updates::ExtensionUpdates::default())
         .manage(commands::scripts::Running::new())
         .manage(timing::Timings::new())
         .manage(previews::Previews::new())
@@ -2374,6 +2377,9 @@ pub fn run() {
             commands::settings::hotkey_conflicts,
             commands::update::update_state,
             commands::update::check_for_update,
+            commands::extension_updates::extension_updates,
+            commands::extension_updates::check_extension_updates,
+            commands::extension_updates::apply_extension_updates,
             commands::update::install_update,
             commands::update::restart_for_update,
             commands::settings::status_troubles,

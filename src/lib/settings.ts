@@ -181,6 +181,23 @@ export interface StoreSettings {
    * and what is on disk is not. Null when unset.
    */
   githubToken: string | null;
+  /**
+   * Whether to notice that an installed extension is behind.
+   *
+   * One small request per installed extension, at most once every six hours,
+   * on a summon. Nothing at all on a machine with nothing installed from the
+   * store, and there is no timer: see `store/updates.rs` for why a summon is
+   * the substitute for an interval.
+   */
+  checkUpdates: boolean;
+  /**
+   * Whether to apply them without being asked.
+   *
+   * Off by default. It runs npm and a bundler per extension, which is a thing
+   * to choose rather than inherit. On, it still only applies updates that
+   * reach nothing that was not already granted.
+   */
+  autoUpdate: boolean;
 }
 
 /**

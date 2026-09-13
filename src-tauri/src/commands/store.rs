@@ -255,13 +255,23 @@ pub(crate) async fn store_prepare(
         .ok_or_else(|| format!("the store has no extension called {name}"))?
         .clone();
 
+    // **Taken before the fetch, held until the install finishes or is thrown
+    // away.** There is one staging directory and `install::prepare` opens by
+    // deleting all of it, so starting here while an update is applying itself
+    // would delete the tree npm is running inside. The person wins wherever the
+    // two can both proceed; where they cannot, this is the half that has
+    // somebody in front of it to read the sentence.
+    state
+        .hold_staging(store::Staging::Person)
+        .map_err(|_| "Sill is updating extensions. Try again in a moment.".to_string())?;
+
     let token = token_of(&prefs).await;
 
     // The same event the install half reports on, so the screen has one place
     // to read from and the wait is continuous rather than starting over when
     // somebody accepts.
     let reporting = app.clone();
-    install::prepare(
+    let prepared = install::prepare(
         &crate::state::data_dir(&app),
         &listing,
         token.as_deref(),
@@ -271,22 +281,47 @@ pub(crate) async fn store_prepare(
             }
         },
     )
-    .await
+    .await;
+
+    // A fetch that failed staged nothing and no screen will appear, so there is
+    // no second half coming to give this back.
+    if prepared.is_err() {
+        state.release_staging(store::Staging::Person);
+    }
+
+    prepared
 }
 
 /// Step two: install what was prepared.
 ///
-/// Also what an update is. An update is this whole path at the newer commit,
-/// including the screen that says what the new version reaches, because an
-/// extension can gain the ability to run programs in a version somebody would
-/// otherwise have accepted without looking.
+/// Also what an update somebody watched is. An update is this whole path at the
+/// newer commit, including the screen that says what the new version reaches,
+/// because an extension can gain the ability to run programs in a version
+/// somebody would otherwise have accepted without looking.
+///
+/// An update that reaches nothing new does not come through here. It goes
+/// through [`crate::commands::extension_updates`], which answers that screen
+/// from what was already agreed to rather than putting it up with nothing on
+/// it. The screen is not skipped there; it is answered in advance.
 #[cfg(windows)]
 #[tauri::command]
 pub(crate) async fn store_install(
     app: AppHandle,
+    state: State<'_, store::StoreState>,
     grants: State<'_, std::sync::Arc<crate::exthost::grants::Granted>>,
     name: String,
 ) -> Result<install::Done, String> {
+    // Whatever happens below, the person's turn with the staging directory
+    // ends here: this is the last of the two steps.
+    let _release = Release(&state);
+
+    struct Release<'a>(&'a store::StoreState);
+    impl Drop for Release<'_> {
+        fn drop(&mut self) {
+            self.0.release_staging(store::Staging::Person);
+        }
+    }
+
     let esbuild =
         crate::extension_install::esbuild_exe(&app).ok_or(crate::extension_install::NO_ESBUILD)?;
     let data_dir = crate::state::data_dir(&app);
@@ -347,8 +382,13 @@ pub(crate) async fn store_install(
 
 /// Throws away a prepared install nobody accepted.
 #[tauri::command]
-pub(crate) async fn store_discard(app: AppHandle) -> Result<(), String> {
+pub(crate) async fn store_discard(
+    app: AppHandle,
+    state: State<'_, store::StoreState>,
+) -> Result<(), String> {
     install::discard(&crate::state::data_dir(&app));
+    // Walking away from the screen is the other way the person's turn ends.
+    state.release_staging(store::Staging::Person);
     Ok(())
 }
 

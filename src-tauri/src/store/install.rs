@@ -310,6 +310,7 @@ pub async fn prepare(
     let origin = Origin::store(
         &listing.name,
         &listing.folder,
+        &listing.author,
         &listing.revision,
         capabilities.iter().map(|it| it.id.clone()).collect(),
         crate::state::now_seconds(),
@@ -926,7 +927,7 @@ mod removing {
         super::super::write_origin(
             &home,
             name,
-            &Origin::store(name, &format!("extensions/{name}"), "sha", Vec::new(), 0),
+            &Origin::store(name, &format!("extensions/{name}"), "someone", "sha", Vec::new(), 0),
         )
         .expect("an origin");
 

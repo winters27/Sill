@@ -2104,6 +2104,32 @@
             </Row>
 
             <Row
+              title="Check for extension updates"
+              description="Asks the store whether anything installed here is behind. One small request per installed extension, at most once every six hours, and only when the launcher is opened: there is no timer, and a machine with nothing installed from the store never asks at all."
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.store.checkUpdates}
+                  onchange={commit}
+                  label="Check for extension updates"
+                />
+              {/snippet}
+            </Row>
+
+            <Row
+              title="Install extension updates automatically"
+              description="Applies them as soon as they are found, keeping settings and saved data. Only updates that reach nothing they were not already allowed to reach: a version that asks for more waits for you however this is set, because the screen that would have asked is the one thing this cannot answer on your behalf."
+            >
+              {#snippet control()}
+                <Toggle
+                  bind:checked={p.store.autoUpdate}
+                  onchange={commit}
+                  label="Install extension updates automatically"
+                />
+              {/snippet}
+            </Row>
+
+            <Row
               title="GitHub token"
               description="Optional. Extension source is fetched from github.com/raycast/extensions, and GitHub answers sixty requests an hour to a machine that does not identify itself. One install spends about three. A token raises that to five thousand, and is encrypted rather than kept in the settings file."
             >

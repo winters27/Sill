@@ -267,7 +267,7 @@ fn removing_an_extension_takes_its_commands_out_of_the_index() {
     sill_lib::store::write_origin(
         &home,
         "demo",
-        &Origin::store("demo", "extensions/demo", "sha", Vec::new(), 0),
+        &Origin::store("demo", "extensions/demo", "someone", "sha", Vec::new(), 0),
     )
     .expect("an origin");
 

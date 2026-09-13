@@ -1098,6 +1098,29 @@ pub struct Store {
     /// the settings file in plain text. Its path is in `SEALED` and a test
     /// refuses a sealed path that names no real field.
     pub github_token: Option<String>,
+    /// Whether to notice that an installed extension is behind.
+    ///
+    /// On. It costs one request per installed extension, at most once every
+    /// six hours, on a summon, and nothing at all on a machine with nothing
+    /// installed from the store. There is no timer: see
+    /// [`crate::store::updates`] for why the summon is the substitute for one.
+    ///
+    /// Off means the row never appears and no request is ever made. It does not
+    /// mean the store stops saying what is out of date, because that is read
+    /// out of a catalogue somebody opened the store to fetch.
+    pub check_updates: bool,
+    /// Whether to apply them without being asked.
+    ///
+    /// **Off**, and the reason is not timidity about the network. Applying an
+    /// update runs npm and a bundler, which is tens of seconds of subprocess
+    /// and tens of megabytes of temporary disk per extension, and doing that
+    /// unattended is a thing somebody should choose rather than inherit.
+    ///
+    /// On, it still only applies updates that reach nothing new. A version that
+    /// gained a capability stops and waits however this is set, because the
+    /// screen that would have asked is the one thing an automatic update cannot
+    /// answer on somebody's behalf.
+    pub auto_update: bool,
 }
 
 impl Default for Store {
@@ -1107,6 +1130,8 @@ impl Default for Store {
             // is a worse store than a smaller one that works.
             windows_only: true,
             github_token: None,
+            check_updates: true,
+            auto_update: false,
         }
     }
 }

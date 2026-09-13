@@ -58,6 +58,16 @@ const HEADINGS: Record<string, string> = {
   "store-listing": "Extension Store",
   "sill-setting": "Sill Settings",
   /*
+   * Installed extensions that are behind, which is one row saying how many.
+   *
+   * A heading over a single row is usually noise, and here it is the point:
+   * the row is inserted at the top of the root list rather than ranked into
+   * it, and without a label of its own it read as the first result for a
+   * search nobody ran. `linesOf` labels in first-encounter order, so this is
+   * the heading at the top, and it goes away with the row.
+   */
+  "extensions-behind": "Updates",
+  /*
    * Terminal profiles and WSL distributions, under one heading.
    *
    * Not "Windows Terminal": on a machine without it, the rows are the WSL
