@@ -891,6 +891,66 @@ pub fn install(
     )
 }
 
+/// Puts a finished build where the extension lives, without a window in which
+/// the old one is gone and the new one has not arrived.
+///
+/// **The order is the whole function.** Deleting the destination and then
+/// renaming over it is the obvious shape and it is destructive when it fails:
+/// `remove_dir_all` walks a tree one entry at a time, and on Windows it stops
+/// on the first file another process holds a handle to. What is left is an
+/// extension that is half deleted and no longer runs, from an update somebody
+/// may not have been watching.
+///
+/// Renaming the old one aside first cannot land there. Windows refuses to
+/// delete a file that is open far more readily than it refuses to rename the
+/// directory above it, so the move usually succeeds where the delete would
+/// not, and when it does not succeed **nothing has been touched yet** and the
+/// working copy is still working.
+///
+/// The leftover is then removed as a courtesy rather than a step. A failure to
+/// clean up is a directory taking space until the next install, which is worth
+/// far less than the extension it is a copy of.
+///
+/// It is dot-prefixed for the same reason the build directory is: `pins` skips
+/// dot-prefixed directories, so a copy waiting to be deleted is never read as
+/// an installed extension.
+#[cfg(windows)]
+fn swap_into_place(built: &Path, dest: &Path) -> Result<(), String> {
+    let previous = dest.with_file_name(format!(
+        ".{}.replaced",
+        dest.file_name().unwrap_or_default().to_string_lossy()
+    ));
+
+    // Anything here is from a swap that did not get to its own cleanup.
+    let _ = std::fs::remove_dir_all(&previous);
+
+    let held = dest.exists();
+    if held {
+        std::fs::rename(dest, &previous).map_err(|err| {
+            format!(
+                "could not move the installed {} aside to replace it: {err}. \
+                 It is still there and still works.",
+                dest.display()
+            )
+        })?;
+    }
+
+    if let Err(err) = std::fs::rename(built, dest) {
+        // The new one did not land, so put the old one back rather than
+        // leaving nothing where an extension used to be.
+        if held {
+            let _ = std::fs::rename(&previous, dest);
+        }
+        return Err(format!(
+            "could not put {} in place: {err}",
+            dest.display()
+        ));
+    }
+
+    let _ = std::fs::remove_dir_all(&previous);
+    Ok(())
+}
+
 /// The same, told where everything is rather than asking a window.
 ///
 /// The split exists so the install path can be exercised without a running
@@ -1057,19 +1117,7 @@ pub fn install_into_reporting(
     // extension that is listed is always one whose provenance is recorded.
     crate::store::write_origin_into(&building, origin)?;
 
-    // The replacement. Removing first because a rename onto an existing
-    // directory fails on Windows, and the pair is what makes an update leave
-    // nothing of the version before it.
-    if dest.exists() {
-        std::fs::remove_dir_all(&dest).map_err(|err| {
-            format!(
-                "could not clear {} to install over it: {err}",
-                dest.display()
-            )
-        })?;
-    }
-    std::fs::rename(&building, &dest)
-        .map_err(|err| format!("could not put {} in place: {err}", dest.display()))?;
+    swap_into_place(&building, &dest)?;
 
     let index_path = crate::store::index_file(home);
     let merged = reinstalled_index(
@@ -1168,6 +1216,107 @@ fn bundle(
     } else {
         said.to_string()
     })
+}
+
+#[cfg(all(test, windows))]
+mod swapping {
+    use super::swap_into_place;
+
+    fn tree(at: &std::path::Path, marker: &str) {
+        std::fs::create_dir_all(at.join("assets")).expect("a directory");
+        std::fs::write(at.join("which.txt"), marker).expect("a file");
+        std::fs::write(at.join("assets").join("logo.png"), marker).expect("a file");
+    }
+
+    #[test]
+    fn the_new_one_lands_and_nothing_of_the_old_one_is_left() {
+        let scratch = tempfile::tempdir().expect("a temp directory");
+        let built = scratch.path().join(".demo.installing");
+        let dest = scratch.path().join("demo");
+
+        tree(&dest, "old");
+        std::fs::write(dest.join("gone.txt"), "old").expect("a file");
+        tree(&built, "new");
+
+        swap_into_place(&built, &dest).expect("the swap");
+
+        assert_eq!(
+            std::fs::read_to_string(dest.join("which.txt")).expect("read"),
+            "new"
+        );
+        assert!(
+            !dest.join("gone.txt").exists(),
+            "a file the new version does not have must not survive the swap"
+        );
+        assert!(!built.exists(), "the build directory is consumed");
+    }
+
+    /// Installing for the first time, with nothing to move aside.
+    #[test]
+    fn a_first_install_has_nothing_to_replace() {
+        let scratch = tempfile::tempdir().expect("a temp directory");
+        let built = scratch.path().join(".demo.installing");
+        let dest = scratch.path().join("demo");
+
+        tree(&built, "new");
+        swap_into_place(&built, &dest).expect("the swap");
+
+        assert_eq!(
+            std::fs::read_to_string(dest.join("which.txt")).expect("read"),
+            "new"
+        );
+    }
+
+    /// **The property the old order could not offer.**
+    ///
+    /// Deleting the destination and then renaming over it means a failure
+    /// between the two leaves nothing where a working extension was. Here the
+    /// new one failing to land puts the old one back, so the worst outcome of a
+    /// failed update is that the update did not happen.
+    #[test]
+    fn a_swap_that_cannot_finish_leaves_the_working_copy_in_place() {
+        let scratch = tempfile::tempdir().expect("a temp directory");
+        let dest = scratch.path().join("demo");
+        tree(&dest, "old");
+
+        // A build directory that is not there, which is the shape of every
+        // reason the second rename can fail.
+        let missing = scratch.path().join(".demo.installing");
+
+        assert!(swap_into_place(&missing, &dest).is_err());
+
+        assert!(dest.is_dir(), "the installed extension is still installed");
+        assert_eq!(
+            std::fs::read_to_string(dest.join("which.txt")).expect("read"),
+            "old"
+        );
+        assert!(
+            dest.join("assets").join("logo.png").exists(),
+            "and it is whole, not half deleted"
+        );
+    }
+
+    /// A copy left by a swap that did not reach its own cleanup is cleared
+    /// rather than colliding with the next one.
+    #[test]
+    fn a_leftover_from_a_previous_swap_does_not_block_the_next() {
+        let scratch = tempfile::tempdir().expect("a temp directory");
+        let built = scratch.path().join(".demo.installing");
+        let dest = scratch.path().join("demo");
+        let leftover = scratch.path().join(".demo.replaced");
+
+        tree(&leftover, "stale");
+        tree(&dest, "old");
+        tree(&built, "new");
+
+        swap_into_place(&built, &dest).expect("the swap");
+
+        assert_eq!(
+            std::fs::read_to_string(dest.join("which.txt")).expect("read"),
+            "new"
+        );
+        assert!(!leftover.exists(), "and it is cleaned up after itself");
+    }
 }
 
 #[cfg(test)]
