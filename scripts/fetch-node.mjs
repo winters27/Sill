@@ -9,6 +9,14 @@
  * machine has. The size is the cost, roughly 28 MB in the installer, and it
  * is what makes an extension the same program everywhere it runs.
  *
+ * **npm comes with it, and the docs and man pages do not.** Installing an
+ * extension runs npm to put its dependencies where esbuild can resolve them,
+ * and npm is only ever found beside the Node it is run with, so a runtime
+ * without it is a runtime that cannot install anything. Measured against this
+ * exact archive: node.exe is 93.4 MB raw and npm's runtime is 9.8 MB, so
+ * carrying it is 10.4% more raw and 8.6% more compressed. The docs and man
+ * pages are another 2.7 MB that nothing reads and are left in the zip.
+ *
  * The repository does not carry the binary; this fetches it per machine from
  * nodejs.org, the way `fetch-fonts.mjs` fetches the font. The version and the
  * SHA-256 of the archive are written down here, so a build reproduces the
@@ -38,6 +46,14 @@ const root = resolve(import.meta.dirname, "..");
 const dir = join(root, "src-tauri", "resources", "node");
 const exe = join(dir, "node.exe");
 const licence = join(dir, "LICENSE");
+/**
+ * npm's entry point, where `store::install::npm_cli` looks for it.
+ *
+ * Named here as well as there because this script is what puts it on disk. A
+ * runtime that has node.exe and not this is one where every extension install
+ * fails on a message about npm, which is how it shipped before.
+ */
+const npmCli = join(dir, "node_modules", "npm", "bin", "npm-cli.js");
 const stamp = join(dir, "VERSION");
 
 const force = process.argv.includes("--force");
@@ -45,7 +61,7 @@ const required = process.argv.includes("--required");
 
 /** Whether what is on disk is the pinned runtime, asked of the binary itself. */
 function present() {
-  if (!existsSync(exe) || !existsSync(licence)) return false;
+  if (!existsSync(exe) || !existsSync(licence) || !existsSync(npmCli)) return false;
   if (!existsSync(stamp) || readFileSync(stamp, "utf8").trim() !== VERSION) return false;
   try {
     return execFileSync(exe, ["--version"], { encoding: "utf8" }).trim() === VERSION;
@@ -79,22 +95,29 @@ try {
   }
 
   writeFileSync(zip, bytes);
-  // Only the two files Sill ships. The rest of the archive is npm and its
-  // modules, which extensions never see and which would triple the size.
+  // The runtime, its licence, and npm. Everything else in the archive is
+  // documentation: `--exclude` drops npm's own docs and man pages, which are
+  // 2.7 MB that nothing on this machine will ever open.
   execFileSync(tar, [
     "-xf",
     zip,
     "-C",
     dir,
     "--strip-components=1",
+    "--exclude",
+    `${archive}/node_modules/npm/docs/*`,
+    "--exclude",
+    `${archive}/node_modules/npm/man/*`,
     `${archive}/node.exe`,
     `${archive}/LICENSE`,
+    `${archive}/node_modules/npm`,
   ]);
   rmSync(zip, { force: true });
   writeFileSync(stamp, `${VERSION}\n`);
 
+  if (!existsSync(npmCli)) throw new Error("the archive did not yield npm, which installing needs");
   if (!present()) throw new Error("the extracted node.exe does not answer with the pinned version");
-  console.log(`ok   Node ${VERSION} fetched (${statSync(exe).size} bytes)`);
+  console.log(`ok   Node ${VERSION} fetched with npm (${statSync(exe).size} bytes)`);
 } catch (err) {
   rmSync(zip, { force: true });
   console.warn(`warn Node was not fetched: ${err.message}`);

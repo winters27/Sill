@@ -491,6 +491,17 @@ fn npm_install(
         .arg(&cli)
         .args(&args)
         .current_dir(staged)
+        // **npm's cache goes inside the staging directory, so it leaves with
+        // it.** Left alone npm writes to `%LOCALAPPDATA%/npm-cache`, which is
+        // outside everything Sill owns: nothing here would ever clean it, it
+        // has no bound, and uninstalling Sill would not take it. Measured at
+        // roughly 24 MB after a handful of extensions.
+        //
+        // The cost is that two installs in a row fetch the same tarball twice.
+        // npm for a real extension is about four seconds, installing is a
+        // thing somebody does occasionally and deliberately, and a bounded
+        // cache is what rule 23 asks for.
+        .env("npm_config_cache", staged.join(".npm-cache"))
         .creation_flags(CREATE_NO_WINDOW);
 
     let ran = crate::bounded::run(&mut command, NPM_DEADLINE, &mut |line| {

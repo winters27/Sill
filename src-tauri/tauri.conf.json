@@ -73,7 +73,8 @@
       "../host/dist/package.json": "host/package.json",
       "../host/node_modules/@esbuild/win32-x64/esbuild.exe": "esbuild/esbuild.exe",
       "resources/node/node.exe": "node/node.exe",
-      "resources/node/LICENSE": "node/LICENSE"
+      "resources/node/LICENSE": "node/LICENSE",
+      "resources/node/node_modules/": "node/node_modules/"
     }
   },
   "plugins": {
