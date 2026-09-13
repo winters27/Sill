@@ -69,6 +69,26 @@
      * for its whole stage, so the bar has to cope rather than sit at zero.
      */
     working?: { line: string; far: number | null } | null;
+    /**
+     * What the last batch of updates left behind, if anything.
+     *
+     * On the row rather than in the chin, and that is the whole of this prop.
+     * The chin is one line already holding a menu, two readings and Escape, and
+     * its own comment says prose is the item that gives way; a reason put there
+     * arrived as "Hacker News could not be updated. npm ...". This is wider and
+     * it persists, so it is still here when somebody comes back to look.
+     *
+     * Empty when the last batch had nothing to report, which is the usual case:
+     * updates that simply worked are reported by the row going away.
+     */
+    outcome?: string;
+    /**
+     * The same in full, for a hover. Empty when the line says it all.
+     *
+     * The line is written to fit, so the path npm was looked for beside and
+     * what to install about it are only here.
+     */
+    outcomeDetail?: string;
   }
 
   let {
@@ -82,6 +102,8 @@
     numeric = false,
     building = false,
     working = null,
+    outcome = "",
+    outcomeDetail = "",
   }: Props = $props();
 
   /** What the list says with nothing in it, which depends on why. */
@@ -660,7 +682,13 @@
               </span>
             {/if}
           </span>
-          {#if command.mode === "extensions-behind" && working}
+          {#if command.mode === "extensions-behind" && !working && outcome}
+            <!--
+              What the last batch left. `title` as well as the text, because
+              this line ellipsises and the reason is the part worth reading.
+            -->
+            <span class="extension" title={outcomeDetail || outcome}>{outcome}</span>
+          {:else if command.mode === "extensions-behind" && working}
             <!--
               What the update is doing, under the row that started it.
               Replaces the list of names, which is about to be out of date: the

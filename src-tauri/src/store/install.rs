@@ -448,9 +448,13 @@ fn npm_cli(node: &Path) -> Result<PathBuf, String> {
         return Ok(cli);
     }
 
+    // **Two lines, and the split is the point.** A launcher row and the chin
+    // both ellipsise, and a path is the longest thing in this message, so the
+    // first line is written to be the whole of what a window can draw and the
+    // rest is for the log. Same bargain `exthost::headline` makes with a crash.
     Err(format!(
-        "npm is not beside the Node at {}. An extension's dependencies cannot be \
-         installed without it; reinstalling Node.js from nodejs.org includes npm.",
+        "Sill's Node has no npm, so dependencies cannot be installed.\n\
+         Looked beside {}. Installing Node.js from nodejs.org includes npm.",
         real.display()
     ))
 }

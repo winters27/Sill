@@ -329,8 +329,11 @@ async fn apply(app: AppHandle, only: Option<String>) {
             Ok(true) => updates.applied(&data_dir, &one.extension),
             Ok(false) => updates.needs_a_look(&one.title),
             Err(err) => {
+                // The whole reason, both here and to the window. Which part of
+                // it there is room to draw is the window's question, and it
+                // answers it differently for the row and for a hover.
                 crate::say!("could not update {}: {err}", one.extension);
-                updates.did_not_work(&one.title);
+                updates.did_not_work(&one.title, &err);
             }
         }
     }

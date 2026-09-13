@@ -31,6 +31,7 @@
     applyExtensionUpdates,
     checkExtensionUpdates,
     whenExtensionUpdatesChange,
+    updatingDetail,
     updatingWords,
   } from "$lib/extensionUpdates";
   import ListView from "$lib/components/ListView.svelte";
@@ -760,6 +761,10 @@
   let updatingLine = $state("");
   let updatingFar = $state<number | null>(null);
   let updatingRow = $state(false);
+  /** What the last batch left to say, drawn on the row rather than the chin. */
+  let updateOutcome = $state("");
+  /** The same, in full, for the hover. Empty when the line already says it all. */
+  let updateDetail = $state("");
 
   /**
    * A store listing as a row, so the panel can ask about it like any other.
@@ -4242,11 +4247,19 @@
         if (!updatingRow) {
           updatingLine = "";
           updatingFar = null;
-          // What is left to say once it is over: what could not be updated,
-          // and what is waiting because it asks for more than before.
-          const said = updatingWords(standing);
-          if (said) status = said;
+          /*
+           * What is left to say: what could not be updated, and what is
+           * waiting because it asks for more than it did.
+           *
+           * Onto the row, not the status line. The chin holds one line and
+           * ellipsises it, so a reason put there is cut off mid-word, which
+           * is the failure its own comment already warned about.
+           */
+          updateOutcome = updatingWords(standing) ?? "";
+          updateDetail = updatingDetail(standing);
         } else {
+          updateOutcome = "";
+          updateDetail = "";
           updatingLine = updatingWords(standing) ?? "";
         }
 
@@ -4890,6 +4903,8 @@
         {query}
         {building}
         working={updatingRow ? { line: updatingLine, far: updatingFar } : null}
+        outcome={updateOutcome}
+        outcomeDetail={updateDetail}
         numeric={prefs?.navigation.numeric ?? false}
         asking={`${mode}:${query}`}
         onselect={(i) => (selected = i)}

@@ -47,6 +47,7 @@ function draw(
   commands: RankedCommand[],
   selected = 0,
   working: { line: string; far: number | null } | null = null,
+  outcome = "",
 ) {
   const target = document.createElement("div");
   document.body.append(target);
@@ -60,6 +61,7 @@ function draw(
       onrun: () => {},
       live: {},
       working,
+      outcome,
     },
   });
 
@@ -100,6 +102,41 @@ describe("drawing the result list", () => {
     const bar = target.querySelector('[role="progressbar"]');
     expect(bar?.hasAttribute("aria-valuenow")).toBe(false);
     expect(target.querySelector(".far.unknown")).not.toBeNull();
+  });
+
+  /**
+   * The reason goes on the row, not in the chin.
+   *
+   * Measured: the chin cut "Hacker News could not be updated. npm is not
+   * beside the Node at ..." down to "Hacker News could not be updated. npm
+   * ...", which is the half with nothing to act on. Its own comment says
+   * prose is the item that gives way there.
+   */
+  it("shows what the last batch left, with the full text to hover", () => {
+    const why = "Sill's Node has no npm, so dependencies cannot be installed.";
+    const target = draw(
+      [row("sill:extensions-behind", "Update 2 extensions", "extensions-behind")],
+      0,
+      null,
+      `Hacker News could not be updated. ${why}`,
+    );
+
+    expect(target.textContent).toContain(why);
+    expect(target.querySelector("[title]")?.getAttribute("title")).toContain(why);
+    expect(target.querySelector('[role="progressbar"]')).toBeNull();
+  });
+
+  /** While it runs, the progress wins: the outcome is about a batch that ended. */
+  it("draws progress rather than an old outcome while a batch is running", () => {
+    const target = draw(
+      [row("sill:extensions-behind", "Update 2 extensions", "extensions-behind")],
+      0,
+      { line: "Fetching 3 of 40 files", far: 0.1 },
+      "something an earlier batch said",
+    );
+
+    expect(target.textContent).toContain("Fetching 3 of 40 files");
+    expect(target.textContent).not.toContain("something an earlier batch said");
   });
 
   /** No batch running, no bar. The row is a button again. */

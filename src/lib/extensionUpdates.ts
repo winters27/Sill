@@ -42,13 +42,20 @@ export type Doing =
   | { kind: "checking" }
   | { kind: "applying"; title: string; done: number; total: number };
 
+/** One update that did not work, and the reason it gives. */
+export interface Failure {
+  title: string;
+  /** Already a sentence somebody can act on, as Rust worded it. */
+  why: string;
+}
+
 export interface Standing {
   behind: Behind[];
   doing: Doing;
   /** Titles that need somebody to look, because the new version reaches more. */
   asking: string[];
-  /** Titles that did not work. */
-  failed: string[];
+  /** What did not work, and why. */
+  failed: Failure[];
   /** When the store was last asked, in seconds, or zero for never. */
   checkedAt: number;
 }
@@ -166,18 +173,68 @@ export function updatingWords(standing: Standing): string | null {
       break;
   }
 
-  // Said after the batch rather than during it, and only once. These are the
-  // two outcomes somebody has to act on; the ones that simply worked are
-  // reported by the row going away.
-  if (standing.failed.length) {
-    return `${said(standing.failed)} could not be updated`;
+  // Null rather than an empty string when there is nothing to report, which
+  // is the contract every caller switches on: a batch where everything
+  // simply worked has the row going away as its whole report.
+  return settled(standing).text || null;
+}
+
+/**
+ * The whole of what the last batch left, for a hover.
+ *
+ * The row ellipsises, so the sentence it draws is written to fit and this is
+ * the rest: the path npm was looked for beside, and what to install. Empty
+ * when there is nothing more to say than the line already says.
+ */
+export function updatingDetail(standing: Standing): string {
+  return settled(standing).detail;
+}
+
+/**
+ * What a finished batch has to report, short and long.
+ *
+ * **Both halves, not whichever came first.** A batch really does end with one
+ * extension failing and another parked: measured on a real machine, one wanted
+ * npm and another had grown a capability. Reporting only the failure left the
+ * parked one with nothing on screen ever having mentioned it, which is a
+ * working guard reading as nothing having happened.
+ *
+ * The short form is deliberately terse. The row it goes on is one line that
+ * ellipsises, and the first attempt spent so many characters on "could not be
+ * updated" that the second half was cut off entirely. The row already says
+ * "Update", so what is worth the width is which extension and why.
+ *
+ * Updates that simply worked are reported by the row going away.
+ */
+function settled(standing: Standing): { text: string; detail: string } {
+  const lines: string[] = [];
+  const detail: string[] = [];
+
+  if (standing.failed.length === 1) {
+    const { title, why } = standing.failed[0];
+    const [first, ...rest] = why.split("\n").map((it) => it.trim()).filter(Boolean);
+    lines.push(first ? `${title}: ${first}` : `${title} could not be updated.`);
+    if (rest.length) detail.push(`${title}: ${why.trim()}`);
+  } else if (standing.failed.length > 1) {
+    // Several reasons will not fit and picking one would be arbitrary, so the
+    // line names them and the hover carries every reason in full.
+    lines.push(`${said(standing.failed.map((it) => it.title))} could not be updated.`);
+    for (const one of standing.failed) detail.push(`${one.title}: ${one.why.trim()}`);
   }
 
   if (standing.asking.length) {
-    return `${said(standing.asking)} asks for more than before, so it is waiting for you`;
+    lines.push(
+      standing.asking.length === 1
+        ? `${standing.asking[0]} asks for more than before.`
+        : `${said(standing.asking)} ask for more than before.`,
+    );
+    detail.push(
+      `${said(standing.asking)} reach something they were not granted, so they are waiting for you in the store.`,
+    );
   }
 
-  return null;
+  const text = lines.join(" ");
+  return { text, detail: detail.length ? [text, ...detail].join(" ") : "" };
 }
 
 /** A list of titles as a person would say it. */

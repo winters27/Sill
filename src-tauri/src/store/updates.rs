@@ -372,9 +372,25 @@ pub struct Standing {
     /// two different sentences: one is "this can be done now" and the other is
     /// "this needs you to look at something".
     pub asking: Vec<String>,
-    /// Titles that failed, with nothing claimed about why here.
-    pub failed: Vec<String>,
+    /// What failed, and why.
+    ///
+    /// **The reason travels.** It used to be a list of titles, with the reason
+    /// going to the log and nowhere else, so the launcher said "Hacker News
+    /// could not be updated" and the one sentence that said what to do about it
+    /// was in a file nobody was looking at. A failure somebody cannot act on is
+    /// barely worth reporting.
+    pub failed: Vec<Failure>,
     pub checked_at: i64,
+}
+
+/// One update that did not work, and the reason it gives.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Failure {
+    pub title: String,
+    /// The error as the install path worded it. Already a sentence somebody can
+    /// act on: the npm one names the Node it looked beside and what to install.
+    pub why: String,
 }
 
 /// The one place the answer lives.
@@ -402,7 +418,7 @@ struct Held {
     loaded: bool,
     doing: Doing,
     asking: Vec<String>,
-    failed: Vec<String>,
+    failed: Vec<Failure>,
 }
 
 impl ExtensionUpdates {
@@ -502,11 +518,14 @@ impl ExtensionUpdates {
         }
     }
 
-    /// Records that one did not work.
-    pub fn did_not_work(&self, title: &str) {
+    /// Records that one did not work, and what it said.
+    pub fn did_not_work(&self, title: &str, why: &str) {
         let mut held = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if !held.failed.iter().any(|it| it == title) {
-            held.failed.push(title.to_string());
+        if !held.failed.iter().any(|it| it.title == title) {
+            held.failed.push(Failure {
+                title: title.to_string(),
+                why: why.to_string(),
+            });
         }
     }
 }
