@@ -46,6 +46,19 @@
     "media",
     "text",
     "picture",
+    "confetti",
+    "reindex",
+    "undo",
+    "colour",
+    "crop",
+    "screen",
+    "markup",
+    "qr",
+    "key",
+    "server",
+    "clock",
+    "weather",
+    "transfer",
   ] as const;
 
   export type IconName = (typeof PANEL_ICONS)[number];
@@ -367,6 +380,165 @@
     <rect x="3.5" y="4.5" width="17" height="15" rx="1.8" />
     <circle cx="9" cy="9.3" r="1.6" />
     <path d="m3.8 17.4 5.2-5.1 3.4 3.3 3-2.9 4.8 4.7" />
+  {:else if name === "confetti"}
+    <!--
+      Three pieces of paper climbing a diagonal, with two sequins off it.
+
+      Each piece is a quadrilateral rather than a `rect` with a rotation,
+      because every other drawing in this file states its geometry and one
+      that carries a transform reads as a different kind of thing. The
+      diagonal is the throw: the same two fountains `$lib/confetti` draws,
+      reduced to the one gesture that still says it at 26px.
+    -->
+    <path d="M8.38 18.32 6.52 14.33 3.62 15.68 5.48 19.67Z" />
+    <path d="M13.25 13.62 14.76 9.48 11.75 8.39 10.24 12.52Z" />
+    <path d="M20.73 6.46 18.32 3.02 15.87 4.74 18.28 8.18Z" />
+    <circle cx="4.6" cy="10.6" r="1.05" />
+    <circle cx="17.4" cy="16.8" r="1.05" />
+  {:else if name === "qr"}
+    <!-- Three finder squares and a scattering of modules. Drawn rather
+         than borrowed: Phosphor has no QR mark, and `squares-four` reads
+         as a grid of apps rather than as something to point a camera at. -->
+    <rect x="3.4" y="3.4" width="7" height="7" rx="1" />
+    <rect x="13.6" y="3.4" width="7" height="7" rx="1" />
+    <rect x="3.4" y="13.6" width="7" height="7" rx="1" />
+    <path d="M6.2 6.2h1.4v1.4H6.2zM16.4 6.2h1.4v1.4h-1.4zM6.2 16.4h1.4v1.4H6.2z" />
+    <path d="M13.6 13.6h2.6M19 13.6h1.6M13.6 17.2v3.4M17.4 16.4h3.2M17.4 20.6h3.2" />
+  {:else if name === "reindex"}
+    <!--
+      Phosphor arrows-clockwise, the same regular weight `marks.ts` carries.
+
+      Scaled rather than redrawn: Phosphor states its outlines on a 256
+      box and every drawing above is stated on a 24 one, and 24/256 is
+      the whole of the difference. Filled and unstroked inside the
+      group, because a regular-weight outline is a filled shape; its
+      optical weight is what `marks.ts` says lets the two sets sit in
+      one list.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M224,48V96a8,8,0,0,1-8,8H168a8,8,0,0,1,0-16h28.69L182.06,73.37a79.56,79.56,0,0,0-56.13-23.43h-.45A79.52,79.52,0,0,0,69.59,72.71,8,8,0,0,1,58.41,61.27a96,96,0,0,1,135,.79L208,76.69V48a8,8,0,0,1,16,0ZM186.41,183.29a80,80,0,0,1-112.47-.66L59.31,168H88a8,8,0,0,0,0-16H40a8,8,0,0,0-8,8v48a8,8,0,0,0,16,0V179.31l14.63,14.63A95.43,95.43,0,0,0,130,222.06h.53a95.36,95.36,0,0,0,67.07-27.33,8,8,0,0,0-11.18-11.44Z" />
+    </g>
+  {:else if name === "undo"}
+    <!--
+      Phosphor arrow-counter-clockwise, the same regular weight `marks.ts` carries.
+
+      Scaled rather than redrawn: Phosphor states its outlines on a 256
+      box and every drawing above is stated on a 24 one, and 24/256 is
+      the whole of the difference. Filled and unstroked inside the
+      group, because a regular-weight outline is a filled shape; its
+      optical weight is what `marks.ts` says lets the two sets sit in
+      one list.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M224,128a96,96,0,0,1-94.71,96H128A95.38,95.38,0,0,1,62.1,197.8a8,8,0,0,1,11-11.63A80,80,0,1,0,71.43,71.39a3.07,3.07,0,0,1-.26.25L44.59,96H72a8,8,0,0,1,0,16H24a8,8,0,0,1-8-8V56a8,8,0,0,1,16,0V85.8L60.25,60A96,96,0,0,1,224,128Z" />
+    </g>
+  {:else if name === "colour"}
+    <!--
+      Phosphor eyedropper, the same regular weight `marks.ts` carries.
+
+      Scaled rather than redrawn: Phosphor states its outlines on a 256
+      box and every drawing above is stated on a 24 one, and 24/256 is
+      the whole of the difference. Filled and unstroked inside the
+      group, because a regular-weight outline is a filled shape; its
+      optical weight is what `marks.ts` says lets the two sets sit in
+      one list.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M224,67.3a35.79,35.79,0,0,0-11.26-25.66c-14-13.28-36.72-12.78-50.62,1.13L142.8,62.2a24,24,0,0,0-33.14.77l-9,9a16,16,0,0,0,0,22.64l2,2.06-51,51a39.75,39.75,0,0,0-10.53,38l-8,18.41A13.68,13.68,0,0,0,36,219.3a15.92,15.92,0,0,0,17.71,3.35L71.23,215a39.89,39.89,0,0,0,37.06-10.75l51-51,2.06,2.06a16,16,0,0,0,22.62,0l9-9a24,24,0,0,0,.74-33.18l19.75-19.87A35.75,35.75,0,0,0,224,67.3ZM97,193a24,24,0,0,1-24,6,8,8,0,0,0-5.55.31l-18.1,7.91L57,189.41a8,8,0,0,0,.25-5.75A23.88,23.88,0,0,1,63,159l51-51,33.94,34ZM202.13,82l-25.37,25.52a8,8,0,0,0,0,11.3l4.89,4.89a8,8,0,0,1,0,11.32l-9,9L112,83.26l9-9a8,8,0,0,1,11.31,0l4.89,4.89a8,8,0,0,0,11.33,0l24.94-25.09c7.81-7.82,20.5-8.18,28.29-.81a20,20,0,0,1,.39,28.7Z" />
+    </g>
+  {:else if name === "crop"}
+    <!--
+      Phosphor crop, the same regular weight `marks.ts` carries.
+
+      Scaled rather than redrawn: Phosphor states its outlines on a 256
+      box and every drawing above is stated on a 24 one, and 24/256 is
+      the whole of the difference. Filled and unstroked inside the
+      group, because a regular-weight outline is a filled shape; its
+      optical weight is what `marks.ts` says lets the two sets sit in
+      one list.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M240,192a8,8,0,0,1-8,8H200v32a8,8,0,0,1-16,0V200H64a8,8,0,0,1-8-8V72H24a8,8,0,0,1,0-16H56V24a8,8,0,0,1,16,0V184H232A8,8,0,0,1,240,192ZM96,72h88v88a8,8,0,0,0,16,0V64a8,8,0,0,0-8-8H96a8,8,0,0,0,0,16Z" />
+    </g>
+  {:else if name === "screen"}
+    <!--
+      Phosphor monitor, the same regular weight `marks.ts` carries.
+
+      Scaled rather than redrawn: Phosphor states its outlines on a 256
+      box and every drawing above is stated on a 24 one, and 24/256 is
+      the whole of the difference. Filled and unstroked inside the
+      group, because a regular-weight outline is a filled shape; its
+      optical weight is what `marks.ts` says lets the two sets sit in
+      one list.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M208,40H48A24,24,0,0,0,24,64V176a24,24,0,0,0,24,24H208a24,24,0,0,0,24-24V64A24,24,0,0,0,208,40Zm8,136a8,8,0,0,1-8,8H48a8,8,0,0,1-8-8V64a8,8,0,0,1,8-8H208a8,8,0,0,1,8,8Zm-48,48a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,224Z" />
+    </g>
+  {:else if name === "markup"}
+    <!--
+      Phosphor highlighter, the same regular weight `marks.ts` carries.
+
+      Scaled rather than redrawn: Phosphor states its outlines on a 256
+      box and every drawing above is stated on a 24 one, and 24/256 is
+      the whole of the difference. Filled and unstroked inside the
+      group, because a regular-weight outline is a filled shape; its
+      optical weight is what `marks.ts` says lets the two sets sit in
+      one list.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M253.66,106.34a8,8,0,0,0-11.32,0L192,156.69,107.31,72l50.35-50.34a8,8,0,1,0-11.32-11.32L96,60.69A16,16,0,0,0,93.18,79.5L72,100.69a16,16,0,0,0,0,22.62L76.69,128,18.34,186.34a8,8,0,0,0,3.13,13.25l72,24A7.88,7.88,0,0,0,96,224a8,8,0,0,0,5.66-2.34L136,187.31l4.69,4.69a16,16,0,0,0,22.62,0l21.19-21.18A16,16,0,0,0,203.31,168l50.35-50.34A8,8,0,0,0,253.66,106.34ZM93.84,206.85l-55-18.35L88,139.31,124.69,176ZM152,180.69,83.31,112,104,91.31,172.69,160Z" />
+    </g>
+  {:else if name === "key"}
+    <!--
+      Phosphor key, the same regular weight the marks above are scaled from.
+
+      Every row wearing it is a secret somebody pasted in: an API key, a
+      token, a client id. What tells them apart is which service the key is
+      for, and that is what the line beside the title says.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M216.57,39.43A80,80,0,0,0,83.91,120.78L28.69,176A15.86,15.86,0,0,0,24,187.31V216a16,16,0,0,0,16,16H72a8,8,0,0,0,8-8V208H96a8,8,0,0,0,8-8V184h16a8,8,0,0,0,5.66-2.34l9.56-9.57A79.73,79.73,0,0,0,160,176h.1A80,80,0,0,0,216.57,39.43ZM224,98.1c-1.09,34.09-29.75,61.86-63.89,61.9H160a63.7,63.7,0,0,1-23.65-4.51,8,8,0,0,0-8.84,1.68L116.69,168H96a8,8,0,0,0-8,8v16H72a8,8,0,0,0-8,8v16H40V187.31l58.83-58.82a8,8,0,0,0,1.68-8.84A63.72,63.72,0,0,1,96,95.92c0-34.14,27.81-62.8,61.9-63.89A64,64,0,0,1,224,98.1ZM192,76a12,12,0,1,1-12-12A12,12,0,0,1,192,76Z" />
+    </g>
+  {:else if name === "server"}
+    <!--
+      Phosphor hard-drive: the machine that answers.
+
+      Not a globe, which is `browsers`, not a globe under a lens, which is
+      `websearch`, not a chain link, which is `quicklinks`, and not a plug,
+      which is `mcp`. Four of the five obvious drawings for "somewhere else"
+      were already spoken for, and the honest fifth is the box itself.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M224,64H32A16,16,0,0,0,16,80v96a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V80A16,16,0,0,0,224,64Zm0,112H32V80H224v96Zm-24-48a12,12,0,1,1-12-12A12,12,0,0,1,200,128Z" />
+    </g>
+  {:else if name === "clock"}
+    <!--
+      Phosphor clock. A plain face, where `history` is a face with an arrow
+      back round it: this is what time it is, that one is what already
+      happened.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm64-88a8,8,0,0,1-8,8H128a8,8,0,0,1-8-8V72a8,8,0,0,1,16,0v48h48A8,8,0,0,1,192,128Z" />
+    </g>
+  {:else if name === "weather"}
+    <!--
+      Phosphor cloud-sun. The sun is what keeps it from reading as a plain
+      cloud, which at this size is a shape rather than a forecast.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M164,72a76.2,76.2,0,0,0-20.26,2.73,55.63,55.63,0,0,0-9.41-11.54l9.51-13.57a8,8,0,1,0-13.11-9.18L121.22,54A55.9,55.9,0,0,0,96,48c-.58,0-1.16,0-1.74,0L91.37,31.71a8,8,0,1,0-15.75,2.77L78.5,50.82A56.1,56.1,0,0,0,55.23,65.67L41.61,56.14a8,8,0,1,0-9.17,13.11L46,78.77A55.55,55.55,0,0,0,40,104c0,.57,0,1.15,0,1.72L23.71,108.6a8,8,0,0,0,1.38,15.88,8.24,8.24,0,0,0,1.39-.12l16.32-2.88a55.74,55.74,0,0,0,5.86,12.42A52,52,0,0,0,84,224h80a76,76,0,0,0,0-152ZM56,104a40,40,0,0,1,72.54-23.24,76.26,76.26,0,0,0-35.62,40,52.14,52.14,0,0,0-31,4.17A40,40,0,0,1,56,104ZM164,208H84a36,36,0,1,1,4.78-71.69c-.37,2.37-.63,4.79-.77,7.23a8,8,0,0,0,16,.92,58.91,58.91,0,0,1,1.88-11.81c0-.16.09-.32.12-.48A60.06,60.06,0,1,1,164,208Z" />
+    </g>
+  {:else if name === "transfer"}
+    <!--
+      Phosphor tray: things go in and out of it.
+
+      Deliberately neither an up arrow nor a down one. Export and import sit
+      next to each other in General and one drawing has to serve both, so a
+      direction on it would be wrong half the time.
+    -->
+    <g transform="scale(0.09375)" fill="currentColor" stroke="none">
+      <path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32Zm0,16V152h-28.7A15.86,15.86,0,0,0,168,156.69L148.69,176H107.31L88,156.69A15.86,15.86,0,0,0,76.69,152H48V48Zm0,160H48V168H76.69L96,187.31A15.86,15.86,0,0,0,107.31,192h41.38A15.86,15.86,0,0,0,160,187.31L179.31,168H208v40Z" />
+    </g>
   {:else}
     <!--
       A name with no drawing, which is a panel added before its glyph was.

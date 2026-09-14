@@ -454,7 +454,8 @@ pub fn builtins() -> Vec<CommandRecord> {
             "Hotkey, appearance, sources and file search",
             &["preferences", "options", "configure", "hotkey"],
         ),
-        builtin(
+        marked(
+            "mark:reindex",
             "reload",
             "advanced",
             "Reload Sill Index",
@@ -468,7 +469,8 @@ pub fn builtins() -> Vec<CommandRecord> {
             "Saved text, expanded by keyword or pasted from here",
             &["snippet", "template", "expand", "abbreviation", "text"],
         ),
-        builtin(
+        marked(
+            "mark:arrangements",
             "save-workspace",
             "advanced",
             "Save Workspace",
@@ -502,7 +504,8 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "dashboard",
             ],
         ),
-        builtin(
+        marked(
+            "mark:undo",
             "undo-last",
             "advanced",
             "Undo Last Action",
@@ -544,7 +547,8 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "refresh",
             ],
         ),
-        builtin(
+        marked(
+            "mark:extensions",
             "install-extension",
             "advanced",
             "Install Extension",
@@ -614,14 +618,16 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "quit", "close", "all", "everything", "apps", "programs", "windows", "exit",
             ],
         ),
-        builtin(
+        marked(
+            "mark:confetti",
             "confetti",
             "general",
             "Confetti",
             "Because it is Friday",
             &["confetti", "celebrate", "party", "hooray", "yay"],
         ),
-        builtin(
+        marked(
+            "mark:qr",
             "read-qr",
             "screenshot",
             "Read a QR Code",
@@ -630,7 +636,8 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "qr", "code", "barcode", "scan", "decode", "read", "square",
             ],
         ),
-        builtin(
+        marked(
+            "mark:colour",
             "pick-colour",
             "screenshot",
             "Pick a Colour",
@@ -648,7 +655,8 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "swatch",
             ],
         ),
-        builtin(
+        marked(
+            "mark:crop",
             "capture-area",
             "clipboard",
             "Capture Area",
@@ -665,7 +673,8 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "capture",
             ],
         ),
-        builtin(
+        marked(
+            "mark:screen",
             "capture-screen",
             "clipboard",
             "Capture Whole Screen",
@@ -680,7 +689,8 @@ pub fn builtins() -> Vec<CommandRecord> {
                 "capture",
             ],
         ),
-        builtin(
+        marked(
+            "mark:markup",
             "mark-up",
             "clipboard",
             "Mark Up Last Image",
@@ -814,7 +824,7 @@ pub fn builtins() -> Vec<CommandRecord> {
         ),
         builtin(
             "emoji",
-            "snippets",
+            "emoji",
             "Emoji",
             "Search every emoji by name and paste one",
             &[
@@ -1300,6 +1310,41 @@ fn builtin_wearing(
 /// id that matches no row updates nothing and reports nothing.
 pub fn builtin_id(id: &str) -> String {
     format!("sill:{id}")
+}
+
+/// A builtin that wears one of Sill's own marks rather than its panel's.
+///
+/// Most builtins are the command form of a settings panel, and wearing that
+/// panel's icon is what makes the pair recognisable. Some are not a setting
+/// at all, and for those the panel is only where their preferences happen to
+/// live: throwing confetti is an action, and drawing it with the General gear
+/// tells somebody it is a setting they have never found.
+///
+/// The whole `mark:name` string rather than the name, and that is not
+/// clumsiness. `verify:source` finds every mark a row asks for by scanning
+/// the source for that literal, so building it here with `format!` and
+/// passing the bare name would leave nine rows naming marks that nothing
+/// checks. Written out, a typo is a failed build instead of a broken image
+/// on a row somebody meets before they ever open settings.
+fn marked(
+    icon: &str,
+    id: &str,
+    panel: &str,
+    title: &str,
+    subtitle: &str,
+    keywords: &[&str],
+) -> CommandRecord {
+    CommandRecord {
+        icon: Some(icon.to_string()),
+        // One or the other, never both. `builtin` sets a panel so a row with
+        // no picture of its own still wears one, and nothing else reads it: a
+        // builtin launches by its own id, and `RunBuiltin` carries its own
+        // list of which panel each one opens. A row leaving both set is a row
+        // whose picture is decided by the order of two branches in the markup,
+        // and `every_builtin_names_a_panel_that_exists` refuses it.
+        panel: None,
+        ..builtin(id, panel, title, subtitle, keywords)
+    }
 }
 
 fn builtin(id: &str, panel: &str, title: &str, subtitle: &str, keywords: &[&str]) -> CommandRecord {
@@ -4395,6 +4440,42 @@ mod pinned_rows {
         .into_iter()
         .map(|one| one.command.id)
         .collect()
+    }
+
+    /// Recency is not frecency, and this is the case that tells them apart.
+    ///
+    /// Fifty launches ending an hour ago lose to one launch a minute ago.
+    /// `score` would say the opposite, correctly, for ordering a search.
+    #[test]
+    fn recents_are_ordered_by_when_not_by_how_often() {
+        let mut frecency = Frecency::default();
+
+        for _ in 0..50 {
+            frecency.record("often", NOW - 3600);
+        }
+        frecency.record("just-now", NOW);
+        frecency.record("a-while-back", NOW - 60);
+
+        assert_eq!(
+            frecency.recent(5),
+            vec!["just-now", "a-while-back", "often"],
+            "recents were ordered by count rather than by clock"
+        );
+    }
+
+    /// Five rows is a glance. Asking for five and getting the whole history
+    /// would push the rest of the root list off the screen.
+    #[test]
+    fn recents_stop_at_what_was_asked_for() {
+        let mut frecency = Frecency::default();
+        for n in 0..20 {
+            frecency.record(&format!("thing-{n}"), NOW - i64::from(n));
+        }
+
+        let recent = frecency.recent(5);
+        assert_eq!(recent.len(), 5);
+        assert_eq!(recent[0], "thing-0", "the newest did not lead");
+        assert_eq!(recent[4], "thing-4");
     }
 
     /// The whole point: the empty query is ordered by what you reach for most,
