@@ -709,7 +709,12 @@ pub fn aliases_from_tsconfig(text: &str) -> Vec<(String, String)> {
 ///   both at runtime**. Bundling either gives the worker a second copy of
 ///   React and hooks fail in ways that read as the extension's fault.
 /// - `--jsx=automatic`, since extensions do not import React to use JSX.
-pub fn esbuild_args(entry: &Path, outfile: &Path, aliases: &[(String, String)]) -> Vec<String> {
+pub fn esbuild_args(
+    entry: &Path,
+    outfile: &Path,
+    aliases: &[(String, String)],
+    metafile: Option<&Path>,
+) -> Vec<String> {
     let mut args = vec![
         entry.to_string_lossy().into_owned(),
         "--bundle".into(),
@@ -739,7 +744,74 @@ pub fn esbuild_args(entry: &Path, outfile: &Path, aliases: &[(String, String)]) 
         args.push(format!("--alias:{from}={to}"));
     }
 
+    // Asked for so the build can be checked afterwards. See `strayed_outside`.
+    if let Some(path) = metafile {
+        args.push(format!("--metafile={}", path.to_string_lossy()));
+    }
+
     args
+}
+
+/// Inputs the build reached that are not inside the extension being built.
+///
+/// **esbuild resolves a bare import by walking up every ancestor directory,
+/// and it does not stop where the extension does.** Sill stages under the data
+/// directory, which on a normal Windows account is below the user's home; a
+/// stray `node_modules` anywhere above staging is therefore on the search
+/// path. Measured on the machine this was written on: a `node_modules` in the
+/// home directory holding 362 packages, six levels above staging, and an
+/// extension importing `uuid` with nothing installed **built successfully**
+/// against it.
+///
+/// npm usually hides this, because a package it installs into staging is
+/// nearer in the walk and wins. What is left is every case where that does not
+/// happen: a dependency npm could not fetch, a tree that was only half
+/// written, a name npm never had a reason to install. Those resolve upward in
+/// silence and the bundle ships somebody else's code.
+///
+/// So the build is asked where every input came from and the answer is
+/// checked. esbuild writes metafile keys relative to its working directory,
+/// which [`bundle`] sets to the extension's own root, so anything inside is a
+/// plain relative path and anything outside begins by climbing out of it or is
+/// absolute. That is the whole test.
+///
+/// Returns the offending inputs, nearest first, or an empty list when the
+/// build stayed where it belongs.
+pub fn strayed_outside(metafile: &str) -> Vec<String> {
+    let Ok(parsed) = serde_json::from_str::<Value>(metafile) else {
+        // Unreadable is not the same as contaminated. A build whose metafile
+        // cannot be parsed is reported by the check that reads it, not here.
+        return Vec::new();
+    };
+
+    let Some(inputs) = parsed.get("inputs").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+
+    let mut strayed: Vec<String> = inputs
+        .keys()
+        .filter(|path| outside(path))
+        .cloned()
+        .collect();
+
+    strayed.sort();
+    strayed
+}
+
+/// Whether one metafile key names something out of the build's own tree.
+///
+/// Two ways out: climbing with `..`, and naming a root outright. The second
+/// covers a Windows drive letter and a UNC share as well as a leading slash,
+/// because a path esbuild did not have to make relative is one it could not,
+/// which means it was on another root entirely.
+fn outside(path: &str) -> bool {
+    let path = path.replace('\\', "/");
+
+    path.starts_with("../")
+        || path == ".."
+        || path.starts_with('/')
+        || path.starts_with("//")
+        || path.chars().nth(1) == Some(':')
 }
 
 /// The marker that pins a built bundle back to CommonJS.
@@ -1098,6 +1170,7 @@ pub fn install_into_reporting(
 
         bundle(
             esbuild,
+            source,
             &source.join(relative),
             &building.join(format!("{}.js", command.name)),
             &aliases,
@@ -1184,6 +1257,7 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
 #[cfg(windows)]
 fn bundle(
     esbuild: &Path,
+    root: &Path,
     entry: &Path,
     outfile: &Path,
     aliases: &[(String, String)],
@@ -1194,9 +1268,19 @@ fn bundle(
     // No console window for a subprocess of a launcher.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+    // Beside the output rather than in the temp folder, so it goes when the
+    // build directory does and two builds cannot read each other's.
+    let metafile = outfile.with_extension("meta.json");
+    let _ = std::fs::remove_file(&metafile);
+
     let mut command = std::process::Command::new(esbuild);
     command
-        .args(esbuild_args(entry, outfile, aliases))
+        .args(esbuild_args(entry, outfile, aliases, Some(&metafile)))
+        // **The working directory is the extension's own root**, which is what
+        // makes the metafile answer the question `strayed_outside` asks: every
+        // input inside the extension is then a plain relative path, and
+        // anything else had to climb out or name another root.
+        .current_dir(root)
         .creation_flags(CREATE_NO_WINDOW);
 
     let ran = crate::bounded::run(&mut command, BUNDLE_DEADLINE, &mut |line| {
@@ -1205,17 +1289,126 @@ fn bundle(
         })
     })?;
 
-    if ran.ok {
-        return Ok(());
+    if !ran.ok {
+        let _ = std::fs::remove_file(&metafile);
+        let said = ran.said.trim();
+
+        return Err(if said.is_empty() {
+            format!("esbuild refused {} and said nothing", entry.display())
+        } else {
+            said.to_string()
+        });
     }
 
-    let said = ran.said.trim();
+    let written = std::fs::read_to_string(&metafile)
+        .map_err(|err| format!("esbuild built {} without saying what it used: {err}", entry.display()))?;
+    let _ = std::fs::remove_file(&metafile);
 
-    Err(if said.is_empty() {
-        format!("esbuild refused {} and said nothing", entry.display())
-    } else {
-        said.to_string()
-    })
+    let strayed = strayed_outside(&written);
+    if !strayed.is_empty() {
+        // Named rather than counted, and the first few rather than all of
+        // them: the first one is nearly always enough to see what happened,
+        // and the list can be hundreds of files from one stray package.
+        let shown: Vec<&str> = strayed.iter().take(3).map(String::as_str).collect();
+        let more = strayed.len().saturating_sub(shown.len());
+
+        return Err(format!(
+            "{} was built against code outside the extension, which Sill will not ship: {}{}. 
+             A `node_modules` above Sill's staging directory is on esbuild's search path,              and what it holds is not what this extension declared.",
+            entry.display(),
+            shown.join(", "),
+            if more > 0 { format!(" and {more} more") } else { String::new() },
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod staying_inside {
+    use super::{esbuild_args, strayed_outside};
+    use std::path::Path;
+
+    fn meta(paths: &[&str]) -> String {
+        let inputs: String = paths
+            .iter()
+            .map(|p| format!("{:?}:{{\"bytes\":1,\"imports\":[]}}", p))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("{{\"inputs\":{{{inputs}}},\"outputs\":{{}}}}")
+    }
+
+    #[test]
+    fn a_build_that_stayed_in_its_own_tree_reports_nothing() {
+        let said = meta(&[
+            "src/run.tsx",
+            "node_modules/uuid/dist/index.js",
+            "node_modules/typeid-js/node_modules/uuid/dist/index.js",
+        ]);
+
+        assert!(strayed_outside(&said).is_empty());
+    }
+
+    /// **The measured case.** An extension importing `uuid` with nothing
+    /// installed resolved six levels up into a `node_modules` in the home
+    /// directory and built successfully. The metafile is the only place that
+    /// says so.
+    #[test]
+    fn climbing_out_of_the_extension_is_caught() {
+        let said = meta(&[
+            "src/run.tsx",
+            "../../../../../../node_modules/uuid/dist/esm-node/rng.js",
+        ]);
+
+        assert_eq!(
+            strayed_outside(&said),
+            vec!["../../../../../../node_modules/uuid/dist/esm-node/rng.js".to_string()]
+        );
+    }
+
+    /// A path esbuild did not make relative is one it could not, which means
+    /// another root entirely.
+    #[test]
+    fn a_path_on_another_root_is_caught() {
+        for named in [
+            "C:/Users/Brandon/node_modules/uuid/index.js",
+            "C:\\Users\\Brandon\\node_modules\\uuid\\index.js",
+            "/usr/lib/node_modules/uuid/index.js",
+            "//server/share/node_modules/uuid/index.js",
+        ] {
+            assert_eq!(strayed_outside(&meta(&[named])).len(), 1, "{named}");
+        }
+    }
+
+    /// A directory that merely starts with two dots is inside.
+    #[test]
+    fn a_name_beginning_with_dots_is_not_an_escape() {
+        assert!(strayed_outside(&meta(&["..hidden/thing.js", "src/..odd.ts"])).is_empty());
+    }
+
+    /// Unreadable is not the same as contaminated; the caller reports that.
+    #[test]
+    fn a_metafile_that_cannot_be_read_accuses_nobody() {
+        assert!(strayed_outside("not json at all").is_empty());
+        assert!(strayed_outside("{}").is_empty());
+    }
+
+    #[test]
+    fn the_metafile_is_only_asked_for_when_somewhere_to_put_it_is_given() {
+        let without = esbuild_args(Path::new("in.tsx"), Path::new("out.js"), &[], None);
+        assert!(!without.iter().any(|a| a.starts_with("--metafile")), "{without:?}");
+
+        let with = esbuild_args(
+            Path::new("in.tsx"),
+            Path::new("out.js"),
+            &[],
+            Some(Path::new("meta.json")),
+        );
+        assert!(
+            with.contains(&"--metafile=meta.json".to_string()),
+            "{with:?}"
+        );
+    }
 }
 
 #[cfg(all(test, windows))]
@@ -1626,7 +1819,7 @@ mod tests {
     /// The three flags that decide whether a built extension actually runs.
     #[test]
     fn the_host_supplied_modules_are_left_out_of_the_bundle() {
-        let args = esbuild_args(Path::new("in.tsx"), Path::new("out.js"), &[]);
+        let args = esbuild_args(Path::new("in.tsx"), Path::new("out.js"), &[], None);
 
         for external in ["@raycast/api", "@sill/api", "react", "react/jsx-runtime"] {
             assert!(
@@ -1645,6 +1838,7 @@ mod tests {
             Path::new("in.tsx"),
             Path::new("out.js"),
             &[("@".into(), "./src".into())],
+            None,
         );
 
         assert!(args.contains(&"--alias:@=./src".to_string()), "{args:?}");
