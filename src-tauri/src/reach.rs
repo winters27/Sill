@@ -198,6 +198,36 @@ pub fn target(target: &str) -> Result<String, String> {
     }
 }
 
+/// Hands a checked target to the shell, by whichever door fits it.
+///
+/// **`open_path` and `open_url` are not interchangeable**, which is the whole
+/// reason this exists. With no application named, `open_path` stats its
+/// argument first:
+///
+/// ```rust,ignore
+/// if with.is_none() { _ = path.metadata()?; }
+/// ```
+///
+/// A web address is not a file, so that returns an IO error and nothing opens.
+/// Sill called `open_path` for both in two places, and every extension that
+/// tried to open a web address was told the address does not exist. What
+/// `proton-pass` did with that was kill its own login and report that the
+/// login had failed.
+///
+/// The stat is worth keeping for a real path, so a file that is not there says
+/// so rather than being handed to the shell as a name. Hence one function
+/// rather than one rule written down twice.
+pub fn open(target: &str, with: Option<&str>) -> Result<(), String> {
+    let checked = self::target(target)?;
+
+    let opened = match scheme_of(&checked) {
+        Some(_) => tauri_plugin_opener::open_url(&checked, with),
+        None => tauri_plugin_opener::open_path(&checked, with),
+    };
+
+    opened.map_err(|err| format!("could not open {checked}: {err}"))
+}
+
 /// Said the same way wherever the refusal comes from.
 fn refusal(scheme: &str) -> String {
     format!(

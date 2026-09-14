@@ -230,9 +230,7 @@ impl Action for Launch {
             // A record in the index is normally a path, but an extension
             // supplies its own rows and a model can name a target, so what
             // gets launched is not always something Sill put there.
-            let target = crate::reach::target(&object.target)?;
-
-            tauri_plugin_opener::open_path(&target, None::<&str>)
+            crate::reach::open(&object.target, None)
                 .map_err(|err| format!("could not launch {}: {err}", object.title))?;
         }
 

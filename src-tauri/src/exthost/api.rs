@@ -167,6 +167,37 @@ pub struct ApiLayer {
     timings: crate::timing::Timings,
 }
 
+/// The host of an address, or a word for what kind it is.
+///
+/// What an extension opens is often a credential. A login URL carries its
+/// payload in the fragment and a share link carries it in the path, so the
+/// only part of one that is safe to write down is the host it is going to.
+pub fn host_of(target: &str) -> String {
+    // Split by hand rather than with a URL parser, because the answer needed
+    // here is one field and a dependency for it would be a dependency for a
+    // log line.
+    let Some((scheme, rest)) = target.split_once("://") else {
+        // Not a URL at all, which is the ordinary case for a file or a folder.
+        return "a path".to_string();
+    };
+
+    let host = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        // Credentials can sit before the host in a URL, and they are the one
+        // part of it this is most careful to leave out.
+        .rsplit('@')
+        .next()
+        .unwrap_or_default();
+
+    if host.is_empty() {
+        scheme.to_string()
+    } else {
+        host.to_string()
+    }
+}
+
 impl ApiLayer {
     pub fn new(
         events: mpsc::UnboundedSender<UiEvent>,
@@ -425,6 +456,14 @@ impl ApiLayer {
                     .and_then(Value::as_str)
                     .filter(|id| !id.is_empty())
                     .map(str::to_string);
+
+                // **The host and nothing after it.** An address an extension
+                // opens is often a credential: this line was written with the
+                // whole URL in it and the first thing it logged was a Proton
+                // login payload, which is a token sitting in a file that syncs
+                // nowhere but lives forever. The host is what says whether the
+                // call was reached, which is all this is for.
+                crate::say!("open: {}", crate::exthost::api::host_of(&target));
 
                 self.blocking(move |bridge| bridge.open(&target, with.as_deref()))
                     .await?;
