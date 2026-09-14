@@ -1346,17 +1346,48 @@ body {
 }
 
 /*
- * Anything that scrolls.
+ * Every scrollbar in every window.
  *
- * These two lines were copied into six components and left out of the
- * seventh, and the seventh is how a Windows scrollbar ends up painted down
- * the middle of a dark window. A class rather than a rule on everything,
- * because the surface that scrolls is a decision each component makes and
- * naming it is what makes the decision visible.
+ * `scrollbar-width` and `scrollbar-color` were the answer here and they
+ * cannot be: Chromium draws a stepper arrow at each end of a Fluent
+ * scrollbar and no standard property turns them off. `::-webkit-scrollbar`
+ * can, but only where nothing sets the standard pair, because that pair
+ * wins and the pseudo-elements are then ignored whole. Measured in the
+ * engine: a box with both reserves the same 10px as one with the pair
+ * alone and draws the arrows, and one with the pseudo-elements alone
+ * reserves 8px and draws none.
+ *
+ * Unscoped, which reverses the decision this used to carry. It was a class
+ * so that a scrolling surface had to name itself, and the class was then
+ * copied by hand into sixteen places across twelve files and not one of
+ * them wore it. `verify:source` holds the new shape instead: either
+ * property outside this file fails, because re-introducing one silently
+ * brings the arrows back on that one surface.
  */
-.sill-scrolls {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+/* The stepper arrows, which are the whole reason this is written out. */
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/*
+ * A transparent border with `background-clip` is how a thumb is inset from
+ * the edge of its track. Padding does nothing on this pseudo-element.
+ */
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
 }
 
 /*
@@ -1371,8 +1402,6 @@ body {
   overflow-y: auto;
   padding: var(--space-1);
   outline: none;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 /*

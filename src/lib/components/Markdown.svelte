@@ -112,7 +112,7 @@
         {/each}
       </div>
     {:else}
-      <div class="scroller sill-scrolls">
+      <div class="scroller">
         <table>
           <thead>
             <tr>

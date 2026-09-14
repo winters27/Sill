@@ -1009,8 +1009,6 @@
     overflow-y: auto;
     padding: var(--space-1);
     border-right: 1px solid var(--hairline);
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   /*
@@ -1076,8 +1074,6 @@
     min-height: 0;
     overflow: auto;
     padding: var(--space-4);
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .preview pre {
@@ -1135,8 +1131,6 @@
     overflow-y: auto;
     padding: var(--space-3) var(--space-4) var(--space-3);
     border-top: 1px solid var(--hairline);
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   /* Structural, not a list separator: it heads a table of metadata rather

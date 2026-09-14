@@ -939,8 +939,6 @@
     min-width: 0;
     padding: var(--space-5) var(--space-8) var(--space-8);
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .s-head {

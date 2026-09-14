@@ -83,8 +83,6 @@
     min-height: 0;
     padding: var(--space-3);
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   /*

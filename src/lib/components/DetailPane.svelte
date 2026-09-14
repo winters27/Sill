@@ -109,8 +109,6 @@
     overflow-y: auto;
     padding: var(--space-4);
     user-select: text;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   /*

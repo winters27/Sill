@@ -145,8 +145,6 @@
     overflow-y: auto;
     padding: var(--space-2);
     outline: none;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .grid {

@@ -370,8 +370,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .row {

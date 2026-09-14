@@ -2545,8 +2545,6 @@
     min-height: 0;
     overflow-y: auto;
     padding: 0 var(--space-2);
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .nav-item {
@@ -2757,8 +2755,6 @@
        vertical one. Controls wrap instead; see Segmented. */
     overflow-x: hidden;
     padding: var(--space-4) var(--settings-gutter) var(--space-10);
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .panel-body {

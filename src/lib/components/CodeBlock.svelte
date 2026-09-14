@@ -46,7 +46,7 @@
 
   <!-- Its own scroller, so a long line never makes the conversation scroll
        sideways. -->
-  <pre class="sill-scrolls"><code>{#each lines as line, at (at)}<span class="line">{line}</span>{"\n"}{/each}</code></pre>
+  <pre><code>{#each lines as line, at (at)}<span class="line">{line}</span>{"\n"}{/each}</code></pre>
 </div>
 
 <style>

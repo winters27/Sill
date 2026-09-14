@@ -585,8 +585,6 @@
     min-height: 9.5rem;
     max-height: 20rem;
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
     padding: var(--space-2);
     border-radius: var(--radius-md);
     background: var(--fill-1);

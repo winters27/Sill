@@ -58,14 +58,14 @@
   </p>
 
   {#if output.stdout.trim()}
-    <pre class="output-text sill-scrolls">{output.stdout}</pre>
+    <pre class="output-text">{output.stdout}</pre>
   {/if}
 
   {#if output.stderr.trim()}
     <!-- Kept apart from the output rather than mixed into it. A script
          that printed a result and a warning has said two things, and
          running them together loses which was which. -->
-    <pre class="output-text output-wrong sill-scrolls">{output.stderr}</pre>
+    <pre class="output-text output-wrong">{output.stderr}</pre>
   {/if}
 
   <!-- Not for an elevated start, which printed nothing here because Sill

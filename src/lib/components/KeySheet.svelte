@@ -45,7 +45,7 @@
   const tone = $derived(standing({ failed: failed !== null, loading, count }));
 </script>
 
-<div class="sheet sill-scrolls">
+<div class="sheet">
   {#if tone === "content"}
     {#each sections as section (section.title)}
       <section>

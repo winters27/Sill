@@ -558,25 +558,28 @@ for (const file of sources(".")) {
     }
 
     /*
-     * A surface that scrolls without saying how its scrollbar looks.
+     * A surface that opts itself out of the window's scrollbar.
      *
-     * Windows paints one itself, in its own colours, and it is the only thing
-     * in the window that does not follow the theme. Six components carry the
-     * two lines that fix it and the seventh forgot, which is what a rule
-     * copied by hand always eventually does.
+     * `theme.css` styles every scrollbar with `::-webkit-scrollbar`, which
+     * is the only way to drop the stepper arrow Chromium draws at each end
+     * of a Fluent scrollbar. Either standard property on an element makes
+     * the engine ignore those pseudo-elements for that element, so one
+     * line here brings the arrows back on one surface and nowhere else.
      *
-     * File level rather than rule level, because a component that scrolls
-     * anything needs the answer somewhere in it, and where is its business.
+     * This replaced a check that a file which scrolls said how its
+     * scrollbar looked. It no longer has to, and the answer that check
+     * asked for is now the thing that breaks it.
      */
-    if (/overflow(-[xy])?:\s*(auto|scroll)/.test(text)) {
-      const answered =
-        text.includes("scrollbar-color") || text.includes("sill-scrolls");
+    if (file.replace(/\\/g, "/") !== "src/lib/theme/theme.css") {
+      const opted = /scrollbar-(width|color)\s*:/.exec(text);
 
-      if (!answered) {
+      if (opted) {
         fail(
           file,
-          lineOf(text, text.search(/overflow(-[xy])?:\s*(auto|scroll)/)),
-          "this scrolls but never says how; add the sill-scrolls class",
+          lineOf(text, opted.index),
+          "this sets a standard scrollbar property, so the engine ignores " +
+            "theme.css's ::-webkit-scrollbar rules here and draws the stepper " +
+            "arrows again; delete it and let the global rule apply",
         );
       }
     }
@@ -2634,7 +2637,7 @@ for (const file of sources("src-tauri/src")) {
   const entries = new Map();
 
   for (const m of catalogue.matchAll(
-    /\bs\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",?\s*\)/g,
+    /\b[sm]\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",?(?:\s*"[^"]*",?)?\s*\)/g,
   )) {
     entries.set(`${m[1]} ${m[3]}`, {
       panel: m[1],
@@ -3197,7 +3200,7 @@ for (const file of sources("src-tauri/src")) {
        * ordered by panel and an entry moving is not the failure being caught.
        */
       const entry = new RegExp(
-        String.raw`s\(\s*"([^"]+)",\s*"[^"]*",\s*"Summon hotkey"`,
+        String.raw`[sm]\(\s*"([^"]+)",\s*"[^"]*",\s*"Summon hotkey"`,
       ).exec(readFileSync(CATALOGUE, "utf8"));
 
       if (!entry) {
@@ -5102,7 +5105,7 @@ if (tracked.status !== 0) {
 {
   const INDEX = "src-tauri/src/settings_index.rs";
   const index = readFileSync(INDEX, "utf8");
-  const entries = [...index.matchAll(/s\(\s*"([a-z]+)",\s*"[^"]+",\s*"([^"]+)",/g)].map((m) => ({
+  const entries = [...index.matchAll(/\b[sm]\(\s*"([a-z]+)",\s*"[^"]+",\s*"([^"]+)",/g)].map((m) => ({
     panel: m[1],
     title: m[2],
     at: m.index,
@@ -5191,6 +5194,7 @@ if (tracked.status !== 0) {
  */
 {
   const ICON = "src/lib/components/SettingsIcon.svelte";
+  const INDEX = "src-tauri/src/settings_index.rs";
   const icon = readFileSync(ICON, "utf8");
   const names = new Set(
     [
@@ -5198,11 +5202,11 @@ if (tracked.status !== 0) {
     ].map((m) => m[1]),
   );
 
-  let seen = 0;
+  const asked = new Set();
   for (const file of [...sources("src-tauri/src"), ...sources("src/lib")]) {
     const text = readFileSync(file, "utf8");
     for (const found of text.matchAll(/"mark:([a-z-]+)"/g)) {
-      seen += 1;
+      asked.add(found[1]);
       if (names.has(found[1])) continue;
       fail(
         file,
@@ -5212,8 +5216,44 @@ if (tracked.status !== 0) {
     }
   }
 
-  if (seen === 0) {
+  if (asked.size === 0) {
     fail(ICON, null, "no `mark:` literal was found anywhere, so this is parsing rather than checking");
+  }
+
+  /*
+   * The other direction, which is the one that fails silently.
+   *
+   * A name reaches `SettingsIcon` one of two ways: it is a panel, and a row
+   * carrying `panel` wears it, or a row builder names it as `"mark:<name>"`.
+   * A name that is neither is a drawing nothing can ask for, and the two
+   * checks above are both happy with it: it has a branch, so the glyph chain
+   * check passes, and no literal names it, so the scan above never looks at
+   * it.
+   *
+   * `history` was exactly that for as long as it has existed. It is in
+   * `PANEL_ICONS`, it has a clock-with-an-arrow drawn for it, `settings_index`
+   * has a test asserting no panel is called that, and nothing in the tree
+   * contained the string `"mark:history"`. The drawing was unreachable and
+   * three checks agreed the set was consistent.
+   */
+  const panels = [
+    ...(readFileSync(INDEX, "utf8").match(/PANELS: &\[&str\] = &\[([\s\S]*?)\];/)?.[1] ?? "")
+      .matchAll(/"([a-z-]+)"/g),
+  ].map((m) => m[1]);
+
+  if (panels.length === 0) {
+    fail(INDEX, null, "no `PANELS` were read, so this is parsing rather than checking");
+  }
+
+  const reachable = new Set([...panels, ...asked]);
+  for (const name of names) {
+    if (reachable.has(name)) continue;
+    fail(
+      ICON,
+      lineOf(icon, icon.indexOf(`"${name}"`)),
+      `PANEL_ICONS offers "${name}", which is not a panel and which no row ` +
+        'builder names as "mark:' + name + '", so that drawing is unreachable',
+    );
   }
 }
 

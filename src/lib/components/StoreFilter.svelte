@@ -111,7 +111,7 @@
   </button>
 
   {#if open}
-    <div class="menu sill-menu sill-scrolls" role="menu" tabindex="-1" use:focusFirst onkeydown={menuKeys}>
+    <div class="menu sill-menu" role="menu" tabindex="-1" use:focusFirst onkeydown={menuKeys}>
       <div class="group" role="presentation">Show</div>
       {#each SCOPES as scope (scope.value)}
         <button

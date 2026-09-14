@@ -351,8 +351,6 @@
     min-height: 38px;
     max-height: 200px;
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
     padding: var(--space-3) var(--space-4) var(--space-1);
     border: 0;
     background: transparent;

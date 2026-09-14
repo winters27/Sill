@@ -49,7 +49,7 @@
   </button>
 
   {#if open}
-    <div class="thought sill-scrolls" transition:drawer>
+    <div class="thought" transition:drawer>
       <p>{text}</p>
     </div>
   {/if}
