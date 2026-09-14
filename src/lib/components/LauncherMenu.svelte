@@ -301,6 +301,22 @@
      there is, the menu scrolls rather than covering the search field. */
   .menu {
     position: fixed;
+    /*
+     * Chromium's own focus ring, off.
+     *
+     * This element is focusable only so the arrow keys have somewhere to
+     * land. Chromium paints `outline: auto` around whatever holds focus
+     * once the last input was a keyboard, which in a launcher it always
+     * just was, and on a dark popover that ring is drawn white and traces
+     * the whole menu. It goes the instant focus leaves, so it reads as the
+     * menu flickering a border rather than as a focus indicator.
+     *
+     * Nothing is lost. Which row the keys are on is drawn by `.selected`
+     * and announced through `aria-activedescendant`, and neither of those
+     * is this element. Forced colours put a real outline back, which is
+     * exactly what that block in `theme.css` is for.
+     */
+    outline: none;
     left: var(--space-2);
     bottom: calc(var(--chin-height) + var(--space-1));
     z-index: var(--z-menu);
