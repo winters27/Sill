@@ -24,6 +24,18 @@ pub struct Setting {
     pub title: &'static str,
     /// Words someone might search for that are not in the title.
     pub keywords: &'static str,
+    /// A mark of this row's own, for a row that is not a field of its panel.
+    ///
+    /// `None` for two rows in three, which is the honest default: "Model",
+    /// "Voice" and "Chroma" are things inside a panel and the panel's mark is
+    /// the most specific true thing there is to draw for them.
+    ///
+    /// The whole `mark:name` string rather than the name, for the reason
+    /// [`crate::registry::marked`] takes it that way: `verify:source` finds
+    /// every mark a row asks for by scanning this directory for that literal,
+    /// so a name built with `format!` would leave these rows naming marks
+    /// nothing checks.
+    pub icon: Option<&'static str>,
 }
 
 /// Every panel the settings window has.
@@ -106,11 +118,12 @@ pub const SETTINGS: &[Setting] = &[
         "Show in the system tray",
         "tray notification area icon",
     ),
-    s(
+    m(
         "general",
         "General",
         "Notes",
         "note scratchpad scratch write prototype",
+        "mark:notes",
     ),
     s(
         "general",
@@ -150,11 +163,12 @@ pub const SETTINGS: &[Setting] = &[
         "Chroma",
         "iridescent wash colour strength prism spectral",
     ),
-    s(
+    m(
         "appearance",
         "Appearance",
         "Interface font",
         "typeface inter segoe type crisp",
+        "mark:fonts",
     ),
     s(
         "appearance",
@@ -186,11 +200,12 @@ pub const SETTINGS: &[Setting] = &[
         "Window width",
         "width size window",
     ),
-    s(
+    m(
         "appearance",
         "Appearance",
         "Where it appears",
         "monitor screen display second multiple cursor mouse primary",
+        "mark:displays",
     ),
     // ----------------------------------------------------------------- ask
     s(
@@ -205,17 +220,26 @@ pub const SETTINGS: &[Setting] = &[
         "Model",
         "ai which model change switch sonnet opus haiku gpt llama qwen",
     ),
-    s(
+    m(
         "ai",
         "AI Chat",
         "Address",
         "ai endpoint base url ollama local server http https lm studio",
+        "mark:server",
     ),
-    s(
+    m(
         "ai",
         "AI Chat",
         "Key",
         "ai api key token secret credential paste anthropic openrouter",
+        "mark:key",
+    ),
+    m(
+        "ai",
+        "AI Chat",
+        "SearXNG address",
+        "web search searx searxng internet online lookup news self hosted url",
+        "mark:server",
     ),
     s(
         "ai",
@@ -223,28 +247,49 @@ pub const SETTINGS: &[Setting] = &[
         "Windows Hello to run a command or write a file",
         "hello fingerprint face pin biometric approve approval consent permission \n         confirm shell command script file write ai mcp model prompt injection",
     ),
-    s(
+    m(
         "advanced",
         "Advanced",
         "What Sill has done",
         "activity history undo revert log recent took back reverse",
+        "mark:history",
     ),
     // ------------------------------------------------------------- widgets
-    s("widgets", "Widgets", "Clock", "pin widget launcher time date clock"),
-    s("widgets", "Widgets", "World clock", "pin widget launcher cities time zones world clock"),
-    s("widgets", "Widgets", "Weather", "pin widget launcher weather temperature forecast"),
+    m(
+        "widgets",
+        "Widgets",
+        "Clock",
+        "pin widget launcher time date clock",
+        "mark:clock",
+    ),
+    m(
+        "widgets",
+        "Widgets",
+        "World clock",
+        "pin widget launcher cities time zones world clock",
+        "mark:clock",
+    ),
+    m(
+        "widgets",
+        "Widgets",
+        "Weather",
+        "pin widget launcher weather temperature forecast",
+        "mark:weather",
+    ),
     s("widgets", "Widgets", "This machine", "pin widget launcher processor memory cpu ram cost programs"),
-    s(
+    m(
         "widgets",
         "Widgets",
         "Where the weather is for",
         "weather location city place temperature forecast fahrenheit celsius",
+        "mark:weather",
     ),
-    s(
+    m(
         "widgets",
         "Widgets",
         "World clock cities",
         "world clock city time zone abroad tokyo london timezone",
+        "mark:clock",
     ),
     // ------------------------------------------------------------ layouts
     s(
@@ -266,17 +311,19 @@ pub const SETTINGS: &[Setting] = &[
         "Voice",
         "who reads speaker aloud engine provider openai piper system sapi \n         natural neural elevenlabs kokoro",
     ),
-    s(
+    m(
         "tts",
         "Text to Speech",
         "Address",
         "endpoint url server speech host",
+        "mark:server",
     ),
-    s(
+    m(
         "tts",
         "Text to Speech",
         "Key",
         "api key token speech credential",
+        "mark:key",
     ),
     s(
         "tts",
@@ -297,11 +344,12 @@ pub const SETTINGS: &[Setting] = &[
         "Dictation",
         "voice speech whisper microphone talk",
     ),
-    s(
+    m(
         "dictation",
         "Dictation",
         "Start dictating",
         "shortcut hotkey trigger push talk",
+        "mark:shortcuts",
     ),
     s(
         "dictation",
@@ -333,11 +381,12 @@ pub const SETTINGS: &[Setting] = &[
         "Language",
         "english auto detect locale",
     ),
-    s(
+    m(
         "dictation",
         "Dictation",
         "Finish and cancel keys",
         "enter escape space discard",
+        "mark:shortcuts",
     ),
     s(
         "dictation",
@@ -351,11 +400,12 @@ pub const SETTINGS: &[Setting] = &[
         "Start and stop cues",
         "sound effects audio feedback tone",
     ),
-    s(
+    m(
         "dictation",
         "Dictation",
         "Keep a history",
         "transcripts record statistics",
+        "mark:history",
     ),
     s(
         "dictation",
@@ -369,17 +419,19 @@ pub const SETTINGS: &[Setting] = &[
         "Backend",
         "transcription local whisper openai groq api engine",
     ),
-    s(
+    m(
         "dictation",
         "Dictation",
         "API key",
         "token secret credential openai groq",
+        "mark:key",
     ),
-    s(
+    m(
         "dictation",
         "Dictation",
         "Custom endpoint",
         "url server remote host base",
+        "mark:server",
     ),
     s(
         "dictation",
@@ -406,17 +458,19 @@ pub const SETTINGS: &[Setting] = &[
         "whisper tiny base small medium download",
     ),
     // Dictation's own history, inside dictation where it belongs.
-    s(
+    m(
         "dictation",
         "Dictation",
         "Transcripts",
         "history past search transcript",
+        "mark:text",
     ),
-    s(
+    m(
         "dictation",
         "Dictation",
         "Clear dictation history",
         "delete forget wipe transcripts",
+        "mark:history",
     ),
     s(
         "dictation",
@@ -437,11 +491,12 @@ pub const SETTINGS: &[Setting] = &[
         "Add a snippet",
         "template saved text signature placeholder",
     ),
-    s(
+    m(
         "snippets",
         "Snippets",
         "Snippets as a file",
         "import export backup json file",
+        "mark:transfer",
     ),
     // --------------------------------------------------------------- emoji
     s(
@@ -463,17 +518,19 @@ pub const SETTINGS: &[Setting] = &[
         "learned names nicknames emoji search remember",
     ),
     // ----------------------------------------------------------- shortcuts
-    s(
+    m(
         "general",
         "General",
         "Summon hotkey",
         "shortcut keybind alt space keyboard hotkey",
+        "mark:shortcuts",
     ),
-    s(
+    m(
         "general",
         "General",
         "Window switcher hotkey",
         "alt tab window switch cycle shortcut keybind",
+        "mark:shortcuts",
     ),
     s(
         "shortcuts",
@@ -481,11 +538,12 @@ pub const SETTINGS: &[Setting] = &[
         "Put the result back",
         "paste replace selection result back",
     ),
-    s(
+    m(
         "general",
         "General",
         "Open with a double-tap",
         "double tap modifier open shortcut",
+        "mark:shortcuts",
     ),
     s(
         "shortcuts",
@@ -556,11 +614,12 @@ pub const SETTINGS: &[Setting] = &[
         "Open with",
         "browser application default chrome",
     ),
-    s(
+    m(
         "quicklinks",
         "Quicklinks",
         "Quicklinks as a file",
         "import export backup json file",
+        "mark:transfer",
     ),
     // ----------------------------------------------------------- clipboard
     s(
@@ -569,11 +628,12 @@ pub const SETTINGS: &[Setting] = &[
         "Record what I copy",
         "clipboard history paste enable",
     ),
-    s(
+    m(
         "clipboard",
         "Clipboard History",
         "Keep history for",
         "retention days delete old expire",
+        "mark:history",
     ),
     s(
         "clipboard",
@@ -587,17 +647,19 @@ pub const SETTINGS: &[Setting] = &[
         "Things that look like passwords",
         "secret token api key credential password redact skip private",
     ),
-    s(
+    m(
         "clipboard",
         "Clipboard History",
         "Keep images",
         "screenshots pictures clipboard",
+        "mark:picture",
     ),
-    s(
+    m(
         "clipboard",
         "Clipboard History",
         "Lock stored pictures",
         "encrypt encryption secure protect screenshots pictures at rest account",
+        "mark:picture",
     ),
     s(
         "clipboard",
@@ -605,11 +667,12 @@ pub const SETTINGS: &[Setting] = &[
         "Never record from",
         "excluded applications ignore private password exclude",
     ),
-    s(
+    m(
         "clipboard",
         "Clipboard History",
         "Clear clipboard history",
         "delete wipe entries",
+        "mark:history",
     ),
     // ------------------------------------------------------------- sources
     s(
@@ -672,17 +735,19 @@ pub const SETTINGS: &[Setting] = &[
         "Hidden entries",
         "exclude filter block ignore hide",
     ),
-    s(
+    m(
         "screenshot",
         "Screenshots",
         "Screenshot hotkey",
         "screenshot capture key bind area region",
+        "mark:crop",
     ),
-    s(
+    m(
         "screenshot",
         "Screenshots",
         "Whole screen hotkey",
         "screenshot capture key bind fullscreen display",
+        "mark:screen",
     ),
     // ---------------------------------------------------------- screenshot
     s(
@@ -697,17 +762,19 @@ pub const SETTINGS: &[Setting] = &[
         "Click a window to take it",
         "screenshot window app capture click",
     ),
-    s(
+    m(
         "screenshot",
         "Screenshots",
         "Tool",
         "screenshot editor markup default tool",
+        "mark:markup",
     ),
-    s(
+    m(
         "screenshot",
         "Screenshots",
         "Colour",
         "screenshot editor markup default colour color",
+        "mark:colour",
     ),
     s(
         "screenshot",
@@ -727,17 +794,19 @@ pub const SETTINGS: &[Setting] = &[
         "Upload to",
         "screenshot share upload link imgur host publish url service",
     ),
-    s(
+    m(
         "screenshot",
         "Screenshots",
         "Imgur client ID",
         "screenshot share upload imgur client id key account",
+        "mark:key",
     ),
-    s(
+    m(
         "screenshot",
         "Screenshots",
         "Upload address",
         "screenshot share upload custom url address endpoint sharex",
+        "mark:server",
     ),
     s(
         "screenshot",
@@ -764,42 +833,48 @@ pub const SETTINGS: &[Setting] = &[
         "Engine",
         "web search google duckduckgo bing brave startpage provider",
     ),
-    s(
+    m(
         "websearch",
         "Web",
         "Your own address",
         "custom web search engine url query template",
+        "mark:server",
     ),
     // -------------------------------------------- sources, browser pages
-    s(
+    m(
         "websearch",
         "Web",
         "Search browser pages",
         "browser history bookmarks pages chrome edge firefox zen web enable",
+        "mark:browsers",
     ),
-    s(
+    m(
         "websearch",
         "Web",
         "Bookmarks",
         "browser saved favourites favorites starred pages",
+        "mark:browsers",
     ),
-    s(
+    m(
         "websearch",
         "Web",
         "History",
         "browser visited pages recently",
+        "mark:history",
     ),
-    s(
+    m(
         "websearch",
         "Web",
         "Open browser tabs",
         "browser tabs open switch to tab chrome edge firefox zen window",
+        "mark:browsers",
     ),
-    s(
+    m(
         "websearch",
         "Web",
         "Include Firefox and browsers built on it",
         "firefox zen librewolf waterfox tabs accessibility cost",
+        "mark:browsers",
     ),
     s(
         "websearch",
@@ -871,11 +946,12 @@ pub const SETTINGS: &[Setting] = &[
         "Only Windows extensions",
         "store platform macos compatible filter browse hide",
     ),
-    s(
+    m(
         "extensions",
         "Extensions",
         "GitHub token",
         "store rate limit api requests hour credential browse install",
+        "mark:key",
     ),
     s(
         "extensions",
@@ -890,29 +966,33 @@ pub const SETTINGS: &[Setting] = &[
         "store auto automatic update upgrade outdated behind unattended background",
     ),
     // ------------------------------------------------------------ advanced
-    s(
+    m(
         "advanced",
         "Advanced",
         "Rebuild the index",
         "reload rescan reindex refresh",
+        "mark:reindex",
     ),
-    s(
+    m(
         "advanced",
         "Advanced",
         "Usage history",
         "frecency ranking forget clear reset",
+        "mark:history",
     ),
-    s(
+    m(
         "general",
         "General",
         "Export settings",
         "backup save copy migrate move machine transfer share",
+        "mark:transfer",
     ),
-    s(
+    m(
         "general",
         "General",
         "Import settings",
         "restore backup migrate powertoys run raycast rayconfig transfer",
+        "mark:transfer",
     ),
     s(
         "advanced",
@@ -932,11 +1012,12 @@ pub const SETTINGS: &[Setting] = &[
         "Detailed logging",
         "verbose debug level trace timings chase fault",
     ),
-    s(
+    m(
         "advanced",
         "Advanced",
         "Export diagnostics",
         "bundle report support send crash log troubleshoot",
+        "mark:transfer",
     ),
     // --------------------------------------------------------------- about
     s("about", "About", "Version", "build release licence credits"),
@@ -965,6 +1046,33 @@ const fn s(
         panel_name,
         title,
         keywords,
+        icon: None,
+    }
+}
+
+/// A setting that is not a field of the panel it is filed under.
+///
+/// The mark says what kind of thing the row is and the line beside the title
+/// says which panel it lives on, so the two carry different halves rather
+/// than the same half twice. Before this, "Rebuild the index" in Advanced
+/// wore a terminal window while the builtin of the same name wore
+/// `mark:reindex`: one subject, two pictures, and nothing said so.
+///
+/// A row either names a mark or wears its panel's, never both, which is the
+/// rule builtins already follow and which `records` below enforces.
+const fn m(
+    panel: &'static str,
+    panel_name: &'static str,
+    title: &'static str,
+    keywords: &'static str,
+    icon: &'static str,
+) -> Setting {
+    Setting {
+        panel,
+        panel_name,
+        title,
+        keywords,
+        icon: Some(icon),
     }
 }
 
@@ -982,8 +1090,15 @@ pub fn records() -> Vec<CommandRecord> {
             extension_title: setting.panel_name.to_string(),
             command: setting.title.to_string(),
             title: setting.title.to_string(),
-            // Where it came from, which is what the row shows beside the name.
-            subtitle: format!("Sill Settings, {}", setting.panel_name),
+            // The panel, and only the panel.
+            //
+            // This was "Sill Settings, Dictation" under a heading reading
+            // "Sill Settings" beside a label reading "Sill Setting", so the
+            // row said where it came from three times and what it was once.
+            // The panel is the one part of that the rest of the row does not
+            // already carry, and it is what the mark deliberately stops
+            // repeating.
+            subtitle: setting.panel_name.to_string(),
             description: String::new(),
             mode: "sill-setting".to_string(),
             entrypoint: setting.panel.to_string(),
@@ -992,9 +1107,16 @@ pub fn records() -> Vec<CommandRecord> {
                 .split_whitespace()
                 .map(str::to_string)
                 .collect(),
-            icon: None,
+            icon: setting.icon.map(str::to_string),
             toggle: None,
-            panel: Some(setting.panel.to_string()),
+            // One or the other, never both. A row carrying a mark and a panel
+            // leaves the launcher to decide which wins, and the deep link does
+            // not need this: `entrypoint` is the panel and `OpenSillSetting`
+            // opens what the target names.
+            panel: setting
+                .icon
+                .is_none()
+                .then(|| setting.panel.to_string()),
             // Only extension commands carry any.
             preferences: serde_json::Value::Null,
             manifest: None,
@@ -1006,6 +1128,93 @@ pub fn records() -> Vec<CommandRecord> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    /// A mark is spelt the way the launcher reads it, or it is not drawn.
+    ///
+    /// Two ways to get this wrong and both are silent. A bare panel name here
+    /// reaches `SearchResult::from`, which drops an icon equal to the
+    /// entrypoint, and the entrypoint of a settings row **is** the panel name:
+    /// the row would lose its icon on the way out and draw a lettered tile. A
+    /// name with no prefix at all fails the other way, as a path the shell is
+    /// asked about and has never heard of.
+    ///
+    /// What the name after the prefix resolves to is `verify:source`'s
+    /// business. It holds every `"mark:"` literal in this directory against
+    /// the set `SettingsIcon` draws, in both directions.
+    #[test]
+    fn a_marked_setting_spells_its_mark_the_way_the_launcher_reads_it() {
+        for setting in SETTINGS {
+            let Some(icon) = setting.icon else {
+                continue;
+            };
+            assert!(
+                icon.starts_with("mark:"),
+                "{} carries the icon {icon:?}, which is not a mark, so the row \
+                 asks the shell about a file of that name",
+                setting.title
+            );
+            assert!(
+                icon.len() > "mark:".len(),
+                "{} names an empty mark",
+                setting.title
+            );
+        }
+    }
+
+    /// A row wears a mark or its panel's, never both and never neither.
+    ///
+    /// The same rule `every_builtin_names_a_panel_that_exists` holds builtins
+    /// to. Both set means the launcher picks, and which one it picks is a fact
+    /// about the order of two branches in the markup rather than about the
+    /// row. Neither set means a lettered tile.
+    ///
+    /// Checked on the records rather than on `SETTINGS`, because `records` is
+    /// what decides this and the two fields it decides from are one field
+    /// here.
+    #[test]
+    fn a_settings_row_carries_a_mark_or_a_panel_and_not_both() {
+        for record in records() {
+            assert!(
+                record.icon.is_some() != record.panel.is_some(),
+                "{} has icon {:?} and panel {:?}, so which mark it wears is a \
+                 guess",
+                record.title,
+                record.icon,
+                record.panel
+            );
+        }
+    }
+
+    /// A marked row still opens the panel it is filed under.
+    ///
+    /// The mark costs the row its `panel` field, and `panel` used to be the
+    /// only other place the panel name appeared. Nothing reads it for the deep
+    /// link, but nothing said so either, and a row that draws beautifully and
+    /// opens the wrong page is worse than the gear it replaced.
+    #[test]
+    fn a_marked_setting_still_deep_links_to_its_panel() {
+        let panels: HashSet<&str> = PANELS.iter().copied().collect();
+        let mut marked = 0;
+
+        for record in records() {
+            if record.icon.is_none() {
+                continue;
+            }
+            marked += 1;
+            assert!(
+                panels.contains(record.entrypoint.as_str()),
+                "{} wears a mark and opens {:?}, which is not a panel",
+                record.title,
+                record.entrypoint
+            );
+        }
+
+        assert!(
+            marked > 0,
+            "no settings row carries a mark, so this is counting rather than \
+             checking"
+        );
+    }
 
     #[test]
     fn every_setting_names_a_panel_that_exists() {

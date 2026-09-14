@@ -115,6 +115,10 @@
           model: "",
         },
       ],
+      // Blank, which is the shipped default and the state the panel is in
+      // most of the time: the row says what it is for rather than showing
+      // somebody an address they did not set.
+      search: "",
     },
   });
 

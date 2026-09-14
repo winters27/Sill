@@ -2289,6 +2289,7 @@ pub fn run() {
             quicklinks::commands::import_quicklinks,
             commands::settings::get_preferences,
             commands::settings::set_preferences,
+            commands::settings::set_markup_defaults,
             commands::settings::export_preferences,
             commands::settings::import_preferences,
             commands::settings::reset_panel,

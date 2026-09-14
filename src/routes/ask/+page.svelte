@@ -35,7 +35,7 @@
   import Opening from "$lib/components/chat/Opening.svelte";
   import Trouble from "$lib/components/chat/Trouble.svelte";
   import Turn from "$lib/components/chat/Turn.svelte";
-  import Waiting from "$lib/components/chat/Waiting.svelte";
+  import Working from "$lib/components/chat/Working.svelte";
   import { standing } from "$lib/instead";
   import { open as pickFiles } from "@tauri-apps/plugin-dialog";
   import {
@@ -598,8 +598,8 @@
             <ApprovalCard asked={live.asked} ondecide={decide} />
           {/if}
 
-          {#if live.asking && !writing && !live.asked}
-            <Waiting />
+          {#if live.asking && !live.asked}
+            <Working writing={writing !== null} />
           {/if}
 
           {#if live.trouble}

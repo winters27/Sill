@@ -32,7 +32,7 @@
   import TitleBar from "$lib/components/TitleBar.svelte";
   import MarkupIcon, { type MarkIcon } from "$lib/components/MarkupIcon.svelte";
   import {
-    arrowHead,
+    arrowTip,
     boxOf,
     COLOURS,
     croppedTo,
@@ -40,6 +40,8 @@
     CAN_FILL,
     HIDE_BLOCK,
     TOOL_KEYS,
+    TIPS,
+    DEFAULT_TIP,
     roomFor,
     moved,
     nextNumber,
@@ -48,6 +50,7 @@
     worthKeeping,
     type Point,
     type Shape,
+    type Tip,
     type Step,
     type Tool,
   } from "$lib/markup";
@@ -59,7 +62,7 @@
     saveMarkup,
     uploadMarkup,
   } from "$lib/capture";
-  import { applyAppearance, getPreferences } from "$lib/settings";
+  import { applyAppearance, getPreferences, setMarkupDefaults } from "$lib/settings";
   import { hint } from "$lib/hint";
 
   let picture = $state<HTMLImageElement | null>(null);
@@ -85,6 +88,8 @@
   let weight = $state(4);
   /** Whether the next box or ellipse is solid rather than an outline. */
   let fill = $state(false);
+  /** Which head the next arrow is drawn with. */
+  let tip = $state<Tip>(DEFAULT_TIP);
   /** Whether the next click reads a colour out of the picture. */
   let dropping = $state(false);
   /** Whether an upload is in flight, so a second click cannot start another. */
@@ -116,6 +121,44 @@
   let crop = $state<{ x: number; y: number; w: number; h: number } | null>(null);
   /** Where the badges start counting. */
   let stepFrom = $state(1);
+
+  /**
+   * The last choice written back, so drawing does not rewrite the file.
+   *
+   * `null` until the preferences arrive, which is what stops the values just
+   * read out of the file being written straight back into it. A plain `let`
+   * rather than `$state`: the effect below assigns it, and a tracked one
+   * would wake the effect it was assigned from.
+   *
+   * One string rather than four fields because the only question ever asked
+   * of it is whether anything at all has moved.
+   */
+  let remembered: string | null = null;
+
+  function currentChoice(): string {
+    return [tool, colour, weight, fill, tip].join("\u0000");
+  }
+
+  /*
+   * What the editor opens with next time is what it was last used with.
+   *
+   * All four were read on open and none was ever written back, so every
+   * change lasted exactly as long as the window did.
+   *
+   * `select` is not written. It is a mode rather than a mark, and an editor
+   * opening in it presents a tool bar where the first drag on the picture
+   * draws nothing, which reads as broken rather than as remembered.
+   */
+  $effect(() => {
+    const next = currentChoice();
+    if (remembered === null || remembered === next || tool === "select") return;
+
+    remembered = next;
+    void setMarkupDefaults(tool, colour, weight, fill, tip).catch(() => {
+      // Forgetting a tool choice is not worth a message over a picture
+      // somebody is in the middle of marking up. The next change tries again.
+    });
+  });
 
   const TOOLS: { id: Tool | "select"; icon: MarkIcon; hint: string }[] = [
     { id: "select", icon: "select", hint: "Pick a mark up to move or delete" },
@@ -347,9 +390,10 @@
       colour,
       weight,
       points: [point, point],
-      // Carried only where it means something, so a line or an arrow never
-      // arrives holding a flag nothing reads.
+      // Carried only where it means something, so a mark never arrives
+      // holding a flag nothing reads.
       ...(CAN_FILL.includes(tool) ? { fill } : {}),
+      ...(tool === "arrow" ? { tip } : {}),
     };
   }
 
@@ -511,7 +555,7 @@
   }
 
   /** Recolours or resizes whatever is picked up, or sets it for the next one. */
-  function restyle(next: { colour?: string; weight?: number; fill?: boolean }) {
+  function restyle(next: { colour?: string; weight?: number; fill?: boolean; tip?: Tip }) {
     if (next.colour !== undefined) {
       colour = next.colour;
       // A colour that is not one of the six gets the spare swatch, so what was
@@ -520,21 +564,44 @@
     }
     if (next.weight !== undefined) weight = next.weight;
     if (next.fill !== undefined) fill = next.fill;
+    if (next.tip !== undefined) tip = next.tip;
 
     if (chosen < 0 || !shapes[chosen]) return;
 
-    // A fill on a shape that cannot take one would be a flag nothing reads and
-    // a difference the picture never shows, so it is dropped rather than set.
+    // A flag the picked mark cannot read would be a difference the picture
+    // never shows, so it is dropped rather than set.
     const picked = shapes[chosen];
-    if (next.fill !== undefined && !CAN_FILL.includes(picked.tool)) {
-      const { fill: _dropped, ...rest } = next;
-      shapes[chosen] = { ...picked, ...rest };
-    } else {
-      shapes[chosen] = { ...picked, ...next };
-    }
+    const applied = { ...next };
+    if (applied.fill !== undefined && !CAN_FILL.includes(picked.tool)) delete applied.fill;
+    if (applied.tip !== undefined && picked.tool !== "arrow") delete applied.tip;
+
+    shapes[chosen] = { ...picked, ...applied };
 
     shapes = shapes;
     paint();
+  }
+
+  /**
+   * One head drawn small, out of the geometry the picture itself uses.
+   *
+   * Built rather than drawn by hand so a button cannot advertise a head the
+   * canvas does not draw. Two hand-kept copies of a shape drift the first time
+   * one of them is adjusted, and the button is the copy nobody looks at twice.
+   */
+  function tipPreview(style: Tip): { shaft: string; head: string; solid: boolean } {
+    const tail = { x: 3, y: 12 };
+    const point = { x: 21, y: 12 };
+    const head = arrowTip(tail, point, 2, style);
+    const path = (corners: Point[]) =>
+      corners
+        .map((corner, at) => `${at === 0 ? "M" : "L"}${corner.x.toFixed(2)} ${corner.y.toFixed(2)}`)
+        .join(" ");
+
+    return {
+      shaft: path([tail, head.shaftEnd]),
+      head: path(head.points) + (head.solid ? " Z" : ""),
+      solid: head.solid,
+    };
   }
 
   function paint() {
@@ -652,18 +719,27 @@
       }
 
       case "arrow": {
+        // Where the shaft stops and what the head is are both decided in
+        // `markup.ts`, where they can be tested. This paints what it is told.
+        const head = arrowTip(from, to, shape.weight, shape.tip ?? DEFAULT_TIP);
+
         pen.beginPath();
         pen.moveTo(from.x, from.y);
-        pen.lineTo(to.x, to.y);
+        pen.lineTo(head.shaftEnd.x, head.shaftEnd.y);
         pen.stroke();
 
-        const [left, right] = arrowHead(from, to, shape.weight * 4);
         pen.beginPath();
-        pen.moveTo(to.x, to.y);
-        pen.lineTo(left.x, left.y);
-        pen.lineTo(right.x, right.y);
-        pen.closePath();
-        pen.fill();
+        pen.moveTo(head.points[0].x, head.points[0].y);
+        for (const corner of head.points.slice(1)) pen.lineTo(corner.x, corner.y);
+
+        if (head.solid) {
+          pen.closePath();
+          pen.fill();
+        } else {
+          // Stroked at the shaft's own weight, which is the whole point of an
+          // open head: the two cannot look mismatched at any stroke.
+          pen.stroke();
+        }
         break;
       }
 
@@ -992,6 +1068,12 @@
         colour = prefs.screenshot?.colour ?? colour;
         weight = prefs.screenshot?.weight ?? weight;
         stepFrom = prefs.screenshot?.stepFrom ?? stepFrom;
+        fill = prefs.screenshot?.fill ?? fill;
+        tip = (prefs.screenshot?.tip as Tip) ?? tip;
+
+        // Last, and only on the path that read them: until this holds
+        // something the effect above writes nothing.
+        remembered = currentChoice();
       })
       .catch(() => {
         // A window with the default palette is still a usable window, so this
@@ -1241,6 +1323,42 @@
       >
         <MarkupIcon name="fill" />
       </button>
+    {/if}
+
+    <!--
+      The heads, under the same rule as the fill switch: only while an arrow
+      is what is being drawn or what is picked up.
+    -->
+    {#if tool === "arrow" || (chosen >= 0 && shapes[chosen].tool === "arrow")}
+      {#each TIPS as option (option.id)}
+        {@const shown = tipPreview(option.id)}
+        <button
+          class="icon"
+          class:on={tip === option.id}
+          use:hint={option.hint}
+          aria-label={option.hint}
+          aria-pressed={tip === option.id}
+          onclick={() => restyle({ tip: option.id })}
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d={shown.shaft}
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+            <path
+              d={shown.head}
+              fill={shown.solid ? "currentColor" : "none"}
+              stroke="currentColor"
+              stroke-width={shown.solid ? "0" : "2"}
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      {/each}
     {/if}
 
     <!--

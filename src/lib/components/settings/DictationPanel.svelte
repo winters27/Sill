@@ -642,13 +642,13 @@
 
   <Row
     title="Vocabulary"
-    description="Names and jargon the model reliably mangles. Placed last in the prompt, closest to the speech, which is where it biases most."
+    description="Names and jargon the model reliably mangles, as a plain list. The model continues what it reads here rather than obeying it, so a sentence is something it imitates instead of a rule it follows: write the names themselves, not a correction. Placed last in the prompt, closest to the speech, which is where it biases most."
   >
     {#snippet children()}
       <textarea
         rows="3"
         spellcheck="false"
-        placeholder="Proper nouns, product names, anything it gets wrong"
+        placeholder="Sill, Tauri, Svelte, Raycast"
         value={prefs.dictation.vocabulary}
         onchange={(e) => {
           prefs.dictation.vocabulary = e.currentTarget.value;

@@ -19,6 +19,38 @@
   import Welcome from "$lib/components/Welcome.svelte";
   import RootList from "$lib/components/RootList.svelte";
   import type { AiReady, Welcome as Greeting } from "$lib/exthost/commands";
+  import ActionPanel from "$lib/components/ActionPanel.svelte";
+  import type { ActionEntry } from "$lib/exthost/actions";
+
+  /*
+   * A panel with one of everything in it.
+   *
+   * A section heading, a chord of one key and a chord of three, an action
+   * with no chord at all, a destructive one, and one an extension declared
+   * with nothing behind it. Those are the five things the row has a branch
+   * for, and a fixture that exercises four of them is a fixture that lets
+   * the fifth break quietly.
+   */
+  const PANEL_ACTIONS: ActionEntry[] = [
+    { id: 1, title: "Open", icon: "ArrowNe", tag: "Sill.Open", props: {},
+      shortcut: { modifiers: [], key: "enter" } },
+    { id: 2, title: "Show in Folder", icon: "Folder", tag: "Sill.Reveal", props: {},
+      shortcut: { modifiers: ["ctrl", "shift"], key: "arrowUp" } },
+    { id: 3, title: "Copy Path", icon: "CopyClipboard", tag: "Sill.CopyPath", props: {},
+      shortcut: { modifiers: ["ctrl"], key: "c" } },
+    { id: 4, title: "Rename", icon: "Pencil", tag: "Sill.Rename", props: {},
+      section: "This File" },
+    { id: 5, title: "Compress", icon: "Box", tag: "Sill.Compress", props: {},
+      section: "This File" },
+    { id: 6, title: "Move to Recycle Bin", icon: "Trash", tag: "Sill.Recycle",
+      props: {}, section: "This File", style: "destructive",
+      shortcut: { modifiers: ["ctrl"], key: "x" } },
+    { id: 7, title: "Declared With Nothing Behind It", icon: "Warning",
+      tag: "Action.Unknown", props: {}, section: "From the Extension" },
+  ];
+
+  let panelPick = $state(0);
+  let panelFilter = $state("");
 
   const answersWith = {
     ready: true,
@@ -132,6 +164,27 @@
 </script>
 
 <div class="stage">
+  <!--
+    The action panel, which outside Tauri has no way to be opened.
+
+    Positioned `fixed` against the bottom right of the window it rises out
+    of, so the frame around it here is given the same corner to sit in
+    rather than the panel being taught a second way to place itself.
+  -->
+  <section>
+    <h2>The action panel, with a section, a destructive row and three chords</h2>
+    <div class="window panel-stage">
+      <ActionPanel
+        actions={PANEL_ACTIONS}
+        selected={panelPick}
+        filter={panelFilter}
+        onfilter={(text) => (panelFilter = text)}
+        onselect={(i) => (panelPick = i)}
+        onrun={(i) => (panelPick = i)}
+      />
+    </div>
+  </section>
+
   <section>
     <h2>A first run where the summon key registered</h2>
     <div class="window">
@@ -284,6 +337,17 @@
 </div>
 
 <style>
+  /* `transform` makes this the containing block for the panel's `fixed`,
+     which is what keeps it inside the card instead of pinning it to the
+     corner of the page. `--chin-height` is what the panel clears, and
+     there is no chin here, so it is zeroed for this frame only. */
+  .panel-stage {
+    position: relative;
+    transform: translateZ(0);
+    height: 420px;
+    --chin-height: 0px;
+  }
+
   .stage {
     display: flex;
     flex-direction: column;

@@ -5,12 +5,44 @@
     /** Destructive actions get the one colour that says so. */
     tone?: "normal" | "danger";
     busy?: boolean;
+    /**
+     * The id of the sentence that says what pressing this will do.
+     *
+     * For a button whose own label cannot carry the consequence: "Remove"
+     * beside a question about emptying two folders that cannot be undone. A
+     * reader hears the label and then the sentence, which is the whole of what
+     * a sighted reader gets from the two being next to each other.
+     */
+    describedBy?: string;
   }
 
-  let { label, onclick, tone = "normal", busy = false }: Props = $props();
+  let {
+    label,
+    onclick,
+    tone = "normal",
+    busy = false,
+    describedBy = undefined,
+  }: Props = $props();
 </script>
 
-<button class:danger={tone === "danger"} disabled={busy} {onclick}>
+<!--
+  `aria-disabled` rather than `disabled` while busy.
+
+  A disabled element cannot hold focus, so disabling the button somebody just
+  pressed moved focus to the document body and left a keyboard user tabbing in
+  from the top of the page to reach the next row. This stays focused, announces
+  as unavailable, and refuses the press in the handler.
+-->
+<button
+  class:danger={tone === "danger"}
+  class:busy
+  aria-disabled={busy}
+  aria-describedby={describedBy}
+  onclick={() => {
+    if (busy) return;
+    onclick();
+  }}
+>
   {busy ? "Working…" : label}
 </button>
 
@@ -36,9 +68,14 @@
     background: var(--hairline-strong);
   }
 
-  button:disabled {
+  button:disabled,
+  .busy {
     opacity: var(--opacity-disabled);
     cursor: default;
+  }
+
+  .busy:hover {
+    background: var(--fill-2);
   }
 
   .danger {

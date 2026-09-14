@@ -23,7 +23,7 @@
   } from "$lib/ai";
   import type { AiSpent } from "$lib/exthost/commands";
   import { dollars, perSecond, tokens } from "$lib/chat/tally";
-  import type { Preferences } from "$lib/settings";
+  import { openAsk, type Preferences } from "$lib/settings";
 
   interface Props {
     /** Not `$bindable`: nothing here reassigns it, only writes its fields. */
@@ -653,6 +653,56 @@
       {/each}
     </div>
   {/if}
+</Section>
+
+<!--
+  The way out of settings and into the thing settings is about.
+
+  Here rather than at the bottom because it belongs to the section above it:
+  once somebody has said who answers, going and asking something is the next
+  thing they want, and the list of services they have not added is not.
+-->
+<Section label="The conversation">
+  <!-- not a setting: the way out of settings, into the thing settings is about -->
+  <Row
+    title="A window of its own"
+    description="Room for a long answer, and a list of what has been asked before. Ctrl+O opens it from the launcher without coming through here."
+  >
+    {#snippet control()}
+      <Button label="Open Chat" onclick={() => void openAsk()} />
+    {/snippet}
+  </Row>
+</Section>
+
+<!--
+  Where it can look that is not this machine.
+
+  Its own section because it is the only thing here that leaves the machine on
+  the model's say-so, and a line inside a provider card would read as that
+  provider's setting when it belongs to all of them.
+-->
+<Section
+  label="The web"
+  description="Sill holds no search account. With an address here the model can search the web through an instance you run; with none it cannot, and says so when asked."
+>
+  <Row
+    title="SearXNG address"
+    description="Nobody else is told what was searched for. It needs json in its search.formats, which is off in a fresh install, or it answers 403 to everything."
+  >
+    {#snippet children()}
+      <TextField
+        value={prefs.ai.search}
+        onchange={(next) => {
+          prefs.ai.search = next.trim();
+          save();
+        }}
+        placeholder="http://searxng.lan:8888"
+        ariaLabel="SearXNG address"
+        full
+        mono
+      />
+    {/snippet}
+  </Row>
 </Section>
 
 <!--

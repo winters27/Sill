@@ -54,8 +54,9 @@ is the arrangement the licence describes.
 
 --------------------------------------------------------------------------
 
-Menu glyphs in src/lib/components/LauncherMenu.svelte and
-src/routes/traymenu/+page.svelte
+Menu glyphs in src/lib/components/LauncherMenu.svelte,
+src/routes/traymenu/+page.svelte, src/lib/components/MarkupIcon.svelte and
+src/lib/components/SettingsIcon.svelte
 
 Phosphor Icons, regular weight (https://phosphoricons.com).
 
@@ -67,11 +68,19 @@ build step and a tree-shaking question for drawings that change about never,
 and the lookup an extension row does on every keystroke is a frozen object.
 Vendoring does not shorten the licence, so the notice lives here.
 
-Two places use it. The tray and launcher menus carry a handful of paths inline.
+Four places use it. The tray and launcher menus carry a handful of paths
+inline, `src/lib/components/MarkupIcon.svelte` carries the twenty-two the
+screenshot editor's tool bar draws, and `src/lib/components/SettingsIcon.svelte`
+carries eleven, scaled from Phosphor's 256 box to the 24 one the drawings
+beside them are stated on.
 `src/lib/components/marks.ts` carries 296 of them, which is what Raycast's 469
 icon names resolve to once the ones that are the same picture are folded
 together, so an extension asking for any name Raycast publishes gets a drawing
 rather than a letter on a tile.
+
+The tool bar's paths are not in `marks.ts`: that table is held to
+`src-tauri/src/exthost/icons.rs` in both directions, and a drawing there that
+no extension name resolves to fails `npm run verify:source` as unreachable.
 
 --------------------------------------------------------------------------
 

@@ -393,6 +393,19 @@ pub struct Ai {
     /// The ones configured. Each key is sealed before this file is written.
     pub providers: Vec<crate::ai::provider::Provider>,
     /**
+    The address of a SearXNG instance, which is what web search is.
+
+    **Blank is off, and blank is the default.** Sill holds no search account
+    and has no instance of its own to point at, so the only honest default is
+    none: with nothing here the model is told there is no web search rather
+    than being handed somebody else's server. Somebody who wants it runs one
+    and types where it is.
+
+    A bare host is accepted and given a scheme, because that is what people
+    type. See `ai::searching`.
+    */
+    pub search: String,
+    /**
     Whether running something or writing a file asks for Windows Hello.
 
     **On, which is the unusual direction for a setting that adds a prompt, and
@@ -421,6 +434,7 @@ impl Default for Ai {
         Self {
             provider: String::new(),
             providers: Vec::new(),
+            search: String::new(),
             hello_for_heavy_actions: true,
         }
     }
@@ -994,6 +1008,16 @@ pub struct Screenshot {
     /// Somebody writing the second half of a walkthrough starts at seven, and
     /// the alternative is placing six badges and deleting them.
     pub step_from: u32,
+    /// Whether a box or an ellipse opens solid rather than as an outline.
+    pub fill: bool,
+    /// Which head an arrow opens with.
+    ///
+    /// A string rather than an enum, and deliberately: which heads exist is
+    /// decided in `markup.ts` beside the geometry that draws them, and a copy
+    /// of that list here would be a second place to forget. An unknown name
+    /// falls back to the default in the drawing, so a file naming a head this
+    /// version has never heard of still draws an arrow.
+    pub tip: String,
     /// Where a picture goes when somebody asks for a link to it.
     #[serde(default)]
     pub upload: Upload,
@@ -1012,6 +1036,10 @@ impl Default for Screenshot {
             colour: "#ff3b30".to_string(),
             weight: 4,
             step_from: 1,
+            // Outlined, because a filled box hides whatever it is drawn
+            // around and the tool is most often used to point at something.
+            fill: false,
+            tip: "barbed".to_string(),
             // Nothing named, which is off. Sill does not choose a service to
             // send somebody's screen to on their behalf.
             upload: Upload::default(),
@@ -1603,6 +1631,57 @@ mod tests {
             "an omitted section keeps a default of false as well"
         );
         assert_eq!(parsed.files.max_results, 20);
+    }
+
+    /// What the editor was last drawing with is what it opens with next time.
+    ///
+    /// These four are the only preferences no settings panel shows, so
+    /// nothing else in the application would notice if they stopped
+    /// round-tripping. For most of Sill's life they were read on open and
+    /// never written back at all, which is the bug this pins.
+    #[test]
+    fn the_editors_last_choice_survives_a_write_and_a_read() {
+        let mut prefs = Preferences::default();
+        prefs.screenshot.tool = "arrow".to_string();
+        prefs.screenshot.colour = "#00a3ff".to_string();
+        prefs.screenshot.weight = 9;
+        prefs.screenshot.fill = true;
+        prefs.screenshot.tip = "chevron".to_string();
+
+        let json = serde_json::to_string(&prefs).expect("serialises");
+        let read: Preferences = serde_json::from_str(&json).expect("parses");
+
+        assert_eq!(read.screenshot.tool, "arrow");
+        assert_eq!(read.screenshot.colour, "#00a3ff");
+        assert_eq!(read.screenshot.weight, 9);
+        assert!(read.screenshot.fill);
+        assert_eq!(read.screenshot.tip, "chevron");
+    }
+
+    /// A file written before the fill toggle was remembered still reads.
+    ///
+    /// Both directions, because only one of them bites. `fill` defaults to
+    /// false, so a test asserting only the default would pass just as well
+    /// for a field nothing ever reads.
+    #[test]
+    fn a_screenshot_section_written_before_fill_existed_still_opens_outlined() {
+        let never_chose: Preferences =
+            serde_json::from_str(r#"{"screenshot":{"tool":"arrow","weight":9}}"#).expect("parses");
+
+        assert_eq!(never_chose.screenshot.tool, "arrow", "the stated value wins");
+        assert_eq!(never_chose.screenshot.weight, 9);
+        assert!(
+            !never_chose.screenshot.fill,
+            "a field added later has to default rather than come back as anything else"
+        );
+        assert_eq!(
+            never_chose.screenshot.tip, "barbed",
+            "an arrow head nobody chose is the default one, not an empty string"
+        );
+
+        let chose_filled: Preferences =
+            serde_json::from_str(r#"{"screenshot":{"fill":true}}"#).expect("parses");
+        assert!(chose_filled.screenshot.fill, "a stored choice has to survive");
     }
 
     #[test]

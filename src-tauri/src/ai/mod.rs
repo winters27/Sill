@@ -20,4 +20,5 @@ pub mod oneshot;
 pub mod openai;
 pub mod pricing;
 pub mod provider;
+pub mod searching;
 pub mod tools;

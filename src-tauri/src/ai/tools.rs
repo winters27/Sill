@@ -117,6 +117,28 @@ pub const CATALOGUE: &[Tool] = &[
         },
     },
     Tool {
+        name: "search_web",
+        description: "Search the public web. Use this for anything that is not on this \
+                      machine: what happened recently, documentation, an error message \
+                      from a library, a price, how something is done. Do not use it to \
+                      find files, applications or settings, which are `find_files` and \
+                      `search_sill`. It answers with an error if no search instance is \
+                      set up, which is a thing to say rather than to work around.",
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "What to search for, as somebody would type it \
+                                        into a search box."
+                    }
+                },
+                "required": ["query"]
+            })
+        },
+    },
+    Tool {
         name: "read_file",
         description: "Read the text of one file. Use it after find_files has given you a \
                       path. Refuses anything that is not text. Files in their home folder \
@@ -359,6 +381,7 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value) -> Value {
     match name {
         "search_sill" => search_sill(app, &text("query")).await,
         "find_files" => find_files(&text("query")),
+        "search_web" => super::searching::run(app, &text("query")).await,
         "read_file" => read_file(app, &text("path")).await,
         "list_directory" => list_directory(app, &text("path")).await,
         "read_clipboard" => read_clipboard(app, &text("query")),

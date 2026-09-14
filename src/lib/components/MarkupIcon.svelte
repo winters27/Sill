@@ -32,8 +32,22 @@
    * row of marks is a row of things to recognise, and a tool bar is looked at
    * far more often than it is read.
    *
-   * One stroke width and one join style across the set, so they sit together
-   * as a family rather than as eight drawings that happen to be the same size.
+   * Phosphor Icons at regular weight, which is the family the tray menu, the
+   * launcher menu and `marks.ts` already draw from, so the tool bar reads as
+   * part of the launcher rather than as a second opinion about what an icon
+   * looks like.
+   *
+   * The path data is vendored here rather than added to `GLYPHS` in
+   * `marks.ts`. That table is the Raycast name table and is held to
+   * `exthost/icons.rs` in both directions by `npm run verify:source`: an
+   * entry there that no extension name resolves to fails as an unreachable
+   * drawing, and every mark in this bar is one no extension ever asks for.
+   *
+   * Filled paths on a 256 box, which is how the set is published. What was
+   * here before was strokes on a 24 box at 1.75, and nothing outside this file
+   * depended on either, so the swap is contained.
+   *
+   * Phosphor Icons is MIT licensed. `resources/NOTICE` names it.
    */
   interface Props {
     name: MarkIcon;
@@ -46,100 +60,76 @@
 <svg
   width={size}
   height={size}
-  viewBox="0 0 24 24"
-  fill="none"
-  stroke="currentColor"
-  stroke-width="1.75"
-  stroke-linecap="round"
-  stroke-linejoin="round"
+  viewBox="0 0 256 256"
+  fill="currentColor"
   aria-hidden="true"
 >
   {#if name === "select"}
-    <!-- A pointer, which is what "stop drawing and pick something up" looks
-         like everywhere. -->
-    <path d="M5 3 19 11.5 12.5 13 10 19.5Z" />
+    <!-- cursor -->
+    <path d="M168,132.69,214.08,115l.33-.13A16,16,0,0,0,213,85.07L52.92,32.8A15.95,15.95,0,0,0,32.8,52.92L85.07,213a15.82,15.82,0,0,0,14.41,11l.78,0a15.84,15.84,0,0,0,14.61-9.59l.13-.33L132.69,168,184,219.31a16,16,0,0,0,22.63,0l12.68-12.68a16,16,0,0,0,0-22.63ZM195.31,208,144,156.69a16,16,0,0,0-26,4.93c0,.11-.09.22-.13.32l-17.65,46L48,48l159.85,52.2-45.95,17.64-.32.13a16,16,0,0,0-4.93,26h0L208,195.31Z"/>
   {:else if name === "box"}
-    <rect x="4" y="6" width="16" height="12" rx="1.5" />
+    <!-- square -->
+    <path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32Zm0,176H48V48H208V208Z"/>
   {:else if name === "arrow"}
-    <path d="M5 19 19 5" />
-    <path d="M11 5h8v8" />
+    <!-- arrow-up-right -->
+    <path d="M200,64V168a8,8,0,0,1-16,0V83.31L69.66,197.66a8,8,0,0,1-11.32-11.32L172.69,72H88a8,8,0,0,1,0-16H192A8,8,0,0,1,200,64Z"/>
   {:else if name === "line"}
-    <!-- The arrow's diagonal without its head, so the pair reads as a pair. -->
-    <path d="M5 19 19 5" />
+    <!-- line-segment -->
+    <path d="M214.64,41.36a32,32,0,0,0-50.2,38.89L80.25,164.44a32.06,32.06,0,0,0-38.89,4.94h0a32,32,0,1,0,50.2,6.37l84.19-84.19a32,32,0,0,0,38.89-50.2Zm-139.33,162a16,16,0,0,1-22.64-22.64h0a16,16,0,0,1,22.63,0h0A16,16,0,0,1,75.31,203.33Zm128-128a16,16,0,1,1,0-22.63A16,16,0,0,1,203.33,75.3Z"/>
   {:else if name === "ellipse"}
-    <ellipse cx="12" cy="12" rx="8" ry="6" />
+    <!-- circle -->
+    <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Z"/>
   {:else if name === "pen"}
-    <path d="M4 20c2-1 3-3.5 5-6s4-5.5 6-6.5 4 0 3 2.5-4 5-6.5 6.5S6 20 4 20Z" />
+    <!-- pencil-simple -->
+    <path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z"/>
   {:else if name === "highlight"}
-    <!-- A marker nib with its stroke under it. -->
-    <path d="M9 14 15.5 7.5a2 2 0 0 1 3 3L12 17H9Z" />
-    <path d="M4 20h16" stroke-width="3" />
+    <!-- highlighter -->
+    <path d="M253.66,106.34a8,8,0,0,0-11.32,0L192,156.69,107.31,72l50.35-50.34a8,8,0,1,0-11.32-11.32L96,60.69A16,16,0,0,0,93.18,79.5L72,100.69a16,16,0,0,0,0,22.62L76.69,128,18.34,186.34a8,8,0,0,0,3.13,13.25l72,24A7.88,7.88,0,0,0,96,224a8,8,0,0,0,5.66-2.34L136,187.31l4.69,4.69a16,16,0,0,0,22.62,0l21.19-21.18A16,16,0,0,0,203.31,168l50.35-50.34A8,8,0,0,0,253.66,106.34ZM93.84,206.85l-55-18.35L88,139.31,124.69,176ZM152,180.69,83.31,112,104,91.31,172.69,160Z"/>
   {:else if name === "hide"}
-    <!-- Blocks, which is what this actually does to the pixels. -->
-    <rect x="4" y="7" width="5" height="5" />
-    <rect x="14" y="7" width="5" height="5" />
-    <rect x="9" y="12" width="5" height="5" />
+    <!-- squares-four -->
+    <path d="M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z"/>
   {:else if name === "text"}
-    <path d="M5 6h14" />
-    <path d="M12 6v13" />
+    <!-- text-t -->
+    <path d="M208,56V88a8,8,0,0,1-16,0V64H136V192h24a8,8,0,0,1,0,16H96a8,8,0,0,1,0-16h24V64H64V88a8,8,0,0,1-16,0V56a8,8,0,0,1,8-8H200A8,8,0,0,1,208,56Z"/>
   {:else if name === "step"}
-    <!-- A numbered disc, which is what the tool drops. -->
-    <circle cx="12" cy="12" r="8" />
-    <path d="M10.5 9.5 12.5 8v8" />
+    <!-- number-circle-one -->
+    <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216ZM140,80v96a8,8,0,0,1-16,0V95l-11.56,7.71a8,8,0,1,1-8.88-13.32l24-16A8,8,0,0,1,140,80Z"/>
   {:else if name === "crop"}
-    <!-- The two overlapping rules every crop tool is drawn as. -->
-    <path d="M7 3v14h14" />
-    <path d="M3 7h14v14" />
+    <!-- crop -->
+    <path d="M240,192a8,8,0,0,1-8,8H200v32a8,8,0,0,1-16,0V200H64a8,8,0,0,1-8-8V72H24a8,8,0,0,1,0-16H56V24a8,8,0,0,1,16,0V184H232A8,8,0,0,1,240,192ZM96,72h88v88a8,8,0,0,0,16,0V64a8,8,0,0,0-8-8H96a8,8,0,0,0,0,16Z"/>
   {:else if name === "fill"}
-    <!-- The box mark again, half of it solid, so the pair reads as one tool
-         in two states rather than as two unrelated drawings. -->
-    <rect x="4" y="6" width="16" height="12" rx="1.5" />
-    <path d="M4 12h16v4.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5Z" fill="currentColor" />
+    <!-- paint-bucket -->
+    <path d="M234.53,139.07a8,8,0,0,0,3.13-13.24L122.17,10.34a8,8,0,0,0-11.31,0L70.25,51,45.65,26.34A8,8,0,0,0,34.34,37.66l24.6,24.6L15,106.17a24,24,0,0,0,0,33.94L99.89,225a24,24,0,0,0,33.94,0l78.49-78.49Zm-32.19-5.24-79.83,79.83a8,8,0,0,1-11.31,0L26.34,128.8a8,8,0,0,1,0-11.31L70.25,73.57l29.12,29.12a28,28,0,1,0,11.31-11.32L81.57,62.26l35-34.95L217.19,128l-11.72,3.9A8.09,8.09,0,0,0,202.34,133.83Zm-86.83-26.31,0,0a13.26,13.26,0,1,1-.05.06S115.51,107.53,115.51,107.52Zm123.15,56a8,8,0,0,0-13.32,0C223.57,166.23,208,190.09,208,208a24,24,0,0,0,48,0C256,190.09,240.43,166.23,238.66,163.56ZM232,216a8,8,0,0,1-8-8c0-6.8,4-16.32,8-24.08,4,7.76,8,17.34,8,24.08A8,8,0,0,1,232,216Z"/>
   {:else if name === "dropper"}
-    <!-- The pipette every editor draws this as, nib pointing at the picture. -->
-    <path d="M15.5 4.5a2.5 2.5 0 0 1 4 3L12 15l-3 1 1-3Z" />
-    <path d="M4 20h5" />
+    <!-- eyedropper -->
+    <path d="M224,67.3a35.79,35.79,0,0,0-11.26-25.66c-14-13.28-36.72-12.78-50.62,1.13L142.8,62.2a24,24,0,0,0-33.14.77l-9,9a16,16,0,0,0,0,22.64l2,2.06-51,51a39.75,39.75,0,0,0-10.53,38l-8,18.41A13.68,13.68,0,0,0,36,219.3a15.92,15.92,0,0,0,17.71,3.35L71.23,215a39.89,39.89,0,0,0,37.06-10.75l51-51,2.06,2.06a16,16,0,0,0,22.62,0l9-9a24,24,0,0,0,.74-33.18l19.75-19.87A35.75,35.75,0,0,0,224,67.3ZM97,193a24,24,0,0,1-24,6,8,8,0,0,0-5.55.31l-18.1,7.91L57,189.41a8,8,0,0,0,.25-5.75A23.88,23.88,0,0,1,63,159l51-51,33.94,34ZM202.13,82l-25.37,25.52a8,8,0,0,0,0,11.3l4.89,4.89a8,8,0,0,1,0,11.32l-9,9L112,83.26l9-9a8,8,0,0,1,11.31,0l4.89,4.89a8,8,0,0,0,11.33,0l24.94-25.09c7.81-7.82,20.5-8.18,28.29-.81a20,20,0,0,1,.39,28.7Z"/>
   {:else if name === "palette"}
-    <!-- The six swatches, standing for the ones this reaches past. -->
-    <circle cx="12" cy="12" r="8" />
-    <circle cx="12" cy="7.5" r="1.3" fill="currentColor" stroke="none" />
-    <circle cx="16" cy="12" r="1.3" fill="currentColor" stroke="none" />
-    <circle cx="8" cy="12" r="1.3" fill="currentColor" stroke="none" />
-    <circle cx="12" cy="16.5" r="1.3" fill="currentColor" stroke="none" />
+    <!-- palette -->
+    <path d="M200.77,53.89A103.27,103.27,0,0,0,128,24h-1.07A104,104,0,0,0,24,128c0,43,26.58,79.06,69.36,94.17A32,32,0,0,0,136,192a16,16,0,0,1,16-16h46.21a31.81,31.81,0,0,0,31.2-24.88,104.43,104.43,0,0,0,2.59-24A103.28,103.28,0,0,0,200.77,53.89Zm13,93.71A15.89,15.89,0,0,1,198.21,160H152a32,32,0,0,0-32,32,16,16,0,0,1-21.31,15.07C62.49,194.3,40,164,40,128a88,88,0,0,1,87.09-88h.9a88.35,88.35,0,0,1,88,87.25A88.86,88.86,0,0,1,213.81,147.6ZM140,76a12,12,0,1,1-12-12A12,12,0,0,1,140,76ZM96,100A12,12,0,1,1,84,88,12,12,0,0,1,96,100Zm0,56a12,12,0,1,1-12-12A12,12,0,0,1,96,156Zm88-56a12,12,0,1,1-12-12A12,12,0,0,1,184,100Z"/>
   {:else if name === "undo"}
-    <path d="M4 10h10a5 5 0 0 1 0 10h-4" />
-    <path d="M8 6 4 10l4 4" />
+    <!-- arrow-counter-clockwise -->
+    <path d="M224,128a96,96,0,0,1-94.71,96H128A95.38,95.38,0,0,1,62.1,197.8a8,8,0,0,1,11-11.63A80,80,0,1,0,71.43,71.39a3.07,3.07,0,0,1-.26.25L44.59,96H72a8,8,0,0,1,0,16H24a8,8,0,0,1-8-8V56a8,8,0,0,1,16,0V85.8L60.25,60A96,96,0,0,1,224,128Z"/>
   {:else if name === "redo"}
-    <!-- Undo's mirror, deliberately: the two are read as a pair and a redo
-         drawn differently is a redo somebody has to stop and identify. -->
-    <path d="M20 10H10a5 5 0 0 0 0 10h4" />
-    <path d="m16 6 4 4-4 4" />
+    <!-- arrow-clockwise -->
+    <path d="M240,56v48a8,8,0,0,1-8,8H184a8,8,0,0,1,0-16H211.4L184.81,71.64l-.25-.24a80,80,0,1,0-1.67,114.78,8,8,0,0,1,11,11.63A95.44,95.44,0,0,1,128,224h-1.32A96,96,0,1,1,195.75,60L224,85.8V56a8,8,0,1,1,16,0Z"/>
   {:else if name === "clear"}
-    <path d="M5 7h14" />
-    <path d="M9 7V5h6v2" />
-    <path d="M7 7v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7" />
-  {:else if name === "share"}
-    <!-- Up and out of a tray: save's arrow reversed, because this is the same
-         act pointed at somewhere that is not the disk. -->
-    <path d="M12 16V6" />
-    <path d="m8 10 4-4 4 4" />
-    <path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3" />
+    <!-- trash -->
+    <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z"/>
   {:else if name === "pin"}
-    <!-- A drawing pin seen from the side, pushed into the picture. -->
-    <path d="M9 4h6l-1 6 3 3H7l3-3Z" />
-    <path d="M12 13v7" />
+    <!-- push-pin -->
+    <path d="M235.32,81.37,174.63,20.69a16,16,0,0,0-22.63,0L98.37,74.49c-10.66-3.34-35-7.37-60.4,13.14a16,16,0,0,0-1.29,23.78L85,159.71,42.34,202.34a8,8,0,0,0,11.32,11.32L96.29,171l48.29,48.29A16,16,0,0,0,155.9,224c.38,0,.75,0,1.13,0a15.93,15.93,0,0,0,11.64-6.33c19.64-26.1,17.75-47.32,13.19-60L235.33,104A16,16,0,0,0,235.32,81.37ZM224,92.69h0l-57.27,57.46a8,8,0,0,0-1.49,9.22c9.46,18.93-1.8,38.59-9.34,48.62L48,100.08c12.08-9.74,23.64-12.31,32.48-12.31A40.13,40.13,0,0,1,96.81,91a8,8,0,0,0,9.25-1.51L163.32,32,224,92.68Z"/>
+  {:else if name === "share"}
+    <!-- share-network -->
+    <path d="M176,160a39.89,39.89,0,0,0-28.62,12.09l-46.1-29.63a39.8,39.8,0,0,0,0-28.92l46.1-29.63a40,40,0,1,0-8.66-13.45l-46.1,29.63a40,40,0,1,0,0,55.82l46.1,29.63A40,40,0,1,0,176,160Zm0-128a24,24,0,1,1-24,24A24,24,0,0,1,176,32ZM64,152a24,24,0,1,1,24-24A24,24,0,0,1,64,152Zm112,72a24,24,0,1,1,24-24A24,24,0,0,1,176,224Z"/>
   {:else if name === "save"}
-    <!-- Down into a tray, rather than a floppy disk: the arrow says where the
-         picture is going to somebody who has never owned one. -->
-    <path d="M12 4v10" />
-    <path d="m8 10 4 4 4-4" />
-    <path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3" />
+    <!-- download-simple -->
+    <path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/>
   {:else if name === "close"}
-    <path d="M7 7 17 17" />
-    <path d="M17 7 7 17" />
+    <!-- x -->
+    <path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/>
   {:else if name === "copy"}
-    <rect x="9" y="4" width="11" height="13" rx="1.5" />
-    <path d="M15 20H5a1 1 0 0 1-1-1V8" />
+    <!-- copy -->
+    <path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/>
   {/if}
 </svg>
 

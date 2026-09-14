@@ -165,11 +165,30 @@ pub fn prompt_fragment(app: Option<&str>) -> String {
     }
 }
 
+/// Tokens whisper keeps from a prompt: `n_text_ctx / 2`, and `small.en`
+/// reports `n_text_ctx = 448` when it loads. Everything before that is
+/// dropped at decode time, whether or not anybody meant it to be.
+const PROMPT_TOKEN_BUDGET: usize = 224;
+
+/// Characters assumed per token when deciding whether a prompt fits.
+///
+/// Whisper's tokenizer is BPE and averages about four characters a token on
+/// ordinary English, but this prompt carries proper nouns and jargon, which
+/// is exactly what splits worst. Three is deliberately pessimistic: going
+/// over the budget costs the head of the prompt with nothing said about it,
+/// and staying under costs a few words at the far end that were already the
+/// least likely to matter.
+const CHARS_PER_TOKEN: usize = 3;
+
+/// Longest prompt worth sending.
+const PROMPT_BUDGET: usize = PROMPT_TOKEN_BUDGET * CHARS_PER_TOKEN;
+
 /// Joins the prompt pieces, dropping the empty ones.
 ///
 /// Order matters: the vocabulary goes last, closest to what is about to be
 /// transcribed, because a speech model conditions most strongly on the tail
-/// of its prompt.
+/// of its prompt. It is also the part that survives [`keep_tail`], which is
+/// the same ordering for the second reason.
 pub fn build_prompt(instructions: &str, app: Option<&str>, vocabulary: &str) -> Option<String> {
     let parts = [
         instructions.trim().to_string(),
@@ -184,7 +203,34 @@ pub fn build_prompt(instructions: &str, app: Option<&str>, vocabulary: &str) -> 
         .collect::<Vec<_>>()
         .join(" ");
 
-    (!joined.is_empty()).then_some(joined)
+    (!joined.is_empty()).then(|| keep_tail(&joined, PROMPT_BUDGET))
+}
+
+/// The last `budget` characters of `prompt`, starting at a word boundary.
+///
+/// Whisper already drops the head of an over-long prompt, so this changes
+/// nothing about which words reach the model. It is done here so the result
+/// is something the caller holds and a test can pin, rather than something
+/// that happens quietly inside the model: a vocabulary long enough to push
+/// the custom instructions out should do so by a rule written down somewhere.
+///
+/// Snapped to a word boundary rather than cut at the character: a prompt
+/// opening midway through a word is a sequence that occurs nowhere in
+/// ordinary text, and the model conditions on it just the same.
+fn keep_tail(prompt: &str, budget: usize) -> String {
+    let length = prompt.chars().count();
+    if length <= budget {
+        return prompt.to_string();
+    }
+
+    let tail: String = prompt.chars().skip(length - budget).collect();
+
+    match tail.find(char::is_whitespace) {
+        Some(at) => tail[at..].trim_start().to_string(),
+        // One unbroken run longer than the whole budget, so there is no
+        // boundary to snap to and the raw tail is all there is.
+        None => tail,
+    }
 }
 
 #[cfg(test)]
@@ -254,5 +300,46 @@ mod tests {
             Some("Dictated into Slack.")
         );
         assert_eq!(build_prompt("   ", None, "  "), None);
+    }
+
+    #[test]
+    fn an_over_long_prompt_keeps_the_vocabulary_and_spends_the_instructions() {
+        // Whisper discards the head of a prompt it cannot fit. The vocabulary
+        // is the part worth keeping, which is why it sits at the tail.
+        let prompt = build_prompt(&"word ".repeat(200), Some("Slack"), "Vicinae, Raycast")
+            .expect("all three parts present");
+
+        assert!(
+            prompt.chars().count() <= PROMPT_BUDGET,
+            "{} characters is over the budget",
+            prompt.chars().count()
+        );
+        assert!(prompt.ends_with("Vicinae, Raycast"), "got {prompt}");
+        assert!(prompt.contains("Dictated into Slack."), "got {prompt}");
+    }
+
+    #[test]
+    fn a_prompt_within_the_budget_is_left_alone() {
+        let prompt = build_prompt("Prefer British spelling.", None, "Raycast")
+            .expect("two parts present");
+
+        assert_eq!(prompt, "Prefer British spelling. Raycast");
+    }
+
+    #[test]
+    fn a_trimmed_prompt_does_not_open_midway_through_a_word() {
+        let prompt = build_prompt(&"alpha ".repeat(200), None, "Raycast").expect("not empty");
+        let first = prompt.split_whitespace().next().expect("a first word");
+
+        assert_eq!(first, "alpha", "opened on a fragment: {first}");
+    }
+
+    #[test]
+    fn one_unbroken_run_longer_than_the_budget_is_trimmed_rather_than_emptied() {
+        // No whitespace anywhere means no boundary to snap to. Returning
+        // nothing would throw away a vocabulary somebody typed.
+        let prompt = build_prompt("", None, &"x".repeat(PROMPT_BUDGET + 50)).expect("not empty");
+
+        assert_eq!(prompt.chars().count(), PROMPT_BUDGET);
     }
 }

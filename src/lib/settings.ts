@@ -230,6 +230,10 @@ export interface Screenshot {
   weight: number;
   /** The number the first badge shows. */
   stepFrom: number;
+  /** Whether a box or an ellipse opens solid rather than as an outline. */
+  fill: boolean;
+  /** Which head an arrow opens with, named in `markup.ts`. */
+  tip: string;
   /** Where a picture goes when somebody asks for a link to it. */
   upload: Upload;
 }
@@ -293,6 +297,14 @@ export interface AiSettings {
   provider: string;
   /** The ones set up. Each key is sealed before this file is written. */
   providers: import("$lib/ai").AiProvider[];
+  /**
+   * The address of a SearXNG instance, which is what web search is.
+   *
+   * Blank is off, and blank is the default: Sill holds no search account and
+   * has no instance to point at, so the model is told there is no web search
+   * rather than being handed somebody else's server.
+   */
+  search: string;
   /**
    * Whether running something or writing a file asks for Windows Hello.
    *
@@ -657,6 +669,23 @@ export function getPreferences(): Promise<Preferences> {
 
 export function setPreferences(prefs: Preferences): Promise<void> {
   return invoke("set_preferences", { prefs });
+}
+
+/**
+ * Remembers what the screenshot editor was last drawing with.
+ *
+ * Narrower than [`setPreferences`] deliberately: the editor knows about four
+ * fields rather than a whole settings object, and sending one back would
+ * write over anything changed in the settings window while it was open.
+ */
+export function setMarkupDefaults(
+  tool: string,
+  colour: string,
+  weight: number,
+  fill: boolean,
+  tip: string,
+): Promise<void> {
+  return invoke("set_markup_defaults", { tool, colour, weight, fill, tip });
 }
 
 /**

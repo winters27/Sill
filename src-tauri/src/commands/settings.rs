@@ -299,6 +299,47 @@ pub(crate) async fn set_preferences(
     Ok(())
 }
 
+/// Remembers what the screenshot editor was last drawing with.
+///
+/// Its own command rather than `set_preferences`, for two reasons. The editor
+/// holds five fields and not a whole settings object, so handing one back
+/// would write over anything the settings window changed while the editor was
+/// open. And these four are the only preferences no panel displays: nothing
+/// renders from them, so unlike every other settings change this one has
+/// nobody to tell, and `sill://preferences-changed` would wake four windows
+/// to re-read a value none of them draws.
+///
+/// `tip` is not checked against a list of heads. Which heads exist is decided
+/// in `markup.ts`, and the drawing falls back to the default for a name it
+/// does not know, so a copy of that list here would be a second place to
+/// forget and would buy nothing the drawing does not already do.
+///
+/// The editor is the only thing that writes these and the only thing that
+/// reads them, which is what makes a command this narrow the honest shape.
+#[tauri::command]
+pub(crate) async fn set_markup_defaults(
+    state: State<'_, PrefsState>,
+    tool: String,
+    colour: String,
+    weight: u32,
+    fill: bool,
+    tip: String,
+) -> Result<(), String> {
+    // Mutated under the lock and saved outside it, as `set_preferences` does:
+    // the save is a blocking file write and nothing else should wait on it.
+    let snapshot = {
+        let mut prefs = state.inner.lock().await;
+        prefs.screenshot.tool = tool;
+        prefs.screenshot.colour = colour;
+        prefs.screenshot.weight = weight;
+        prefs.screenshot.fill = fill;
+        prefs.screenshot.tip = tip;
+        prefs.clone()
+    };
+
+    snapshot.save(&state.path).map_err(|e| e.to_string())
+}
+
 /// Opens the settings window, creating it the first time.
 ///
 /// A separate window rather than a view inside the launcher: settings are read

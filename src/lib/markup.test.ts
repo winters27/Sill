@@ -11,6 +11,9 @@ import {
   CAN_FILL,
   TOOL_KEYS,
   arrowHead,
+  arrowTip,
+  DEFAULT_TIP,
+  TIPS,
   boxOf,
   croppedTo,
   fitted,
@@ -24,6 +27,7 @@ import {
   windowUnder,
   worthKeeping,
   type Shape,
+  type Tip,
   type Tool,
 } from "$lib/markup";
 
@@ -97,6 +101,136 @@ describe("an arrow head", () => {
     const large = arrowHead({ x: 0, y: 0 }, { x: 100, y: 0 }, 30)[0];
 
     expect(100 - large.x).toBeGreaterThan(100 - small.x);
+  });
+});
+
+describe("an arrow's head", () => {
+  const EVERY: Tip[] = TIPS.map((one) => one.id);
+
+  test("the picker offers every head and nothing it cannot draw", () => {
+    // A head in the list that `arrowTip` does not know would be a button that
+    // silently draws the default, which looks like the picker being broken.
+    for (const tip of EVERY) {
+      expect(arrowTip({ x: 0, y: 0 }, { x: 100, y: 0 }, 4, tip).points.length).toBeGreaterThan(2);
+    }
+
+    expect(EVERY).toContain(DEFAULT_TIP);
+  });
+
+  /**
+   * The failure this exists for: a shaft taken to the tip shows either side of
+   * a head that comes to a point, and a round cap puts half a stroke past it.
+   * Only the open head has nowhere to hide an end, and its barbs meet the
+   * shaft at the tip instead.
+   */
+  test("stops the shaft inside the head, unless the head is an open one", () => {
+    const from = { x: 0, y: 0 };
+    const tip = { x: 200, y: 0 };
+
+    // Which head is the open one is part of the design rather than an
+    // accident of the table. Found by sabotage: without these two lines,
+    // filling every head passes, because the loop below only checks that
+    // `solid` and `shaftEnd` agree with each other.
+    expect(arrowTip(from, tip, 4, "chevron").solid).toBe(false);
+    for (const style of EVERY.filter((one) => one !== "chevron")) {
+      expect(arrowTip(from, tip, 4, style).solid).toBe(true);
+    }
+
+    for (const style of EVERY) {
+      const head = arrowTip(from, tip, 4, style);
+
+      if (head.solid) {
+        expect(head.shaftEnd.x).toBeLessThan(tip.x);
+      } else {
+        expect(head.shaftEnd).toEqual(tip);
+      }
+    }
+  });
+
+  test("a swept head takes the shaft closer to the tip than a straight one", () => {
+    // The notch is the whole difference between the two, and both are the
+    // same reach, so this is the only thing that can tell them apart.
+    const from = { x: 0, y: 0 };
+    const tip = { x: 200, y: 0 };
+
+    const barbed = arrowTip(from, tip, 4, "barbed");
+    const triangle = arrowTip(from, tip, 4, "triangle");
+
+    expect(barbed.shaftEnd.x).toBeGreaterThan(triangle.shaftEnd.x);
+    expect(barbed.points.length).toBe(4);
+    expect(triangle.points.length).toBe(3);
+  });
+
+  test("turns with the line, whichever way the arrow points", () => {
+    const tip = { x: 100, y: 100 };
+
+    for (const style of EVERY) {
+      for (const from of [
+        { x: 0, y: 100 },
+        { x: 200, y: 100 },
+        { x: 100, y: 0 },
+        { x: 100, y: 200 },
+        { x: 0, y: 0 },
+      ]) {
+        const reach = Math.hypot(tip.x - from.x, tip.y - from.y);
+
+        // Every corner other than the tip itself sits nearer the start than
+        // the tip does. A head with fixed angles passes this pointing right
+        // and fails it pointing any other way.
+        for (const corner of arrowTip(from, tip, 4, style).points) {
+          if (corner.x === tip.x && corner.y === tip.y) continue;
+          expect(Math.hypot(corner.x - from.x, corner.y - from.y)).toBeLessThan(reach);
+        }
+      }
+    }
+  });
+
+  test("every head grows with the stroke it is drawn at", () => {
+    const from = { x: 0, y: 0 };
+    const tip = { x: 400, y: 0 };
+
+    // Measured as how far back the furthest corner sits, rather than off the
+    // tip, which several heads carry as a corner and which never moves.
+    const reach = (weight: number, style: Tip) =>
+      Math.max(...arrowTip(from, tip, weight, style).points.map((p) => tip.x - p.x));
+
+    for (const style of EVERY) {
+      expect(reach(20, style)).toBeGreaterThan(reach(2, style));
+    }
+  });
+
+  /**
+   * An arrow shorter than its own head would otherwise get a stub of shaft out
+   * of the back of it, pointing the wrong way.
+   */
+  test("never takes the shaft back past the arrow's own start", () => {
+    const from = { x: 50, y: 50 };
+
+    for (const style of EVERY) {
+      const head = arrowTip(from, { x: 56, y: 50 }, 40, style);
+
+      expect(head.shaftEnd.x).toBeGreaterThanOrEqual(from.x);
+      expect(head.shaftEnd.x).toBeLessThanOrEqual(56);
+    }
+  });
+
+  test("is points rather than NaNs when the arrow has no length", () => {
+    for (const style of EVERY) {
+      const head = arrowTip({ x: 10, y: 10 }, { x: 10, y: 10 }, 4, style);
+
+      for (const value of [head.shaftEnd.x, head.shaftEnd.y, ...head.points.flatMap((p) => [p.x, p.y])]) {
+        expect(Number.isFinite(value)).toBe(true);
+      }
+    }
+  });
+
+  test("a head it has never heard of draws the default rather than nothing", () => {
+    // Reached from a stored setting, so a file written by a later version has
+    // to draw an arrow rather than take the editor down.
+    const from = { x: 0, y: 0 };
+    const tip = { x: 200, y: 0 };
+
+    expect(arrowTip(from, tip, 4, "spiral" as Tip)).toEqual(arrowTip(from, tip, 4, DEFAULT_TIP));
   });
 });
 

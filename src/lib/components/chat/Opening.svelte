@@ -52,7 +52,7 @@
 
 <div class="opening" class:stage>
   <div class="lead">
-    <Orb size={stage ? "hero" : "inline"} />
+    <Orb size={stage ? "hero" : "inline"} motion="drift" />
     <div class="words">
       {#if answersWith?.ready}
         <p class="ask">

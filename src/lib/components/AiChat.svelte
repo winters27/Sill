@@ -24,7 +24,7 @@
   import Opening from "./chat/Opening.svelte";
   import Trouble from "./chat/Trouble.svelte";
   import Turn from "./chat/Turn.svelte";
-  import Waiting from "./chat/Waiting.svelte";
+  import Working from "./chat/Working.svelte";
 
   interface Props {
     conversation: Shown[];
@@ -56,7 +56,7 @@
   const shown = $derived(writing ? [...conversation, writing] : conversation);
 </script>
 
-<div class="chat sill-scrolls" use:follow={live.asking}>
+<div class="chat" use:follow={live.asking}>
   <div class="flow">
     {#if conversation.length === 0 && !live.asking && !writing}
       <Opening {answersWith} {onoffer} />
@@ -70,8 +70,8 @@
       <ApprovalCard asked={live.asked} {ondecide} />
     {/if}
 
-    {#if live.asking && !writing && !live.asked}
-      <Waiting />
+    {#if live.asking && !live.asked}
+      <Working writing={writing !== null} />
     {/if}
 
     {#if live.trouble}

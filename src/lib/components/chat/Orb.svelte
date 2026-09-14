@@ -7,13 +7,15 @@
    * running through it and a glass highlight on the rim, lensed toward the
    * edge so it reads as fluid in a container rather than a picture of one.
    *
-   * ## What it costs at rest: nothing
+   * ## What it costs with nobody looking: nothing
    *
-   * The frame loop runs only while `live`. When the turn ends one settled
-   * frame is painted and the loop is cancelled, so a window with a finished
-   * conversation in it has a still picture and no timer. Reduced motion is a
-   * single still frame throughout. Without WebGL the CSS gradient underneath
-   * is the face and the canvas is never touched.
+   * The frame loop runs only while there is motion to draw, and the browser
+   * stops calling it while the page is not being rendered, so an orb set to
+   * drift in a window that has been put away is not drawing. `still` paints one
+   * settled frame and cancels the loop, which is how a finished conversation
+   * ends up with a picture and no timer. Reduced motion is a single still
+   * frame throughout. Without WebGL the CSS gradient underneath is the face
+   * and the canvas is never touched.
    *
    * ## Why the colours are read, not written
    *
@@ -23,24 +25,46 @@
    */
   import { onMount } from "svelte";
 
+  type Motion = "still" | "drift" | "live";
+
   interface Props {
     /** Inline beside a line of text, or the larger one an empty chat opens with. */
     size?: "inline" | "hero";
-    /** Whether the model is working right now, which is when this moves. */
-    live?: boolean;
+    /** Still, the slow drift of a window at rest, or the churn of a live turn. */
+    motion?: Motion;
   }
 
-  let { size = "inline", live = false }: Props = $props();
+  /**
+   * How fast the light travels, and how hard the sphere breathes, for each.
+   *
+   * A pace of zero means the loop does not run at all rather than running at
+   * no speed, so `still` costs one frame and then nothing.
+   *
+   * Drift does not breathe. The pulse is what says a turn is in flight, and a
+   * window with nothing in flight pulsing says something that is not true; the
+   * fluid moving on its own is enough to read as awake.
+   */
+  const PACE: Record<Motion, { pace: number; swell: number }> = {
+    still: { pace: 0, swell: 0 },
+    drift: { pace: 0.35, swell: 0 },
+    live: { pace: 1.6, swell: 1 },
+  };
+
+  let { size = "inline", motion = "still" }: Props = $props();
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   let drawn = $state(false);
 
   /** The loop's controls, set once the canvas has a context. */
-  let start: (() => void) | null = null;
+  let run: ((pace: number, swell: number) => void) | null = null;
   let stop: (() => void) | null = null;
 
+  // This runs before `onMount`, so on the first pass `run` is still null and
+  // nothing happens. What starts the first turn is the line at the end of
+  // `onMount`; without it every orb would sit still until its motion changed.
   $effect(() => {
-    if (live) start?.();
+    const { pace, swell } = PACE[motion];
+    if (pace) run?.(pace, swell);
     else stop?.();
   });
 
@@ -191,8 +215,8 @@ void main(){
      * A sphere a few tens of pixels across has too few pixels for noise to
      * read as fluid and for its rim to read as a curve; drawn at 2x or 3x
      * and scaled down by the browser it is the same picture, sampled
-     * finely. The cost is a few thousand extra fragments per frame, only
-     * while a turn is live.
+     * finely. The cost is a few thousand extra fragments per frame, and
+     * only on frames that are drawn.
      */
     const fit = () => {
       const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
@@ -211,7 +235,7 @@ void main(){
       }
     };
 
-    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     // Time accumulates through the pace rather than being scaled by it, so
     // a change of pace bends the motion rather than jumping the clock. It
@@ -220,10 +244,12 @@ void main(){
     let last = 0;
     let breathe = 0;
     let frame = 0;
+    let pace = 0;
+    let swell = 0;
     let watching: ResizeObserver | null = null;
 
-    const paint = (now: number, pace: number, target: number) => {
-      if (last) acc += ((now - last) / 1000) * pace;
+    const paint = (now: number, speed: number, target: number) => {
+      if (last) acc += ((now - last) / 1000) * speed;
       last = now;
       breathe += (target - breathe) * 0.06;
       const pulse = 0.5 + 0.5 * Math.sin((now / 1000) * 3.93);
@@ -242,13 +268,17 @@ void main(){
     };
 
     const loop = (now: number) => {
-      paint(now, 1.6, 1);
+      paint(now, pace, swell);
       frame = requestAnimationFrame(loop);
     };
 
-    start = () => {
-      if (frame || still) {
-        if (still) once();
+    run = (nextPace: number, nextSwell: number) => {
+      // Set before the early return, so a change of pace on a loop that is
+      // already running reaches the next frame rather than being dropped.
+      pace = nextPace;
+      swell = nextSwell;
+      if (frame || reduced) {
+        if (reduced) once();
         return;
       }
       fit();
@@ -273,11 +303,12 @@ void main(){
     };
 
     once();
-    if (live) start();
+    const opening = PACE[motion];
+    if (opening.pace) run(opening.pace, opening.swell);
 
     return () => {
       stop?.();
-      start = null;
+      run = null;
       stop = null;
       ctx.getExtension("WEBGL_lose_context")?.loseContext();
     };

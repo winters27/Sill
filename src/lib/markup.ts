@@ -50,6 +50,15 @@ export interface Shape {
    */
   number?: number;
   /**
+   * Only for `arrow`: which head it was drawn with.
+   *
+   * Carried per mark for the same reason `colour` and `weight` are: changing
+   * the picker is a choice about the next arrow, not about the ones already on
+   * the picture. Optional, so a mark built without one still draws, with the
+   * default head.
+   */
+  tip?: Tip;
+  /**
    * Only for the tools in [`CAN_FILL`]: solid rather than an outline.
    *
    * Optional rather than defaulted to false, so a mark saved before this
@@ -89,17 +98,28 @@ export function boxOf(a: Point, b: Point): { x: number; y: number; w: number; h:
 }
 
 /**
+ * How far a head opens either side of the line it points along.
+ *
+ * Wide enough to read as an arrow at a glance, narrow enough not to look like
+ * a delta. The default the solid heads are proportioned around; a head is free
+ * to state its own.
+ */
+const HEAD_SPREAD = Math.PI / 7;
+
+/**
  * Where an arrow's head sits, as the two points behind its tip.
  *
  * Worked out here rather than in the drawing so it can be tested: an arrow
  * whose head does not turn with the line is the classic version of this bug,
  * and it only shows at certain angles.
  */
-export function arrowHead(from: Point, to: Point, size: number): [Point, Point] {
+export function arrowHead(
+  from: Point,
+  to: Point,
+  size: number,
+  spread: number = HEAD_SPREAD,
+): [Point, Point] {
   const angle = Math.atan2(to.y - from.y, to.x - from.x);
-  // Wide enough to read as an arrow at a glance, narrow enough not to look
-  // like a delta.
-  const spread = Math.PI / 7;
 
   return [
     {
@@ -111,6 +131,110 @@ export function arrowHead(from: Point, to: Point, size: number): [Point, Point] 
       y: to.y - size * Math.sin(angle + spread),
     },
   ];
+}
+
+/**
+ * A point `by` back from the tip along the arrow's own line.
+ *
+ * Clamped at the arrow's start, so an arrow shorter than its own head stops
+ * there rather than reaching back out of its tail.
+ */
+function back(from: Point, to: Point, by: number): Point {
+  const span = Math.hypot(to.x - from.x, to.y - from.y);
+  if (span === 0) return { x: to.x, y: to.y };
+
+  const along = Math.min(by, span);
+
+  return {
+    x: to.x - (along * (to.x - from.x)) / span,
+    y: to.y - (along * (to.y - from.y)) / span,
+  };
+}
+
+/** How an arrow's head is drawn. */
+export type Tip = "barbed" | "dart" | "chevron" | "triangle";
+
+/** The head an arrow gets when nothing says otherwise. */
+export const DEFAULT_TIP: Tip = "barbed";
+
+/** Every head, in the order the picker offers them. */
+export const TIPS: { id: Tip; hint: string }[] = [
+  { id: "barbed", hint: "Swept head, notched into the shaft" },
+  { id: "dart", hint: "A long, narrow head" },
+  { id: "chevron", hint: "Two strokes, at the shaft's own weight" },
+  { id: "triangle", hint: "A plain filled head" },
+];
+
+/**
+ * How each head is proportioned, against the stroke it is drawn with.
+ *
+ * Everything is a multiple of the stroke rather than a pixel count, which is
+ * what keeps a head looking the same at weight 2 and at weight 20. A fixed
+ * size is the version of this that looks right at exactly one weight.
+ *
+ * `notch` is how far the back edge is pulled in toward the tip, as a fraction
+ * of `reach`: zero leaves the back edge straight, and more sweeps it.
+ */
+const SHAPE: Record<Tip, { reach: number; spread: number; notch: number; solid: boolean }> = {
+  barbed: { reach: 6, spread: HEAD_SPREAD, notch: 0.58, solid: true },
+  dart: { reach: 7, spread: Math.PI / 11, notch: 0, solid: true },
+  // Wider and shorter than the solid heads: an open head has no area to read
+  // by, so it needs the angle to say which way it points.
+  chevron: { reach: 5, spread: Math.PI / 6, notch: 0, solid: false },
+  triangle: { reach: 6, spread: HEAD_SPREAD, notch: 0, solid: true },
+};
+
+/** An arrow's head, as something the drawing can paint without deciding anything. */
+export interface Head {
+  /** Where the shaft stops, so no part of the stroke shows past the head. */
+  shaftEnd: Point;
+  /** The head's corners, in the order they are joined. */
+  points: Point[];
+  /** Filled when true, stroked at the shaft's own weight when not. */
+  solid: boolean;
+}
+
+/**
+ * An arrow's head, whichever kind it was drawn with.
+ *
+ * One function rather than one per head, because every caller wants the same
+ * three things and the difference between the heads is four numbers. A
+ * `switch` in the drawing would put the shape of an arrow in the one file
+ * that cannot be tested.
+ *
+ * ## Why the shaft stops short
+ *
+ * A solid head comes to a point, so for the last stroke width before the tip
+ * it is narrower than the shaft drawn into it: a shaft taken the whole way
+ * shows either side of the point, and a round cap puts another half a stroke
+ * beyond it. Ending at the back edge, or at the notch where there is one,
+ * buries the end of the shaft in the widest part of the head.
+ *
+ * An open head is the exception and its shaft does run to the tip. There is no
+ * area to hide an end inside, the two barbs meet the shaft there, and a round
+ * join closes the corner. Stopping short would open a gap instead.
+ *
+ * An unknown head falls back to the default rather than throwing: this is
+ * reached from a stored preference, and a settings file holding a name from a
+ * later version should draw an arrow rather than take the editor down.
+ */
+export function arrowTip(from: Point, to: Point, weight: number, tip: Tip = DEFAULT_TIP): Head {
+  const { reach, spread, notch, solid } = SHAPE[tip] ?? SHAPE[DEFAULT_TIP];
+  const size = weight * reach;
+  const [left, right] = arrowHead(from, to, size, spread);
+  const point = { x: to.x, y: to.y };
+
+  if (!solid) {
+    return { shaftEnd: point, points: [left, point, right], solid };
+  }
+
+  const base = back(from, to, notch > 0 ? size * notch : size * Math.cos(spread));
+
+  return {
+    shaftEnd: base,
+    points: notch > 0 ? [point, left, base, right] : [point, left, right],
+    solid,
+  };
 }
 
 /**

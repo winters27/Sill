@@ -46,6 +46,12 @@ export const VERBS: Record<string, Verb> = {
     icon: "search",
     quotes: true,
   },
+  search_web: {
+    doing: "Searching the web for",
+    done: "Searched the web for",
+    icon: "search",
+    quotes: true,
+  },
   read_file: { doing: "Reading", done: "Read", icon: "file" },
   list_directory: { doing: "Looking inside", done: "Looked inside", icon: "folder" },
   read_clipboard: {
