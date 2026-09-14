@@ -80,6 +80,7 @@ let browse: Browse;
 
 /** What `store_prepare` answers: fetched and read, installed nothing. */
 const prepared: Preparation = {
+  macOnly: [],
   name: "behind",
   title: "behind",
   revision: "bbbb",

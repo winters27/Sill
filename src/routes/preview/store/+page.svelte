@@ -228,6 +228,12 @@
    * varies, which is the distinction the whole screen turns on.
    */
   const PREPARED: Preparation = {
+    // The real case this was built for: `proton-pass` declares Windows in
+    // the index and then shells out to a Mac.
+    macOnly: [
+      { marker: "/usr/bin/", seenIn: ["src/login.ts"] },
+      { marker: "com.apple.", seenIn: ["src/login.ts"] },
+    ],
     name: "spotify-player",
     title: "Spotify Player",
     revision: "a0fbca34f41fb77a122db71c76ff48d539aa8d42",

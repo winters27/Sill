@@ -677,6 +677,30 @@
         {/if}
       </section>
 
+      <!--
+        Read from the source, not from the platform the index declares.
+
+        Raycast's index lets an extension name Windows without meaning it.
+        `proton-pass` declares macOS and Windows, then runs `/usr/bin/xattr` on
+        a binary it stages; installed here it does not fail loudly, it reports
+        that the login worked. This is what the code appears to need, said
+        before anybody agrees to it, which is the same bargain the capability
+        list above makes.
+      -->
+      {#if deciding.macOnly.length}
+        <p class="warning">
+          This looks like it was built for macOS. It names
+          {#each deciding.macOnly as found, at (found.marker)}{at > 0
+              ? at === deciding.macOnly.length - 1
+                ? " and "
+                : ", "
+              : ""}<code>{found.marker}</code>{/each}, which
+          {deciding.macOnly.length === 1 ? "is" : "are"} not on this machine.
+          It can still be installed, and the parts that need
+          {deciding.macOnly.length === 1 ? "that" : "those"} will not work.
+        </p>
+      {/if}
+
       {#if deciding.apiWarning}
         <p class="warning">{deciding.apiWarning}</p>
       {/if}

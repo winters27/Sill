@@ -126,6 +126,14 @@ export interface Preparation {
   secrets: string[];
   /** Said when it asks for a newer `@raycast/api` than Sill implements. */
   apiWarning: string | null;
+  /**
+   * What in the source only works on a Mac, when anything does.
+   *
+   * Empty for nearly every extension. Raycast's index lets one declare Windows
+   * without meaning it, so this is read from the code rather than the
+   * declaration.
+   */
+  macOnly: { marker: string; seenIn: string[] }[];
   /** The commands Sill will refuse to install, one sentence each. */
   refused: string[];
   notEnforced: string;

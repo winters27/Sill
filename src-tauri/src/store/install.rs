@@ -212,6 +212,12 @@ pub struct Preparation {
     /// is that "a function is undefined" has an explanation somebody saw
     /// before they installed it.
     pub api_warning: Option<String>,
+    /// What in the source only works on a Mac, when anything does.
+    ///
+    /// Empty for nearly every extension. Raycast's index lets one declare
+    /// Windows without meaning it, and this is read from the code rather than
+    /// from the declaration.
+    pub mac_only: Vec<capability::MacOnly>,
     /// The commands Sill will refuse to install, one sentence each.
     ///
     /// On the screen that asks, because an extension whose menu bar command is
@@ -301,7 +307,9 @@ pub async fn prepare(
 
     // Written now rather than after the build, so step two knows what it is
     // finishing without the window having to carry it back.
-    let capabilities = capability::reached(&sources_under(&staged));
+    let sources = sources_under(&staged);
+    let capabilities = capability::reached(&sources);
+    let mac_only = capability::mac_only_in(&sources);
 
     // Written before the screen is shown, so what gets granted is exactly what
     // was on it. Deriving it again at install time would scan the same source
@@ -335,6 +343,7 @@ pub async fn prepare(
         packages: packages_in(&manifest),
         secrets: secrets_in(&manifest),
         api_warning: api_warning_for(&manifest),
+        mac_only,
         refused: refused_in(&manifest),
         not_enforced: capability::NOT_ENFORCED,
     })

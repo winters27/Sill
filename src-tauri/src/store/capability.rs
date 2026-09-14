@@ -529,6 +529,221 @@ pub fn reached(sources: &[(String, String)]) -> Vec<Reached> {
         .collect()
 }
 
+// -------------------------------------------------------- built for macOS
+
+/// Something in the source that only exists on a Mac.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MacOnly {
+    /// What was found, spelled as it appears.
+    pub marker: String,
+    /// The first few files it was seen in.
+    pub seen_in: Vec<String>,
+}
+
+/// Markers that mean a Mac and cannot mean anything else.
+///
+/// **`darwin` is deliberately not here**, and leaving it out is most of what
+/// makes this worth showing. A cross-platform extension says `darwin` to ask
+/// which machine it is on, so matching it would accuse the extensions that
+/// handle Windows *best* of being unable to run here. Every marker below is a
+/// path or an identifier that has no meaning off a Mac, so finding one is not a
+/// platform check, it is the platform.
+const ONLY_ON_A_MAC: &[(&str, &str)] = &[
+    ("/usr/bin/", "a Unix program path"),
+    ("/usr/local/bin/", "a Unix program path"),
+    ("/Applications/", "the macOS applications folder"),
+    ("/System/Library/", "a macOS system folder"),
+    ("com.apple.", "an Apple identifier"),
+    ("osascript", "AppleScript"),
+    ("NSWorkspace", "a macOS framework"),
+    ("pbcopy", "the macOS clipboard tool"),
+    ("pbpaste", "the macOS clipboard tool"),
+    (".app/Contents/", "the inside of a macOS application"),
+];
+
+/// How many files are named for one marker before the list stops.
+const FEW_ENOUGH: usize = 3;
+
+/// Whether the extension handles Windows anywhere in its own source.
+///
+/// **This is the whole guard, and it exists because the first version of this
+/// check was wrong about the extension it was written for.** `proton-pass`
+/// names `/usr/bin/xattr` and `com.apple.quarantine`, which look conclusive,
+/// and `src/lib/pass-cli.ts` opens the function holding them with
+/// `if (process.platform === "win32") return currentPath;`. The macOS code is
+/// dead on Windows and the extension runs here.
+///
+/// A substring cannot tell guarded code from unguarded code, and parsing to
+/// find out would be a compiler for one warning. So the cheap question is asked
+/// instead: does this extension know Windows exists? An author who wrote a
+/// `win32` branch has thought about this machine, and their macOS paths are
+/// theirs to reach or not.
+///
+/// The cost is every extension that is genuinely macOS-only **and** happens to
+/// mention `win32` somewhere. That is the direction to be wrong in: saying
+/// nothing about an extension that does not work is a disappointment, and
+/// warning about one that does is the launcher being wrong out loud on the
+/// screen where somebody is deciding whether to trust it.
+fn handles_windows(sources: &[(String, String)]) -> bool {
+    sources
+        .iter()
+        .any(|(_, text)| text.contains("win32") || text.contains("WINDOWS"))
+}
+
+/// What in this extension only works on a Mac.
+///
+/// **Read from the source, like the capabilities beside it, and shown rather
+/// than enforced.** Raycast's index carries a platform field and an extension
+/// is free to name Windows without meaning it, so the declaration is not the
+/// thing to go on.
+///
+/// Answers nothing at all for an extension that branches on `win32` anywhere:
+/// see [`handles_windows`] for why, and for the measured case that made it
+/// necessary.
+pub fn mac_only_in(sources: &[(String, String)]) -> Vec<MacOnly> {
+    if handles_windows(sources) {
+        return Vec::new();
+    }
+
+    let mut found: Vec<MacOnly> = Vec::new();
+
+    for (name, text) in sources {
+        for (marker, _) in ONLY_ON_A_MAC {
+            if !text.contains(marker) {
+                continue;
+            }
+
+            match found.iter_mut().find(|it| it.marker == *marker) {
+                Some(already) => {
+                    if already.seen_in.len() < FEW_ENOUGH && !already.seen_in.contains(name) {
+                        already.seen_in.push(name.clone());
+                    }
+                }
+                None => found.push(MacOnly {
+                    marker: (*marker).to_string(),
+                    seen_in: vec![name.clone()],
+                }),
+            }
+        }
+    }
+
+    found.sort_by(|a, b| a.marker.cmp(&b.marker));
+    found
+}
+
+/// What to call a marker on the screen.
+pub fn mac_marker_means(marker: &str) -> &'static str {
+    ONLY_ON_A_MAC
+        .iter()
+        .find(|(named, _)| *named == marker)
+        .map(|(_, means)| *means)
+        .unwrap_or("a macOS-only name")
+}
+#[cfg(test)]
+mod built_for_a_mac {
+    use super::{mac_marker_means, mac_only_in};
+
+    fn source(files: &[(&str, &str)]) -> Vec<(String, String)> {
+        files
+            .iter()
+            .map(|(name, text)| (name.to_string(), text.to_string()))
+            .collect()
+    }
+
+    /// An extension with no Windows path anywhere and macOS names in it.
+    #[test]
+    fn an_extension_that_only_shells_out_to_a_mac_is_named() {
+        let found = mac_only_in(&source(&[(
+            "src/login.ts",
+            r#"await execFileAsync("/usr/bin/xattr", ["-d", "com.apple.quarantine", staged]);"#,
+        )]));
+
+        let markers: Vec<&str> = found.iter().map(|it| it.marker.as_str()).collect();
+        assert!(markers.contains(&"/usr/bin/"), "{markers:?}");
+        assert!(markers.contains(&"com.apple."), "{markers:?}");
+        assert_eq!(found[0].seen_in, vec!["src/login.ts".to_string()]);
+    }
+
+    /// **The correction.** `proton-pass` was the extension this check was
+    /// written for, and it was the wrong example: it names `/usr/bin/xattr`
+    /// and `com.apple.quarantine`, and the function holding them opens with
+    /// `if (process.platform === "win32") return currentPath;`. It runs on
+    /// Windows. The first version of this warned about it, which is the
+    /// launcher being wrong out loud on the screen where somebody decides
+    /// whether to trust an extension.
+    #[test]
+    fn an_extension_that_guards_its_mac_code_is_left_alone() {
+        let found = mac_only_in(&source(&[
+            (
+                "src/lib/pass-cli.ts",
+                r#"if (process.platform === "win32") return currentPath;
+                   await execFileAsync("/usr/bin/xattr", ["-d", "com.apple.quarantine", staged]);"#,
+            ),
+            (
+                "src/lib/terminal.ts",
+                r#"if (process.platform !== "darwin") { return openWindowsTerminal(); }"#,
+            ),
+        ]));
+
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    /// **The false positive that would matter most.** An extension that asks
+    /// which platform it is on is handling Windows, not refusing it. Matching
+    /// `darwin` would accuse exactly the extensions that work here best.
+    #[test]
+    fn asking_which_platform_it_is_on_is_not_being_built_for_one() {
+        let found = mac_only_in(&source(&[(
+            "src/run.ts",
+            r#"const shell = process.platform === "darwin" ? "zsh" : "powershell";
+               if (process.platform !== "darwin") { useWindowsPath(); }"#,
+        )]));
+
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn an_ordinary_extension_is_named_for_nothing() {
+        let found = mac_only_in(&source(&[
+            ("src/run.tsx", "import { List } from \"@raycast/api\";"),
+            ("src/util.ts", "export const add = (a: number, b: number) => a + b;"),
+        ]));
+
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    /// One marker in many files is one row, and the list of files stops rather
+    /// than becoming the whole extension.
+    #[test]
+    fn a_marker_in_many_files_is_reported_once_and_briefly() {
+        let files: Vec<(String, String)> = (0..10)
+            .map(|at| (format!("src/{at}.ts"), "osascript -e 'beep'".to_string()))
+            .collect();
+
+        let found = mac_only_in(&files);
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].marker, "osascript");
+        assert_eq!(found[0].seen_in.len(), 3);
+    }
+
+    #[test]
+    fn every_marker_has_words_for_the_screen() {
+        let found = mac_only_in(&source(&[(
+            "src/a.ts",
+            "/usr/bin/ /Applications/ com.apple. osascript NSWorkspace pbcopy pbpaste /usr/local/bin/ /System/Library/ .app/Contents/",
+        )]));
+
+        assert_eq!(found.len(), 10, "every marker should have matched");
+        for one in &found {
+            let means = mac_marker_means(&one.marker);
+            assert!(!means.is_empty());
+            assert_ne!(means, "a macOS-only name", "{} has no words", one.marker);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
