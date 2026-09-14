@@ -84,7 +84,11 @@ zip = "8.6.0"
 # `gzip`, for the extension store. Its index is 19 MB of JSON uncompressed and
 # 3.5 MB with it, measured, which is the difference between an acceptable
 # on-demand fetch and one nobody would wait for.
-reqwest = { version = "0.13.4", features = ["multipart", "stream", "json", "gzip"] }
+# `blocking` is for placing an extension's dependencies. That whole path is
+# a sequence of build, read what was refused, fetch, build again, and it
+# runs on a thread that is already blocking; a client is made per install
+# and dropped with it, so nothing of it is resident.
+reqwest = { version = "0.13.4", features = ["multipart", "stream", "json", "gzip", "blocking"] }
 fend-core = "1.5.8"
 clipboard-master = "4.0.0"
 arboard = "3.6.1"

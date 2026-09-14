@@ -341,6 +341,74 @@ fn importer_in(line: &str) -> Option<String> {
     Some(path.replace('\\', "/"))
 }
 
+/// Imports the build satisfied from outside the extension.
+///
+/// **A refusal is not the only way an import can be missing.** esbuild walks up
+/// past the extension when it resolves, so a package that is absent here but
+/// present in some `node_modules` above staging is resolved rather than
+/// refused, and the build either succeeds against the wrong code or fails much
+/// later for a reason that does not mention resolution at all. Measured: a real
+/// install placed three packages correctly and then died on
+/// `No matching export ... for import "v7"`, because `uuid` had come from a
+/// directory six levels up rather than being fetched.
+///
+/// So the metafile is read as well. Every input that strayed outside is a
+/// package that should have been placed, and the import edge that reached it
+/// says both what was asked for and who asked, which is exactly what fetching
+/// one needs.
+pub fn strayed_imports(metafile: &str) -> Vec<Wanted> {
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(metafile) else {
+        return Vec::new();
+    };
+
+    let Some(inputs) = parsed.get("inputs").and_then(|it| it.as_object()) else {
+        return Vec::new();
+    };
+
+    let mut found = Vec::new();
+
+    for (importer, about) in inputs {
+        // An input that is itself outside cannot be the one to blame: whatever
+        // imported it is, and that edge is recorded on the importer.
+        if crate::extension_install::is_outside(importer) {
+            continue;
+        }
+
+        let Some(edges) = about.get("imports").and_then(|it| it.as_array()) else {
+            continue;
+        };
+
+        for edge in edges {
+            let Some(reached) = edge.get("path").and_then(|it| it.as_str()) else {
+                continue;
+            };
+
+            if !crate::extension_install::is_outside(reached) {
+                continue;
+            }
+
+            // `original` is the specifier as written. Without it the name would
+            // have to be guessed out of the resolved path, which is the same
+            // guess in a worse place.
+            let Some(specifier) = edge.get("original").and_then(|it| it.as_str()) else {
+                continue;
+            };
+
+            if package_of(specifier).is_none() {
+                continue;
+            }
+
+            found.push(Wanted {
+                importer: importer.replace('\\', "/"),
+                specifier: specifier.to_string(),
+            });
+        }
+    }
+
+    found.sort();
+    found.dedup();
+    found
+}
 // ------------------------------------------------------------- the tarball
 
 /// How large a single package may be before this refuses it.
@@ -652,6 +720,78 @@ X [ERROR] Could not resolve \"uuid\"
     fn a_build_that_said_nothing_about_resolving_wants_nothing() {
         assert!(refused("").is_empty());
         assert!(refused("X [ERROR] Expected \";\" but found \"}\"\n\n  src/run.ts:4:2:\n").is_empty());
+    }
+
+    // ------------------------------------------------------------ the strays
+
+    /// **The case that made this exist.** A real install placed three packages
+    /// correctly and then died on `No matching export ... for import "v7"`,
+    /// because `uuid` was resolved from a `node_modules` six levels above
+    /// staging instead of being fetched. esbuild never refused it, so nothing
+    /// in its message said a package was missing.
+    #[test]
+    fn a_package_taken_from_outside_counts_as_one_that_is_wanted() {
+        let meta = r#"{"inputs":{
+            "src/generateV7.tsx": {"bytes":1,"imports":[
+                {"path":"../../../../../../node_modules/uuid/dist/esm-node/index.js",
+                 "kind":"import-statement","original":"uuid"}
+            ]},
+            "../../../../../../node_modules/uuid/dist/esm-node/index.js": {"bytes":1,"imports":[]}
+        },"outputs":{}}"#;
+
+        assert_eq!(
+            strayed_imports(meta),
+            vec![Wanted {
+                importer: "src/generateV7.tsx".to_string(),
+                specifier: "uuid".to_string(),
+            }]
+        );
+    }
+
+    /// A build that stayed inside wants nothing, which is what ends the loop.
+    #[test]
+    fn a_build_that_resolved_everything_locally_wants_nothing() {
+        let meta = r#"{"inputs":{
+            "src/run.tsx": {"bytes":1,"imports":[
+                {"path":"node_modules/uuid/dist/index.js","kind":"import-statement","original":"uuid"}
+            ]},
+            "node_modules/uuid/dist/index.js": {"bytes":1,"imports":[]}
+        },"outputs":{}}"#;
+
+        assert!(strayed_imports(meta).is_empty());
+    }
+
+    /// The file that strayed is not the one to blame; whatever imported it is.
+    /// Reading edges off a strayed input would name the wrong asker and fetch
+    /// against the wrong path.
+    #[test]
+    fn edges_recorded_on_a_strayed_input_are_not_read() {
+        let meta = r#"{"inputs":{
+            "../../node_modules/a/index.js": {"bytes":1,"imports":[
+                {"path":"../../node_modules/b/index.js","kind":"import-statement","original":"b"}
+            ]}
+        },"outputs":{}}"#;
+
+        assert!(strayed_imports(meta).is_empty());
+    }
+
+    /// A relative import that strayed is the extension reaching out of itself,
+    /// which is not a package and cannot be fetched.
+    #[test]
+    fn something_that_is_not_a_package_is_not_asked_for() {
+        let meta = r#"{"inputs":{
+            "src/run.tsx": {"bytes":1,"imports":[
+                {"path":"../../shared/helper.ts","kind":"import-statement","original":"../../shared/helper"}
+            ]}
+        },"outputs":{}}"#;
+
+        assert!(strayed_imports(meta).is_empty());
+    }
+
+    #[test]
+    fn a_metafile_that_cannot_be_read_wants_nothing() {
+        assert!(strayed_imports("not json").is_empty());
+        assert!(strayed_imports("{}").is_empty());
     }
 
     // ---------------------------------------------------------- the tarball

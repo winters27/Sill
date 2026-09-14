@@ -375,6 +375,340 @@ pub fn discard(data_dir: &Path) {
 
 // ---------------------------------------------------------------------- npm
 
+/// How many times the build is asked what it is still missing.
+///
+/// Each round learns one level of the import graph, and measured across the
+/// ten extensions the view gate installs the deepest nesting is three. Eight is
+/// a runaway guard rather than a limit anybody reaches: a lockfile still naming
+/// something new after eight rounds is one this does not understand, and npm is
+/// a better answer than a ninth request.
+const MOST_ROUNDS: usize = 8;
+
+/// Step two, placing what the build needs from the lockfile rather than npm.
+///
+/// **This is async and the build inside it is not, and that split is the
+/// point.** Fetching packages is I/O and belongs on the runtime; running
+/// esbuild is a subprocess and belongs on a blocking thread. The first attempt
+/// kept the whole thing synchronous with a blocking HTTP client, which builds a
+/// runtime of its own and panics when it is dropped inside an asynchronous
+/// context. That made the contract "do not call this sync function from async",
+/// which is the kind of rule that is fine until somebody writes an ordinary
+/// test.
+///
+/// Falls back to [`finish_reporting`], which is npm, whenever the lockfile
+/// cannot answer. **npm is the fallback rather than the removed thing**, and
+/// that is what makes this safe to land: the worst outcome is the install
+/// everybody already had, started a few seconds later.
+#[cfg(windows)]
+pub async fn finish_placing(
+    data_dir: PathBuf,
+    esbuild: PathBuf,
+    node: PathBuf,
+    name: String,
+    report: std::sync::Arc<dyn Fn(crate::extension_install::Progress) + Send + Sync>,
+) -> Result<Done, String> {
+    let named = safe_name(&name)
+        .ok_or_else(|| format!("{name} is not a name this can install"))?
+        .to_string();
+    let staged = staging_home(&data_dir).join(&named);
+
+    let lock = std::fs::read_to_string(staged.join("package-lock.json"))
+        .ok()
+        .and_then(|text| super::packages::Lock::read(&text))
+        .filter(|lock| !lock.is_empty());
+
+    let placed = match lock {
+        None => {
+            crate::say!("no lockfile this can place from, so npm is installing instead");
+            false
+        }
+        Some(lock) => {
+            match place_from_lockfile(&esbuild, &staged, &lock, &report).await {
+                Ok(count) => {
+                    crate::say!("placed {count} package(s) from the lockfile");
+                    true
+                }
+                Err(why) => {
+                    crate::say!(
+                        "could not place from the lockfile, so npm is installing instead: {why}"
+                    );
+                    // A tree half placed from a lockfile is not one npm was
+                    // asked to reason about, and `npm ci` is entitled to assume
+                    // it wrote whatever it finds.
+                    let _ = std::fs::remove_dir_all(staged.join("node_modules"));
+                    false
+                }
+            }
+        }
+    };
+
+    // Everything after the dependencies is a subprocess and a directory swap,
+    // so it goes back to a blocking thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        if placed {
+            finish_built(&data_dir, &esbuild, &named, &*report)
+        } else {
+            finish_reporting(&data_dir, &esbuild, &node, &named, &*report)
+        }
+    })
+    .await
+    .map_err(|err| format!("the install did not finish: {err}"))?
+}
+
+/// Builds, reads what the build refused, fetches that, and builds again.
+///
+/// **Only what esbuild asks for is fetched.** Walking the lockfile's whole
+/// closure up front would be correct and slower than npm, and would drag in the
+/// packages npm deliberately never installs: `uuid-generator`'s lockfile names
+/// 26 `@esbuild/*` platform binaries, and the 25 that are not for Windows come
+/// to 100 MiB, more than npm's entire tree for that extension. Asking the build
+/// what it wants sidesteps that instead of reimplementing npm's platform rules
+/// and keeping them right, because a bundler never imports a platform binary.
+///
+/// The cost is one throwaway build per round. Rounds are the depth of the
+/// import graph, two or three in practice, and a build is quick beside the
+/// download it is replacing.
+#[cfg(windows)]
+async fn place_from_lockfile(
+    esbuild: &Path,
+    staged: &Path,
+    lock: &super::packages::Lock,
+    report: &std::sync::Arc<dyn Fn(crate::extension_install::Progress) + Send + Sync>,
+) -> Result<usize, String> {
+    let entries = entry_points(staged)?;
+    if entries.is_empty() {
+        return Err("this extension has no command to build".to_string());
+    }
+
+    let client = crate::dictation::fetch::client();
+    let aliases = aliases_for(staged);
+    let mut placed = 0;
+
+    for _ in 0..MOST_ROUNDS {
+        let wanted = {
+            let esbuild = esbuild.to_path_buf();
+            let staged = staged.to_path_buf();
+            let entries = entries.clone();
+            let aliases = aliases.clone();
+
+            tauri::async_runtime::spawn_blocking(move || {
+                still_wanted(&esbuild, &staged, &entries, &aliases)
+            })
+            .await
+            .map_err(|err| format!("the build did not answer: {err}"))??
+        };
+
+        if wanted.is_empty() {
+            return Ok(placed);
+        }
+
+        let mut this_round = 0;
+        for want in wanted {
+            let Some(at) = lock.resolve(&want.importer, &want.specifier) else {
+                return Err(format!(
+                    "the lockfile does not say where {} belongs for {}",
+                    want.specifier, want.importer
+                ));
+            };
+
+            // Already here, so the build refused it for some other reason and
+            // another round would only refuse it again.
+            if staged.join(&at.path).join("package.json").is_file() {
+                continue;
+            }
+
+            report(crate::extension_install::Progress::Dependencies {
+                said: format!("fetching {}", at.path),
+            });
+
+            fetch_into(&client, at, staged).await?;
+            placed += 1;
+            this_round += 1;
+        }
+
+        if this_round == 0 {
+            return Err("the build is refusing something that is already in place".to_string());
+        }
+    }
+
+    Err(format!(
+        "the build still wanted something after {MOST_ROUNDS} rounds of fetching"
+    ))
+}
+
+/// Fetches one package and unpacks it where the lockfile puts it.
+#[cfg(windows)]
+async fn fetch_into(
+    client: &reqwest::Client,
+    at: &super::packages::Placed,
+    staged: &Path,
+) -> Result<(), String> {
+    let answer = client
+        .get(&at.resolved)
+        .header(reqwest::header::USER_AGENT, super::source::USER_AGENT)
+        .send()
+        .await
+        .map_err(|err| format!("could not reach the registry for {}: {err}", at.path))?;
+
+    if !answer.status().is_success() {
+        return Err(format!(
+            "the registry answered {} for {}",
+            answer.status(),
+            at.path
+        ));
+    }
+
+    // Refused on the way in rather than once it is on disk, so a redirect to
+    // something enormous is stopped before it is read.
+    if answer
+        .content_length()
+        .is_some_and(|size| size > super::packages::LARGEST_PACKAGE)
+    {
+        return Err(format!(
+            "{} is larger than any package has a reason to be",
+            at.path
+        ));
+    }
+
+    let bytes = answer
+        .bytes()
+        .await
+        .map_err(|err| format!("{} did not finish arriving: {err}", at.path))?;
+
+    if bytes.len() as u64 > super::packages::LARGEST_PACKAGE {
+        return Err(format!(
+            "{} is larger than any package has a reason to be",
+            at.path
+        ));
+    }
+
+    // **Before anything is written.** What the lockfile vouches for is the only
+    // reason to trust these bytes at all.
+    super::packages::matches_integrity(&at.integrity, &bytes)
+        .map_err(|why| format!("{}: {why}", at.path))?;
+
+    let into = staged.join(&at.path);
+    std::fs::create_dir_all(&into)
+        .map_err(|err| format!("could not make room for {}: {err}", at.path))?;
+
+    super::packages::unpack(&bytes, &into).map(|_| ())
+}
+
+/// What the build still cannot resolve.
+///
+/// Builds every command to a throwaway file. A build that fails for a reason
+/// that is not a missing import is that failure, returned rather than retried.
+#[cfg(windows)]
+fn still_wanted(
+    esbuild: &Path,
+    staged: &Path,
+    entries: &[PathBuf],
+    aliases: &[(String, String)],
+) -> Result<Vec<super::packages::Wanted>, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let scratch = staged.join(".probe.js");
+    let metafile = staged.join(".probe.meta.json");
+    let mut wanted = Vec::new();
+    let mut refused_for_another_reason: Option<String> = None;
+
+    for entry in entries {
+        let _ = std::fs::remove_file(&metafile);
+
+        let mut command = std::process::Command::new(esbuild);
+        command
+            .args(crate::extension_install::esbuild_args(
+                entry,
+                &scratch,
+                aliases,
+                Some(&metafile),
+            ))
+            .current_dir(staged)
+            .creation_flags(CREATE_NO_WINDOW);
+
+        let ran = crate::bounded::run(
+            &mut command,
+            crate::extension_install::BUNDLE_DEADLINE,
+            &mut |_| {},
+        )?;
+
+        // **A build that succeeded can still be missing something.** esbuild
+        // walks up past the extension, so a package absent here and present in
+        // a `node_modules` above staging is resolved rather than refused. The
+        // metafile is the only place that says so.
+        if let Ok(written) = std::fs::read_to_string(&metafile) {
+            wanted.extend(super::packages::strayed_imports(&written));
+        }
+
+        if ran.ok {
+            continue;
+        }
+
+        let asking = super::packages::refused(&ran.said);
+        if asking.is_empty() {
+            refused_for_another_reason.get_or_insert_with(|| ran.said.trim().to_string());
+            continue;
+        }
+
+        wanted.extend(asking);
+    }
+
+    let _ = std::fs::remove_file(&scratch);
+    let _ = std::fs::remove_file(&metafile);
+
+    // A build that failed for something other than a missing import fails the
+    // same way in `install_into_reporting`, which is where it is reported
+    // properly. Fetching first would be work for a build that cannot succeed,
+    // so this only gives up once nothing is missing.
+    // A stray counts as something wanted, so a build that failed because it
+    // had resolved one is retried with the right package in place rather than
+    // reported. Only a failure with nothing wanted is a real one.
+    if wanted.is_empty() {
+        if let Some(said) = refused_for_another_reason {
+            return Err(said);
+        }
+    }
+
+    wanted.sort();
+    wanted.dedup();
+    Ok(wanted)
+}
+
+/// Every command's entry file, as the build will reach it.
+#[cfg(windows)]
+fn entry_points(staged: &Path) -> Result<Vec<PathBuf>, String> {
+    let text = std::fs::read_to_string(staged.join("package.json"))
+        .map_err(|_| "Nothing is staged to install. Fetch it again.".to_string())?;
+
+    let manifest: crate::extension_install::Manifest = serde_json::from_str(&text)
+        .map_err(|err| format!("the staged package.json could not be read: {err}"))?;
+
+    Ok(manifest
+        .commands
+        .iter()
+        .filter(|command| crate::extension_install::why_not_runnable(&command.mode).is_none())
+        .filter_map(|command| {
+            crate::extension_install::entrypoint_for(&command.name, |candidate| {
+                staged.join(candidate).is_file()
+            })
+            .map(|relative| staged.join(relative))
+        })
+        .collect())
+}
+
+/// The path aliases the extension's own tsconfig sets, in the form esbuild
+/// wants them.
+#[cfg(windows)]
+fn aliases_for(staged: &Path) -> Vec<(String, String)> {
+    std::fs::read_to_string(staged.join("tsconfig.json"))
+        .map(|text| crate::extension_install::aliases_from_tsconfig(&text))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(from, to)| (from, staged.join(to).to_string_lossy().into_owned()))
+        .collect()
+}
+
 /// What npm is run with, and why each flag is there.
 ///
 /// - `ci` when there is a lock file, because it installs exactly what the
@@ -581,6 +915,26 @@ pub fn finish_reporting(
         .ok_or_else(|| "Nothing recorded what was staged. Fetch it again.".to_string())?;
 
     npm_install(node, &staged, report)?;
+
+    finish_built(data_dir, esbuild, name, report)
+}
+
+/// The rest of an install, once its dependencies are where they belong.
+///
+/// Split out because there are two ways to get them there and only one way to
+/// finish: [`finish_reporting`] runs npm and this, and [`finish_placing`]
+/// places from the lockfile and this. A second copy of the tail is a second
+/// place for the index merge and the capability rewrite to drift.
+#[cfg(windows)]
+fn finish_built(
+    data_dir: &Path,
+    esbuild: &Path,
+    name: &str,
+    report: crate::extension_install::Report<'_>,
+) -> Result<Done, String> {
+    let staged = staging_home(data_dir).join(name);
+    let origin = super::origin_of(&staging_home(data_dir), name)
+        .ok_or_else(|| "Nothing recorded what was staged. Fetch it again.".to_string())?;
 
     let home = super::extensions_home(data_dir);
     let installed =

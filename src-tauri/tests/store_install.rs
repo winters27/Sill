@@ -48,7 +48,7 @@ fn esbuild() -> PathBuf {
 }
 
 #[tokio::test]
-#[ignore = "reaches the network and runs npm"]
+#[ignore = "reaches the network and the npm registry"]
 async fn a_real_extension_installs_from_the_store() {
     let root = std::env::temp_dir().join("sill-store-e2e");
     let _ = std::fs::remove_dir_all(&root);
@@ -175,7 +175,21 @@ async fn a_real_extension_installs_from_the_store() {
     // ------------------------------------------------------------ step two
     let node = sill_lib::host::node_exe(&std::sync::Mutex::new(None), None)
         .expect("this test needs Node on PATH");
-    let done = install::finish(&root, &esbuild(), &node, EXTENSION).expect("it builds");
+    // `finish_placing` rather than `finish`, because it is what the store and
+    // the update row both call. A test that exercised the npm fallback instead
+    // would pass while the path that ships went unchecked.
+    let said: std::sync::Arc<dyn Fn(sill_lib::extension_install::Progress) + Send + Sync> =
+        std::sync::Arc::new(|progress| println!("  {progress:?}"));
+
+    let done = install::finish_placing(
+        root.clone(),
+        esbuild(),
+        node.clone(),
+        EXTENSION.to_string(),
+        said,
+    )
+    .await
+    .expect("it builds");
 
     println!(
         "installed {} at {}: {}",

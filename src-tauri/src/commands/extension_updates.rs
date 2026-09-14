@@ -382,14 +382,15 @@ async fn apply_one(
     // the row look like the launcher had died: the work was real and running,
     // and nothing on screen said so.
     let reporting = app.clone();
-    let say = move |progress: crate::extension_install::Progress| {
-        if let Err(err) = reporting.emit(crate::commands::store::INSTALL_PROGRESS, &progress) {
-            crate::say!("could not say how the update is going: {err}");
-        }
-    };
+    let say: std::sync::Arc<dyn Fn(crate::extension_install::Progress) + Send + Sync> =
+        std::sync::Arc::new(move |progress| {
+            if let Err(err) = reporting.emit(crate::commands::store::INSTALL_PROGRESS, &progress) {
+                crate::say!("could not say how the update is going: {err}");
+            }
+        });
 
     // Step one. Downloads and reads; nothing is executed and npm has not run.
-    let prepared = install::prepare(data_dir, &listing, token.as_deref(), &say).await?;
+    let prepared = install::prepare(data_dir, &listing, token.as_deref(), &*say).await?;
 
     let home = store::extensions_home(data_dir);
     let granted = store::origin_of(&home, &one.extension)
@@ -431,13 +432,17 @@ async fn apply_one(
 
     // npm is a subprocess of seconds and esbuild is one per command, so it goes
     // off the async runtime rather than holding it for the length of a build.
-    let owned = data_dir.to_path_buf();
-    let name = one.listing.clone();
-    let done = tauri::async_runtime::spawn_blocking(move || {
-        install::finish_reporting(&owned, &esbuild, &node, &name, &say)
-    })
-    .await
-    .map_err(|err| format!("the update did not finish: {err}"))??;
+    // Awaited rather than wrapped in `spawn_blocking`: placing dependencies is
+    // network I/O and belongs on the runtime, and `finish_placing` puts the
+    // build back on a blocking thread itself.
+    let done = install::finish_placing(
+        data_dir.to_path_buf(),
+        esbuild,
+        node,
+        one.listing.clone(),
+        say,
+    )
+    .await?;
 
     // The same join an install makes: what was recorded is what gets granted.
     // A subset of what was already held, by the check above, so this is

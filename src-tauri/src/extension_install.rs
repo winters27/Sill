@@ -790,7 +790,7 @@ pub fn strayed_outside(metafile: &str) -> Vec<String> {
 
     let mut strayed: Vec<String> = inputs
         .keys()
-        .filter(|path| outside(path))
+        .filter(|path| is_outside(path))
         .cloned()
         .collect();
 
@@ -804,7 +804,7 @@ pub fn strayed_outside(metafile: &str) -> Vec<String> {
 /// covers a Windows drive letter and a UNC share as well as a leading slash,
 /// because a path esbuild did not have to make relative is one it could not,
 /// which means it was on another root entirely.
-fn outside(path: &str) -> bool {
+pub fn is_outside(path: &str) -> bool {
     let path = path.replace('\\', "/");
 
     path.starts_with("../")

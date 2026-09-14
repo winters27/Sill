@@ -343,15 +343,17 @@ pub(crate) async fn store_install(
     // answer. Rule 6, and the same shape `dictation::SetupProgress` already
     // uses for the other download somebody waits on.
     let reporting = app.clone();
-    let done = tauri::async_runtime::spawn_blocking(move || {
-        install::finish_reporting(&data_dir, &esbuild, &node, &name, &|progress| {
+    let say: std::sync::Arc<dyn Fn(crate::extension_install::Progress) + Send + Sync> =
+        std::sync::Arc::new(move |progress| {
             if let Err(err) = reporting.emit(INSTALL_PROGRESS, &progress) {
                 crate::say!("could not say how the install is going: {err}");
             }
-        })
-    })
-    .await
-    .map_err(|err| format!("the install did not finish: {err}"))??;
+        });
+
+    // Awaited rather than wrapped in `spawn_blocking`: placing dependencies is
+    // network I/O and belongs on the runtime, and `finish_placing` puts the
+    // build back on a blocking thread itself.
+    let done = install::finish_placing(data_dir, esbuild, node, name, say).await?;
 
     // **The join.** What the screen showed is what gets granted, keyed by the
     // extension's own name because that is what the worker asks about.
