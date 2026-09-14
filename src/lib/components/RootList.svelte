@@ -7,6 +7,7 @@
   import LaunchIcon from "./LaunchIcon.svelte";
   import SettingsIcon, { type IconName } from "./SettingsIcon.svelte";
   import { isGlyph } from "$lib/exthost/present";
+  import { hint } from "$lib/hint";
 
   interface Props {
     commands: RankedCommand[];
@@ -684,10 +685,13 @@
           </span>
           {#if command.mode === "extensions-behind" && !working && outcome}
             <!--
-              What the last batch left. `title` as well as the text, because
-              this line ellipsises and the reason is the part worth reading.
+              What the last batch left, with the whole of it on a hover.
+              `use:hint` rather than `title`, which is what the rest of the
+              window uses: a native tooltip arrives in the system font on a
+              white slab, takes a second, and cannot be reached by keyboard.
+              This line ellipsises and the reason is the part worth reading.
             -->
-            <span class="extension" title={outcomeDetail || outcome}>{outcome}</span>
+            <span class="extension" use:hint={outcomeDetail || outcome}>{outcome}</span>
           {:else if command.mode === "extensions-behind" && working}
             <!--
               What the update is doing, under the row that started it.

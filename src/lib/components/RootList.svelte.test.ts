@@ -112,7 +112,7 @@ describe("drawing the result list", () => {
    * ...", which is the half with nothing to act on. Its own comment says
    * prose is the item that gives way there.
    */
-  it("shows what the last batch left, with the full text to hover", () => {
+  it("shows what the last batch left", () => {
     const why = "Sill's Node has no npm, so dependencies cannot be installed.";
     const target = draw(
       [row("sill:extensions-behind", "Update 2 extensions", "extensions-behind")],
@@ -122,7 +122,6 @@ describe("drawing the result list", () => {
     );
 
     expect(target.textContent).toContain(why);
-    expect(target.querySelector("[title]")?.getAttribute("title")).toContain(why);
     expect(target.querySelector('[role="progressbar"]')).toBeNull();
   });
 
