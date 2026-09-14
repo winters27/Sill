@@ -911,8 +911,12 @@ pub fn finish_reporting(
         return Err("Nothing is staged to install. Fetch it again.".to_string());
     }
 
-    let origin = super::origin_of(&home, name)
-        .ok_or_else(|| "Nothing recorded what was staged. Fetch it again.".to_string())?;
+    // Checked before npm rather than bound: `finish_built` is what reads the
+    // origin now, and finding out it is missing after a minute of installing
+    // dependencies is a worse way to learn it.
+    if super::origin_of(&home, name).is_none() {
+        return Err("Nothing recorded what was staged. Fetch it again.".to_string());
+    }
 
     npm_install(node, &staged, report)?;
 

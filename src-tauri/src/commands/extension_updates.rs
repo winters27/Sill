@@ -53,6 +53,21 @@ fn announce(app: &AppHandle, standing: Standing) {
     }
 }
 
+/// Says one extension is no longer behind, whoever updated it.
+///
+/// **The row is not the only way an extension gets updated.** Accepting one in
+/// the store runs the same install at the same commit and leaves it current,
+/// and without this the row went on naming it until the next check, which is up
+/// to six hours of the launcher saying something untrue about a thing somebody
+/// had just done.
+pub fn now_current(app: &AppHandle, extension: &str) {
+    let data_dir = crate::state::data_dir(app);
+    let updates = app.state::<ExtensionUpdates>();
+
+    updates.applied(&data_dir, extension);
+    announce(app, updates.read(&data_dir));
+}
+
 /// The standing right now, for a window that has just opened.
 ///
 /// Reads the file on the first call of a run, which is what lets the row appear

@@ -13,6 +13,7 @@
    * what comes back, which is the same division the root list already keeps.
    */
   import { onMount, untrack } from "svelte";
+  import { whenExtensionUpdatesChange } from "$lib/extensionUpdates";
   import { listen } from "@tauri-apps/api/event";
   import {
     ago,
@@ -288,6 +289,29 @@
 
   $effect(() => {
     oncount(rows.length);
+  });
+
+  /*
+   * Reloads when an extension stops being out of date, wherever that happened.
+   *
+   * **The store is not the only thing that updates an extension.** The row at
+   * the top of the launcher applies them too, and Rust says so on
+   * `sill://extension-updates` whichever path did it. Without this the shelf
+   * went on drawing an Update pill for something that had just been updated,
+   * because a list is only as current as the last time it was asked.
+   *
+   * Only once a batch has settled. The same event carries progress while one
+   * is running, and re-browsing three thousand listings on every step of it
+   * would be work nobody asked for.
+   */
+  $effect(() => {
+    const stopping = whenExtensionUpdatesChange((standing) => {
+      if (standing.doing.kind === "nothing") void load();
+    });
+
+    return () => {
+      void stopping.then((stop) => stop());
+    };
   });
 
   /*

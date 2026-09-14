@@ -376,6 +376,11 @@ pub(crate) async fn store_install(
         );
     }
 
+    // Whatever the row said about this one is now out of date, and the row is
+    // drawn from a file that nothing else would have corrected until the next
+    // check.
+    crate::commands::extension_updates::now_current(&app, &done.installed.extension);
+
     // The new commands are in the index file and nothing has read it yet.
     crate::reload_index(&app);
 

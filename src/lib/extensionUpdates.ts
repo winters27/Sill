@@ -225,8 +225,8 @@ function settled(standing: Standing): { text: string; detail: string } {
   if (standing.asking.length) {
     lines.push(
       standing.asking.length === 1
-        ? `${standing.asking[0]} asks for more than before.`
-        : `${said(standing.asking)} ask for more than before.`,
+        ? `${standing.asking[0]} asks for more than before. Enter to review it.`
+        : `${said(standing.asking)} ask for more than before. Enter to review them.`,
     );
     detail.push(
       `${said(standing.asking)} reach something they were not granted, so they are waiting for you in the store.`,

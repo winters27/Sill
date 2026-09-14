@@ -98,7 +98,7 @@ describe("the line shown while updates are being applied", () => {
 
   it("reports what is waiting for a decision", () => {
     expect(updatingWords(standing({ asking: ["GitHub"] }))).toBe(
-      "GitHub asks for more than before.",
+      "GitHub asks for more than before. Enter to review it.",
     );
   });
 
@@ -152,6 +152,17 @@ describe("the line shown while updates are being applied", () => {
 
     expect(updatingWords(at)).toBe("Brew: Sill's Node has no npm, so dependencies cannot be installed.");
     expect(updatingDetail(at)).toContain("Installing Node.js from nodejs.org");
+  });
+
+  /**
+   * The line has to say what pressing the row will do.
+   *
+   * Without it the row is a dead end: it reports that an extension is waiting
+   * for a decision and gives no way to reach the screen that takes one.
+   */
+  it("says what Enter will do about something that is waiting", () => {
+    const said = updatingWords(standing({ asking: ["GitHub"] }));
+    expect(said).toContain("Enter to review it");
   });
 
   /** Nothing more to say than the line says, so there is no hover text. */

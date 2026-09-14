@@ -763,6 +763,14 @@
   let updatingRow = $state(false);
   /** What the last batch left to say, drawn on the row rather than the chin. */
   let updateOutcome = $state("");
+  /**
+   * Whether everything still out of date is waiting on a decision.
+   *
+   * True when every extension that is behind is also one whose new version
+   * reaches something it was never granted. Pressing the row then cannot apply
+   * anything, so it opens the store instead of trying and parking them again.
+   */
+  let updateParked = $state(false);
   /** The same, in full, for the hover. Empty when the line already says it all. */
   let updateDetail = $state("");
 
@@ -2304,6 +2312,22 @@
        */
       if (command.mode === "extensions-behind") {
         if (updatingRow) return;
+
+        /*
+         * Nothing left that a press can apply, so this opens the store on what
+         * is out of date rather than trying again.
+         *
+         * Without this the row is a dead end: it says an extension is waiting
+         * for a decision, and the only thing it does is park it again. The
+         * store is where the screen that can take that decision lives.
+         */
+        if (updateParked) {
+          storeOnUpdates = true;
+          mode = "store";
+          selected = 0;
+          query = "";
+          return;
+        }
 
         // Set before the call rather than waiting for the first event.
         // Rust answers within a frame or two, and a row that does nothing
@@ -4256,6 +4280,10 @@
            * is the failure its own comment already warned about.
            */
           updateOutcome = updatingWords(standing) ?? "";
+          // Every one that is left needs looking at, so there is nothing a
+          // press could apply.
+          updateParked =
+            standing.asking.length > 0 && standing.asking.length >= standing.behind.length;
           updateDetail = updatingDetail(standing);
         } else {
           updateOutcome = "";
