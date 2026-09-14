@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { groupActions, isRunnable, shortcutKeys, type ActionEntry } from "$lib/exthost/actions";
+  import {
+    actionIcon,
+    groupActions,
+    isRunnable,
+    shortcutKeys,
+    type ActionEntry,
+  } from "$lib/exthost/actions";
+  import ExtIcon from "./ExtIcon.svelte";
   import { noMatch, standing } from "$lib/instead";
   import Instead from "./Instead.svelte";
   import { popover } from "$lib/motion";
@@ -104,30 +111,6 @@
   in:popover={{ origin: "bottom right" }}
   out:popover={{ origin: "bottom right", out: true }}
 >
-  <!--
-    Not shown until there is something to narrow. Two actions with a search box
-    over them is furniture, and the panel is small enough that it shows.
-  -->
-  {#if showFilter}
-    <div class="find" role="presentation">
-      <input
-        bind:this={field}
-        value={filter}
-        oninput={(e) => onfilter(e.currentTarget.value)}
-        placeholder="Filter actions"
-        aria-label="Filter actions"
-        role="combobox"
-        aria-expanded="true"
-        aria-haspopup="menu"
-        aria-controls={MENU}
-        aria-activedescendant={actions.length ? itemId(MENU, selected) : undefined}
-        aria-autocomplete="list"
-        spellcheck="false"
-        autocomplete="off"
-      />
-    </div>
-  {/if}
-
   <div class="scroll" role="presentation">
     {#each groups as group, g (g)}
       {#if group.section}
@@ -138,6 +121,11 @@
 
       {#each group.items as action (action.id)}
         {@const index = indexOf(action)}
+        <!--
+          The mark, resolved here rather than in the row below it because a
+          `{@const}` may only be the immediate child of a block.
+        -->
+        {@const mark = actionIcon(action)}
         <div
           id={itemId(MENU, index)}
           class="row"
@@ -152,13 +140,32 @@
           }}
           onkeydown={(e) => e.key === "Enter" && onrun(index)}
         >
+          <!--
+            Drawn even when there is nothing to draw. A row missing its
+            picture in a list where the rest have one reads as a broken row;
+            an empty 16px box reads as an action nobody has drawn yet, which
+            is what it is.
+          -->
+          <span class="mark" aria-hidden="true">
+            {#if mark}<ExtIcon icon={mark} small />{/if}
+          </span>
           <span class="title">{action.title}</span>
           {#if !isRunnable(action)}
             <span class="inert">no action</span>
           {/if}
           <span class="spacer"></span>
           {#if action.shortcut}
-            <span class="keys">{shortcutKeys(action.shortcut).join(" ")}</span>
+            <!--
+              One cap per key, the same `.sill-key` the chin draws. The panel
+              used to join them into one grey string, so the two surfaces that
+              show a chord showed it two different ways and the one that rises
+              out of the other was the plainer of them.
+            -->
+            <span class="keys">
+              {#each shortcutKeys(action.shortcut) as key, k (k)}
+                <span class="sill-key">{key}</span>
+              {/each}
+            </span>
           {/if}
         </div>
       {/each}
@@ -173,6 +180,44 @@
       hint={filter ? "" : "Nothing here can be done to this row."}
     />
   </div>
+
+  <!--
+    Under the list, not over it.
+
+    The panel rises out of the chin and the field is the part nearest it, so
+    the caret lands where the eye already is rather than at the far end of a
+    list somebody has to look past. It is also where every launcher that has
+    this control puts it.
+
+    Not shown until there is something to narrow. Two actions with a search
+    box under them is furniture, and the panel is small enough that it shows.
+
+    Written out here rather than declared as a `{#snippet}` above the list and
+    rendered here. It was that for one commit and the field stopped taking
+    focus on open: the `$effect` that focuses it reads `field`, and a binding
+    inside a snippet is not set by the time that effect first runs. Typing went
+    nowhere and the only way through eleven actions was the arrow keys, which
+    is the exact failure the effect exists to prevent.
+  -->
+  {#if showFilter}
+    <div class="find" role="presentation">
+      <input
+        bind:this={field}
+        value={filter}
+        oninput={(e) => onfilter(e.currentTarget.value)}
+        placeholder="Search for actions..."
+        aria-label="Filter actions"
+        role="combobox"
+        aria-expanded="true"
+        aria-haspopup="menu"
+        aria-controls={MENU}
+        aria-activedescendant={actions.length ? itemId(MENU, selected) : undefined}
+        aria-autocomplete="list"
+        spellcheck="false"
+        autocomplete="off"
+      />
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -201,8 +246,6 @@
   .scroll {
     overflow-y: auto;
     padding: var(--space-1);
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .section {
@@ -233,7 +276,26 @@
     background-color: var(--accent-fill);
   }
 
-  .row.destructive .title {
+  /* The mark column.
+
+     Fixed width and always present, so the titles line up whether or not a
+     given action has a picture. A column that collapses on the rows with
+     nothing to draw is a ragged left edge, which is the thing an icon
+     column is supposed to fix. */
+  .mark {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: var(--icon-tile-xs);
+    height: var(--icon-tile-xs);
+    color: var(--text-2);
+  }
+
+  /* Both halves, not just the words. `ExtIcon` draws a mark in
+     `currentColor`, so the colour on the row reaches the picture too and a
+     destructive row reads as one before it is read. */
+  .row.destructive .title,
+  .row.destructive .mark {
     color: var(--danger);
   }
 
@@ -258,17 +320,24 @@
     flex: 1;
   }
 
+  /* Above the field rather than below it, because the field is the last
+     thing in the panel now. `margin-top: auto` is what keeps it against the
+     bottom edge when the list is shorter than the panel. */
   .find {
-    padding: var(--space-2);
-    border-bottom: 1px solid var(--hairline);
+    flex: none;
+    margin-top: auto;
+    padding: var(--space-1) var(--space-2);
+    border-top: 1px solid var(--hairline);
   }
 
+  /* No fill. A filled box inside a popover is a second surface sitting on a
+     surface, and the rule above it already says where the list stops. */
   .find input {
     width: 100%;
-    padding: var(--space-1) var(--space-2);
+    height: 28px;
+    padding: 0 var(--space-1);
     border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--fill-1);
+    background: transparent;
     color: var(--text-1);
     font: inherit;
     font-size: var(--text-meta);
@@ -280,9 +349,9 @@
   }
 
   .keys {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
     flex: none;
-    font-size: var(--text-meta);
-    font-weight: var(--weight-medium);
-    color: var(--text-3);
   }
 </style>

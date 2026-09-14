@@ -186,6 +186,10 @@ impl Action for Launch {
     fn title(&self) -> &str {
         "Open"
     }
+    fn icon(&self) -> &'static str {
+        "ArrowNe"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(
@@ -250,6 +254,10 @@ impl Action for RunExtensionCommand {
     fn title(&self) -> &str {
         "Run Command"
     }
+    fn icon(&self) -> &'static str {
+        "Code"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::ExtensionCommand
@@ -438,6 +446,10 @@ impl Action for OpenSystemSetting {
     fn title(&self) -> &str {
         "Open Setting"
     }
+    fn icon(&self) -> &'static str {
+        "Gear"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::SystemSetting
@@ -469,6 +481,10 @@ impl Action for OpenSillSetting {
     fn title(&self) -> &str {
         "Open in Settings"
     }
+    fn icon(&self) -> &'static str {
+        "Gear"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Setting
@@ -502,6 +518,10 @@ impl Action for RunBuiltin {
     fn title(&self) -> &str {
         "Run"
     }
+    fn icon(&self) -> &'static str {
+        "Play"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Builtin
@@ -763,6 +783,10 @@ impl Action for ToggleSystem {
     fn title(&self) -> &str {
         "Run"
     }
+    fn icon(&self) -> &'static str {
+        "Switch"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::SystemControl
@@ -929,6 +953,10 @@ impl Action for ToggleSessionMute {
     fn title(&self) -> &str {
         "Mute or Unmute"
     }
+    fn icon(&self) -> &'static str {
+        "SpeakerSlash"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::AudioSession
@@ -988,6 +1016,10 @@ impl Action for SessionLouder {
     fn title(&self) -> &str {
         "Louder"
     }
+    fn icon(&self) -> &'static str {
+        "SpeakerHigh"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::AudioSession
@@ -1013,6 +1045,10 @@ impl Action for SessionQuieter {
     fn title(&self) -> &str {
         "Quieter"
     }
+    fn icon(&self) -> &'static str {
+        "SpeakerLow"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::AudioSession
@@ -1038,6 +1074,10 @@ impl Action for SessionHalf {
     fn title(&self) -> &str {
         "Half Volume"
     }
+    fn icon(&self) -> &'static str {
+        "SpeakerLow"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::AudioSession
@@ -1063,6 +1103,10 @@ impl Action for SessionFull {
     fn title(&self) -> &str {
         "Full Volume"
     }
+    fn icon(&self) -> &'static str {
+        "SpeakerHigh"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::AudioSession
@@ -1116,6 +1160,10 @@ impl Action for PlayPause {
     fn title(&self) -> &str {
         "Play or Pause"
     }
+    fn icon(&self) -> &'static str {
+        "Play"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::NowPlaying
@@ -1161,6 +1209,10 @@ impl Action for NextTrack {
     fn title(&self) -> &str {
         "Next Track"
     }
+    fn icon(&self) -> &'static str {
+        "Forward"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::NowPlaying
@@ -1235,6 +1287,10 @@ impl Action for QuitProcess {
     fn title(&self) -> &str {
         "Quit"
     }
+    fn icon(&self) -> &'static str {
+        "StopFilled"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Process
@@ -1289,6 +1345,10 @@ impl Action for ForceQuitProcess {
     fn title(&self) -> &str {
         "Force Quit"
     }
+    fn icon(&self) -> &'static str {
+        "Power"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Process
@@ -1334,6 +1394,10 @@ impl Action for UninstallApp {
     fn title(&self) -> &str {
         "Uninstall"
     }
+    fn icon(&self) -> &'static str {
+        "Trash"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Application
@@ -1550,6 +1614,10 @@ impl Action for PasteSnippet {
     fn title(&self) -> &str {
         "Paste Snippet"
     }
+    fn icon(&self) -> &'static str {
+        "Clipboard"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Snippet
@@ -1604,6 +1672,10 @@ impl Action for PasteEmoji {
     fn title(&self) -> &str {
         "Paste"
     }
+    fn icon(&self) -> &'static str {
+        "Clipboard"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Emoji
@@ -1643,6 +1715,10 @@ impl Action for OpenQuicklink {
     fn title(&self) -> &str {
         "Open Link"
     }
+    fn icon(&self) -> &'static str {
+        "Link"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Quicklink
@@ -1683,6 +1759,10 @@ impl Action for CopyAnswer {
     fn title(&self) -> &str {
         "Copy Answer"
     }
+    fn icon(&self) -> &'static str {
+        "CopyClipboard"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Answer
@@ -1736,6 +1816,10 @@ impl Action for TerminalHere {
     fn title(&self) -> &str {
         "Open Terminal Here"
     }
+    fn icon(&self) -> &'static str {
+        "Terminal"
+    }
+
 
     fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
         // T for terminal.
@@ -1829,6 +1913,10 @@ impl Action for JumpInDialog {
     fn title(&self) -> &'static str {
         "Jump To In Dialog"
     }
+    fn icon(&self) -> &'static str {
+        "Folder"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(kind, ObjectKind::File | ObjectKind::Folder)
@@ -1898,6 +1986,10 @@ impl Action for OpenTerminalProfile {
     fn title(&self) -> &'static str {
         "Open Terminal"
     }
+    fn icon(&self) -> &'static str {
+        "Terminal"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::TerminalProfile
@@ -1944,6 +2036,10 @@ impl Action for RecycleFile {
     fn title(&self) -> &str {
         "Move to Recycle Bin"
     }
+    fn icon(&self) -> &'static str {
+        "Trash"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(kind, ObjectKind::File | ObjectKind::Folder)
@@ -2059,6 +2155,10 @@ impl Action for CopyPath {
     fn title(&self) -> &str {
         "Copy Path"
     }
+    fn icon(&self) -> &'static str {
+        "CopyClipboard"
+    }
+
 
     fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
         // C for copy, and Shift because Ctrl+C is the clipboard's own Copy.
@@ -2099,6 +2199,10 @@ impl Action for RevealInFolder {
     fn title(&self) -> &str {
         "Show in Folder"
     }
+    fn icon(&self) -> &'static str {
+        "Folder"
+    }
+
 
     fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
         // E for Explorer, which is the window this opens.
@@ -2145,6 +2249,10 @@ impl Action for CopyName {
     fn title(&self) -> &str {
         "Copy Name"
     }
+    fn icon(&self) -> &'static str {
+        "CopyClipboard"
+    }
+
 
     fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
         // N for name. It sits beside Copy Path on nearly every row.
@@ -2196,6 +2304,10 @@ impl Action for Transform {
     fn title(&self) -> &str {
         self.title
     }
+    fn icon(&self) -> &'static str {
+        "Text"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         // Anything that *is* text. A clipboard row and a selection are the
@@ -2236,6 +2348,10 @@ impl Action for RestoreWorkspace {
     fn title(&self) -> &str {
         "Restore"
     }
+    fn icon(&self) -> &'static str {
+        "AppWindowGrid2x2"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Workspace
@@ -2274,6 +2390,10 @@ impl Action for MakeWorkspacePortable {
     fn title(&self) -> &str {
         "Use Named Positions"
     }
+    fn icon(&self) -> &'static str {
+        "Monitor"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Workspace
@@ -2310,6 +2430,10 @@ impl Action for ForgetWorkspace {
     fn title(&self) -> &str {
         "Forget"
     }
+    fn icon(&self) -> &'static str {
+        "Trash"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Workspace
@@ -2347,6 +2471,10 @@ impl Action for ForgetConversation {
     fn title(&self) -> &str {
         "Forget"
     }
+    fn icon(&self) -> &'static str {
+        "Trash"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Conversation
@@ -2392,6 +2520,10 @@ impl Action for CopyConversation {
     fn title(&self) -> &str {
         "Copy Transcript"
     }
+    fn icon(&self) -> &'static str {
+        "CopyClipboard"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Conversation
@@ -2441,6 +2573,10 @@ impl Action for CopyStoreSource {
     fn title(&self) -> &str {
         "Copy Source Link"
     }
+    fn icon(&self) -> &'static str {
+        "Link"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::StoreListing
@@ -2502,6 +2638,10 @@ impl Action for RemoveExtension {
     fn title(&self) -> &str {
         "Remove"
     }
+    fn icon(&self) -> &'static str {
+        "Trash"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::StoreListing
@@ -2589,6 +2729,10 @@ impl Action for ReadAloud {
     fn title(&self) -> &str {
         "Read Aloud"
     }
+    fn icon(&self) -> &'static str {
+        "SpeakerHigh"
+    }
+
 
     fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
         // S for speak. R is taken by nothing yet, but reads as reload.
@@ -2630,6 +2774,10 @@ impl Action for StopReading {
     fn title(&self) -> &str {
         "Stop Reading"
     }
+    fn icon(&self) -> &'static str {
+        "Stop"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(kind, ObjectKind::ClipboardEntry | ObjectKind::Text)
@@ -2715,6 +2863,10 @@ impl Action for CopyClipboardEntry {
     fn title(&self) -> &str {
         "Copy"
     }
+    fn icon(&self) -> &'static str {
+        "CopyClipboard"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(
@@ -2835,6 +2987,10 @@ impl Action for PlaceInLayout {
     fn title(&self) -> &str {
         "Place in Layout"
     }
+    fn icon(&self) -> &'static str {
+        "AppWindowGrid2x2"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Window
@@ -2887,6 +3043,10 @@ impl Action for FocusWindow {
     fn title(&self) -> &str {
         "Switch To"
     }
+    fn icon(&self) -> &'static str {
+        "AppWindow"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Window
@@ -2918,6 +3078,10 @@ impl Action for CloseWindow {
     fn title(&self) -> &str {
         "Close Window"
     }
+    fn icon(&self) -> &'static str {
+        "XMarkCircle"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Window
@@ -2956,6 +3120,10 @@ impl Action for WindowState {
     fn title(&self) -> &str {
         self.title
     }
+    fn icon(&self) -> &'static str {
+        "Maximize"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Window
@@ -2991,6 +3159,10 @@ impl Action for KeepOnTop {
     fn title(&self) -> &str {
         "Keep on Top"
     }
+    fn icon(&self) -> &'static str {
+        "Pin"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Window
@@ -3032,6 +3204,10 @@ impl Action for SnapWindow {
     fn title(&self) -> &str {
         self.slot.title()
     }
+    fn icon(&self) -> &'static str {
+        "AppWindow"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Window
@@ -3068,6 +3244,10 @@ impl Action for NextDisplay {
     fn title(&self) -> &str {
         "Move to Next Display"
     }
+    fn icon(&self) -> &'static str {
+        "Monitor"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Window
@@ -3110,6 +3290,10 @@ impl Action for SwitchToTab {
     fn title(&self) -> &str {
         "Switch To Tab"
     }
+    fn icon(&self) -> &'static str {
+        "Globe"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::BrowserTab
@@ -3160,6 +3344,10 @@ impl Action for PressControl {
     fn title(&self) -> &str {
         "Press"
     }
+    fn icon(&self) -> &'static str {
+        "Bolt"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::ScreenControl
@@ -3270,6 +3458,10 @@ impl Action for MarkUp {
     fn title(&self) -> &str {
         "Mark Up"
     }
+    fn icon(&self) -> &'static str {
+        "Highlight"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::ClipboardEntry
@@ -3314,6 +3506,10 @@ impl Action for ExtractText {
     fn title(&self) -> &str {
         "Extract Text"
     }
+    fn icon(&self) -> &'static str {
+        "Text"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::ClipboardEntry
@@ -3384,6 +3580,10 @@ impl Action for ReadQr {
     fn title(&self) -> &str {
         "Read QR Code"
     }
+    fn icon(&self) -> &'static str {
+        "BarCode"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::ClipboardEntry
@@ -3466,6 +3666,10 @@ impl Action for SearchWeb {
     fn title(&self) -> &str {
         "Search the Web"
     }
+    fn icon(&self) -> &'static str {
+        "MagnifyingGlass"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Search
@@ -3516,6 +3720,10 @@ impl Action for OpenUrl {
     fn title(&self) -> &str {
         "Open in Browser"
     }
+    fn icon(&self) -> &'static str {
+        "Globe"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Url
@@ -3559,6 +3767,10 @@ impl Action for CopyUrl {
     fn title(&self) -> &str {
         "Copy Address"
     }
+    fn icon(&self) -> &'static str {
+        "Link"
+    }
+
 
     fn shortcut(&self) -> Option<crate::action_keys::Shortcut> {
         // The same key as Copy Path: a web address has no path, so the two are never on one list together.
@@ -3601,6 +3813,10 @@ impl Action for HashFile {
     fn title(&self) -> &str {
         "Copy SHA-256"
     }
+    fn icon(&self) -> &'static str {
+        "Fingerprint"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::File
@@ -3640,6 +3856,10 @@ impl Action for CompressFile {
     fn title(&self) -> &str {
         "Compress"
     }
+    fn icon(&self) -> &'static str {
+        "Box"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(kind, ObjectKind::File | ObjectKind::Folder)
@@ -3696,6 +3916,10 @@ impl Action for ConvertImage {
     fn title(&self) -> &str {
         self.to.title()
     }
+    fn icon(&self) -> &'static str {
+        "Image"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         // A folder holds pictures rather than being one, and the kind is all
@@ -3791,6 +4015,10 @@ impl Action for RenameClipboardEntry {
     fn title(&self) -> &str {
         "Name This Entry"
     }
+    fn icon(&self) -> &'static str {
+        "Pencil"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::ClipboardEntry
@@ -3845,6 +4073,10 @@ impl Action for EditClipboardEntry {
     fn title(&self) -> &str {
         "Edit Text"
     }
+    fn icon(&self) -> &'static str {
+        "Pencil"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::ClipboardEntry
@@ -3900,6 +4132,10 @@ impl Action for CopyFontName {
     fn title(&self) -> &str {
         "Copy Font Name"
     }
+    fn icon(&self) -> &'static str {
+        "CopyClipboard"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Font
@@ -3938,6 +4174,10 @@ impl Action for SetDisplayMode {
     fn title(&self) -> &str {
         "Use This Mode"
     }
+    fn icon(&self) -> &'static str {
+        "Monitor"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::DisplayMode
@@ -4038,6 +4278,10 @@ impl Action for RenameFile {
     fn title(&self) -> &str {
         "Rename"
     }
+    fn icon(&self) -> &'static str {
+        "Pencil"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(kind, ObjectKind::File | ObjectKind::Folder)
@@ -4097,6 +4341,10 @@ impl Action for MoveFile {
         // difference between the two.
         "Move to Folder"
     }
+    fn icon(&self) -> &'static str {
+        "Folder"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(kind, ObjectKind::File | ObjectKind::Folder)
@@ -4170,6 +4418,10 @@ impl Action for VerifyFile {
     fn title(&self) -> &str {
         "Check Against Copied Checksum"
     }
+    fn icon(&self) -> &'static str {
+        "CheckCircle"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::File
@@ -4234,6 +4486,10 @@ impl Action for LookUpFile {
     fn title(&self) -> &str {
         "Look Up on VirusTotal"
     }
+    fn icon(&self) -> &'static str {
+        "Eye"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::File
@@ -4288,6 +4544,10 @@ impl Action for RunScript {
     fn title(&self) -> &str {
         "Run"
     }
+    fn icon(&self) -> &'static str {
+        "Terminal"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         matches!(kind, ObjectKind::Script)
@@ -4521,6 +4781,10 @@ impl Action for OpenNote {
     fn title(&self) -> &str {
         "Open"
     }
+    fn icon(&self) -> &'static str {
+        "BlankDocument"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Note
@@ -4572,6 +4836,10 @@ impl Action for CopyNote {
     fn title(&self) -> &str {
         "Copy Note"
     }
+    fn icon(&self) -> &'static str {
+        "CopyClipboard"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Note
@@ -4617,6 +4885,10 @@ impl Action for SetReminder {
     fn title(&self) -> &str {
         "Set Reminder"
     }
+    fn icon(&self) -> &'static str {
+        "Bell"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Reminder
@@ -4718,6 +4990,10 @@ impl Action for ShowReminder {
     fn title(&self) -> &str {
         "Show It Now"
     }
+    fn icon(&self) -> &'static str {
+        "Alarm"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         kind == ObjectKind::Reminder

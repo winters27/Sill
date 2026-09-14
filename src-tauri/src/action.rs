@@ -349,6 +349,24 @@ pub trait Action: Send + Sync {
     /// about to do rather than a description of what it does.
     fn title(&self) -> &str;
 
+    /// The mark the panel draws beside it.
+    ///
+    /// A Raycast icon name, which is the vocabulary an extension's own actions
+    /// already arrive in. So the panel draws Sill's rows and an extension's
+    /// rows through one component against one table, and there is no second
+    /// set of names to keep in step with the first.
+    ///
+    /// Required rather than defaulted, and that is the whole point of it. A
+    /// default is the answer nobody comes back to, and a panel where a third
+    /// of the rows wear the same shrug is worse than one with no marks at all:
+    /// the eye stops using the column. An action that cannot say what it looks
+    /// like should fail to compile.
+    ///
+    /// `&'static str` where [`Self::id`] is borrowed, because an extension
+    /// contributes an id it read out of a manifest and does not contribute a
+    /// drawing: whatever it names, the mark is one of the ones already here.
+    fn icon(&self) -> &'static str;
+
     fn accepts(&self, kind: ObjectKind) -> bool;
 
     fn capabilities(&self) -> &'static [Capability];
@@ -385,6 +403,8 @@ pub trait Action: Send + Sync {
 pub struct ActionInfo {
     pub id: String,
     pub title: String,
+    /// The Raycast icon name the panel draws, from [`Action::icon`].
+    pub icon: &'static str,
     pub primary: bool,
     /// The chord that runs it, after whatever the person has set.
     ///
@@ -550,6 +570,7 @@ impl ActionRegistry {
             .map(|a| ActionInfo {
                 id: a.id().to_string(),
                 title: a.title().to_string(),
+                icon: a.icon(),
                 primary: a.is_primary(kind),
                 shortcut: crate::action_keys::effective(keys, a.id(), a.shortcut()),
             })

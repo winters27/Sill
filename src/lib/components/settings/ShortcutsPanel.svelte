@@ -160,7 +160,15 @@
    * The settings row still has to offer it, so the one place it is spelled out
    * is here, next to the id Rust reads.
    */
-  const PANEL: ActionInfo = { id: "sill.actions", title: "Open the Action Panel", primary: false };
+  const PANEL: ActionInfo = {
+    id: "sill.actions",
+    title: "Open the Action Panel",
+    // Named like a real action's, because the type is the registry's answer
+    // and this row stands in that list. Nothing draws it today; leaving it
+    // blank would be a hole waiting for the first surface that does.
+    icon: "List",
+    primary: false,
+  };
 
   /** The actions a binding may choose from, which follows what it runs on. */
   function choicesFor(source: BindingSource): ActionInfo[] {

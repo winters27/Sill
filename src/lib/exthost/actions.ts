@@ -8,6 +8,7 @@
  */
 
 import { isHandlerRef, type ElementNode, type ViewTree } from "./tree";
+import { iconOf, type ExtIcon } from "./present";
 
 export interface Shortcut {
   modifiers: string[];
@@ -22,6 +23,15 @@ export interface ActionEntry {
   handler?: string;
   /** The section it was declared in, if any. */
   section?: string;
+  /**
+   * The mark drawn beside it, as a Raycast icon name.
+   *
+   * Only Sill's own actions carry it here, because theirs comes from Rust
+   * as a field rather than from a rendered `icon` prop. An extension's
+   * arrives inside {@link ActionEntry.props} like every other prop it
+   * declared, and {@link actionIcon} is what reads whichever is present.
+   */
+  icon?: string;
   /** "destructive" renders differently. */
   style?: string;
   shortcut?: Shortcut;
@@ -67,6 +77,22 @@ export function isRunnable(action: ActionEntry): boolean {
     BUILTIN_ACTIONS.has(action.tag) ||
     action.tag.startsWith("Sill.")
   );
+}
+
+/**
+ * The mark to draw beside an action, wherever it came from.
+ *
+ * One function for both kinds, because the panel draws one list. An
+ * extension writes `icon={Icon.Trash}` and the prop arrives as the string
+ * "Trash"; Sill's own actions name the same vocabulary in Rust, so `iconOf`
+ * resolves both without knowing which it has.
+ *
+ * The extension's own prop wins, and that is the honest order: on a
+ * contributed action both are set, and the one the author chose is the one
+ * about that command rather than about the kind of thing it acts on.
+ */
+export function actionIcon(action: ActionEntry): ExtIcon | undefined {
+  return iconOf(action.props.icon ?? action.icon);
 }
 
 const CONTAINERS = new Set(["ActionPanel", "ActionPanel.Section", "ActionPanel.Submenu"]);

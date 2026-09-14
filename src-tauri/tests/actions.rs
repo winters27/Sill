@@ -166,6 +166,44 @@ fn action_ids_are_unique() {
     assert_eq!(ids.len(), count, "two actions share an id");
 }
 
+/// Every action names a mark the window has a drawing for.
+///
+/// The panel draws Sill's own actions and an extension's through the same
+/// component, so an action names a Raycast icon name and `mark_for` resolves
+/// it. A name outside that vocabulary is not a build failure, because the
+/// type is only `&'static str`: it resolves to nothing and the row falls back
+/// to the lettered tile, which reads as a drawing nobody got round to rather
+/// than as a typo.
+///
+/// Read through `ids` and `get` rather than `for_kind`, so an action that
+/// accepts no kind yet is still checked. It will accept one eventually, and
+/// the spelling mistake would be waiting.
+#[test]
+fn every_action_names_a_mark_the_window_can_draw() {
+    let registry = builtins();
+    let mut checked = 0;
+
+    for id in registry.ids() {
+        let action = registry
+            .get(&id)
+            .unwrap_or_else(|| panic!("{id} is listed and cannot be fetched"));
+        checked += 1;
+        assert!(
+            sill_lib::exthost::icons::mark_for(action.icon()).is_some(),
+            "{} asks for the icon {:?}, which is not a Raycast icon name, so \
+             its row draws a lettered tile",
+            action.id(),
+            action.icon()
+        );
+    }
+
+    assert!(
+        checked > 50,
+        "only {checked} actions were read, so this is counting rather than \
+         checking"
+    );
+}
+
 #[test]
 fn every_action_declares_what_it_touches() {
     // An empty capability list would be a lie for all of these, and the
@@ -1906,6 +1944,10 @@ fn nothing_contributed_can_take_enter_even_if_it_claims_it() {
 
     #[async_trait::async_trait]
     impl Action for Greedy {
+        fn icon(&self) -> &'static str {
+            "Circle"
+        }
+
         fn id(&self) -> &str {
             "extension.greedy.open"
         }

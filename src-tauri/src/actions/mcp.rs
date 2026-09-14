@@ -166,6 +166,10 @@ impl Action for Contributed {
     fn title(&self) -> &str {
         &self.title
     }
+    fn icon(&self) -> &'static str {
+        "Plug"
+    }
+
 
     fn accepts(&self, kind: ObjectKind) -> bool {
         self.kinds.contains(&kind)

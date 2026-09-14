@@ -5,7 +5,13 @@ import type { ActionInfo, RankedCommand } from "./exthost/commands";
 
 /** A registry answer, which is what Rust hands back for a kind. */
 function registry(over: Partial<ActionInfo> = {}): ActionInfo {
-  return { id: "sill.file.reveal", title: "Reveal in Explorer", primary: false, ...over };
+  return {
+    id: "sill.file.reveal",
+    title: "Reveal in Explorer",
+    icon: "Folder",
+    primary: false,
+    ...over,
+  };
 }
 
 /** A row, with only the fields the panel reads filled in properly. */
