@@ -4569,6 +4569,24 @@
         void forgetUnreadable("launcher");
 
         /*
+         * And the line at the bottom, for the same reason.
+         *
+         * **A status is about the launcher you are in, not the one you closed.**
+         * It was cleared on a render, on entering a command, and when a search
+         * replaced a trouble with something better, and by none of those when
+         * the window simply went away: an action that said "Launching WinUtil"
+         * and then dismissed left that sentence sitting in the chin, still
+         * there on the next summon, describing something that finished minutes
+         * ago.
+         *
+         * Here rather than at the moment of dismissal, which is the same
+         * choice `forgetUnreadable` above makes and for the same reason: what
+         * is on screen while the window is going away is nobody's business,
+         * and a summon is the moment somebody is about to read it again.
+         */
+        status = "";
+
+        /*
          * Whether there is a newer Sill.
          *
          * On the summon because that is a moment somebody created, which is
