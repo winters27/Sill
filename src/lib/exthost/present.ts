@@ -302,9 +302,23 @@ export interface EmptyView {
   icon?: ExtIcon;
 }
 
-export function emptyViewOf(tree: ViewTree, node: ElementNode): EmptyView | undefined {
+/**
+ * The `EmptyView` element itself, when a list has one.
+ *
+ * Separate from [`emptyViewOf`], which reads its words. This is for its
+ * actions: an empty list has no selected row to collect a panel from, and an
+ * extension that has nothing to show is exactly the one with something for you
+ * to do about it. `proton-pass` draws "Not Logged In" with a browser login on
+ * the `EmptyView`, and without this the screen names a way forward and offers
+ * no way to take it.
+ */
+export function emptyViewNodeOf(tree: ViewTree, node: ElementNode): ElementNode | undefined {
   const tag = node.tag === "Grid" ? "Grid.EmptyView" : "List.EmptyView";
-  const view = tree.elementChildren(node).find((child) => child.tag === tag);
+  return tree.elementChildren(node).find((child) => child.tag === tag);
+}
+
+export function emptyViewOf(tree: ViewTree, node: ElementNode): EmptyView | undefined {
+  const view = emptyViewNodeOf(tree, node);
   if (!view) return undefined;
 
   const title = view.props.title;

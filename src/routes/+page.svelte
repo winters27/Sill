@@ -165,7 +165,7 @@
   } from "$lib/exthost/commands";
   import { ViewTree, isHandlerRef, type ElementNode, type Op } from "$lib/exthost/tree";
   import { SearchRelay, itemsOf, rowsOf, searchProps } from "$lib/exthost/search";
-  import { dropdownOf, paginationOf } from "$lib/exthost/present";
+  import { dropdownOf, emptyViewNodeOf, paginationOf } from "$lib/exthost/present";
   import {
     applyAppearance,
     getPreferences,
@@ -1112,7 +1112,20 @@
 
     if (node.tag === "List" || node.tag === "Grid") {
       const item = items[selected];
-      return item ? collectActions(tree, item) : [];
+      if (item) return collectActions(tree, item);
+
+      /*
+       * An empty list still has somewhere to go.
+       *
+       * With no rows there is no selected item to collect a panel from, so
+       * this used to answer nothing, and an extension that puts its actions on
+       * the `EmptyView` had them nowhere. That is the common shape for a
+       * sign-in screen: `proton-pass` draws "Not Logged In" with the browser
+       * login on the `EmptyView` and nothing else anywhere, so the screen
+       * named a way forward and offered no way to take it.
+       */
+      const empty = emptyViewNodeOf(tree, node);
+      return empty ? collectActions(tree, empty) : [];
     }
 
     return collectActions(tree, node);

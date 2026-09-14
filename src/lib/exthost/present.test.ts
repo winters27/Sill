@@ -8,11 +8,13 @@
  * had one. There is nothing to see and nothing to blame.
  */
 import { describe, expect, test } from "vitest";
+import { collectActions } from "./actions";
 
 import {
   accessoriesOf,
   colourOf,
   dropdownOf,
+  emptyViewNodeOf,
   emptyViewOf,
   gridContentOf,
   iconOf,
@@ -255,6 +257,50 @@ describe("the empty view an extension writes for itself", () => {
   test("a list that wrote none has none", () => {
     const { tree, top } = grow({ tag: "List", children: [{ tag: "List.Item" }] });
     expect(emptyViewOf(tree, top()!)).toBeUndefined();
+  });
+
+  /**
+   * An empty list still has somewhere to go.
+   *
+   * An extension with nothing to show is exactly the one with something for
+   * you to do about it, and a sign-in screen is the common shape:
+   * `proton-pass` draws "Not Logged In" with the browser login on the
+   * `EmptyView` and nothing anywhere else. Reading only its words left the
+   * screen naming a way forward and offering no way to take it.
+   */
+  test("the element itself comes back, so its actions can be collected", () => {
+    const { tree, top } = grow({
+      tag: "List",
+      children: [
+        {
+          tag: "List.EmptyView",
+          props: { title: "Not Logged In" },
+          // An element-valued prop arrives as a `$slot` child, which is how
+          // the API layer carries what the reconciler cannot serialise.
+          children: [
+            {
+              tag: "$slot",
+              props: { name: "actions" },
+              children: [
+                {
+                  tag: "ActionPanel",
+                  children: [{ tag: "Action", props: { title: "Log In" } }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const node = emptyViewNodeOf(tree, top()!);
+    expect(node?.tag).toBe("List.EmptyView");
+    expect(collectActions(tree, node!).map((one) => one.title)).toEqual(["Log In"]);
+  });
+
+  test("a list with no empty view has no element either", () => {
+    const { tree, top } = grow({ tag: "List", children: [{ tag: "List.Item" }] });
+    expect(emptyViewNodeOf(tree, top()!)).toBeUndefined();
   });
 });
 
