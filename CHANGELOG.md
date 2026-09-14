@@ -19,6 +19,43 @@ IPC surface, the dependencies added, and every commit body in full. What goes
 in a section here is the subset of that which somebody would notice, said
 differently.
 
+## 0.3.0
+
+**The last five things you opened lead the list.** Nothing typed, and what
+you were just doing is at the top, under anything you pinned.
+
+**A result is one line.** What used to sit under a name now sits beside it,
+slightly larger and on the same baseline. An extension's command also says
+which extension it came from, which it never did when the command had a
+subtitle of its own: Pokédex's Nature command read "Nature, Mechanics" and
+the word Pokédex was nowhere on the row.
+
+**Scrollbars have no arrows.** Windows was drawing a stepper button at each
+end of every scrollbar in the application.
+
+**Screenshots in the extension store open.** Click one and it fills the
+launcher. Escape puts it back where you were.
+
+**Everything that can have an icon has one.** Every action in the panel, and
+the launcher's own commands: Reload Sill Index, Save Workspace, Pick a
+Colour, Read a QR Code and the capture commands all wore the gear from
+whichever settings page their preferences happened to live on. Emoji wore
+the Snippets mark while the emoji settings under it wore a smiley.
+
+**The menu is your theme's colour.** It was the same black on every theme,
+and it no longer draws a white ring around itself when it takes the keyboard.
+
+**Confetti looks like paper.** It tumbles, shows its back as it turns, and
+lands on the screen you summoned Sill on rather than across every monitor you
+own. The first time you ever asked for it, it drew nothing at all.
+
+**The launcher opens a little larger**, at 800 by 549. A fresh install only;
+if you have ever changed the size, yours is the one that counts.
+
+**The AI can search the web**, through a SearXNG instance you run yourself.
+There is no address in the box to begin with, and with none it says so rather
+than reaching for somebody else's server.
+
 ## 0.2.0
 
 **A screenshot opens the editor.** It always could, and the setting saying so
