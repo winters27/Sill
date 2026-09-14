@@ -61,6 +61,7 @@
 pub mod capability;
 pub mod catalog;
 pub mod install;
+pub mod packages;
 pub mod source;
 pub mod updates;
 

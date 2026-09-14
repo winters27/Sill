@@ -71,6 +71,10 @@ cpal = "0.18"
 rubato = "5"
 audioadapter-buffers = "5"
 sha2 = "0.10"
+# Unpacking an npm tarball, which is gzip around tar and nothing else.
+# `tar` is asked for no features: it defaults to none beyond the reader.
+tar = { version = "0.4", default-features = false }
+flate2 = "1"
 # SHA-1 and UUIDs, for the utility answers. Both were already being built as
 # transitive dependencies, so naming them here costs nothing new.
 sha1 = "0.11"
