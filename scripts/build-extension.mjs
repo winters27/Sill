@@ -178,6 +178,35 @@ function defaultPreferences(manifest, command) {
   return collected;
 }
 
+/**
+ * The picture this command draws with, resolved the way Rust resolves it.
+ *
+ * `extension_install::icon_beside` takes the command's own icon and falls
+ * back to the extension's, resolved against `assets`. Nothing here did, so
+ * every extension built from the tree landed in the index with no icon and
+ * `dress_old_index` then stamped the Extensions panel's puzzle piece on it.
+ * Four installed extensions drew their own pictures and eleven built ones
+ * drew the same generic mark, which reads as Sill being unable to find an
+ * icon rather than as this script never having looked for one.
+ *
+ * Pointed at the source tree, not at `extensions/build`: the bundles are
+ * written there but the assets are not copied, so the file only exists
+ * where it started.
+ *
+ * A name that climbs out of `assets` is refused, for the same reason Rust
+ * refuses it: a manifest is somebody else's file, and this value reaches a
+ * loader that reads whatever path it is handed.
+ */
+function iconBeside() {
+  const named = (command.icon ?? manifest.icon ?? "").trim();
+  if (!named) return undefined;
+  if (named.split(/[\\/]/).some((part) => part === ".." || part === "")) {
+    return undefined;
+  }
+
+  return join(extRoot, "assets", named).replace(/\\/g, "/");
+}
+
 const record = {
   id: `${manifest.name}:${command.name}`,
   extension: manifest.name,
@@ -188,6 +217,7 @@ const record = {
   description: command.description ?? "",
   mode: command.mode,
   entrypoint: outfile.replace(/\\/g, "/"),
+  icon: iconBeside(),
   keywords: command.keywords ?? [],
   preferences: defaultPreferences(manifest, command),
   /*
