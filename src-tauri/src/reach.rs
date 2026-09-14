@@ -218,7 +218,11 @@ pub fn target(target: &str) -> Result<String, String> {
 /// so rather than being handed to the shell as a name. Hence one function
 /// rather than one rule written down twice.
 pub fn open(target: &str, with: Option<&str>) -> Result<(), String> {
-    let checked = self::target(target)?;
+    // Spelled in full rather than as `self::target`, because the source
+    // check that holds this invariant scans for that path by name. A guard
+    // it cannot see is one that stops being enforced the day somebody
+    // writes the call a third way.
+    let checked = crate::reach::target(target)?;
 
     let opened = match scheme_of(&checked) {
         Some(_) => tauri_plugin_opener::open_url(&checked, with),
