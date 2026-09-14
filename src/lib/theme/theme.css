@@ -372,6 +372,21 @@
   --scrim: rgba(0, 0, 0, 0.35);
 
   /*
+   * What sits behind a picture being looked at, which is not the same thing.
+   *
+   * A modal card is read against the window it came from, and 0.35 is enough
+   * to say the list underneath is not the thing to press. A screenshot opened
+   * full size is the only thing on screen while it is up, and at 0.35 the
+   * store behind it stayed legible enough to read, which leaves two panes
+   * competing and neither of them winning.
+   *
+   * One value for both themes on purpose. A picture is looked at against a
+   * dark surround whatever the rest of the application is set to, which is
+   * what every viewer that has ever shown one does.
+   */
+  --scrim-deep: rgba(0, 0, 0, 0.86);
+
+  /*
    * The canonical bevels, taken verbatim from StreamNook so the
    * recipe stays identical across both apps.
    */

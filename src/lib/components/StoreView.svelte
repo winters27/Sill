@@ -130,6 +130,15 @@
    * version, and the one key that installs it.
    */
   let opened = $state<StoreRow | null>(null);
+  /**
+   * The screenshot filling the pane, by position, or nothing.
+   *
+   * The position rather than the URL, so the line underneath can say which
+   * of how many without searching the list for a string, and so stepping
+   * between them later is arithmetic rather than a lookup.
+   */
+  let enlarged = $state<number | null>(null);
+
   /** Its screenshots: not asked yet, or the answer, which may be empty. */
   let gallery = $state<string[] | null>(null);
   /** What is happening, so every surface can say so. */
@@ -444,6 +453,16 @@
    * confirmation goes back to the list, and the list goes back to the root.
    */
   export function back(): boolean {
+    /*
+     * Innermost first, which is what makes this a chain rather than a
+     * switch. A picture filling the pane is what Escape is obviously about
+     * while one is open, and closing the whole extension instead would
+     * throw away the place somebody was reading.
+     */
+    if (enlarged !== null) {
+      enlarged = null;
+      return true;
+    }
     if (deciding) {
       cancel();
       return true;
@@ -602,7 +621,7 @@
       trust that is not on offer. It is a description, and the sentence at the
       bottom says exactly that.
     -->
-    <div class="decide sill-scrolls">
+    <div class="decide">
       <header class="head">
         <StoreIcon src={deciding.icon} label={deciding.title} size={40} />
         <div>
@@ -754,7 +773,7 @@
       then what it does and what it is. This is the only place the pictures
       are fetched, one extension at a time, when somebody asks to see it.
     -->
-    <div class="opened sill-scrolls">
+    <div class="opened">
       <div class="head">
         <StoreIcon src={opened.icon} label={opened.title} size={40} />
         <div class="named">
@@ -773,9 +792,19 @@
       <p class="desc">{opened.description}</p>
 
       {#if gallery?.length}
-        <div class="gallery sill-scrolls" aria-label="Screenshots">
+        <div class="gallery" aria-label="Screenshots">
           {#each gallery as shot, at (shot)}
-            <img src={shot} alt="Screenshot {at + 1} of {opened.title}" loading="lazy" />
+            <!-- A button rather than a click on the picture, so Tab reaches it
+                 and Enter opens it. A store you can only read with a mouse is
+                 a store nobody using the keyboard can look at. -->
+            <button
+              class="shot"
+              type="button"
+              onclick={() => (enlarged = at)}
+              aria-label={`Enlarge screenshot ${at + 1} of ${opened.title}`}
+            >
+              <img src={shot} alt="Screenshot {at + 1} of {opened.title}" loading="lazy" />
+            </button>
           {/each}
         </div>
       {/if}
@@ -876,7 +905,7 @@
       -->
       <div
         id={LISTBOX}
-        class="list sill-scrolls"
+        class="list"
         role="listbox"
         tabindex="-1"
         aria-label="Extensions"
@@ -1044,6 +1073,35 @@
   {/if}
 </div>
 
+{#if enlarged !== null && gallery?.[enlarged]}
+  <!--
+    One screenshot, filling the launcher.
+
+    The launcher window is the frame, which is the whole of what full
+    screen means here: Sill would otherwise need a second window for a
+    picture somebody looks at for two seconds, and that is a renderer and a
+    backdrop and a place for focus to get lost in.
+
+    The layer is the button. A `div` with a click handler announces as
+    nothing and cannot be reached by keyboard, and wrapping the picture in a
+    button instead costs no markup at all.
+  -->
+  <button
+    class="enlarged"
+    type="button"
+    aria-label="Close the screenshot"
+    onclick={() => (enlarged = null)}
+  >
+    <img
+      src={gallery[enlarged]}
+      alt={`Screenshot ${enlarged + 1} of ${opened?.title ?? ""}`}
+    />
+    {#if gallery.length > 1}
+      <span class="of">{enlarged + 1} of {gallery.length}</span>
+    {/if}
+  </button>
+{/if}
+
 <style>
   .store {
     display: flex;
@@ -1110,7 +1168,19 @@
     overflow-x: auto;
   }
 
+  /* The button is only a target; the picture inside it is the whole of
+     what is drawn, so the button itself has no surface of its own. */
+  .shot {
+    display: block;
+    flex: none;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: zoom-in;
+  }
+
   .gallery img {
+    display: block;
     flex: none;
     height: 190px;
     border-radius: var(--radius-md);
@@ -1569,5 +1639,55 @@
   .decide-actions button:disabled {
     opacity: var(--opacity-disabled);
     cursor: default;
+  }
+  /*
+   * The enlarged screenshot.
+   *
+   * `fixed` rather than `absolute`, because the pane underneath scrolls and
+   * an absolutely placed layer would scroll away from the picture it is
+   * showing while somebody is looking at it.
+   *
+   * `contain` rather than `cover`: a screenshot cropped to fill the window
+   * is missing the part somebody clicked it to read.
+   */
+  .enlarged {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-dialog);
+    display: grid;
+    /*
+     * Definite rows, and that is the whole of why the picture fits.
+     *
+     * With both rows sized by their content, the image max-height of 100%
+     * resolves against a row whose height is being decided by that same
+     * image, which is circular, so the browser drops the constraint and
+     * draws it at full size: a 1280px tall screenshot ran off a 720px
+     * window with no sign anything was wrong.
+     */
+    grid-template-rows: 1fr auto;
+    place-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border: 0;
+    background: var(--scrim-deep);
+    cursor: zoom-out;
+  }
+
+  .enlarged img {
+    /* A grid item will not shrink below its content without this, so a tall
+       picture would push its own row past the window it is measured in. */
+    min-height: 0;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: var(--radius-md);
+    box-shadow: var(--elevation-window);
+  }
+
+  /* Which of how many, for a strip worth stepping through. Quiet, because
+     the picture is what was asked for and this is a footnote to it. */
+  .enlarged .of {
+    color: var(--text-3);
+    font-size: var(--text-meta);
   }
 </style>
