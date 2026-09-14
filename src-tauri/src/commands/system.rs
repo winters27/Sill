@@ -1234,16 +1234,52 @@ pub(crate) async fn find_place(name: String) -> Result<crate::weather::Place, St
     crate::weather::find(&name).await
 }
 
-/// Throws confetti over every screen.
+/// The screen the launcher was summoned on, in physical pixels.
 ///
-/// The window is sized to the whole virtual screen in physical pixels, the
-/// way the capture overlay is, shown, and told to start. It asks to be put
-/// away itself once every piece has fallen off the bottom.
+/// Confetti is a reply to something somebody just did in the launcher, so it
+/// belongs on the screen they did it on. Sized to the virtual screen instead
+/// it lands on every other monitor as well, and on a desk that has them those
+/// are showing work nobody asked to have confetti thrown over.
+///
+/// Read off the launcher window rather than from the `SummonOn` preference,
+/// because that preference says where the *next* summon will go and this
+/// wants where the last one actually went: under `cursor` the pointer may
+/// have moved to another screen since.
+///
+/// The launcher is hidden before this runs, which does not matter: hiding
+/// does not move a window, so it is still on the monitor it was summoned on.
+/// The virtual screen is the fallback for having no launcher window at all,
+/// or for Windows naming no monitor for it.
+fn launcher_screen(app: &AppHandle) -> (i32, i32, i32, i32) {
+    let found = app
+        .get_webview_window("main")
+        .and_then(|main| main.current_monitor().ok().flatten());
+
+    let Some(monitor) = found else {
+        return crate::capture::virtual_screen();
+    };
+
+    let at = monitor.position();
+    let size = monitor.size();
+
+    (
+        at.x,
+        at.y,
+        i32::try_from(size.width).unwrap_or(i32::MAX),
+        i32::try_from(size.height).unwrap_or(i32::MAX),
+    )
+}
+
+/// Throws confetti over the screen the launcher is on.
+///
+/// The window is sized to that one screen in physical pixels, the way the
+/// capture overlay is sized to its own, shown, and told to start. It asks to
+/// be put away itself once every piece has fallen off the bottom.
 #[tauri::command]
 pub(crate) async fn throw_confetti(app: AppHandle) -> Result<(), String> {
     let window = crate::lazy_windows::ensure(&app, "confetti")?;
 
-    let (left, top, width, height) = crate::capture::virtual_screen();
+    let (left, top, width, height) = launcher_screen(&app);
     if width <= 0 || height <= 0 {
         return Err("no screens were found".to_string());
     }
