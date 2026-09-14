@@ -557,11 +557,25 @@
     const measured = live?.[command.id];
     if (measured) return measured;
 
-    // An extension command's subtitle already names its extension: Rust
-    // defaults it to the extension's title when the manifest declares none
-    // (`extension_install::record_for`). This used to overwrite it here, so
-    // the one case that changed anything was an extension that had written a
-    // subtitle, which then never showed.
+    /*
+     * An extension command names its extension, and its own subtitle too.
+     *
+     * Rust defaults `subtitle` to the extension's title when the manifest
+     * declares none, so most of these say it already. The ones that declare
+     * a subtitle said only that: Pokédex's Nature command drew as
+     * "Nature  Mechanics", under a heading reading "Extensions", and the word
+     * Pokédex was nowhere on the row or above it.
+     *
+     * Both, rather than one in place of the other. Overwriting the subtitle
+     * with the extension title is what this used to do, and the only rows it
+     * changed were the ones where a manifest had something to say.
+     */
+    if (command.mode === "view" || command.mode === "no-view") {
+      const own = command.subtitle;
+      return own && own !== command.extensionTitle
+        ? `${command.extensionTitle} · ${own}`
+        : command.extensionTitle;
+    }
 
     // The subtitle is the character itself, drawn as the mark on the left.
     // Writing it here as well would put the emoji on the row twice.
@@ -595,6 +609,9 @@
     {:else}
       {@const command = line.command}
       {@const index = line.index}
+      <!-- The update row is the one that still stacks: it carries a progress
+           bar under its own line, and a bar beside a name is not a bar. -->
+      {@const stacked = command.mode === "extensions-behind" && Boolean(outcome || working)}
       <div
         id={optionId(index)}
         data-row={index}
@@ -682,6 +699,14 @@
                 Sphinx of black quartz, judge my vow
               </span>
             {/if}
+            {#if !stacked && sourceOf(command)}
+              <!-- Beside the name, not under it. Stacked, the two sizes read as
+                   two separate things per row and the list looked like a table
+                   of paragraphs; a row is one thing, so it gets one line. It
+                   shrinks before the title does, which is what the higher
+                   shrink factor on `.line .extension` buys. -->
+              <span class="extension">{sourceOf(command)}</span>
+            {/if}
           </span>
           {#if command.mode === "extensions-behind" && !working && outcome}
             <!--
@@ -720,8 +745,6 @@
                 style={working.far === null ? "" : `width: ${Math.round(working.far * 100)}%`}
               ></span>
             </span>
-          {:else if sourceOf(command)}
-            <span class="extension">{sourceOf(command)}</span>
           {/if}
         </span>
 
@@ -833,16 +856,25 @@
     flex: 1;
   }
 
+  /*
+   * One baseline, not two centred boxes.
+   *
+   * The title is 14px in a 17px box and the source beside it is 12px in a
+   * 14px one. Centring aligns the boxes, which leaves the two baselines
+   * about a pixel apart: close enough to look like a mistake rather than a
+   * style. The line is the same 17px either way, because baseline
+   * alignment here resolves to the taller item's ascent and descent.
+   */
   .line {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: var(--space-2);
     min-width: 0;
   }
 
   .title {
     color: var(--text-1);
-    font-size: var(--text-body);
+    font-size: var(--text-row);
     font-weight: var(--weight-body);
     /* Stated in px, not as a ratio, so the row's height does not move when
        the interface face changes. Satoshi, Inter and Segoe UI Variable have
@@ -882,6 +914,10 @@
   /* The user's own name for this. Quiet: it is a reminder, not a label
      competing with the title it sits beside. */
   .alias {
+    /* Out of the baseline group above: this is a chip with a ground and
+       symmetric padding, and a box reads as centred rather than as sitting
+       on a line. Its own text baseline is not the thing being aligned. */
+    align-self: center;
     flex: none;
     padding: var(--space-hair) var(--space-1);
     font-size: var(--text-micro);
@@ -891,6 +927,21 @@
     background: var(--fill-2);
     border-radius: var(--radius-sm);
     white-space: nowrap;
+  }
+
+  /*
+   * On the title's line, the faint half is the one that gives up space.
+   *
+   * Both ellipsise, so without a weighting a long title and a long path
+   * shrink in proportion and the name loses characters while the folder
+   * it is in keeps them. The name is what was searched for.
+   *
+   * Scoped to `.line` because the update row still draws this in the
+   * column, where a shrink factor would squash its height instead.
+   */
+  .line .extension {
+    flex: 0 6 auto;
+    min-width: 0;
   }
 
   .extension {
@@ -917,6 +968,16 @@
   }
 
   .sample {
+    /*
+     * Also out of the baseline group, and this one is not taste.
+     *
+     * The face is whatever font the row is about. Baseline alignment sizes
+     * the line from the largest ascent in the group, so one family with
+     * unusual metrics would set the height of every row it appears on.
+     * Centred, it is clipped by the row instead of moving it.
+     */
+    align-self: center;
+    line-height: var(--line-body);
     margin-left: var(--space-2);
     color: var(--text-3);
     font-size: var(--text-body);

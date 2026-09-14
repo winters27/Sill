@@ -220,3 +220,35 @@ describe("drawing the result list", () => {
     expect(target.textContent?.trim().length ?? 0).toBeGreaterThan(0);
   });
 });
+
+describe("an extension command says which extension", () => {
+  /** A command of somebody else's extension, as Rust writes it. */
+  function ofExtension(subtitle: string): RankedCommand {
+    return {
+      ...row("pokedex:nature", "Nature", "view"),
+      extension: "pokedex",
+      extensionTitle: "Pokédex",
+      subtitle,
+    } as RankedCommand;
+  }
+
+  /*
+   * The case that started this. The heading above says "Extensions", which
+   * is a category, and the row said "Nature" and "Mechanics", which are the
+   * command and its own subtitle. Nothing anywhere said Pokédex.
+   */
+  it("names it alongside the command's own subtitle", () => {
+    const target = draw([ofExtension("Mechanics")]);
+    expect(target.textContent).toContain("Pokédex · Mechanics");
+  });
+
+  /*
+   * Rust already defaults the subtitle to the extension title when the
+   * manifest declares none, and saying it twice would read as a mistake.
+   */
+  it("says it once when the subtitle is already the extension", () => {
+    const target = draw([ofExtension("Pokédex")]);
+    expect(target.textContent).not.toContain("·");
+    expect(target.textContent).toContain("Pokédex");
+  });
+});

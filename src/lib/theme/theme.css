@@ -757,7 +757,8 @@
    *   --text-title    20    -0.015em     600     settings panel title
    *   --text-query    18    -0.01em      400     the launcher input
    *   --text-heading  15    -0.01em      600     card and section headings
-   *   --text-body     13     0           450     row title, settings row
+   *   --text-row      14     0           450     launcher result row title
+   *   --text-body     13     0           450     settings row, body copy
    *   --text-meta     12     0           400     subtitles, hints, blurbs
    *   --text-group    12     0           500     launcher group heading
    *   --text-label    11     0.06em      600     settings section label, CAPS
@@ -772,6 +773,7 @@
   --text-title: 20px;
   --text-query: 18px;
   --text-heading: 15px;
+  --text-row: 14px;
   --text-body: 13px;
   --text-meta: 12px;
   --text-group: 12px;
@@ -1458,6 +1460,21 @@ body {
  * Sentence case, not uppercase. The uppercase treatment belongs to a settings
  * section label, which is structural; this one is only a quiet separator.
  */
+/*
+ * Air above a break, but not above the first one.
+ *
+ * The label alone was carrying the separation and at 30px it read as one
+ * more row rather than as the start of something. The extra 14px is above
+ * the text, because the label is bottom-aligned in its own box.
+ *
+ * Not on the first heading, which sits directly under the field: there is
+ * nothing above it to be separated from, and the space would only push
+ * the whole list down.
+ */
+.sill-list > .sill-group:not(:first-child) {
+  height: 44px;
+}
+
 .sill-group {
   display: flex;
   align-items: flex-end;
