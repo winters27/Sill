@@ -132,7 +132,7 @@
   <div
     id={MENU}
     bind:this={menu}
-    class="menu sill-menu sill-scrolls"
+    class="menu sill-menu"
     role="menu"
     tabindex="-1"
     aria-label="Sill menu"
@@ -195,7 +195,16 @@
         <span class="label">{item.label}</span>
         {#if item.hint}
           <span class="spacer"></span>
-          <span class="hint">{item.hint}</span>
+          <!--
+            One cap per key, split on the space the hint is written with.
+            The same `.sill-key` the chin and the action panel draw, so the
+            three surfaces that show a chord show it one way.
+          -->
+          <span class="hint">
+            {#each item.hint.split(" ") as key, k (k)}
+              <span class="sill-key">{key}</span>
+            {/each}
+          </span>
         {/if}
       </div>
     {/each}
@@ -374,10 +383,14 @@
     flex: 1;
   }
 
-  /* The same face as the label. A monospace key name beside a proportional
-     one puts two typefaces in a four-row menu. */
+  /* Caps rather than grey words. The note that used to be here said a
+     monospace key name beside a proportional one puts two typefaces in a
+     four-row menu, which is still true: `.sill-key` inherits the face and
+     sets only a size and a ground, so this stays one typeface. */
   .hint {
-    font-size: var(--text-meta);
-    color: var(--text-3);
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex: none;
   }
 </style>

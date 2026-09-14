@@ -316,6 +316,56 @@
   --tint-panel: rgba(255, 255, 255, 0.03);
 
   /*
+   * The base under a popover that sits ON the launcher: the action panel,
+   * the launcher menu, the clipboard menus, the store filter.
+   *
+   * **Near-opaque, and it does not thin as `--glass-strength` drops.** That
+   * is the load-bearing half of StreamNook's `.glass-flyout` and the half
+   * that looks wrong written down: a menu reads as glass because of the
+   * frost, the light off its top edge and the saturation behind it, not
+   * because the page shows through it. StreamNook arrived there after a
+   * base that DID thin left its flyout a ghost over a bright stream, and
+   * its own note says a menu you cannot read is not a minimal menu, it is a
+   * broken one.
+   *
+   * Sill reached the same wall from the other side. `.sill-menu` was a flat
+   * 0.82 black slab, and both attempts to open it up thinned the base and
+   * left the blur where it was, so the rows behind arrived legible and the
+   * conclusion drawn each time was that the surface had to be deep.
+   *
+   * 92% matches the flyout. The tray menu's `--tint-menu` is 94% and stays
+   * separate: that one is a standalone transparent window with the desktop
+   * behind it rather than the launcher.
+   */
+  --menu-base: color-mix(in srgb, var(--core-secondary-background) 92%, transparent);
+
+  /*
+   * What lifts the popover off the window under it.
+   *
+   * **A second layer rather than a lighter base colour, and that is the
+   * whole point.** `--menu-base` is the window's own surface so the popover
+   * keeps each theme's hue: oilslick is violet, ember is warm, moss is
+   * green, and none of them redefine the grey ramp, so a menu built out of
+   * `--grey-3` would arrive neutral grey on all three. The base carries the
+   * colour and this carries the lift.
+   *
+   * It is the same two-layer composite StreamNook's `.glass-flyout` uses: a
+   * surface, then a flat tint over it, then the light off the top edge.
+   *
+   * White in both themes rather than `--ink`, for the reason written on
+   * `--sheen` and `--bevel-tile` in frost-light: the light that makes glass
+   * read as glass comes from above whichever way the surface goes. On a
+   * pale theme it has to be much stronger, because lifting near-white off
+   * near-white takes more than lifting off near-black.
+   *
+   * **This is the dial for "the menu looks too dark".** The base was
+   * `--core-secondary-background` at 92% and the window is the same colour
+   * at 88%, so before this the popover was the same value as the thing it
+   * floated on and nothing about it read as raised.
+   */
+  --menu-lift: rgba(255, 255, 255, 0.13);
+
+  /*
    * A window that is only a menu, which is a different problem again.
    *
    * `.sill-menu` is an IN-PAGE recipe: `backdrop-filter` blurs the launcher's
@@ -964,6 +1014,9 @@
   --chin: rgba(0, 0, 0, 0.045);
   --scrim: rgba(0, 0, 0, 0.2);
   --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.25));
+  /* Far stronger than the dark theme's 0.08: lifting a near-white popover
+     off a near-white window takes more than lifting off near-black. */
+  --menu-lift: rgba(255, 255, 255, 0.55);
   --well: inset 0 1px 2px rgba(0, 0, 0, 0.1);
   --bevel-tile: inset 1px 1px 0 0 rgba(255, 255, 255, 0.8),
     inset -1px -1px 0 0 rgba(0, 0, 0, 0.07);
@@ -1240,6 +1293,24 @@
  * without subpixels rather than into pretending the cost is not there.
  */
 :root {
+  /*
+   * What a page paints underneath everything. Transparent, so the DWM
+   * material `summon::apply_backdrop` puts on the window reaches the page.
+   *
+   * The comment that used to sit on `html, body` said this was "painted by
+   * `data-surface`, which is set from the backdrop preference". **Nothing
+   * ever set `data-surface`**: it described a mechanism that was never
+   * built, and the value has always simply been `transparent`.
+   *
+   * An opaque value here was tried and reverted, and it is worth knowing
+   * why before trying it again. It does make `backdrop-filter` work, which
+   * nothing else does. It also costs the acrylic entirely, because the two
+   * want this alpha in opposite directions, and a background on the ROOT
+   * element paints the canvas: it fills the whole square window and ignores
+   * every border-radius on the page, so it puts a square corner behind the
+   * shell's rounded one. That second part is fixable with
+   * `set_background_color` on the window; the first is not fixable at all.
+   */
   --surface-base: transparent;
 }
 
@@ -1333,10 +1404,9 @@ body {
   height: 100%;
   overflow: hidden;
   /*
-   * Painted by `data-surface`, which is set from the backdrop preference.
-   * Transparent by default so the acrylic reaches the page: an opaque
-   * background here would throw the desktop blur away, and would also be the
-   * only way to get subpixel text back. That trade is settled; see above.
+   * Painted by `--surface-base`, which is transparent so the window's DWM
+   * material reaches the page. See that token: an opaque value here is the
+   * only way to get in-page glass, and it costs the acrylic to get it.
    */
   background: var(--surface-base);
   color: var(--text-1);
@@ -1581,14 +1651,51 @@ body {
  * blur and a real border. A card radius, not a row radius.
  */
 .sill-menu {
-  /* Deep enough that text on the popover stays crisp. At 0.65 the list rows
-     behind it showed through the labels and washed them out. */
-  background-color: rgba(0, 0, 0, 0.82);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(10px);
+  /*
+   * StreamNook's `.glass-flyout`, in this app's tokens.
+   *
+   * Ported rather than invented, the same way `--bevel-tile` above is taken
+   * verbatim, because it answers exactly this question: a small menu
+   * floating over content that has to stay readable. Four parts, and it is
+   * all four or none:
+   *
+   * 1. A near-opaque base, which is what makes the labels legible.
+   * 2. Light off the top edge. `--sheen` already is that gradient and is
+   *    already theme-aware, so on a pale theme the highlight stays white
+   *    and the bevel's shadow does the work instead.
+   *
+   * **Parts three and four of that recipe are not here, and cannot be.**
+   * StreamNook frosts its flyout with `backdrop-filter` and saturates what
+   * bleeds through. Its window is opaque. This one is transparent so DWM
+   * can blur the desktop behind it, and Chromium will not give a backdrop
+   * root to a transparent window, so a filter here resolves to nothing.
+   * A `blur(12px)` sat on this rule for months doing exactly that.
+   *
+   * Both were written out and removed rather than left dormant, because a
+   * declaration that provably does nothing reads to the next person as a
+   * thing that works.
+   *
+   * **Do not add `backdrop-filter` back to this rule.** It was tried, on a
+   * real build, and the window was made opaque to make it work. It did
+   * work, and the cost was the whole acrylic: the launcher stopped floating
+   * over the desktop and read as a flat slab. Reverted deliberately.
+   *
+   * The trap that wasted the most time is worth naming. A probe appended to
+   * `body`, with no painted ancestor, DOES blur the launcher's own rows to
+   * an unreadable smear at `blur(12px)`, which looks like proof that the
+   * note on `--chin` is wrong. It is not proof: that probe ran in an
+   * ordinary browser tab against the dev server, and that is not this
+   * window. **The Browser pane cannot test this and neither can the preview
+   * routes.** The `--chin` note's "prove it on a real build first" means a
+   * real build.
+   */
+  background-color: var(--menu-base);
+  /* Top layer first, the way `background-image` stacks: the light off the
+     edge sits over the flat lift, which sits over the base colour. */
+  background-image: var(--sheen), linear-gradient(var(--menu-lift), var(--menu-lift));
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
-  box-shadow: var(--elevation-menu);
+  box-shadow: var(--bevel-tile), var(--elevation-menu);
   /* Nothing inside a popover paints past its corner. A collection name
      longer than the menu used to carry its count out over the rows. */
   overflow: hidden;
