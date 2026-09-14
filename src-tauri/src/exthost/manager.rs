@@ -140,7 +140,20 @@ impl LoadOptions {
     ) -> Self {
         Self {
             mode,
-            env: CommandEnv::Development,
+            // **Production, because that is what this is.**
+            //
+            // `environment.isDevelopment` means `ray develop` is watching a
+            // source directory, and Sill has no such mode: everything it runs
+            // was installed, from the store or from a folder, and built.
+            //
+            // Saying otherwise is not cosmetic. An extension is entitled to
+            // branch on it, and they do: `proton-pass` reads
+            // `const USE_MOCK_DATA = environment.isDevelopment` and then
+            // returns `true` from `checkAuth` without running anything, so its
+            // login command drew "You're Logged In" the moment it opened.
+            // Measured through `run-extension.mjs`: one `Storage/list`, two
+            // renders, and no process launched at all.
+            env: CommandEnv::Production,
             entrypoint: entrypoint.into(),
             extension_id: extension.to_string(),
             extension_name: extension.to_string(),

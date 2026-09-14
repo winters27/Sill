@@ -795,7 +795,7 @@ send({
   params: {
     opts: {
       mode: modeArg,
-      env: "Development",
+      env: "Production",
       entrypoint,
       extension_name: extensionName,
       extension_id: extensionName,
@@ -1129,7 +1129,7 @@ if (measuring) {
   const again = await ask(4, "Manager/load", {
     opts: {
       mode: modeArg,
-      env: "Development",
+      env: "Production",
       entrypoint,
       extension_name: extensionName,
       extension_id: extensionName,
