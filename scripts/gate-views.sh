@@ -23,7 +23,7 @@ set -e
 DREW=()
 drew() { DREW+=("$1"); }
 
-# Whether a server this gate does not own is answering.
+# Whether the one host this gate does not own is answering.
 #
 # Some of the extensions below are real store extensions that fetch their rows
 # from somebody else's host, and what they draw is not a fact about Sill when
@@ -32,11 +32,17 @@ drew() { DREW+=("$1"); }
 # here. Both used to arrive as the same red line, and one of them held up a
 # release for a reason nobody could act on.
 #
-# No `-f`: the exit code wanted is "something answered", and a GraphQL endpoint
-# replies to a bare GET with a 400 that proves the host is up. Non-zero is DNS,
-# a refused connection, or the timeout, which are the three ways it is not.
+# The status code carries nothing here. This endpoint answers a bare GET, an
+# unknown path and a query naming a field it does not have all with a 200,
+# because a GraphQL server reports failure in the body, so a probe reading the
+# code cannot tell a working host from one serving a block page. The probe is
+# the POST the extension makes, inside the ten seconds its client waits, and
+# what it reads is the body. No output at all is the timeout and the refusal.
 answering() {
-  curl -sS --max-time 15 -o /dev/null "$1" 2>/dev/null
+  curl -sS --max-time 10 \
+    -H "Content-Type: application/json" \
+    -d '{"query":"query { nature(limit: 1) { id } }"}' \
+    "$1" 2>/dev/null | grep -q '"nature"'
 }
 
 # The one third-party host anything here depends on for its content.
@@ -48,16 +54,23 @@ POKEAPI="https://graphql.pokeapi.co/v1beta2"
 # with the data: the command builds, loads, mounts, renders a root view and
 # asks for no API Sill lacks. Only the counts made out of fetched rows are set
 # aside, and the note below says so rather than passing quietly.
-if answering "$POKEAPI"; then
-  POKEDEX_ROWS="--expect-icons 20 --expect-accessories 40"
-  POKEDEX_DETAIL="--expect-detail"
-else
-  echo "note: $POKEAPI is not answering."
-  echo "      Pokedex draws its rows out of it, so this run checks the view"
-  echo "      and the API surface rather than what is in the rows."
-  POKEDEX_ROWS=""
-  POKEDEX_DETAIL=""
-fi
+#
+# Asked immediately before each Pokedex case rather than once at the top,
+# because the gate takes about ten minutes to reach the first of them, and an
+# answer that old is about a different minute than the one the extension
+# fetches in.
+pokedex_counts() {
+  if answering "$POKEAPI"; then
+    POKEDEX_ROWS="--expect-icons 20 --expect-accessories 40"
+    POKEDEX_DETAIL="--expect-detail"
+  else
+    echo "note: $POKEAPI is not answering."
+    echo "      Pokedex draws its rows out of it, so this run checks the view"
+    echo "      and the API surface rather than what is in the rows."
+    POKEDEX_ROWS=""
+    POKEDEX_DETAIL=""
+  fi
+}
 
 SEED=$(python -c "
 import json
@@ -134,6 +147,7 @@ drew hacker-news
 echo
 echo "--- Icons and accessories of a real extension: pokedex natures ---"
 node scripts/build-extension.mjs extensions/raycast-src/extensions/pokedex nature > /dev/null
+pokedex_counts
 node scripts/run-extension.mjs extensions/build/pokedex/nature.js pokedex \
   --grant fileRead,fileWrite,network,processLaunch \
   --assets extensions/raycast-src/extensions/pokedex/assets \
@@ -147,6 +161,7 @@ drew pokedex
 echo
 echo "--- Detail pane of a real extension: pokedex weakness ---"
 node scripts/build-extension.mjs extensions/raycast-src/extensions/pokedex weakness > /dev/null
+pokedex_counts
 node scripts/run-extension.mjs extensions/build/pokedex/weakness.js pokedex \
   --grant fileRead,fileWrite,network,processLaunch \
   --assets extensions/raycast-src/extensions/pokedex/assets \
