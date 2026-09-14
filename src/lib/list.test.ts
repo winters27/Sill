@@ -490,3 +490,33 @@ describe("one row per id", () => {
     expect(onePerId(rows)).toBe(rows);
   });
 });
+
+describe("a row that brings its own heading", () => {
+  /**
+   * Rust leads the root list with the last few things opened, and they are
+   * ordinary rows: an application is still `mode: "app"`, because that is
+   * what Enter dispatches on. Without the override they file under
+   * Applications and the section does not exist.
+   */
+  it("is filed under it rather than under its kind", () => {
+    const row = command("app");
+    expect(groupOf(row)).toBe("Applications");
+
+    expect(groupOf({ ...row, heading: "Recents" })).toBe("Recents");
+  });
+
+  it("puts the section at the top, once", () => {
+    const lines = linesOf([
+      { ...command("app"), id: "a", heading: "Recents" },
+      { ...command("file"), id: "b", heading: "Recents" },
+      { ...command("app"), id: "c" },
+    ]);
+
+    const headings = lines
+      .filter((line) => line.kind === "header")
+      .map((line) => line.label);
+
+    expect(headings[0]).toBe("Recents");
+    expect(headings.filter((label) => label === "Recents")).toHaveLength(1);
+  });
+});

@@ -28,6 +28,13 @@ fn said_about(offer: &crate::ai::chat::Offer) -> String {
     )
 }
 
+/// How many of the last-opened rows lead the root list.
+///
+/// Five, which is a glance rather than a list. The whole value of this
+/// section is that it can be read without reading it; at ten it becomes
+/// another thing to search through, and the search field is right there.
+const RECENT_ROWS: usize = 5;
+
 /// The root list, or what matches a query.
 #[tauri::command]
 pub(crate) async fn search_commands(
@@ -475,7 +482,47 @@ pub(crate) async fn search_commands(
      * is read rather than asked: nothing here checks anything, and a check that
      * has never run leaves this empty.
      */
+    // Empty on every other keystroke, which is all this costs there.
+    let mut recent: Vec<String> = Vec::new();
+
     if query.trim().is_empty() {
+        /*
+         * The last few things opened, under the pins and above the rest.
+         *
+         * Hoisted out of the list rather than looked up and inserted. An
+         * empty query already ranks every row by frecency, so anything
+         * opened recently is near the front of `results` already, and what
+         * gets moved is the row itself: there is no second construction to
+         * keep in step and no way for the copy at the top to disagree with
+         * the real one.
+         *
+         * Under the pins, because a pin is a decision somebody made and
+         * this is a side effect of what they happened to do.
+         */
+        let lead = results
+            .iter()
+            .take_while(|ranked| pinned.contains(&ranked.command.id))
+            .count();
+
+        recent = ranking
+            .frecency
+            .recent(RECENT_ROWS)
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+
+        // Moved rather than copied, so a row is never in the list twice.
+        for (nth, id) in recent.iter().enumerate() {
+            let Some(at) = results.iter().position(|r| r.command.id == *id) else {
+                continue;
+            };
+
+            if at > lead + nth {
+                let row = results.remove(at);
+                results.insert(lead + nth, row);
+            }
+        }
+
         let standing = app
             .state::<crate::store::updates::ExtensionUpdates>()
             .read(&crate::state::data_dir(&app));
@@ -508,6 +555,14 @@ pub(crate) async fn search_commands(
                 .map(str::to_string);
             let mut result: registry::SearchResult = ranked.into();
             result.alias = alias;
+
+            // Filed by when it was opened rather than by what it is. Empty
+            // unless nothing was typed, so this is a scan of five strings
+            // against nothing on every other keystroke.
+            if recent.iter().any(|id| *id == result.id) {
+                result.heading = Some("Recents".to_string());
+            }
+
             result
         })
         .collect())

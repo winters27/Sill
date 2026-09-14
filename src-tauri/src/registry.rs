@@ -181,6 +181,15 @@ pub struct SearchResult {
     /// name nobody can see is one nobody remembers they set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
+    /// The heading to file this row under, when it is not its kind's.
+    ///
+    /// Absent on almost every row, which is why it is skipped rather than
+    /// sent as null: the window groups by mode, and for a list of things
+    /// that is right. A row that leads because of *when* it was used rather
+    /// than *what* it is has to say so, or a folder opened a minute ago is
+    /// filed under Files at the top of the list and reads as a stray.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading: Option<String>,
     /// Whether the query named this rather than merely fitting it.
     ///
     /// The window runs more than one search and shows the answers in one list,
@@ -233,6 +242,7 @@ impl From<RankedCommand> for SearchResult {
             matched,
             // Filled by the caller, which is the only place that knows them.
             alias: None,
+            heading: None,
             strong: is_strong(class),
         }
     }
@@ -264,6 +274,7 @@ impl SearchResult {
             // Nothing was typed, so nothing matched.
             matched: Vec::new(),
             alias: None,
+            heading: None,
             // Nothing was typed, so nothing was named.
             strong: false,
         }
@@ -2544,6 +2555,30 @@ impl Frecency {
     /// question the count answers and the score does not: the score folds
     /// recency in, so two writers losing one launch each can still produce the
     /// same number.
+    /// The ids opened most recently, newest first.
+    ///
+    /// Recency, not frecency. `score` blends how often with how lately and
+    /// is the right answer for ordering a search; this answers a different
+    /// question. Something opened once an hour ago leads this over something
+    /// opened daily but not since Tuesday, and that is the point of it: it
+    /// is a record of what somebody was just doing.
+    ///
+    /// Sorted whole rather than partially. This map holds what has actually
+    /// been launched, which is hundreds of entries, not the tens of
+    /// thousands the index carries.
+    pub fn recent(&self, most: usize) -> Vec<&str> {
+        let mut seen: Vec<(&str, i64)> = self
+            .entries
+            .iter()
+            .map(|(id, (_, last))| (id.as_str(), *last))
+            .collect();
+
+        // The id breaks the tie, so two things launched in the same second
+        // do not swap places between one summon and the next.
+        seen.sort_unstable_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+        seen.into_iter().take(most).map(|(id, _)| id).collect()
+    }
+
     pub fn count(&self, id: &str) -> u32 {
         self.entries.get(id).map(|(count, _)| *count).unwrap_or(0)
     }

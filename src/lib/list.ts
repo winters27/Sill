@@ -222,7 +222,16 @@ export function onePerId(rows: RankedCommand[]): RankedCommand[] {
 }
 
 export function groupOf(command: RankedCommand): string {
-  return HEADINGS[command.mode] ?? command.extensionTitle;
+  /*
+   * A heading the row brought with it wins over the one its kind implies.
+   *
+   * Only Rust sets that, and only on the rows it puts at the top of the
+   * root list. It cannot be done by mode the way the update row is: mode
+   * is what `launch_command` dispatches on, and a real application wearing
+   * a mode invented for a heading is a row that draws correctly and then
+   * answers "no such command" on Enter.
+   */
+  return command.heading ?? HEADINGS[command.mode] ?? command.extensionTitle;
 }
 
 /**

@@ -257,6 +257,15 @@ export interface RankedCommand {
   strong?: boolean;
   /** The name the user gave this, when they gave it one. */
   alias?: string;
+  /**
+   * The heading to file this row under, instead of its kind's.
+   *
+   * Rust sets it on the rows it leads the root list with, and on nothing
+   * else. A row is grouped by what it is, which is right until one leads
+   * because of *when* it was opened: a folder used a minute ago sitting at
+   * the top under Files reads as a stray rather than as a section.
+   */
+  heading?: string;
 }
 
 export interface LaunchedCommand {
@@ -1562,6 +1571,15 @@ export function summonWith(command?: string): Promise<void> {
 export interface ActionInfo {
   id: string;
   title: string;
+  /**
+   * The mark the panel draws beside it, as a Raycast icon name.
+   *
+   * The same vocabulary an extension's own actions arrive in, so the panel
+   * draws both through one component. Declared by the action in Rust, where
+   * the trait makes it required: a row with no mark in a column of them
+   * reads as broken, so there is no default to fall through to.
+   */
+  icon: string;
   /** What Enter does. Exactly one per kind. */
   primary: boolean;
   /**
