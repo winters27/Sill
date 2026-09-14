@@ -335,8 +335,8 @@ impl Default for Appearance {
             font: InterfaceFont::Satoshi,
             glass_strength: 1.0,
             tint_alpha: 232,
-            visible_rows: 10,
-            window_width: 750,
+            visible_rows: 11,
+            window_width: 800,
             summon_on: SummonOn::Cursor,
         }
     }
