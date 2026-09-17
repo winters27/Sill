@@ -9,8 +9,13 @@
  * node for one.
  *
  * The subset is deliberate. Headings, paragraphs, fenced code, lists, quotes,
- * rules and tables cover what these services emit; footnotes, definition lists
- * and raw HTML do not appear and are left as the plain text they arrived as.
+ * rules, tables and images cover what these services emit; footnotes,
+ * definition lists and raw HTML do not appear and are left as the plain text
+ * they arrived as.
+ *
+ * An image is the only node whose address is *loaded* rather than followed, so
+ * it is the only one whose allow-list is not a question about where a person
+ * is sent. See [`pictureOf`], which is where that difference is written down.
  */
 
 /** One run of inline text. */
@@ -20,7 +25,23 @@ export type Span =
   | { kind: "strong"; spans: Span[] }
   | { kind: "em"; spans: Span[] }
   | { kind: "strike"; spans: Span[] }
-  | { kind: "link"; href: string; spans: Span[] };
+  | { kind: "link"; href: string; spans: Span[] }
+  | {
+      kind: "image";
+      href: string;
+      /** Kept even when empty: an empty alt is a deliberate "this says nothing". */
+      alt: string;
+      /** What the document asked for, which is not what it gets. See `pictureOf`. */
+      width?: number;
+      height?: number;
+    };
+
+/** An address a picture may be drawn from, with the size that was asked for. */
+interface Picture {
+  href: string;
+  width?: number;
+  height?: number;
+}
 
 /** One thing that stands on its own. */
 export type Block =
@@ -253,6 +274,10 @@ function textOf(spans: Span[]): string {
     .map((span) => {
       if (span.kind === "text") return span.text;
       if (span.kind === "code") return "`" + span.text + "`";
+      // Back to the source it was read from, because this is the *unparse*
+      // half of a round trip: the caller appends a wrapped line and parses the
+      // result again. An image holds no spans to recurse into.
+      if (span.kind === "image") return "![" + span.alt + "](" + span.href + ")";
       return textOf(span.spans);
     })
     .join("");
@@ -360,28 +385,107 @@ function codeMark(text: string): Found | null {
   };
 }
 
+/**
+ * A link, or a picture.
+ *
+ * One matcher for both, because they are one syntax with a mark in front of
+ * it. Two would be a ninth regex tried against every inline scan, and that
+ * scan already runs against every prefix of an answer as it arrives.
+ */
 function linkMark(text: string): Found | null {
-  const found = /\[([^\]]*)\]\(([^\s)]+)(?:\s+"[^"]*")?\)/.exec(text);
+  const found = /(!?)\[([^\]]*)\]\(([^\s)]+)(?:\s+"[^"]*")?\)/.exec(text);
   if (!found || found.index === undefined) return null;
 
-  const href = found[2];
+  const [whole, bang, label, href] = found;
+  const at = found.index;
+
+  if (bang) {
+    const picture = pictureOf(href);
+
+    /*
+     * A refused picture is its alt text, and nothing else.
+     *
+     * Everywhere else here falls back to the plain text a mark arrived as, and
+     * that is exactly wrong in the case this node exists for: the address is
+     * forty kilobytes of base64, and printing it *is* the bug. An empty alt
+     * draws nothing, because a document that said nothing about a picture it
+     * cannot show has given this nothing to put on screen.
+     */
+    return {
+      at,
+      length: whole.length,
+      span: picture ? { kind: "image", alt: label, ...picture } : { kind: "text", text: label },
+    };
+  }
 
   // Only schemes that go somewhere a person meant to go. `javascript:` is the
   // reason this is a list of what is allowed rather than a list of what is
   // not, even though nothing here ever becomes HTML.
   if (!/^(https?:|mailto:)/i.test(href)) {
-    return {
-      at: found.index,
-      length: found[0].length,
-      span: { kind: "text", text: found[0] },
-    };
+    return { at, length: whole.length, span: { kind: "text", text: whole } };
   }
 
-  return {
-    at: found.index,
-    length: found[0].length,
-    span: { kind: "link", href, spans: spansOf(found[1]) },
-  };
+  return { at, length: whole.length, span: { kind: "link", href, spans: spansOf(label) } };
+}
+
+/**
+ * An address this window will draw from, or `null`.
+ *
+ * `data:image/` and nothing else, and the two halves of that are separate
+ * decisions.
+ *
+ * Not `data:` generally, because `data:text/html` is a document and a document
+ * runs script. The media type is the whole of the check that this is a
+ * picture.
+ *
+ * Not `https:` either, and that is the one worth writing down, because the
+ * link above allows it and this does not. A link is followed by somebody who
+ * chose to; a picture is *fetched by the act of drawing the words*. This
+ * module renders an extension's detail pane and an answer a model wrote, and
+ * in both the address is content rather than something its author typed: it
+ * came from an API response, or from a page the model was asked to read. A
+ * remote one is a request nobody asked for, made the moment the text appears,
+ * carrying whatever is in its path to whoever is listening for it. A data URI
+ * is bytes that already arrived, so drawing one reaches nothing at all.
+ *
+ * This is deliberately tighter than `exthost/present.ts` is for an icon, where
+ * the source is a literal in the extension author's own code.
+ */
+function pictureOf(href: string): Picture | null {
+  const picture = sized(href);
+
+  // Case-insensitive because both halves are: the scheme by RFC 3986 and the
+  // media type by RFC 2045, and extensions write `data:image/PNG`.
+  return /^data:image\//i.test(picture.href) ? picture : null;
+}
+
+/**
+ * The address, with the size Raycast writes on the end of it taken off.
+ *
+ * `?raycast-width=` and `?raycast-height=` are how a Raycast extension asks
+ * for a picture at a size, and they are **not a query string**: a data URL has
+ * no query component, everything after the comma is payload, and
+ * `?raycast-width=320` is not in the base64 alphabet. Left on, the picture
+ * does not decode at all, which is a broken image rather than a wall of text
+ * and is no better. Every chart the Speedtest extension draws is written this
+ * way.
+ *
+ * Taken off only when the whole of what follows the last `?` is those two
+ * parameters, so a `?` that is part of a payload stays part of it.
+ */
+function sized(href: string): Picture {
+  const mark = href.lastIndexOf("?");
+  if (mark < 0) return { href };
+
+  const picture: Picture = { href: href.slice(0, mark) };
+
+  for (const part of href.slice(mark + 1).split("&")) {
+    const found = /^raycast-(width|height)=(\d{1,5})$/i.exec(part);
+    if (!found) return { href };
+    picture[found[1].toLowerCase() as "width" | "height"] = Number(found[2]);
+  }
+
+  return picture;
 }
 
 function wrapMark(text: string, marks: string, kind: string): Found | null {

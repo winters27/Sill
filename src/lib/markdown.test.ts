@@ -4,7 +4,13 @@ import { blocksOf, spansOf, type Block, type Span } from "./markdown";
 /** The text a tree holds, for asserting on shape without spelling out spans. */
 function textOf(spans: Span[]): string {
   return spans
-    .map((span) => (span.kind === "text" || span.kind === "code" ? span.text : textOf(span.spans)))
+    .map((span) => {
+      if (span.kind === "text" || span.kind === "code") return span.text;
+      // What an image puts into the document is its alt text. The address is
+      // an attribute, and several tests below are about it staying one.
+      if (span.kind === "image") return span.alt;
+      return textOf(span.spans);
+    })
     .join("");
 }
 
@@ -247,6 +253,150 @@ describe("inline", () => {
   it("takes the earliest mark, not the first kind checked", () => {
     const spans = spansOf("*first* then `second`");
     expect(spans.map((s) => s.kind)).toEqual(["em", "text", "code"]);
+  });
+});
+
+/*
+ * A picture is the one node whose address is loaded rather than followed, and
+ * every test here is about that difference. The extension that prompted them
+ * is Speedtest, which draws its charts as SVG data URIs and had been printing
+ * forty kilobytes of base64 into the pane as prose.
+ */
+describe("images", () => {
+  it("reads a data URI picture as a picture", () => {
+    const [span] = spansOf("![a chart](data:image/png;base64,iVBORw0KGgo=)");
+    expect(span).toEqual({
+      kind: "image",
+      href: "data:image/png;base64,iVBORw0KGgo=",
+      alt: "a chart",
+    });
+  });
+
+  it("reads a picture with no alt text", () => {
+    const [span] = spansOf("![](data:image/gif;base64,R0lGOD)");
+    expect(span).toEqual({ kind: "image", href: "data:image/gif;base64,R0lGOD", alt: "" });
+  });
+
+  it("reads the media type whatever case it is written in", () => {
+    expect(spansOf("![x](DATA:IMAGE/PNG;base64,iVBOR)")[0].kind).toBe("image");
+  });
+
+  /*
+   * `?raycast-width=` is not a query string. A data URL has no query
+   * component, so the suffix is part of the payload and is not in the base64
+   * alphabet: left on, the picture does not decode and draws as broken. This
+   * is the whole of the difference between fixing Speedtest and appearing to.
+   */
+  it("takes the size Raycast writes on the end off the address", () => {
+    const [span] = spansOf("![gauge](data:image/svg+xml;base64,PHN2Zy8+?raycast-width=320)");
+    expect(span).toEqual({
+      kind: "image",
+      href: "data:image/svg+xml;base64,PHN2Zy8+",
+      alt: "gauge",
+      width: 320,
+    });
+  });
+
+  it("reads both sizes when both are written", () => {
+    const [span] = spansOf("![x](data:image/png;base64,iVBOR?raycast-width=100&raycast-height=50)");
+    expect(span).toEqual({
+      kind: "image",
+      href: "data:image/png;base64,iVBOR",
+      alt: "x",
+      width: 100,
+      height: 50,
+    });
+  });
+
+  /** A `?` the document meant is payload, and payload is not touched. */
+  it("keeps a question mark that is not a size", () => {
+    const [span] = spansOf("![x](data:image/svg+xml,%3Csvg?%3E)");
+    expect(span).toEqual({ kind: "image", href: "data:image/svg+xml,%3Csvg?%3E", alt: "x" });
+  });
+
+  /*
+   * `data:` generally also spells `data:text/html`, which is a document rather
+   * than a picture. It must not become an image, and it must not fall through
+   * to the link branch either, which would put a live address on screen.
+   */
+  it("refuses data:text/html, and does not fall back to a link", () => {
+    const spans = spansOf("![page](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)");
+    expect(spans.map((span) => span.kind)).toEqual(["text"]);
+    expect(textOf(spans)).toBe("page");
+  });
+
+  it("refuses javascript:, as it does for a link", () => {
+    const spans = spansOf("![go](javascript:alert)");
+    expect(spans.every((span) => span.kind === "text")).toBe(true);
+    expect(textOf(spans)).toBe("go");
+  });
+
+  /*
+   * Deliberately tighter than the link above, which allows `https:`. A link is
+   * followed by somebody who chose to; a picture is fetched by the act of
+   * drawing the words, and this module also draws answers a model wrote.
+   */
+  it("refuses a remote address that the same link is allowed", () => {
+    const spans = spansOf("![a cat](https://example.com/cat.png)");
+    expect(spans.every((span) => span.kind === "text")).toBe(true);
+    expect(textOf(spans)).toBe("a cat");
+
+    expect(spansOf("[a cat](https://example.com/cat.png)")[0].kind).toBe("link");
+  });
+
+  /*
+   * The bug this whole node exists for. Falling back to the plain text a mark
+   * arrived as is right everywhere else in this module and is exactly wrong
+   * here, because the text is the address and the address is a page of base64.
+   */
+  it("does not put a refused address into the document", () => {
+    const blob = "data:text/html;base64," + "QUJD".repeat(500);
+    const spans = spansOf(`![a chart](${blob})`);
+
+    expect(textOf(spans)).toBe("a chart");
+    expect(textOf(spans)).not.toContain("QUJD");
+    expect(textOf(spans).length).toBeLessThan(20);
+  });
+
+  /** Nothing to draw and nothing said about it, so nothing is put on screen. */
+  it("draws nothing for a refused picture with no alt text", () => {
+    expect(textOf(spansOf("![](https://example.com/x.png)"))).toBe("");
+  });
+
+  it("does not read an exclamation mark that ends a sentence as a picture", () => {
+    expect(spansOf("Wow! [docs](https://example.com)").map((span) => span.kind)).toEqual([
+      "text",
+      "link",
+    ]);
+  });
+
+  /*
+   * A wrapped list item is rejoined by unparsing its spans back to source and
+   * parsing the result again. An image holds no spans, so the unparser has to
+   * know about it or this throws rather than failing.
+   */
+  it("survives a picture in a list item that wraps", () => {
+    const [block] = blocksOf("- ![c](data:image/png;base64,iVBOR)\n  and a caption");
+    expect(block.kind).toBe("list");
+    if (block.kind !== "list") return;
+    expect(block.items[0].spans.map((span) => span.kind)).toEqual(["image", "text"]);
+  });
+
+  it("reads the line the Speedtest extension actually writes", () => {
+    const [block] = blocksOf(
+      "![speedtest-download-52-0-17.855](data:image/svg+xml;base64,PHN2Zy8+?raycast-width=560)",
+    );
+
+    expect(block.kind).toBe("paragraph");
+    if (block.kind !== "paragraph") return;
+    expect(block.spans).toEqual([
+      {
+        kind: "image",
+        href: "data:image/svg+xml;base64,PHN2Zy8+",
+        alt: "speedtest-download-52-0-17.855",
+        width: 560,
+      },
+    ]);
   });
 });
 

@@ -5,6 +5,12 @@
    * Recursive, because emphasis nests. Every branch is an element written
    * here, so nothing reaches the document as a string of markup.
    *
+   * The `<img>` is the one branch whose attribute is *loaded*, so it is the
+   * one the parser has already refused an address for: by the time a span is
+   * an `image` its `href` is a `data:image/` URI, which is bytes that arrived
+   * with the text and reaches nothing. `$lib/markdown`'s `pictureOf` is where
+   * that is decided and why.
+   *
    * A single newline is a line break, which is `remarkBreaks` in the renderer
    * this follows. Strict markdown folds one into a space, and models do not
    * write that way: an address, a list of names, a set of steps written
@@ -37,7 +43,13 @@
       rel="noreferrer noopener">{#if span.spans.length}<Self
           spans={span.spans}
         />{:else}{span.href}{/if}</a
-    >{/if}{/each}
+    >{:else if span.kind === "image"}<img
+      src={span.href}
+      alt={span.alt}
+      width={span.width}
+      height={span.height}
+      decoding="async"
+    />{/if}{/each}
 
 <style>
   /*
@@ -87,5 +99,30 @@
 
   a:hover {
     text-decoration-color: var(--accent);
+  }
+
+  /*
+   * A picture, sized by the pane rather than by the document.
+   *
+   * `max-width` is the whole of the overflow rule. A table gets the scroller
+   * in `Markdown.svelte` because a table cannot be narrowed without hiding a
+   * column; a picture can be, and scaling a chart down loses nothing a
+   * sideways scrollbar would have kept. So a picture can never make the pane
+   * scroll sideways, and the `width` the document asked for is an upper bound
+   * rather than a size it is given.
+   *
+   * The height bound is for the other shape, a screenshot taller than it is
+   * wide, which would otherwise push everything written after it off the pane.
+   * Either constraint holds the aspect ratio by itself, which is what the
+   * `auto` is for.
+   */
+  img {
+    max-width: 100%;
+    max-height: 340px;
+    height: auto;
+    border-radius: var(--radius-md);
+    /* Centred on the line rather than sat on its baseline, which leaves a
+       descender's worth of gap under a picture alone in a paragraph. */
+    vertical-align: middle;
   }
 </style>
