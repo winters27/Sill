@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": true,
   "description": "Extension host: runs Raycast-compatible extensions in worker threads and speaks Sill's JSON-RPC protocol over stdio",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "commonjs",
   "main": "dist/host.js",
   "scripts": {

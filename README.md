@@ -28,7 +28,7 @@
     alt="downloads"></a>
   <a href="LICENSE"><img
     src="https://img.shields.io/github/license/winters27/Sill"
-    alt="MIT"></a>
+    alt="AGPL-3.0"></a>
   <a href="https://github.com/winters27/Sill/stargazers"><img
     src="https://img.shields.io/github/stars/winters27/Sill?style=flat"
     alt="stars"></a>
@@ -63,8 +63,8 @@ ranked by what you actually open. Press Enter and it does the obvious thing.
 Press Escape and it is gone.
 
 The core is Rust and the interface is Svelte, so it starts fast, stays small,
-and costs close to nothing while it waits. It runs on Windows 11 and is MIT
-licensed.
+and costs close to nothing while it waits. It runs on Windows 11 and is free
+software under the AGPL-3.0.
 
 ## What it does
 
@@ -277,9 +277,20 @@ change has to pass.
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE). Three third-party works travel with this project
-under their own terms, and [resources/NOTICE](resources/NOTICE) names each: a
-Windows settings catalogue from Microsoft PowerToys, the marks and menu glyphs
-from Phosphor Icons, and the Satoshi typeface from Indian Type Foundry.
+AGPL-3.0-only. See [LICENSE](LICENSE). Copyright (c) 2026 Brandon Winters.
+
+Sill is free software: you may redistribute and modify it under the terms of
+the GNU Affero General Public License, version 3. It carries no warranty. A
+work that includes any part of Sill has to be offered under the same licence,
+which a permissive licence would not have required.
+
+Everything up to and including the `0.3.0` tag was published under MIT and
+stays available under those terms. Relicensing binds what comes after it, not
+what was already given away.
+
+Three third-party works travel with this project under their own terms, and
+[resources/NOTICE](resources/NOTICE) names each: a Windows settings catalogue
+from Microsoft PowerToys, the marks and menu glyphs from Phosphor Icons, and
+the Satoshi typeface from Indian Type Foundry.
 
 <p align="center"><sub><i>Made by Winters.</i></sub></p>

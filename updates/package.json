@@ -2,7 +2,7 @@
   "name": "@sill/updates",
   "private": true,
   "description": "The update endpoint Sill asks for latest.json, which proxies GitHub and counts the checks",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",

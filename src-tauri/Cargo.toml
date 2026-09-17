@@ -4,7 +4,7 @@ version = "0.3.0"
 description = "Sill: a Raycast-compatible launcher for Windows"
 authors = ["Brandon Winters"]
 edition = "2021"
-license = "MIT"
+license = "AGPL-3.0-only"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
