@@ -1,27 +1,43 @@
 //! The windows on the desktop, as things Sill can find and act on.
 //!
-//! Nothing here runs unless somebody asks. There is no watcher, no timer and
-//! no cached list: enumerating every top-level window is a few hundred
-//! microseconds of synchronous Win32, and a launcher only needs the answer
-//! when a query is being typed. Keeping a live model of the desktop up to date
-//! would mean a shell hook and a stream of events for a question nobody is
-//! asking most of the time, which rule 23 rules out.
+//! Nothing here runs unless somebody asks. There is no watcher and no timer: a
+//! reading is taken when the launcher is shown and while somebody is typing
+//! into it, and never while Sill is closed. Keeping a live model of the
+//! desktop up to date would mean a shell hook and a stream of events for a
+//! question nobody is asking most of the time, which rule 23 rules out.
+//!
+//! **What is asked for is never waited for.** The last reading is held in a
+//! `state::Fresh`, and [`recent_records`] hands back whatever is in it and
+//! starts the next reading behind the caller. See that function for why.
 //!
 //! **The one thing here that is not Win32 is the cloaked windows.** A window
 //! on another virtual desktop looks exactly like a suspended store
 //! application from Win32's side, and telling them apart is a question for
-//! `desktops`, which is COM and costs about a millisecond for the whole batch.
-//! It is asked once per enumeration, only about the windows that are cloaked,
-//! and not at all on a machine where none are. Measured on 2026-09-03: a list
-//! of sixteen windows with one cloaked among them is 2.9 to 5.5 ms in a debug
-//! build, of which 1 to 2 ms is the desktop question, and asking about no
-//! cloaked windows at all is under a microsecond.
+//! `desktops`, which is COM.
+//!
+//! ## What an enumeration actually costs
+//!
+//! Measured on 2026-09-03: a list of **sixteen** windows with one cloaked among
+//! them is 2.9 to 5.5 ms in a debug build, of which 1 to 2 ms is the desktop
+//! question, and asking about no cloaked windows at all is under a microsecond.
+//!
+//! That number was read as "a few hundred microseconds of synchronous Win32,
+//! cheap enough to do on a keystroke". **It does not generalise, because the
+//! cost is per window and sixteen is a quiet desktop.** Measured again on
+//! 2026-09-16 on a desktop with **276 top-level windows**: about **400 ms** for
+//! one enumeration, in a release build. Doing that on a keystroke took the
+//! median keystroke to 151 ms and the worst to 909 ms.
+//!
+//! So: a cost that is linear in something the machine owns rather than
+//! something Sill owns is not a constant, and a measurement of it is only ever
+//! a measurement of the machine it was taken on.
 //!
 //! The layout arithmetic is separate from the Win32 calls on purpose. Where a
 //! window should go is the part with judgement in it and the part that can be
 //! wrong; it is pure functions over rectangles, tested without a desktop.
 
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 /// A rectangle in virtual-screen coordinates.
 ///
@@ -1028,28 +1044,91 @@ pub use platform::{
 /// Chrome window when not one of them has "chrome" in its title.
 /// How long an enumeration is reused for.
 ///
-/// Long enough that a burst of typing walks the desktop once rather than once
-/// per character, short enough that a window opened while the launcher is up
-/// is findable by the time anybody has finished typing its name. The same
-/// bargain, and the same number, `system::live` makes for switches.
+/// How old a reading may be before the next search asks for another.
+///
+/// Not a wait any more. Nobody is held up by this number: it decides when a
+/// reading is taken behind the search rather than how long a keystroke stands
+/// still. Short enough that a window opened while the launcher is up is
+/// findable by the time anybody has finished typing its name.
 pub const FRESH_FOR: std::time::Duration = std::time::Duration::from_millis(1000);
 
-/**
-The open windows, enumerated at most once a second.
+/// The cache these rows live in, named once so three signatures agree.
+type Windows = crate::state::Fresh<Vec<crate::registry::CommandRecord>>;
 
-For the search path, which asks on every keystroke. `EnumWindows` walks every
-top-level window on the desktop and asks each one for its title, its process
-and whether the compositor has it cloaked, so typing eight characters did all
-of that eight times for a list that had not changed.
+/**
+The open windows as launcher rows, from the last reading taken.
+
+**This never enumerates on the caller's thread**, and that is the whole point
+of it. `EnumWindows` walks every top-level window on the desktop and asks each
+one for its title, its process and whether the compositor has it cloaked. On a
+desktop with 276 windows that was measured at about 400 ms, and the search path
+asks on every keystroke, so typing waited on the desktop: the median keystroke
+took 151 ms and the worst 909 ms. Reading the last answer instead took the
+median to 20 ms.
+
+A reading that has aged out starts another one behind this call, which returns
+without waiting for it. So a search can be answered from a list a moment out of
+date. That is the trade, and it is the right way round: the window list changes
+when somebody opens a window, which is not something they are doing while
+typing into this launcher, and a stale row still opens the right window because
+[`focus`] is given a handle and checks it.
 
 The switcher deliberately does not use this: it is opened on purpose, its whole
 value is that the first row is the window you were just in, and a second-old
-Z-order is exactly the thing it must not show.
+Z-order is exactly the thing it must not show. It enumerates on a blocking
+thread of its own.
 */
-pub fn recent_records(
-    windows: &crate::state::Fresh<Vec<crate::registry::CommandRecord>>,
-) -> Vec<crate::registry::CommandRecord> {
-    windows.get(records)
+pub fn recent_records(app: &tauri::AppHandle) -> Vec<crate::registry::CommandRecord> {
+    let Some(windows) = app.try_state::<Windows>() else {
+        return Vec::new();
+    };
+
+    let (held, stale) = windows.held();
+
+    if stale {
+        refresh_behind(app);
+    }
+
+    held.unwrap_or_default()
+}
+
+/**
+Takes a reading off this thread, if one is not already being taken.
+
+Returns as soon as it has handed the work over, so a caller on the search path
+pays a compare-exchange and a thread spawn and nothing else.
+
+Called from two places, and the second is what keeps the first from being a
+regression: the search path asks when its reading has aged out, and
+[`crate::summon::show`] asks when the launcher appears. Without the second, the
+first keystroke of a session would be answered from the list as it was when the
+launcher was last closed, because a refresh started by that keystroke cannot
+land before it returns.
+
+Nothing runs while Sill is closed. A reading is taken when the launcher is
+shown and while somebody is typing into it, and at no other time.
+*/
+pub fn refresh_behind(app: &tauri::AppHandle) {
+    let Some(windows) = app.try_state::<Windows>() else {
+        return;
+    };
+
+    // Nobody else is taking one, and now nothing else will until this ends.
+    let Some(taking) = windows.claim() else {
+        return;
+    };
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // Held for the whole reading, and lowered however this ends.
+        let _taking = taking;
+
+        let reading = records();
+
+        if let Some(windows) = app.try_state::<Windows>() {
+            windows.renew(reading);
+        }
+    });
 }
 
 /**

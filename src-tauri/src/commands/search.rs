@@ -105,7 +105,7 @@ pub(crate) async fn search_commands(
     let windows = if query.trim().is_empty() {
         Vec::new()
     } else {
-        windowing::recent_records(&app.state::<crate::state::Fresh<Vec<registry::CommandRecord>>>())
+        windowing::recent_records(&app)
     };
 
     // Chained, not collected: both sides are borrowed and nothing is copied.

@@ -69,6 +69,8 @@ pub(crate) struct HostState {
 pub struct Fresh<T> {
     held: std::sync::Mutex<Option<(std::time::Instant, T)>>,
     good_for: std::time::Duration,
+    /// Whether a reading is already being taken somewhere off this thread.
+    taking: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl<T: Clone> Fresh<T> {
@@ -76,6 +78,7 @@ impl<T: Clone> Fresh<T> {
         Self {
             held: std::sync::Mutex::new(None),
             good_for,
+            taking: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -100,6 +103,58 @@ impl<T: Clone> Fresh<T> {
         reading
     }
 
+    /**
+    What is held, without ever taking a reading, and whether it has aged out.
+
+    [`get`](Self::get) is for a caller that can afford to wait for the answer
+    it asked for. This is for one that cannot: the search path runs on every
+    keystroke and must never do this work itself. See
+    `windowing::recent_records`, where waiting for one of these was measured at
+    400 ms a keystroke.
+
+    `None` only before the first reading of the run. After that the last one is
+    kept whatever its age, because a caller that cannot wait is drawing
+    something, and a list a moment out of date beats an empty one.
+    */
+    pub fn held(&self) -> (Option<T>, bool) {
+        let held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+
+        match held.as_ref() {
+            Some((taken, reading)) => (Some(reading.clone()), taken.elapsed() >= self.good_for),
+            None => (None, true),
+        }
+    }
+
+    /// Keeps a reading taken somewhere else.
+    ///
+    /// The other half of [`held`](Self::held): whoever took the slow path off
+    /// the hot thread puts the answer here for the next reader.
+    pub fn renew(&self, reading: T) {
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        *held = Some((std::time::Instant::now(), reading));
+    }
+
+    /**
+    Claims the right to take a reading, if nobody else holds it.
+
+    A compare-exchange rather than a store, for the reason
+    [`take_repeat`](crate::state::take_repeat) uses one: **every keystroke
+    asks**. Two threads enumerating the desktop at once is the cost this type
+    exists to avoid, paid twice and on two cores.
+
+    The guard owns a handle on the flag rather than borrowing the cache, so it
+    can be carried onto the thread doing the work and still lower the flag if
+    that thread panics.
+    */
+    pub fn claim(&self) -> Option<Taking> {
+        use std::sync::atomic::Ordering;
+
+        self.taking
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Taking(self.taking.clone()))
+    }
+
     /// Throws the last reading away.
     ///
     /// For the moment something is known to have changed: pressing a switch
@@ -109,6 +164,20 @@ impl<T: Clone> Fresh<T> {
         if let Ok(mut held) = self.held.lock() {
             *held = None;
         }
+    }
+}
+
+/// The right to take one reading, held for as long as the taking lasts.
+///
+/// A guard rather than a pair of calls, for the reason [`FirstScan`] is one:
+/// the work happens on another thread and can end by panicking, and a flag
+/// left raised by that would mean no reading is ever taken again for the life
+/// of the run. There is no way to forget to lower it.
+pub struct Taking(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for Taking {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -1241,6 +1310,69 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /**
+    An aged reading is handed back, not thrown away.
+
+    This is the promise that lets the search path stop waiting. A keystroke
+    asks for the open windows, and if the answer is old it still wants it:
+    the alternative is searching an empty window list for the 400 ms it takes
+    to walk a busy desktop, which is the whole defect this replaced.
+
+    Returning `None` when stale would compile, pass any test about staleness,
+    and silently drop every window row out of the launcher for the first
+    keystroke of every session.
+    */
+    #[test]
+    fn a_reading_past_its_window_is_still_handed_back() {
+        let fresh: Fresh<Vec<String>> = Fresh::new(std::time::Duration::from_millis(1));
+        fresh.renew(vec!["a window".to_string()]);
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let (held, stale) = fresh.held();
+
+        assert!(stale, "a reading past its window did not ask to be replaced");
+        assert_eq!(
+            held.unwrap_or_default(),
+            vec!["a window".to_string()],
+            "an aged reading was dropped rather than handed back, so a \
+             keystroke would search an empty list while the next one is taken"
+        );
+    }
+
+    /**
+    One reading at a time, and the right to take one always comes back.
+
+    Every keystroke asks, so without the claim a burst of typing would start a
+    walk of the desktop per character: the cost this exists to avoid, paid
+    several times over and on several cores at once.
+
+    The second half is the one that fails quietly. A flag raised and never
+    lowered means no reading is ever taken again for the life of the run, and
+    nothing about that looks like an error: the launcher goes on answering
+    from a window list that stopped changing.
+    */
+    #[test]
+    fn only_one_reading_is_taken_at_a_time() {
+        let fresh: Fresh<Vec<String>> = Fresh::new(std::time::Duration::from_millis(0));
+
+        let first = fresh.claim();
+        assert!(first.is_some(), "nobody held it and the first caller was refused");
+        assert!(
+            fresh.claim().is_none(),
+            "a second caller was let in, so two threads would walk the desktop \
+             at the same time"
+        );
+
+        drop(first);
+
+        assert!(
+            fresh.claim().is_some(),
+            "the right to take a reading did not come back when the last one \
+             ended, so the window list is frozen for the rest of the run"
+        );
     }
 }
 

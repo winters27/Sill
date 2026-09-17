@@ -491,6 +491,19 @@ pub fn show(window: &WebviewWindow) {
     let _ = window.show();
     let _ = window.set_focus();
 
+    /*
+     * The window list, read while somebody is deciding what to type.
+     *
+     * The search path will not enumerate the desktop itself, so without this
+     * the first search of a session would be answered from the list as it was
+     * when the launcher was last closed. Started here, it has the time it
+     * takes to read the screen and press a key to land, which is longer than
+     * it needs.
+     *
+     * Off this thread: it is the one about to paint.
+     */
+    crate::windowing::refresh_behind(&window.app_handle().clone());
+
     // Tauri exposes an HWND from its own pinned `windows` version, which is a
     // different type to ours even though the value is identical. The raw
     // pointer is the common ground.
