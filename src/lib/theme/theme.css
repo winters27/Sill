@@ -352,18 +352,32 @@
    * It is the same two-layer composite StreamNook's `.glass-flyout` uses: a
    * surface, then a flat tint over it, then the light off the top edge.
    *
-   * White in both themes rather than `--ink`, for the reason written on
-   * `--sheen` and `--bevel-tile` in frost-light: the light that makes glass
-   * read as glass comes from above whichever way the surface goes. On a
-   * pale theme it has to be much stronger, because lifting near-white off
-   * near-white takes more than lifting off near-black.
+   * The theme's own accent rather than white, and that is what makes the
+   * two-layer idea above actually work.
+   *
+   * White was the light here, and white raises every channel by the same
+   * amount. The hue survives the addition and the brightness it is measured
+   * against triples, so what arrives reads grey. Measured on oilslick,
+   * against a dark desktop: the launcher's own surface carries 23.8% chroma
+   * relative to its brightness, and the menu floating on it carried 8.9%.
+   * A menu a third as coloured as the window under it is the whole of
+   * "none of the theme reaches the menus".
+   *
+   * The accent at the same alpha carries 24.0%, which is the surface it
+   * floats on, and lands at rgb(55,51,65) where white landed at
+   * rgb(63,62,67). More colour and slightly deeper, so nothing is given up
+   * to get it.
+   *
+   * `frost-light` keeps white, and keeps it strong. On a pale surface the
+   * shadow does the lifting and the highlight only has to exist; a tinted
+   * light there would read as a stain rather than as glass.
    *
    * **This is the dial for "the menu looks too dark".** The base was
    * `--core-secondary-background` at 92% and the window is the same colour
    * at 88%, so before this the popover was the same value as the thing it
    * floated on and nothing about it read as raised.
    */
-  --menu-lift: rgba(255, 255, 255, 0.13);
+  --menu-lift: rgba(var(--accent-rgb), 0.13);
 
   /*
    * A window that is only a menu, which is a different problem again.
@@ -475,7 +489,7 @@
   --etch: rgba(0, 0, 0, 0.62);
 
   /*
-   * The window's edge: a hairline ring, and a light catch along the top.
+   * The window's edge: one hairline ring, and nothing else.
    *
    * DWM defines the shape and clips to it, so the ring is drawn inside the
    * window and follows the rounded corner exactly; nothing can be drawn
@@ -485,14 +499,13 @@
    * around the window in its own colour (switched off in summon.rs). One
    * ring at hairline strength is the whole border now: enough for the pane
    * to separate from a wallpaper of its own colour, faint enough to be
-   * glass. The catch along the top is where light lands on a sheet.
+   * glass. Every other glass surface takes `--sheen`; the window does not,
+   * so its edge reads as a cut rather than a lit bevel.
    *
    * A border plus two 1px insets was 3px of edge treatment stacked where
    * DWM clips the corner; on a 750x500 launcher that read as a frame.
    */
-  --bevel-window:
-    inset 0 0 0 1px var(--hairline),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+  --bevel-window: inset 0 0 0 1px var(--hairline);
 
   /* The single light catch a selected row takes. One bevel per edge, and a
      row has no border to stack it on. */
@@ -838,7 +851,7 @@
   --text-title: 20px;
   --text-query: 18px;
   --text-heading: 15px;
-  --text-row: 14px;
+  --text-row: 15px;
   --text-body: 13px;
   --text-meta: 12px;
   --text-group: 12px;
@@ -859,7 +872,7 @@
 
   /* Variable faces, so the in-between weight is real. 450 reads as "slightly
      more present" without the jump to a semibold. */
-  --weight-body: 450;
+  --weight-body: 500;
   --weight-medium: 500;
   --weight-strong: 600;
 
@@ -892,6 +905,17 @@
      have different default metrics and Rust cannot see which one is active. */
   --line-body: 17px;
   --line-meta: 14px;
+  /*
+   * The row title's own line box, because it is the one place that sets text
+   * at `--text-row` rather than `--text-body`.
+   *
+   * It has to be taller than `--line-body` for the same reason it exists: the
+   * title is 15px against the body's 13px, and the title clips its overflow,
+   * so a line box sized for the smaller face takes the tail off every g, y and
+   * p. Pair this with `--text-row` and `--line-body` with `--text-body`;
+   * crossing them is what cut the descenders off.
+   */
+  --line-row: 20px;
 
   /* Overridden per face: only Segoe has a separate display cut. */
   --font-display: var(--font);
@@ -1421,11 +1445,14 @@ body {
    * at 13px it gives jagged stems and any stroke thinner than a pixel simply
    * vanishes, because there is nowhere for it to go.
    *
-   * `geometricPrecision` keeps glyph advances unrounded, which is what stops
-   * words drifting apart as they get longer.
+   * `text-rendering` stays at `auto` so the rasteriser is allowed to
+   * grid-fit. `geometricPrecision` buys exact glyph advances, so long words
+   * keep their spacing, and pays for them by putting every stem on a
+   * fractional pixel. In a window this small the text is most of what there
+   * is, so crisp stems are worth more than exact advances.
    */
   -webkit-font-smoothing: antialiased;
-  text-rendering: geometricPrecision;
+  text-rendering: auto;
   font-optical-sizing: auto;
   font-feature-settings: var(--font-features, "kern" 1, "liga" 1, "calt" 1);
   user-select: none;
@@ -1525,6 +1552,21 @@ body {
 
 .sill-row:hover:not(.selected) {
   background-color: var(--fill-1);
+}
+
+/*
+ * The row under the pointer.
+ *
+ * Neutral, never the accent: the accent marks selection, matches, focus
+ * and affirmative state, and a hover is none of those. The note on the
+ * ramp says it outright, that a hover is not a selection, and two accents
+ * in one list would leave nothing saying which row Enter means.
+ *
+ * The same fill every other hover in the app takes, so a row lights the
+ * way a chin button does.
+ */
+.sill-row.hovered {
+  background-color: var(--fill-2);
 }
 
 /* The selected row is the one lit tile on the surface, and the one place in
