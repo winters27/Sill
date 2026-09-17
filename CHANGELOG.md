@@ -19,6 +19,49 @@ IPC surface, the dependencies added, and every commit body in full. What goes
 in a section here is the subset of that which somebody would notice, said
 differently.
 
+## 0.4.0
+
+**Typing keeps up.** Every keystroke asked Windows for the list of open
+windows, and on a busy desktop that is most of a second of work: with 276
+windows open the middle keystroke took 151ms and the worst 909ms. Searching
+reads the answer it already has now, and takes 22ms. The list is still
+current; it is refreshed a moment after you type rather than while you wait.
+
+**The top left says which place you are in.** It used to be Sill's logo on
+every screen, with the name of the place beside it. Now it is that place: an
+extension's own icon, or the art of the settings panel a launcher screen
+belongs to, so a screen and the row that opened it are one picture. Nothing is
+written next to it, because the picture already said it. At the root, where
+you are not inside anything, it is a magnifier.
+
+**Sill's own mark is in the bottom left**, on the button that opens its menu,
+where a caret used to be.
+
+**The clock, the battery and the weather sit in the middle of the chin.** They
+hung off the keys on the right before, so pinning a second reading pushed the
+first one sideways. One, two or three now grow out from the centre and stay
+there.
+
+**You can rank, pin, name and bind a row from the action panel.** Those were
+settings you had to go and find, about a row you were already looking at.
+Naming was already there; the other four have joined it, and all of them are
+reachable from a key, from the model and from an automation as well.
+
+**Menus are your theme's colour.** The light across the top of a popover was
+white, which washes a hue out rather than lifting it, so a menu floated on the
+window looking a third as coloured as the window under it. Light themes keep
+the white, where a tinted highlight would read as a stain.
+
+**A Detail view draws pictures.** An extension that makes its own chart has
+nowhere to put it but the text, and the wall of characters you saw instead of
+one was the picture, printed.
+
+**The launcher opens at 750 by 509.** A fresh install only; if you have ever
+changed the size, yours is the one that counts.
+
+**Sill is licensed under the AGPL, version 3.** Everything up to and including
+the 0.3.0 tag was published under MIT and stays available under it.
+
 ## 0.3.0
 
 **The last five things you opened lead the list.** Nothing typed, and what
