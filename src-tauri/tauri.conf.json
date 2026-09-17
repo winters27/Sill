@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "Sill",
-        "width": 800,
-        "height": 549,
+        "width": 750,
+        "height": 509,
         "visible": false,
         "focus": false,
         "decorations": false,
