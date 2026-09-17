@@ -168,8 +168,7 @@
   <h2>Launcher</h2>
   <div class="launcher">
     <div class="l-search">
-      <img src="/sill.png" alt="" width="26" height="26" />
-      <span class="l-crumb">Clipboard History</span>
+      <SettingsIcon name="clipboard" size={26} />
       <input placeholder="Search for apps and commands…" spellcheck="false" />
     </div>
     <div class="l-divider"></div>
@@ -193,20 +192,13 @@
       {/each}
     </div>
     <footer class="l-footer">
-      <button class="l-context">
-        <img src="/sill.png" alt="" width="18" height="18" />
-        <svg width="9" height="9" viewBox="0 0 12 12" aria-hidden="true">
-          <path d="M2.5 7.5 6 4l3.5 3.5" stroke="currentColor" stroke-width="1.6"
-            stroke-linecap="round" stroke-linejoin="round" fill="none" />
-        </svg>
+      <button class="l-context" aria-label="Sill menu">
+        <img src="/sill.png" alt="" width="20" height="20" />
       </button>
       <span class="l-spacer"></span>
-      <span class="l-escape">Close <span>Esc</span></span>
-      <div class="l-pill">
-        <button class="l-seg">Open <span class="sill-key">↵</span></button>
-        <span class="l-split"></span>
-        <button class="l-seg">Actions <span class="sill-key">Ctrl K</span></button>
-      </div>
+      <button class="l-seg">Open <span class="sill-key">↵</span></button>
+      <span class="l-split"></span>
+      <button class="l-seg">Actions <span class="sill-key">Ctrl K</span></button>
     </footer>
   </div>
 
@@ -582,17 +574,6 @@
     padding-left: var(--space-4);
   }
 
-  .l-crumb {
-    flex: none;
-    padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-sm);
-    background-image: var(--sheen);
-    box-shadow: var(--bevel-tile);
-    color: var(--text-2);
-    font-size: var(--text-meta);
-    white-space: nowrap;
-  }
-
   .l-search input {
     flex: 1;
     min-width: 0;
@@ -700,9 +681,8 @@
   }
 
   .l-context {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
+    display: grid;
+    place-items: center;
     flex: none;
     height: 30px;
     padding: 0 var(--space-2);
@@ -717,27 +697,14 @@
   }
 
   .l-context:hover { background: var(--fill-2); color: var(--text-1); }
-  .l-context svg { color: var(--text-4); }
-
-  .l-escape { display: flex; align-items: center; gap: var(--space-1); color: var(--text-4); }
-  .l-escape span { font-weight: var(--weight-medium); }
-
-  .l-pill {
-    display: flex;
-    align-items: center;
-    flex: none;
-    height: 30px;
-    border-radius: var(--radius-lg);
-    background: var(--fill-2);
-    box-shadow: var(--bevel-tile);
-    overflow: hidden;
-  }
 
   .l-seg {
     display: flex;
     align-items: center;
+    flex: none;
     gap: var(--space-2);
-    height: 100%;
+    height: 30px;
+    border-radius: var(--radius-md);
     padding: 0 var(--space-2);
     border: 0;
     background: transparent;

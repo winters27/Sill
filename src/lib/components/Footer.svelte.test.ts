@@ -55,7 +55,8 @@ describe("the chin says there is a newer Sill", () => {
       update: chinLine({ kind: "available", version: "0.3.0", notes: null }),
     });
 
-    // A pill, in the shape the action pill next to it uses, and pressable.
+    // A raised pill, which is now the only one on the chin: the two action
+    // keys beside it stand on the surface with no container of their own.
     const pill = target.querySelector("button.update");
     expect(pill?.textContent?.trim()).toBe("Update to 0.3.0");
 

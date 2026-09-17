@@ -141,28 +141,40 @@
 </script>
 
 <!--
-  Where you are, with the picture of the place.
+  Where you are, as a picture and nothing else.
 
-  The crumb used to be a word. A word says which face is on screen; the
-  picture beside it says it at a glance, the way the row that opened the
-  place did. An extension wears its own icon, the one its row wears in the
-  list; each of the launcher's own faces wears the settings art of the panel
-  it belongs to, so the clipboard crumb and the Clipboard panel are one
-  picture. A face with no art of its own stays a word.
+  The picture stands where the window's own mark used to, and is the same one
+  the row that opened the place wore: an extension wears its own icon, and each
+  of the launcher's own faces wears the settings art of the panel it belongs to,
+  so the clipboard crumb and the Clipboard panel are one picture.
+
+  There is no name beside it. Sill draws art for effectively everything it can
+  put you inside, so a word next to that art was the same fact twice, and the
+  picture is the half that reads without being read.
+
+  `text` did not become unused when the label went. It is the accessible name,
+  and it is the letter on the tile below, which is what a face with no art of
+  its own falls back to -- the same drawing its row falls back to in the list,
+  for the same reason.
+
+  So the slot is `role="img"` carrying the name the label used to show. That
+  puts the name back for somebody listening, who cannot take a glance at a
+  clipboard, and it is what stops the lettered tile from being announced as a
+  bare "C" in front of nothing.
 -->
 {#snippet crumb(text: string, panel?: IconName, path?: string)}
-  <span class="crumb">
+  <span class="lead" role="img" aria-label={text}>
     {#if path}
-      <span class="crumb-mark"><LaunchIcon {path} label={text} resolvable /></span>
+      <LaunchIcon {path} label={text} resolvable />
     {:else if panel}
-      <SettingsIcon name={panel} size={14} />
+      <SettingsIcon name={panel} size={26} />
+    {:else}
+      <LaunchIcon path="" label={text} resolvable={false} />
     {/if}
-    <span class="crumb-text">{text}</span>
   </span>
 {/snippet}
 
 <div class="search">
-  <img class="mark" src="/sill.png" alt="" width="26" height="26" draggable="false" />
   {#if mode === "argument" && awaitingTitle !== undefined}
     {@render crumb(awaitingTitle)}
   {:else if mode === "output" && outputTitle !== undefined}
@@ -189,16 +201,25 @@
       with something rather than another list.
 
       Still a button, and the same button as the chip in the root list, so
-      changing model is in one place whichever end you reach it from.
+      changing model is in one place whichever end you reach it from. A provider
+      draws a bare glyph where a panel draws a plaque, so it is set a step under
+      the tile it stands in and carries the same weight as the settings art
+      other modes lead with.
+
+      The mark IS the button here, rather than a picture with a pressable name
+      next to it. Losing the name to the rule the rest of the row follows would
+      otherwise take the control with it, and changing model would be a trip
+      through Settings again. Which model is answering moves into the hint and
+      the accessible name, both of which already said it.
     -->
     {#if answersWith?.ready}
       <button
-        class="crumb who-crumb"
+        class="lead who-lead"
         onclick={() => void openSettings("ai")}
         use:hint={askingIs}
+        aria-label="Answering with {answersWith.model || answersWith.name}"
       >
-        <AiMark name={answersWith.id} size={13} />
-        <span class="who">{answersWith.model || answersWith.name}</span>
+        <AiMark name={answersWith.id} size={20} />
       </button>
     {:else}
       {@render crumb("AI Chat", "ai")}
@@ -223,6 +244,29 @@
     {@render crumb(namingTitle)}
   {:else if runningTitle !== undefined}
     {@render crumb(runningTitle, runningPanelName, runningIconPath)}
+  {:else}
+    <!--
+      The root, where you are not inside anything.
+
+      The slot says what is being searched, so at the root it says everything,
+      and a magnifier is the drawing for that. Leaving it empty was the other
+      candidate and reads well on its own, but the field then begins 46px
+      further left here than in every other mode, so entering a place slides
+      the caret and the placeholder sideways under the cursor.
+
+      Sill's own mark was the third, and it is the one thing this slot can no
+      longer be: the mark is in the chin now, and drawing it here as well puts
+      the same picture in two corners saying two different things.
+
+      Hidden from screen readers. The field is already labelled Search and the
+      placeholder says what it searches; this repeats both in a picture.
+    -->
+    <span class="lead" aria-hidden="true">
+      <svg class="glass" width="20" height="20" viewBox="0 0 24 24">
+        <circle cx="10.5" cy="10.5" r="6.75" stroke="currentColor" stroke-width="1.8" fill="none" />
+        <path d="M15.4 15.4 20.5 20.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+      </svg>
+    </span>
   {/if}
   <!--
     A combobox, which is what this is: a field whose typing filters a list
@@ -372,73 +416,39 @@
     flex: none;
   }
 
-  /* The mark stands where a magnifier would, so the window is identifiable
-     the moment it appears rather than only from its contents.
+  /* The place you are in, at the size its row wears in the list.
 
-     The app icon itself, at the size it is drawn everywhere else. There is
-     no separate in-app mark any more: the art lost its plaque, so the thing
-     on the taskbar is already the right thing to put here. */
-  .mark {
-    flex: none;
-    width: var(--icon-tile);
-    height: var(--icon-tile);
-    -webkit-user-drag: none;
-  }
-
-  /* A chip, not a tile. The sheen-and-bevel recipe belongs to something that
-     reads as a raised object; this is a label saying where you are. */
-  .crumb {
-    display: inline-flex;
-    flex: none;
-    gap: var(--space-1);
-    align-items: center;
-    /* An extension's or a file's name, so it is bounded the way `.who`
-       below is; otherwise a long one squeezes the field to nothing. */
-    max-width: 24ch;
-    padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-sm);
-    background: var(--fill-2);
-    color: var(--text-2);
-    font-size: var(--text-meta);
-    white-space: nowrap;
-  }
-
-  .crumb-text {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* The extension's own picture at the crumb's size rather than a row's. */
-  .crumb-mark {
-    --icon-tile: 14px;
+     A fixed square rather than whatever the picture inside it happens to be,
+     so the field begins at one x whichever picture is standing there and
+     entering a place does not nudge the caret sideways. There is no longer a
+     name after it that could have absorbed the difference. */
+  .lead {
     display: grid;
     flex: none;
     place-items: center;
+    width: var(--icon-tile);
+    height: var(--icon-tile);
   }
 
-  /* The one crumb that is pressable, so it says so on hover rather than only
-     when the pointer is already on it. */
-  .who-crumb {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
+  /* The one picture that is pressable, so it says so on hover rather than only
+     once the pointer is already on it. The tile's own size and nothing more: a
+     padded target here would be the one mode whose field starts further right
+     than every other mode's. */
+  .who-lead {
+    padding: 0;
     border: 0;
-    padding-left: var(--space-1);
+    border-radius: var(--radius-sm);
+    background: transparent;
     font: inherit;
-    font-size: var(--text-meta);
     cursor: pointer;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
+    transition: background-color var(--motion-state) var(--ease);
   }
 
-  .who-crumb:hover {
-    background: var(--hairline-strong);
-    color: var(--text-1);
+  .who-lead:hover {
+    background: var(--fill-2);
   }
 
-  .who-crumb:focus-visible {
+  .who-lead:focus-visible {
     outline: none;
     box-shadow: var(--ring-accent);
   }
@@ -528,5 +538,13 @@
     max-width: 22ch;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* A step under the tile, which is the size both of this row's bare glyphs
+     take: the provider mark beside a model name is drawn at the same step,
+     and neither of them is artwork that fills a tile to its edges. Quiet,
+     because it is the one thing in the row nobody needs to read. */
+  .glass {
+    color: var(--text-3);
   }
 </style>

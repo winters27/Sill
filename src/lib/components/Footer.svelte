@@ -81,8 +81,9 @@
   part of the window into a boxed-in strip.
 -->
 <footer>
-  <LauncherMenu {onbuiltin} />
-  {#if toast}
+  <div class="side">
+    <LauncherMenu {onbuiltin} />
+    {#if toast}
     <span class="toast" data-style={toast.style}>{toast.title}</span>
     <!--
       The buttons the extension put on its own message.
@@ -149,51 +150,50 @@
         change size under the cursor at the moment somebody presses it.
       -->
       <span class="update">{update.words}</span>
+      {/if}
     {/if}
-  {/if}
-  <span class="spacer"></span>
-
-  <!-- Whatever is pinned, sitting in what was empty space between the
-       status and the keys. -->
-  <WidgetChin {prefs} />
-
-  <!-- Escape sits outside the pill and stays plain, so the pill holds
-       exactly the two things somebody reaches for. -->
-  <span class="escape">
-    {mode === "root" ? "Close" : "Back"}
-    <span class="esc-key">Esc</span>
-  </span>
+  </div>
 
   <!--
-    The action pill.
+    Whatever is pinned, in the middle of the window.
 
-    `tabindex="-1"` and a prevented mousedown on both segments, because the
-    search field must keep document focus. A plain button would take it on
-    click, and the arrow keys would stop moving the selection with no
-    visible cause.
+    Always drawn, even with nothing pinned, because it is the middle column of
+    the three and a column that comes and going would hand its track to the
+    keys and put them where the readings belong.
   -->
-  <div class="pill">
+  <div class="mid"><WidgetChin {prefs} /></div>
+
+  <div class="keys">
+  <!--
+    The two things somebody reaches for, standing on the chin rather than
+    gathered into a container of their own.
+
+    `tabindex="-1"` and a prevented mousedown on both, because the search
+    field must keep document focus. A plain button would take it on click,
+    and the arrow keys would stop moving the selection with no visible
+    cause.
+  -->
+  <button
+    class="segment"
+    tabindex="-1"
+    onmousedown={(e) => e.preventDefault()}
+    onclick={onrun}
+  >
+    {mode === "clipboard" ? "Paste" : mode === "root" ? "Open" : viewTag === "Form" ? "Submit" : "Run"}
+    <span class="sill-key">↵</span>
+  </button>
+  {#if hasActions}
+    <span class="split"></span>
     <button
       class="segment"
       tabindex="-1"
       onmousedown={(e) => e.preventDefault()}
-      onclick={onrun}
+      onclick={onactions}
     >
-      {mode === "clipboard" ? "Paste" : mode === "root" ? "Open" : viewTag === "Form" ? "Submit" : "Run"}
-      <span class="sill-key">↵</span>
+      Actions
+      <span class="sill-key">Ctrl K</span>
     </button>
-    {#if hasActions}
-      <span class="split"></span>
-      <button
-        class="segment"
-        tabindex="-1"
-        onmousedown={(e) => e.preventDefault()}
-        onclick={onactions}
-      >
-        Actions
-        <span class="sill-key">Ctrl K</span>
-      </button>
-    {/if}
+  {/if}
   </div>
 </footer>
 
@@ -208,9 +208,31 @@
    *
    * 8px of side padding puts the pill on the same right edge as the action
    * panel that rises out of it.
+   *
+   * ## Three columns, because the readings belong to the window
+   *
+   * A flex row with one spacer put the widget strip against the keys, so it
+   * was positioned by how wide it happened to be: pinning a second reading
+   * moved the first one left, and the strip sat wherever the arithmetic left
+   * it rather than anywhere somebody chose.
+   *
+   * The two outer tracks are equal, so the middle one is centred on the window
+   * whatever is in it, and one, two or three readings grow about the centre
+   * instead of away from the right edge. `minmax(0, ...)` on the left track is
+   * what lets a long status line shrink; without the 0 its minimum is its own
+   * sentence and prose would push the centre off it.
+   *
+   * The right track floors at `max-content` instead, because the keys are the
+   * one thing here that cannot give: a key with its tail cut off is not a
+   * shorter key. While there is room the floor is slack and both tracks
+   * resolve to the same `1fr`, so the centre is a real centre. When a wide
+   * strip finally takes that room, the floor binds and the middle slides right
+   * rather than the keys sliding out from under their own track and printing
+   * over the readings.
    */
   footer {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
     align-items: center;
     gap: var(--space-2);
     flex: none;
@@ -219,6 +241,27 @@
     background: var(--chin);
     font-size: var(--text-meta);
     color: var(--text-3);
+  }
+
+  /* The two outer tracks. `min-width: 0` on both, so the shrinking the grid
+     allows actually reaches the toast inside. */
+  .side,
+  .keys {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  /* Against the window's edge, which is where the action panel rises from. */
+  .keys {
+    justify-content: flex-end;
+  }
+
+  .mid {
+    display: flex;
+    justify-content: center;
+    min-width: 0;
   }
 
   /* The line an error lands on. One line, and it stays one line: a path or
@@ -235,42 +278,26 @@
 
   /* Outside the pill and quieter than it. Escape is the key nobody needs
      reminding of, so it does not get to sit in the affordance. */
-  .escape {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    color: var(--text-4);
-  }
-
-  .esc-key {
-    font-weight: var(--weight-medium);
-  }
-
   /*
-   * The action pill.
+   * The two keys, each standing on the chin.
    *
-   * One raised cluster holding the primary action and the action menu, which
-   * is the shape every launcher uses and the thing Sill's flat row of five
-   * faint hints was standing in for. The bevel is the tile recipe: unlike the
-   * window, this sits ON a surface, so an outer edge has something to fall on.
+   * No container around them. A raised cluster reads as one control with two
+   * halves, which is wrong for two separate things: Enter runs what is
+   * selected and Ctrl K opens a menu about it, and they are related the way
+   * neighbours are rather than the way a switch's two positions are. The
+   * separator stays, because that relation still wants saying.
+   *
+   * Each carries its own radius now. Inside the pill the hover fill was
+   * clipped to the cluster by `overflow: hidden`, and without a shape of its
+   * own a hovered segment would paint a bare rectangle on the chin.
    */
-  /* Lifted off the chin, which is a known background again. */
-  .pill {
-    display: flex;
-    align-items: center;
-    flex: none;
-    height: var(--control-height);
-    border-radius: var(--radius-lg);
-    background: var(--fill-2);
-    box-shadow: var(--bevel-tile);
-    overflow: hidden;
-  }
-
   .segment {
     display: flex;
     align-items: center;
+    flex: none;
     gap: var(--space-2);
-    height: 100%;
+    height: var(--control-height);
+    border-radius: var(--radius-md);
     padding: 0 var(--space-2);
     border: 0;
     background: transparent;
@@ -297,19 +324,17 @@
   }
 
   /*
- * The status line, which is the only thing down here made of prose.
- *
- * It had no rule at all, so it was a flex item at its natural width with the
- * default `min-width: auto`, which means it could not be made narrower than
- * its own sentence. A long one ate the spacer, and then the only item in the
- * row that *could* give was the widget chin, which is set to hide what does
- * not fit: "Hacker News stopped: the worker exited" cut the clock and the
- * weather in half against the edge of the window.
- *
- * Prose is the right thing to shorten. It is the one item here that still
- * says something with its tail missing, and the ellipsis says a tail is
- * missing; half a temperature reading looks like a different temperature.
- */
+   * The status line, which is the only thing down here made of prose.
+   *
+   * `min-width: 0` is what lets it give. Its track is `minmax(0, 1fr)` and can
+   * shrink to nothing, but a flex item inside a track that can shrink still
+   * refuses to be narrower than its own sentence, so without this the sentence
+   * runs out of the track and over the readings in the middle of the chin.
+   *
+   * Prose is the right thing to shorten. It is the one item here that still
+   * says something with its tail missing, and the ellipsis says a tail is
+   * missing; half a temperature reading looks like a different temperature.
+   */
   .toast {
     min-width: 0;
     overflow: hidden;
@@ -369,10 +394,6 @@
   button.update:hover {
     background-color: var(--info-fill-strong);
     color: var(--text-1);
-  }
-
-  .spacer {
-    flex: 1;
   }
 
   /*

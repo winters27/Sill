@@ -169,6 +169,7 @@
           effective stroke at 14px is 0.88px against the 0.99px this had, where
           bold would have been half again as heavy as everything around it.
         -->
+        <span class="mark">
         <svg
           class="glyph"
           width="14"
@@ -192,6 +193,7 @@
             <path d="M120,128V48a8,8,0,0,1,16,0v80a8,8,0,0,1-16,0Zm60.37-78.7a8,8,0,0,0-8.74,13.4C194.74,77.77,208,101.57,208,128a80,80,0,0,1-160,0c0-26.43,13.26-50.23,36.37-65.3a8,8,0,0,0-8.74-13.4C47.9,67.38,32,96.06,32,128a96,96,0,0,0,192,0C224,96.06,208.1,67.38,180.37,49.3Z" />
           {/if}
         </svg>
+        </span>
         <span class="label">{item.label}</span>
         {#if item.hint}
           <span class="spacer"></span>
@@ -212,16 +214,20 @@
 {/if}
 
 <!--
-  One caret, and nothing else.
+  Sill's mark, on the button that opens Sill's menu.
 
-  It carried the word "Sill" briefly, then the mark. Both said the same thing,
-  which is an identity, and identity is not the job of a button in a corner:
-  by the time anybody looks down here the window is unmistakably Sill's. What
-  is left is the affordance on its own, which is all this ever needed to be.
+  The mark stood here once beside a caret and was taken out on the grounds that
+  a corner button is not the place for an identity. This is now the only place
+  for one. The top of the window has given its lead slot to whichever face is
+  on screen, so the picture that says which application this is cannot live up
+  there any more, and the application's own menu is the right thing to hang it
+  on: pressing the mark opens the things that belong to Sill rather than to
+  what Sill is showing.
 
-  Still a real button rather than a bare glyph: it has a target, a hover state,
-  and a caret that turns over when the menu is open, so it says what pressing
-  it will do next rather than what it did last.
+  Still a real button rather than a bare glyph: it has a target and a hover
+  fill, and wears that same fill while the menu is open. The caret said whether
+  the menu was open by turning over; the open menu, an inch above it, says the
+  same thing louder.
 
   `tabindex="-1"` with mousedown prevented, because the search field must keep
   document focus. A plain button takes it on click and the arrow keys then stop
@@ -242,60 +248,41 @@
     selected = 0;
   }}
 >
-  <svg class="caret" width="14" height="14" viewBox="0 0 12 12" aria-hidden="true">
-    <path d="M2.5 7.5 6 4l3.5 3.5" stroke="currentColor" stroke-width="1.7"
-      stroke-linecap="round" stroke-linejoin="round" fill="none" />
-  </svg>
+  <img class="mark" src="/sill.png" alt="" width="20" height="20" draggable="false" />
 </button>
 
 <style>
   .trigger {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
+    display: grid;
+    place-items: center;
     flex: none;
     height: var(--control-height);
     padding: 0 var(--space-2);
     border: 0;
     border-radius: var(--radius-lg);
     background: transparent;
-    color: var(--text-2);
     font: inherit;
     cursor: default;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
+    transition: background-color var(--motion-state) var(--ease);
   }
 
   /*
-   * Points up because the menu rises, and turns over when it is open so the
-   * button says what pressing it will do next rather than what it did last.
+   * A step under the tile a list row draws an icon in.
    *
-   * The whole trigger now, rather than a mark with a chevron beside it. A logo
-   * is an identity, and identity is not what a corner button is for: the
-   * window is already unmistakably Sill's by the time anybody looks down here.
+   * The chin is a 40px band carrying 30px controls. A 26px tile inside one of
+   * those leaves two pixels above and below it, which is the mark standing
+   * flush with the edge of its own hover fill rather than on it.
    */
-  .caret {
+  .mark {
     flex: none;
-    color: var(--text-3);
-    transition:
-      color var(--motion-state) var(--ease),
-      transform var(--motion-enter) var(--ease);
-  }
-
-  .trigger.open .caret {
-    transform: rotate(180deg);
+    width: var(--icon-tile-sm);
+    height: var(--icon-tile-sm);
+    -webkit-user-drag: none;
   }
 
   .trigger:hover,
   .trigger.open {
     background-color: var(--fill-2);
-    color: var(--text-1);
-  }
-
-  .trigger:hover .caret,
-  .trigger.open .caret {
-    color: var(--text-1);
   }
 
   .scrim {
@@ -329,20 +316,30 @@
     left: var(--space-2);
     bottom: calc(var(--chin-height) + var(--space-1));
     z-index: var(--z-menu);
-    width: 208px;
+    width: 400px;
     max-height: calc(100vh - var(--chin-height) - var(--space-8));
     overflow-y: auto;
     padding: var(--space-1);
   }
 
+  /*
+   * The same object the action panel draws, because they are the same kind
+   * of thing: a list of what you can do, one press from the chin.
+   *
+   * Matched rather than merely similar. Thirty pixels against thirty-two,
+   * and eight of padding against twelve, are each too small to look wrong
+   * alone; together they are why one menu read as a different control from
+   * the other.
+   */
   .item {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    height: var(--control-height);
+    height: 32px;
     padding: 0 var(--space-2);
     border-radius: var(--radius-md);
     font-size: var(--text-body);
+    font-weight: var(--weight-body);
     color: var(--text-2);
     cursor: default;
     transition:
@@ -350,10 +347,26 @@
       color var(--motion-state) var(--ease);
   }
 
+  /*
+   * The mark column, sized like the panel's rather than left as whatever
+   * the drawing happens to be.
+   *
+   * Fixed and always present, so labels line up whether a glyph is wide or
+   * narrow. A column that fits itself to each drawing is a ragged left
+   * edge, which is the thing an icon column exists to fix.
+   */
+  .mark {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: var(--icon-tile-xs);
+    height: var(--icon-tile-xs);
+    color: var(--text-2);
+    transition: color var(--motion-state) var(--ease);
+  }
+
   .glyph {
     flex: none;
-    color: var(--text-3);
-    transition: color var(--motion-state) var(--ease);
   }
 
   .item.selected {
@@ -361,7 +374,7 @@
     color: var(--text-1);
   }
 
-  .item.selected .glyph {
+  .item.selected .mark {
     color: var(--text-2);
   }
 
@@ -369,7 +382,7 @@
      means it, and only once it is under the cursor. Red on every render
      would make quitting the loudest thing in the menu. */
   .item.danger.selected,
-  .item.danger.selected .glyph {
+  .item.danger.selected .mark {
     color: var(--danger);
   }
 
