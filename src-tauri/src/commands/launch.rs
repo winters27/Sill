@@ -432,19 +432,46 @@ pub(crate) async fn extract_text_from_last_image(app: AppHandle) -> Result<Strin
 
 /// What can be done to the selected result.
 ///
-/// Keyed on the mode rather than looked up by id, because the answer depends
-/// only on what kind of thing it is, and because a file result is not in any
-/// index to be looked up in.
+/// The row is sent when there is one, and only the mode when there is not.
+/// Both callers are real: the launcher has the row in front of it, and the
+/// shortcuts screen lists what a *kind* supports with nothing selected at all.
+///
+/// The row is still never looked up by id. It arrives whole, for the reason
+/// this was keyed on the mode to begin with: a file result is in no index to
+/// be looked up in, and an id that has to resolve is an id that can fail to.
 #[tauri::command]
 pub(crate) async fn actions_for(
     actions: State<'_, ActionRegistry>,
     prefs: State<'_, crate::state::PrefsState>,
     mode: String,
+    object: Option<ObjectRef>,
 ) -> Result<Vec<crate::action::ActionInfo>, String> {
     // The chords come along with the list rather than being asked for
     // separately: a second call would be a second opinion about what Ctrl+
     // Shift+C does, and this one is already made per selection change.
-    let keys = prefs.inner.lock().await.action_keys.clone();
+    //
+    // The names come with them for the same reason, and because the two are
+    // read under one lock rather than two.
+    let (keys, aliases) = {
+        let held = prefs.inner.lock().await;
+        (held.action_keys.clone(), held.aliases.clone())
+    };
+
+    if let Some(object) = object {
+        // Through ObjectRef like `run_action`, not a bare Object: the window
+        // sends a result, which carries a mode and no kind, and mapping the one
+        // to the other is what this type is for.
+        let object = object.into_object()?;
+        let row = crate::action::Row {
+            object: &object,
+            alias: aliases
+                .iter()
+                .find(|one| one.command == object.id)
+                .map(|one| one.alias.as_str()),
+        };
+
+        return Ok(actions.describe_for(&row, &keys));
+    }
 
     Ok(crate::object::ObjectKind::from_mode(&mode)
         .map(|kind| actions.describe(kind, &keys))

@@ -1105,7 +1105,7 @@
     }
 
     // Whatever Rust says can be done to the selected result.
-    if (hasRowActions(mode)) return rowPanel(rootActions, rowForActions);
+    if (hasRowActions(mode)) return rowPanel(rootActions);
 
     const node = tree.top();
     if (!node) return [];
@@ -1258,15 +1258,27 @@
       return;
     }
 
-    // The answer depends only on the kind, and it has not changed.
-    const wanted = command.mode;
+    /*
+     * Keyed on the row now, not the kind.
+     *
+     * The kind was enough while every action answered the same on every row of
+     * it. It stopped being enough when aliasing moved into the registry:
+     * "Set Alias" and `Change Alias "gg"` are one action reading one row,
+     * and "Clear Alias" is absent on rows that have none.
+     *
+     * What this costs is one ask per arrow key where the kind cost one per
+     * kind. What it still prevents is the thing the note above describes: the
+     * effect also reads `commands`, which a single keystroke rebuilds up to six
+     * times, and the key holds all six to one ask because the row is the same.
+     */
+    const wanted = `${command.mode}\u0000${command.id}\u0000${command.alias ?? ""}`;
     if (wanted === askedFor) return;
 
     askedFor = wanted;
 
-    void actionsFor(wanted).then((list) => {
-      // The selection moved to a different kind while this was in flight.
-      if (rowForActions?.mode === wanted) rootActions = list;
+    void actionsFor(command.mode, asTarget(command)).then((list) => {
+      // The selection moved while this was in flight.
+      if (askedFor === wanted) rootActions = list;
     });
   });
 
@@ -1980,11 +1992,21 @@
       const target = naming;
       if (!target) return;
 
+      /*
+       * Through the registry, not through `setAlias`.
+       *
+       * The field and its wording stay exactly as they were; what changed is
+       * what happens at the end of it. Naming used to be a Tauri command this
+       * page called directly, which made it the one thing you could do to a
+       * row that a bound key, the model and an automation could not. Clearing
+       * is its own action rather than a name of nothing, because "" is not an
+       * instruction anybody would write down.
+       */
       try {
-        prefs = await setAlias(target.id, query);
-        status = query.trim()
-          ? `${target.title} answers to "${query.trim().toLowerCase()}"`
-          : `Forgot the name for ${target.title}`;
+        const outcome = query.trim()
+          ? await runObjectAction("sill.row.alias", target.of, query)
+          : await runObjectAction("sill.row.alias.clear", target.of);
+        status = outcome.message;
       } catch (err) {
         status = `${err}`;
       }
@@ -2799,7 +2821,7 @@
   let rootList = $state<ReturnType<typeof RootList> | null>(null);
 
   /** The result being given a name, while the field holds the name. */
-  let naming = $state<{ id: string; title: string } | null>(null);
+  let naming = $state<{ id: string; title: string; of: ActionTarget } | null>(null);
 
   /** The separator a plain merge uses: one entry per line. */
   const NEWLINE = String.fromCharCode(10);
@@ -2974,27 +2996,6 @@
         case "Sill.ClipboardForgetCollection":
           await clipboardView?.forgetCollection();
           break;
-        case "Sill.SetAlias": {
-          const chosen = commands[selected];
-          if (!chosen) return;
-          naming = { id: chosen.id, title: chosen.title };
-          mode = "alias";
-          query = chosen.alias ?? "";
-          panelOpen = false;
-          return;
-        }
-        case "Sill.ClearAlias": {
-          const chosen = commands[selected];
-          if (!chosen) return;
-          try {
-            prefs = await setAlias(chosen.id, "");
-            status = `Forgot the name for ${chosen.title}`;
-            await refreshRoot();
-          } catch (err) {
-            status = `${err}`;
-          }
-          break;
-        }
         case "Sill.ClipboardPin":
           await clipboardView?.togglePin();
           break;
@@ -3079,6 +3080,32 @@
         mode = "argument";
         selected = 0;
         query = "";
+        return;
+      }
+
+      /*
+       * Naming borrows the field, the way renaming a file does, and keeps the
+       * mode it already had: `alias` draws the row it is naming above the
+       * field, which `argument` does not.
+       */
+      if (chosen === "sill.row.alias") {
+        naming = { id: command.id, title: command.title, of: asTarget(command) };
+        mode = "alias";
+        // The name it already carries, so changing one is an edit.
+        query = command.alias ?? "";
+        selected = 0;
+        return;
+      }
+
+      if (chosen === "sill.row.alias.clear") {
+        try {
+          status = (await runObjectAction(chosen, asTarget(command))).message;
+          // The row draws its own name, so the list has to be re-read before
+          // it stops saying one it no longer has.
+          await refreshRoot();
+        } catch (err) {
+          status = `${err}`;
+        }
         return;
       }
 

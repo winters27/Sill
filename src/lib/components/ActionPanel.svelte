@@ -236,7 +236,7 @@
     right: var(--space-2);
     bottom: calc(var(--chin-height) + var(--space-1));
     z-index: var(--z-panel);
-    width: 320px;
+    width: 400px;
     max-height: 60vh;
     overflow: hidden;
     display: flex;

@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { mount, unmount } from "svelte";
+import { mount, tick, unmount } from "svelte";
 import RootList from "./RootList.svelte";
 import type { RankedCommand } from "$lib/exthost/commands";
 
@@ -250,5 +250,95 @@ describe("an extension command says which extension", () => {
     const target = draw([ofExtension("Pokédex")]);
     expect(target.textContent).not.toContain("·");
     expect(target.textContent).toContain("Pokédex");
+  });
+});
+
+describe("what the mouse does to a row", () => {
+  /**
+   * The list's own `draw` throws both callbacks away, and these two tests are
+   * entirely about which one was called.
+   */
+  function withSpies(commands: RankedCommand[]) {
+    const target = document.createElement("div");
+    document.body.append(target);
+
+    const ran: number[] = [];
+    const picked: number[] = [];
+
+    mounted = mount(RootList, {
+      target,
+      props: {
+        commands,
+        selected: 0,
+        onselect: (index: number) => picked.push(index),
+        onrun: (index: number) => ran.push(index),
+        live: {},
+        working: null,
+        outcome: "",
+      },
+    });
+
+    return { target, ran, picked };
+  }
+
+  /*
+   * A single click used to run the row, which left nothing for a mouse to say
+   * "this one, but tell me what I can do to it" with: moving onto a row
+   * already selects it, so the click had no meaning left to carry.
+   *
+   * Running moved to the double click. If this goes red because a single
+   * click ran something, the action panel is unreachable without the keyboard
+   * again, and that is the thing to notice rather than the assertion.
+   */
+  it("selects on a click, and runs only on a double click", () => {
+    const { target, ran, picked } = withSpies([row("a", "Alpha"), row("b", "Beta")]);
+
+    const second = target.querySelectorAll<HTMLElement>("[data-row]")[1];
+    expect(second, "the list drew fewer rows than it was given").toBeTruthy();
+
+    second!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(ran, "a single click ran the row").toEqual([]);
+    expect(picked, "a single click did not select the row").toEqual([1]);
+
+    second!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    expect(ran, "a double click did not run the row").toEqual([1]);
+  });
+
+  /// The row already under the pointer is already selected; saying so again
+  /// would raise the pointer flag and swallow the next arrow key.
+  it("says nothing when the click lands on the row already selected", () => {
+    const { target, ran, picked } = withSpies([row("a", "Alpha"), row("b", "Beta")]);
+
+    const first = target.querySelectorAll<HTMLElement>("[data-row]")[0];
+    first!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(picked).toEqual([]);
+    expect(ran).toEqual([]);
+  });
+  /*
+   * The bug this prevents is the one the note on `byPointer` describes: while
+   * moving the mouse selected, a row half over the bottom edge was selected
+   * the moment the cursor touched it, scrolling it on pulled the next row up
+   * under the cursor, and the list crawled downward on its own.
+   *
+   * If this goes red, pointing and selecting have become the same gesture
+   * again and the crawl is back.
+   */
+  it("points without selecting, and lights the row it points at", async () => {
+    const { target, ran, picked } = withSpies([row("a", "Alpha"), row("b", "Beta")]);
+
+    const rows = target.querySelectorAll<HTMLElement>("[data-row]");
+    rows[1]!.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+    await tick();
+
+    expect(picked, "moving the mouse moved the selection").toEqual([]);
+    expect(ran, "moving the mouse ran something").toEqual([]);
+
+    expect(rows[1]!.classList.contains("hovered"), "the pointed row is not lit").toBe(true);
+    expect(rows[0]!.classList.contains("selected"), "the selection moved").toBe(true);
+    expect(
+      rows[0]!.classList.contains("hovered"),
+      "the selected row is lit twice over",
+    ).toBe(false);
   });
 });

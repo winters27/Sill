@@ -197,89 +197,7 @@ export function clipboardPanel(from: ClipboardPanel): ActionEntry[] {
   ];
 }
 
-/**
- * Whether a name given to this row would still mean something tomorrow.
- *
- * An alias points at a command id and is matched against the index, so it is
- * only worth offering on a row whose id survives a restart. A calculator
- * answer exists for as long as it is on screen, a window's id is a handle that
- * stops being valid when it closes, and a program's audio session carries the
- * process number in it, so naming one would be naming this morning's copy of
- * that program. A running process is that last one exactly: its id **is** the
- * process number.
- *
- * A conversation is not in the index, so a name given to one would find
- * nothing however carefully it was chosen. Nor is an extension in the store,
- * for a stronger version of the same reason: it may not be installed at all,
- * so there is nothing on this machine for a name to point at. Once it is
- * installed its commands are in the index and each can be named there.
- *
- * Written as the kinds that cannot rather than the kinds that can, so a kind
- * added later is namable by default and reads oddly rather than vanishing.
- */
-const UNNAMABLE = new Set([
-  "answer",
-  "window",
-  // A tab, for the same reason a window is: its id holds a window handle and
-  // the browser's own identifier for the tab, and both stop meaning anything
-  // when the tab closes. A name given to today's tab would point at nothing
-  // tomorrow.
-  "browser-tab",
-  "audio-session",
-  "process",
-  // A control, for a shorter-lived version of a window's reason: its id holds
-  // a window handle and the provider's own identifier for one button, and both
-  // stop meaning anything when that window redraws itself.
-  "control",
-  // One row for whatever is playing, built by the search and gone the moment
-  // the music stops. Its id is fixed, so a name given to it would survive and
-  // point at nothing, which is worse than not offering one.
-  "media",
-  "conversation",
-  "past-conversation",
-  "store-listing",
-]);
-
-export function namable(row: RankedCommand | undefined): boolean {
-  return !!row && !UNNAMABLE.has(row.mode);
-}
-
-/**
- * What the registry says can be done to the selected row, plus its name.
- *
- * This used to be two entries written by hand, which meant the panel and the
- * Enter key were two separate opinions about what a result supports.
- */
-export function rowPanel(registry: ActionInfo[], row: RankedCommand | undefined): ActionEntry[] {
-  // Naming a result is offered on the result, not buried in settings. An alias
-  // nobody can reach is one nobody sets, and the launcher is where you are
-  // when you notice you want one.
-  const naming: ActionEntry[] =
-    row && namable(row)
-      ? [
-          {
-            id: -40,
-            title: row.alias ? `Rename "${row.alias}"` : "Give It a Name",
-            tag: "Sill.SetAlias",
-            icon: "Pencil",
-            props: {},
-            shortcut: undefined,
-          },
-          ...(row.alias
-            ? [
-                {
-                  id: -41,
-                  title: `Forget the Name "${row.alias}"`,
-                  tag: "Sill.ClearAlias",
-                  icon: "XMarkCircle",
-                  props: {},
-                  shortcut: undefined,
-                },
-              ]
-            : []),
-        ]
-      : [];
-
+export function rowPanel(registry: ActionInfo[]): ActionEntry[] {
   return [
     ...registry.map((action, index) => ({
       id: -1 - index,
@@ -298,6 +216,5 @@ export function rowPanel(registry: ActionInfo[], row: RankedCommand | undefined)
        */
       shortcut: action.primary ? { modifiers: [], key: "enter" } : action.shortcut,
     })),
-    ...naming,
   ];
 }

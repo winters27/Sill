@@ -17,6 +17,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 pub mod extension;
 pub mod mcp;
+pub mod row;
 
 use crate::action::{Action, ActionCtx, ActionRegistry, Capability, Outcome, Undo};
 use crate::object::{Object, ObjectKind};
@@ -101,6 +102,19 @@ pub fn builtins() -> ActionRegistry {
         // Below every action that opens or copies, for the reason "Move to
         // Recycle Bin" is: the panel is drawn in this order and the entry that
         // removes a program should not sit above the ones that do not.
+        // What a row is, rather than what it opens.
+        //
+        // Above Uninstall deliberately, and a test holds them there: the
+        // one action that cannot be taken back is drawn last on an
+        // application, and six harmless rows under it would put a reach
+        // for Reset Ranking one row away from removing the program.
+        Box::new(row::CopyDeeplink),
+        Box::new(row::ResetRanking),
+        Box::new(row::ToggleFavourite),
+        Box::new(row::SetAlias),
+        Box::new(row::ClearAlias),
+        Box::new(row::OpenCommandPreferences),
+        Box::new(row::SetGlobalShortcut),
         Box::new(UninstallApp),
         Box::new(RestoreWorkspace),
         Box::new(MakeWorkspacePortable),
@@ -147,7 +161,11 @@ pub fn builtins() -> ActionRegistry {
 /// possible undo: a string that was already in memory. Reading the old value
 /// can fail perfectly normally (an image, or an empty clipboard), and that is
 /// not a reason to refuse the copy, only a reason to offer no undo for it.
-fn copy_with_undo(ctx: &ActionCtx, text: &str, message: &str) -> Result<Outcome, String> {
+pub(super) fn copy_with_undo(
+    ctx: &ActionCtx,
+    text: &str,
+    message: &str,
+) -> Result<Outcome, String> {
     let previous = ctx.app.clipboard().read_text().ok();
 
     ctx.app

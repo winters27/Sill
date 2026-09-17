@@ -1506,7 +1506,8 @@ else if (Number(css[1]) !== Number(rust[1])) {
  * the panel: Enter on a window, on a process, on a program's volume, on a
  * calculator answer, on what is playing. Each of those is a string written in
  * TypeScript that has to match a string written in Rust, with nothing making
- * them match. Rename one in `actions/mod.rs` and the window still compiles,
+ * them match. Rename one in `src-tauri/src/actions` and the window still
+ * compiles,
  * still passes `svelte-check`, and answers "no such action" the first time
  * somebody presses the key.
  *
@@ -1515,9 +1516,16 @@ else if (Number(css[1]) !== Number(rust[1])) {
  */
 {
   const PAGE = "src/routes/+page.svelte";
-  const ACTIONS = "src-tauri/src/actions/mod.rs";
+  const ACTIONS = "src-tauri/src/actions";
   const text = readFileSync(PAGE, "utf8");
-  const rust = readFileSync(ACTIONS, "utf8");
+  // Every file in the directory rather than `mod.rs` alone. Actions live
+  // in submodules too, and one that moved into a file of its own read here
+  // as an action the window names and nothing declares, which is the exact
+  // false alarm this check exists to never produce.
+  const rust = readdirSync(ACTIONS)
+    .filter((name) => extname(name) === ".rs")
+    .map((name) => readFileSync(join(ACTIONS, name), "utf8"))
+    .join("\n");
 
   // Every id an action declares. They are literals in `fn id`, so the whole
   // file is scanned for the shape rather than the function parsed.

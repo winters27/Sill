@@ -324,6 +324,23 @@ fn meant(argument: Option<String>) -> Option<String> {
         .filter(|given| !given.is_empty())
 }
 
+/// A row, as the panel knows it when deciding what to offer.
+///
+/// Separate from [`Object`], which is "enough to act on it" and is
+/// deliberately flat. This is "enough to decide whether to offer it", which is
+/// a different and larger question: whether a row already has a name changes
+/// what naming it should be called, and that is a fact about the launcher's
+/// settings rather than about the thing itself.
+///
+/// Borrowed, and built per describe rather than stored. The next action that
+/// needs a different fact adds a field here instead of to `Object`, where it
+/// would travel to thirteen construction sites that have no idea about it.
+pub struct Row<'a> {
+    pub object: &'a Object,
+    /// The name the user gave this row, when they gave it one.
+    pub alias: Option<&'a str>,
+}
+
 /// Something that can be done to an [`Object`].
 ///
 /// Async, and boxed by `async_trait` so the registry can hold them as trait
@@ -368,6 +385,28 @@ pub trait Action: Send + Sync {
     fn icon(&self) -> &'static str;
 
     fn accepts(&self, kind: ObjectKind) -> bool;
+
+    /// Whether this is worth offering on *this* row, not just this kind.
+    ///
+    /// [`Self::accepts`] answers "does this kind support me", which is all a
+    /// settings screen listing every action can ask. This answers "is there
+    /// anything to do here", which only the row can say: forgetting a name is
+    /// a dead entry on a row that has none.
+    ///
+    /// Defaulted to yes, because for nearly every action the kind is the whole
+    /// answer and a row it cannot act on is one `accepts` already refused.
+    fn shown(&self, _row: &Row<'_>) -> bool {
+        true
+    }
+
+    /// The title, when it depends on the row rather than the action.
+    ///
+    /// `None` keeps [`Self::title`], which is the case for all but a couple.
+    /// Setting a name and changing one are the same action and should not read
+    /// as the same word, and only the row knows which of the two it is.
+    fn title_for(&self, _row: &Row<'_>) -> Option<String> {
+        None
+    }
 
     fn capabilities(&self) -> &'static [Capability];
 
@@ -572,6 +611,32 @@ impl ActionRegistry {
                 title: a.title().to_string(),
                 icon: a.icon(),
                 primary: a.is_primary(kind),
+                shortcut: crate::action_keys::effective(keys, a.id(), a.shortcut()),
+            })
+            .collect()
+    }
+
+    /// The same, for one particular row.
+    ///
+    /// `describe` is kept beside this and answers the kind alone, because a
+    /// settings screen listing what a file supports has no file in front of
+    /// it. Where there *is* a row, this is the one to ask: it lets an action
+    /// hide itself and retitle itself, which the kind alone cannot decide.
+    pub fn describe_for(
+        &self,
+        row: &Row<'_>,
+        keys: &crate::action_keys::Settings,
+    ) -> Vec<ActionInfo> {
+        self.for_kind(row.object.kind)
+            .into_iter()
+            .filter(|a| a.shown(row))
+            .map(|a| ActionInfo {
+                id: a.id().to_string(),
+                title: a
+                    .title_for(row)
+                    .unwrap_or_else(|| a.title().to_string()),
+                icon: a.icon(),
+                primary: a.is_primary(row.object.kind),
                 shortcut: crate::action_keys::effective(keys, a.id(), a.shortcut()),
             })
             .collect()

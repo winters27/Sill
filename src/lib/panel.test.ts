@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clipboardPanel, namable, rowPanel } from "./panel";
+import { clipboardPanel, rowPanel } from "./panel";
 import type { ActionInfo, RankedCommand } from "./exthost/commands";
 
 /** A registry answer, which is what Rust hands back for a kind. */
@@ -50,10 +50,7 @@ describe("a registry action keeps the key Rust resolved for it", () => {
   });
 
   it("carries it into a row's panel too", () => {
-    const built = rowPanel(
-      [registry({ shortcut: { modifiers: ["ctrl", "shift"], key: "e" } })],
-      row(),
-    );
+    const built = rowPanel([registry({ shortcut: { modifiers: ["ctrl", "shift"], key: "e" } })]);
 
     expect(built[0]?.shortcut).toEqual({ modifiers: ["ctrl", "shift"], key: "e" });
   });
@@ -67,10 +64,7 @@ describe("a registry action keeps the key Rust resolved for it", () => {
    * actually runs it from the panel.
    */
   it("shows Enter on the primary one whatever it declared", () => {
-    const built = rowPanel(
-      [registry({ primary: true, shortcut: { modifiers: ["ctrl"], key: "o" } })],
-      row(),
-    );
+    const built = rowPanel([registry({ primary: true, shortcut: { modifiers: ["ctrl"], key: "o" } })]);
 
     expect(built[0]?.shortcut).toEqual({ modifiers: [], key: "enter" });
   });
@@ -135,53 +129,5 @@ describe("what the clipboard offers", () => {
     });
 
     expect(new Set(built.map((e) => e.id)).size).toBe(built.length);
-  });
-});
-
-describe("which rows are worth naming", () => {
-  /*
-   * An alias points at a command id and is matched against the index, so it is
-   * only worth offering where the id survives a restart.
-   */
-  it("refuses the kinds whose id does not outlive the moment", () => {
-    for (const mode of [
-      "answer",
-      "window",
-      "browser-tab",
-      "audio-session",
-      "process",
-      "conversation",
-      "past-conversation",
-      "store-listing",
-      "media",
-    ] as const) {
-      expect(namable(row({ mode })), `${mode} should not be namable`).toBe(false);
-    }
-  });
-
-  it("offers it on the kinds that are in the index", () => {
-    for (const mode of ["app", "exe", "view", "no-view", "snippet", "quicklink"] as const) {
-      expect(namable(row({ mode })), `${mode} should be namable`).toBe(true);
-    }
-  });
-
-  it("says no when there is no row at all", () => {
-    expect(namable(undefined)).toBe(false);
-  });
-
-  it("offers to forget a name only where there is one", () => {
-    const without = rowPanel([], row()).map((e) => e.tag);
-    expect(without).toContain("Sill.SetAlias");
-    expect(without).not.toContain("Sill.ClearAlias");
-
-    const withOne = rowPanel([], row({ alias: "np" }));
-    expect(withOne.map((e) => e.tag)).toContain("Sill.ClearAlias");
-    expect(withOne.find((e) => e.tag === "Sill.SetAlias")?.title).toBe('Rename "np"');
-  });
-
-  it("offers nothing about names on a row that cannot hold one", () => {
-    const built = rowPanel([registry()], row({ mode: "window" })).map((e) => e.tag);
-    expect(built).not.toContain("Sill.SetAlias");
-    expect(built).not.toContain("Sill.ClearAlias");
   });
 });

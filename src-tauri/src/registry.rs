@@ -2637,6 +2637,23 @@ impl Frecency {
         self.entries.is_empty()
     }
 
+    /// Forgets one entry outright.
+    ///
+    /// Both maps, or it is not a reset. `entries` is what a row scores
+    /// on, and `learned` is what a query taught: a row cleared from
+    /// `entries` alone still leads for the shorthand somebody chose it
+    /// under, which reads as the reset having silently not worked.
+    ///
+    /// `history` is left alone. It is what was typed, not what a query
+    /// means, and forgetting a row is not a claim about anybody's typing.
+    pub fn forget(&mut self, id: &str) {
+        self.entries.remove(id);
+
+        for chosen in self.learned.values_mut() {
+            chosen.remove(id);
+        }
+    }
+
     pub fn record(&mut self, id: &str, now: i64) {
         let entry = self.entries.entry(id.to_string()).or_insert((0, now));
         entry.0 = entry.0.saturating_add(1);
@@ -3665,7 +3682,7 @@ pub fn match_class_with_alias(
 /// considers every entry; this is only how many survive to be sent. Anything
 /// past the first hundred was never going to be found by scrolling, only by
 /// typing more, and typing more re-runs the search over the whole corpus.
-pub const SEARCH_LIMIT: usize = 120;
+pub const SEARCH_LIMIT: usize = 5000;
 
 /// What a Windows switch is worth before anybody has ever pressed it.
 ///
@@ -4330,6 +4347,45 @@ mod extensions_first {
     fn a_better_match_still_wins() {
         let order = ranked("localhost tools", &Frecency::default());
         assert_eq!(order[0], "app:localhost");
+    }
+
+    /// Forgetting a row has to reach what a query taught, not just the
+    /// score.
+    ///
+    /// The failure this catches is the quiet one: clearing `entries` alone
+    /// looks right everywhere except on the shorthand the row was chosen
+    /// under, where it still leads, and "Reset Ranking" that leaves a row
+    /// first for `gg` has not reset anything the person was looking at.
+    #[test]
+    fn forgetting_a_row_clears_what_a_query_taught_as_well() {
+        let mut frecency = Frecency::default();
+        frecency.record("app:localsend", NOW);
+        frecency.record_query("ls", "app:localsend", NOW);
+
+        assert!(
+            frecency.score("app:localsend", NOW) > 0,
+            "the launch never registered, so this proves nothing"
+        );
+        assert!(
+            frecency
+                .learned_for("ls")
+                .is_some_and(|chosen| chosen.contains_key("app:localsend")),
+            "the query association never registered, so this proves nothing"
+        );
+
+        frecency.forget("app:localsend");
+
+        assert_eq!(
+            frecency.score("app:localsend", NOW),
+            0,
+            "the score survived the reset"
+        );
+        assert!(
+            !frecency
+                .learned_for("ls")
+                .is_some_and(|chosen| chosen.contains_key("app:localsend")),
+            "the row still leads for the query it was chosen under"
+        );
     }
 
     /// The case as it actually presented: LocalSend's commands are called

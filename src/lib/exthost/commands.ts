@@ -1614,8 +1614,11 @@ export interface ActionOutcome {
  * Asked by mode rather than by id, because the answer depends only on what
  * kind of thing it is, and a file result was never in an index to look up.
  */
-export function actionsFor(mode: string): Promise<ActionInfo[]> {
-  return invoke<ActionInfo[]>("actions_for", { mode });
+export function actionsFor(mode: string, object?: ActionTarget): Promise<ActionInfo[]> {
+  // The row goes when there is one. Without it Rust can only answer for the
+  // kind, which is right for the shortcuts screen and wrong for the panel: an
+  // action that retitles or hides itself per row has nothing to read.
+  return invoke<ActionInfo[]>("actions_for", { mode, object });
 }
 
 /** The thing an action is being run against. */

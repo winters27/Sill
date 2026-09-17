@@ -136,19 +136,40 @@
   /**
    * True while a selection change is the pointer's own doing.
    *
-   * The keep-in-view effect below must not answer the mouse. A row sitting
-   * half over the bottom edge is selected the moment the cursor touches it,
-   * scrolling it fully on pulls the next row up under the cursor, that one is
-   * selected in turn, and the list crawls downward on its own for as long as
-   * the mouse stays near the edge. Chromium also replays a mousemove after a
-   * wheel scroll to refresh what is hovered, so the list fought the wheel the
-   * same way. The keys still scroll: they move the selection without moving
-   * the pointer, so this stays down.
+   * The keep-in-view effect below must leave the list alone after a click:
+   * the row is already under the hand that chose it, and keeping it on
+   * screen would move it away from that hand.
+   *
+   * It used to guard something worse, and the worse thing is why pointing
+   * and selecting must never be the same gesture again. Moving the mouse
+   * selected, so a row sitting half over the bottom edge was selected the
+   * moment the cursor touched it, scrolling it fully on pulled the next row
+   * up under the cursor, that one was selected in turn, and the list crawled
+   * downward on its own for as long as the mouse stayed near the edge.
+   * Chromium also replays a mousemove after a wheel scroll to refresh what
+   * is hovered, so the list fought the wheel the same way.
+   *
+   * The keys still scroll: they move the selection without moving the
+   * pointer, so this stays down.
    *
    * Plain rather than `$state`, because the effect reads it without wanting
    * to run again when it changes.
    */
   let byPointer = false;
+
+  /**
+   * The row under the pointer, which is not the selected row.
+   *
+   * Moving the mouse used to select. That made the two indistinguishable,
+   * and with the click running the row there was nothing a mouse could do
+   * that did not either act or move the selection out from under the
+   * keyboard.
+   *
+   * Now the pointer only points. `-1` is nowhere, which is what leaving the
+   * list means: a row left lit under a cursor that has gone is a second
+   * thing claiming to be the selection.
+   */
+  let hovered = $state(-1);
 
   /**
    * Every line is drawn.
@@ -602,6 +623,7 @@
   tabindex="-1"
   aria-label="Results"
   bind:this={viewport}
+  onmouseleave={() => (hovered = -1)}
 >
   {#each lines as line, at (line.kind === "header" ? `h:${line.label}` : line.command.id)}
     {#if line.kind === "header"}
@@ -620,18 +642,30 @@
         class:path={isPath(command)}
         class:behind={command.mode === "extensions-behind"}
         class:selected={index === selected}
+        class:hovered={index === hovered && index !== selected}
         role="option"
         aria-selected={index === selected}
         tabindex="-1"
-        onmousemove={() => {
-          // Only a change raises the flag: on the row already selected the
-          // parent's state does not move, the effect never runs, and a raised
-          // flag would be left waiting to swallow the next arrow key.
+        onmousemove={() => (hovered = index)}
+        onclick={() => {
+          /*
+           * Selects. Running is the double click below.
+           *
+           * A single click used to run, and moving onto a row used to
+           * select. Between them a mouse could act, or it could move the
+           * keyboard's selection out from under it, and there was no
+           * gesture left meaning "this one, but tell me what I can do to
+           * it". The pointer only points now, and this is what commits.
+           *
+           * The flag stops the scroll effect: this selection came from the
+           * pointer, so the row is already where the hand is and the list
+           * must not move to keep it on screen.
+           */
           if (index === selected) return;
           byPointer = true;
           onselect(index);
         }}
-        onclick={() => onrun(index)}
+        ondblclick={() => onrun(index)}
         onkeydown={(e) => e.key === "Enter" && onrun(index)}
       >
         {#if command.mode === "emoji"}
@@ -878,8 +912,12 @@
     font-weight: var(--weight-body);
     /* Stated in px, not as a ratio, so the row's height does not move when
        the interface face changes. Satoshi, Inter and Segoe UI Variable have
-       different default metrics and Rust cannot see which one is active. */
-    line-height: var(--line-body);
+       different default metrics and Rust cannot see which one is active.
+
+       `--line-row`, not `--line-body`: this is the one place set at
+       `--text-row`, and the body's line box is too short for it to keep its
+       descenders. */
+    line-height: var(--line-row);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

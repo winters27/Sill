@@ -2459,3 +2459,88 @@ fn pressing_a_control_is_its_own_capability() {
         "a scheduled trigger can press a button while nobody is at the machine"
     );
 }
+
+/*
+ * Naming a row, which moved out of `panel.ts` and into the registry.
+ *
+ * These three replace the ones that were in `panel.test.ts`. They are here
+ * rather than there because the behaviour is here now: what a row is worth
+ * offering and what to call it are the registry's answers, and the window only
+ * draws what it is handed.
+ */
+mod naming_a_row {
+    use super::*;
+    use sill_lib::action::Row;
+    use sill_lib::object::Object;
+
+    fn row_of(mode: &str) -> Object {
+        Object {
+            kind: sill_lib::object::ObjectKind::from_mode(mode).expect("a known mode"),
+            id: format!("{mode}:something"),
+            target: "whatever".into(),
+            title: "Something".into(),
+            mode: mode.to_string(),
+        }
+    }
+
+    fn offered(object: &Object, alias: Option<&str>) -> Vec<sill_lib::action::ActionInfo> {
+        builtins().describe_for(&Row { object, alias }, &Default::default())
+    }
+
+    fn titled(list: &[sill_lib::action::ActionInfo], id: &str) -> Option<String> {
+        list.iter().find(|a| a.id == id).map(|a| a.title.clone())
+    }
+
+    /// Setting a name and changing one are one action, and must not read as
+    /// the same word: "Set Alias" on a row that already has one is how
+    /// somebody overwrites a name they meant to keep.
+    #[test]
+    fn it_retitles_itself_once_there_is_a_name() {
+        let object = row_of("app");
+
+        assert_eq!(
+            titled(&offered(&object, None), "sill.row.alias").as_deref(),
+            Some("Set Alias"),
+        );
+        assert_eq!(
+            titled(&offered(&object, Some("np")), "sill.row.alias").as_deref(),
+            Some("Change Alias \"np\""),
+        );
+    }
+
+    /// An entry that does nothing is worse than no entry: it has to be read
+    /// before it can be skipped.
+    #[test]
+    fn forgetting_is_offered_only_where_there_is_a_name() {
+        let object = row_of("app");
+
+        assert!(
+            titled(&offered(&object, None), "sill.row.alias.clear").is_none(),
+            "offered to forget a name on a row that has none",
+        );
+        assert_eq!(
+            titled(&offered(&object, Some("np")), "sill.row.alias.clear").as_deref(),
+            Some("Clear Alias \"np\""),
+        );
+    }
+
+    /// A window's id is a handle that stops being valid when it closes, so a
+    /// name given to one would point at nothing tomorrow. See `UNNAMABLE`.
+    #[test]
+    fn a_row_a_name_would_outlive_is_offered_neither() {
+        let object = row_of("window");
+
+        for alias in [None, Some("w")] {
+            let drawn = offered(&object, alias);
+
+            assert!(
+                titled(&drawn, "sill.row.alias").is_none(),
+                "offered to name a window, whose id is a handle: {drawn:?}",
+            );
+            assert!(
+                titled(&drawn, "sill.row.alias.clear").is_none(),
+                "offered to forget a window's name: {drawn:?}",
+            );
+        }
+    }
+}
