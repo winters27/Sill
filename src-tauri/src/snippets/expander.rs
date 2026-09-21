@@ -415,10 +415,36 @@ impl Expander {
     /// The global hotkeys the hook answers to. Replaced whole on every
     /// settings write, which is rare; read on every keystroke, which is not.
     pub fn set_hotkeys(&self, hotkeys: Vec<crate::hotkeys::Hotkey>) {
+        self.set_hotkeys_with(hotkeys, crate::hotkeys::key_down);
+    }
+
+    /// The same, asking `down` whether a chord's key is pressed right now.
+    ///
+    /// A chord whose key is down at the moment it is bound is a chord somebody
+    /// is still holding in the recorder that bound it: the settings window
+    /// saves on the key-down, and Windows repeats a held key, so the next
+    /// repeat would arrive at a hook that now answers to it. That is how
+    /// recording Alt+Home as the summon key summoned the launcher over the
+    /// settings window mid-keystroke.
+    ///
+    /// Latching the key now reuses the swallow-until-key-up the hook already
+    /// keeps for a chord that fired: nothing dispatches, and the program
+    /// underneath sees no repeats, until the key has been let go. Any other
+    /// save leaves the latch clear, as before.
+    pub fn set_hotkeys_with(
+        &self,
+        hotkeys: Vec<crate::hotkeys::Hotkey>,
+        down: impl Fn(u32) -> bool,
+    ) {
+        let still_pressed = hotkeys
+            .iter()
+            .map(|one| one.chord.vk)
+            .find(|&vk| down(vk))
+            .unwrap_or(0);
         self.inner.hotkeys.store(Arc::new(hotkeys));
         self.inner
             .hotkey_held
-            .store(0, std::sync::atomic::Ordering::Relaxed);
+            .store(still_pressed, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Which key stands in for four modifiers, or none.
@@ -1263,6 +1289,46 @@ pub fn stop(_expander: &Expander) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn summon_on(vk: u32) -> crate::hotkeys::Hotkey {
+        crate::hotkeys::Hotkey {
+            accelerator: "Alt+Home".to_string(),
+            chord: crate::hotkeys::Chord {
+                ctrl: false,
+                alt: true,
+                shift: false,
+                win: false,
+                vk,
+            },
+            target: crate::hotkeys::Target::Summon,
+        }
+    }
+
+    const VK_HOME: u32 = 0x24;
+
+    #[test]
+    fn a_chord_bound_while_its_key_is_still_down_is_latched_until_it_is_released() {
+        // The recorder saves on the key-down, and a held key repeats. Without
+        // the latch the next repeat fires the binding it just set.
+        let expander = Expander::new();
+
+        expander.set_hotkeys_with(vec![summon_on(VK_HOME)], |vk| vk == VK_HOME);
+
+        assert_eq!(
+            expander.inner.hotkey_held.load(Ordering::Relaxed),
+            VK_HOME,
+            "the key that was down when it was bound must be held back until its key-up"
+        );
+    }
+
+    #[test]
+    fn a_chord_bound_with_nothing_down_leaves_the_latch_clear() {
+        let expander = Expander::new();
+
+        expander.set_hotkeys_with(vec![summon_on(VK_HOME)], |_| false);
+
+        assert_eq!(expander.inner.hotkey_held.load(Ordering::Relaxed), 0);
+    }
 
     #[test]
     fn the_buffer_keeps_only_the_recent_tail() {

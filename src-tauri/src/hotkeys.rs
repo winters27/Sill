@@ -362,6 +362,20 @@ pub fn held_now() -> Held {
     Held::default()
 }
 
+/// Whether one key is physically down right now.
+#[cfg(windows)]
+pub fn key_down(vk: u32) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+
+    // SAFETY: takes a virtual key and returns a plain value.
+    unsafe { (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0 }
+}
+
+#[cfg(not(windows))]
+pub fn key_down(_vk: u32) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

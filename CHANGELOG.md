@@ -19,6 +19,14 @@ IPC surface, the dependencies added, and every commit body in full. Use the
 relevant subset under recognizable feature labels, with measured results where
 available.
 
+## 0.4.2
+
+- **Recording a hotkey:** Setting a key while it is still held no longer
+  fires it. Recording Alt+Home as the summon key used to summon the launcher
+  over the Settings window the moment the key repeated, because the new
+  binding was armed on the key-down that recorded it. A chord whose key is
+  down when it is bound now waits for that key to be released.
+
 ## 0.4.1
 
 - **Clipboard:** Sill no longer empties the clipboard or writes over a copy
