@@ -380,6 +380,39 @@
   --menu-lift: rgba(var(--accent-rgb), 0.13);
 
   /*
+   * ---- The lit rim -------------------------------------------------------
+   *
+   * A flat border says where a surface ends. These two say it is glass, and
+   * they do it the way a real edge does: the rim carries the colour of the
+   * thing it is cut from, and the light only catches part of the way along.
+   *
+   * `--menu-rim` is the edge, in the accent, so a popover is cut from the
+   * same material as `--menu-lift` under it rather than outlined in grey.
+   *
+   * `--menu-spec` is the highlight, and it is white on every theme. A rim
+   * highlight is a reflection of the room rather than of the surface, so it
+   * does not take the accent even where the rim does.
+   *
+   * The intensity is one number. Raise `--menu-glaze` to make the whole
+   * effect stronger and lower it to make it nearly nothing; it is the dial,
+   * the way `--menu-lift` is the dial for how dark a popover reads.
+   */
+  --menu-rim: rgba(var(--accent-rgb), 0.50);
+  --menu-spec: rgba(255, 255, 255, 0.55);
+  --menu-glaze: 0.85;
+
+  /*
+   * The line outside the rim, which is separation rather than a second edge.
+   *
+   * Dark, because it is doing the job a drop shadow does at its very first
+   * pixel: telling the eye where the popover stops and the window behind it
+   * starts. It replaces the `--hairline` border this recipe used to carry.
+   * Light themes take their own, since a dark line on a pale popover reads
+   * as a drawn outline rather than as a shadow.
+   */
+  --menu-edge: 0 0 0 1px rgba(0, 0, 0, 0.45);
+
+  /*
    * A window that is only a menu, which is a different problem again.
    *
    * `.sill-menu` is an IN-PAGE recipe: `backdrop-filter` blurs the launcher's
@@ -750,6 +783,25 @@
   /* The gutter both columns of the settings window keep from its edges. */
   --settings-gutter: var(--space-10);
   --icon-tile: 26px;
+
+  /*
+   * How heavy a line-drawn glyph is, on the 24-unit grid they are drawn on.
+   *
+   * There were **eleven** different stroke weights across nineteen files,
+   * from 1 to 2.6, because `stroke-width` is an SVG presentation attribute
+   * rather than a CSS property and so nothing in `verify:source` was ever
+   * looking at it. This is the number, and a glyph that wants a different
+   * one should say why next to itself.
+   *
+   * 1.25 on a 24 grid drawn into 16px is a 0.83px line, which is under a
+   * device pixel and lands as a soft one. That is the intent: these sit
+   * beside 13px text and a glyph that reads heavier than the word next to
+   * it is a glyph competing with the word.
+   *
+   * It is a bare number, not a length: `stroke-width` on an SVG is in user
+   * units, so a length here would be wrong at every size but one.
+   */
+  --stroke-glyph: 1.25;
   --icon-tile-sm: 20px;
   --icon-tile-xs: 16px;
 
@@ -1041,6 +1093,9 @@
   /* Far stronger than the dark theme's 0.08: lifting a near-white popover
      off a near-white window takes more than lifting off near-black. */
   --menu-lift: rgba(255, 255, 255, 0.55);
+  /* The dark theme's 0.45 black is a drawn outline on a near-white popover.
+     This is the same job in the ink the rest of the theme separates with. */
+  --menu-edge: 0 0 0 1px rgba(var(--ink), 0.12);
   --well: inset 0 1px 2px rgba(0, 0, 0, 0.1);
   --bevel-tile: inset 1px 1px 0 0 rgba(255, 255, 255, 0.8),
     inset -1px -1px 0 0 rgba(0, 0, 0, 0.07);
@@ -1735,12 +1790,102 @@ body {
   /* Top layer first, the way `background-image` stacks: the light off the
      edge sits over the flat lift, which sits over the base colour. */
   background-image: var(--sheen), linear-gradient(var(--menu-lift), var(--menu-lift));
-  border: 1px solid var(--hairline);
+  /*
+   * No border, and no `--bevel-tile`, because the rim below is the edge now.
+   *
+   * There were three concentric rings on this element: a 1px `--hairline`
+   * border on the border box, `--bevel-tile`'s inset white highlight a pixel
+   * inside that, and the rim. **An absolutely positioned child with
+   * `inset: 0` sits against the PADDING box**, so the rim drew one pixel in
+   * from the border while `border-radius: inherit` gave it the border box's
+   * curve. Two rings a pixel apart, with corners that cannot agree, is what
+   * a doubled edge looks like.
+   *
+   * With the border gone the pseudo-elements cover the whole element and
+   * their corners are the element's corners. `--menu-edge` is outside all of
+   * it and is separation from the window behind, not another edge.
+   */
+  border: 0;
   border-radius: var(--radius-lg);
-  box-shadow: var(--bevel-tile), var(--elevation-menu);
+  box-shadow: var(--menu-edge), var(--elevation-menu);
   /* Nothing inside a popover paints past its corner. A collection name
      longer than the menu used to carry its count out over the rows. */
   overflow: hidden;
+  /* The rim below is drawn by children, and a child cannot be positioned
+     against a parent that is not. */
+  position: relative;
+}
+
+/*
+ * The rim, in two layers, over the rows and under nothing.
+ *
+ * Pseudo-elements rather than more `box-shadow` on the rule above, for one
+ * reason: the sweep has to be masked, and a mask applies to an element, not
+ * to one shadow among several. Once one layer needs its own element the
+ * other may as well have one too, so each is a thing with a name.
+ *
+ * `inset: 0` with `border-radius: inherit` rather than any repeated number,
+ * so the corner is stated once on the popover and both layers follow it.
+ *
+ * Neither takes the pointer. The rows underneath are what is being clicked.
+ */
+.sill-menu::before,
+.sill-menu::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-raised);
+  border-radius: inherit;
+  opacity: var(--menu-glaze);
+  pointer-events: none;
+}
+
+/*
+ * The edge, and the colour just inside it.
+ *
+ * One pixel of accent on the boundary, then a soft fall of the same colour
+ * inwards. The fall is what keeps the edge from reading as a drawn line:
+ * a real edge on a curved surface is bright exactly at the boundary and
+ * dims over a few pixels, and a hairline alone stops dead.
+ */
+.sill-menu::before {
+  box-shadow:
+    inset 0 0 0 1px var(--menu-rim),
+    inset 0 0 8px 1px rgba(var(--accent-rgb), 0.16);
+  /*
+   * The rim fades down rather than closing a uniform loop.
+   *
+   * A ring of one strength all the way round is an outline drawn on the
+   * shape. Light lands on an edge unevenly, so this is strongest along the
+   * top and weakest at the bottom, falling in the same direction `--sheen`
+   * washes, and the two read as one light rather than two decisions.
+   *
+   * It fades to a quarter and not to nothing. An accent that stopped would
+   * look rubbed out at the bottom corners; the silhouette down there is
+   * `--menu-edge`'s job, and that goes all the way round.
+   */
+  mask-image: linear-gradient(180deg, black, rgba(0, 0, 0, 0.25));
+}
+
+/*
+ * The light, caught across the middle and gone at both ends.
+ *
+ * This is the half that makes it read as glass rather than as a tinted box.
+ * `--sheen` on the rule above is a vertical wash, which says "lit from
+ * overhead"; this is a horizontal band, which says "this edge is curved".
+ * The mask is the whole trick, and it is why this cannot be another shadow
+ * on the popover itself.
+ *
+ * `translateZ(0)` because a masked element that is not on its own layer is
+ * re-masked on every repaint underneath it, and the rows under a popover
+ * repaint on every arrow key.
+ */
+.sill-menu::after {
+  box-shadow:
+    inset 0 0 2px 1px var(--menu-spec),
+    inset 0 0 4px 1px rgba(255, 255, 255, 0.10);
+  mask-image: linear-gradient(90deg, transparent, black, transparent);
+  transform: translateZ(0);
 }
 
 /*

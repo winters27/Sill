@@ -573,13 +573,13 @@
     height={size}
     viewBox="0 0 24 24"
     fill="none"
-    stroke-width={1.35 * unit}
+    stroke-width={1.0 * unit}
     stroke-linecap="butt"
     stroke-linejoin="miter"
     aria-hidden="true"
   >
     {#if etched}
-      <g class="groove" transform="translate(0 {-unit})" stroke-width={1.5 * unit}>
+      <g class="groove" transform="translate(0 {-unit})" stroke-width={1.3 * unit}>
         {@render glyph()}
       </g>
     {/if}

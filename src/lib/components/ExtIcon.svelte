@@ -176,6 +176,7 @@
       </svg>
     {:else if printed}
       <svg
+        class="line"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -196,7 +197,18 @@
         >
       </svg>
     {:else if drawn}
+      <!--
+        The weight is set in CSS rather than here, and the attribute below is
+        what draws if that rule ever stops matching. A presentation attribute
+        cannot read a custom property, and CSS on the same element beats it,
+        so the token wins while the attribute keeps the glyph from vanishing.
+
+        It is set on the `svg`, so it reaches every shape by inheritance and
+        any shape that wants its own weight can still say so on itself. The
+        bars below do exactly that.
+      -->
       <svg
+        class="line"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -279,6 +291,11 @@
 {/if}
 
 <style>
+  /* The one weight, inherited by every shape that does not set its own. */
+  .line {
+    stroke-width: var(--stroke-glyph);
+  }
+
   .ext-icon {
     display: grid;
     flex: none;
