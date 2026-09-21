@@ -911,6 +911,37 @@ for (const file of sources("scripts")) {
 }
 
 /*
+ * Every global recipe has a mock in the gallery.
+ *
+ * `src/routes/preview/gallery/+page.svelte` is where the design system is
+ * judged as a system, on seven themes and three wallpapers, and it is the
+ * only place a material can be looked at next to its neighbours before a
+ * build. It drifted once without anything noticing: the real launcher menu
+ * lost its caret and the gallery's hand-written copy kept it, green the
+ * whole time. This holds the other direction: a `.sill-*` class defined in
+ * the theme that the gallery never draws is a recipe nobody can judge, so a
+ * new one cannot ship without a mock.
+ */
+{
+  const GALLERY = "src/routes/preview/gallery/+page.svelte";
+  const theme = readFileSync("src/lib/theme/theme.css", "utf8");
+  const gallery = readFileSync(GALLERY, "utf8");
+  const recipes = new Set(
+    [...theme.matchAll(/^\.(sill-[a-z-]+)/gm)].map((m) => m[1]),
+  );
+
+  if (recipes.size < 5) {
+    fail("src/lib/theme/theme.css", null, `only ${recipes.size} .sill-* recipes read, which is parsing rather than checking`);
+  }
+
+  for (const recipe of recipes) {
+    if (!gallery.includes(recipe)) {
+      fail(GALLERY, null, `never draws \`.${recipe}\`, which theme.css defines, so that recipe cannot be judged before a build`);
+    }
+  }
+}
+
+/*
  * The row height, which lives in two places because it has to.
  *
  * Rust sizes the launcher window and cannot read CSS, so `window_height`

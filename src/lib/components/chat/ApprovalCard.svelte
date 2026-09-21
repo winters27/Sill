@@ -23,7 +23,7 @@
   let { asked, ondecide }: Props = $props();
 </script>
 
-<div class="permission" role="group" aria-label={asked.title}>
+<div class="permission sill-glaze sill-glaze-card" role="group" aria-label={asked.title}>
   <p class="wants">{asked.title}</p>
   <p class="subject">{asked.subject}</p>
   <p class="touches">This {asked.touches}.</p>
@@ -45,14 +45,16 @@
 </div>
 
 <style>
+  /* The popover's material at card size, in the flow of the chat: the base
+     is the menu's, the rim and highlight are the card glaze's, and a short
+     shadow gives it contact rather than the faint accent ring it wore. */
   .permission {
     align-self: flex-start;
     max-width: 62ch;
     width: 100%;
     padding: var(--space-3);
-    border-radius: var(--radius-lg);
-    background: var(--fill-1);
-    box-shadow: var(--ring-accent-faint);
+    --glaze-base: var(--menu-base);
+    box-shadow: var(--menu-edge), var(--elevation-2);
   }
 
   .wants {

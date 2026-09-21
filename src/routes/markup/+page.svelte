@@ -30,6 +30,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { currentMonitor, getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
   import TitleBar from "$lib/components/TitleBar.svelte";
+  import { watchFocus } from "$lib/chrome";
   import MarkupIcon, { type MarkIcon } from "$lib/components/MarkupIcon.svelte";
   import {
     arrowTip,
@@ -1053,6 +1054,10 @@
     }
   }
 
+  // The glaze on the toolbar clusters goes out while another window is in
+  // front. One listener, one attribute flip per focus change; see `$lib/chrome`.
+  onMount(() => watchFocus());
+
   onMount(() => {
     let off: UnlistenFn | undefined;
 
@@ -1103,7 +1108,7 @@
   <TitleBar />
 
   <header>
-    <div class="group">
+    <div class="group sill-glaze sill-glaze-cluster">
       {#each TOOLS as option (option.id)}
         <button
           class="icon"
@@ -1118,7 +1123,7 @@
       {/each}
     </div>
 
-    <div class="group right">
+    <div class="group right sill-glaze sill-glaze-cluster">
       <button
         class="icon"
         use:hint={"Undo the last mark (Ctrl Z)"}
@@ -1238,7 +1243,7 @@
   </div>
 
   <footer>
-    <div class="group">
+    <div class="group sill-glaze sill-glaze-cluster">
       {#each COLOURS as swatch (swatch.value)}
         <button
           class="swatch"
@@ -1396,6 +1401,11 @@
        came out as a footer cut off along the bottom edge. */
     position: fixed;
     inset: 0;
+    /* The title bar floats over the top of this box, so the toolbar starts
+       under it. Border-box, or the padding grows a box that is already pinned
+       to the viewport past its bottom edge. */
+    box-sizing: border-box;
+    padding-top: var(--titlebar-height);
     /* Stated, not inherited. The page under this is transparent on purpose so
        the launcher's acrylic reaches it, and an editor that lets the desktop
        through its edges reads as a broken window. */
@@ -1412,27 +1422,24 @@
     flex: none;
   }
 
-  header {
-    border-bottom: 1px solid var(--hairline);
-  }
-
+  /* No line under the header: the bar above it has none either, so the two
+     read as one block of chrome. The footer keeps its line, because it abuts
+     the stage rather than the bar. */
   footer {
     border-top: 1px solid var(--hairline);
   }
 
-  .group {
-    display: flex;
-    gap: var(--space-1);
-    align-items: center;
-  }
-
+  /* Each group is a cluster on the glaze: `.sill-glaze-cluster` lays it
+     out and sizes it at 34px, and the buttons inside light themselves. */
   .right {
     margin-left: auto;
   }
 
+  /* A divider inside a capsule is a short one; the full height would cut
+     the pill in two. */
   .split {
     width: 1px;
-    height: var(--control-height);
+    height: var(--icon-tile-xs);
     margin: 0 var(--space-1);
     background: var(--hairline);
   }
@@ -1444,7 +1451,10 @@
     height: var(--control-height);
     padding: 0;
     border: 0;
-    border-radius: var(--radius-md);
+    /* Round inside a capsule: a rounded rectangle inside a pill fights it
+       over which curve is in charge, and a circle is the one shape that does
+       not argue. */
+    border-radius: var(--radius-pill);
     background: transparent;
     color: var(--text-2);
     cursor: default;
@@ -1474,7 +1484,7 @@
     height: var(--control-height);
     padding: 0 var(--space-3);
     border: 0;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-pill);
     background: var(--accent);
     color: var(--core-background);
     font: inherit;
@@ -1526,7 +1536,7 @@
     place-items: center;
     width: var(--control-height);
     height: var(--control-height);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-pill);
     color: var(--text-2);
     cursor: default;
   }

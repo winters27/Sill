@@ -284,7 +284,7 @@
 
 <div class="root">
   {#if visible}
-    <div class="pill" style:height="{BOX_HEIGHT}px">
+    <div class="pill sill-glaze" style:height="{BOX_HEIGHT}px">
       {#if status === "transcribing"}
         <!-- The one state that is work in progress, drawn as such. The word
              says which state it is; the row under it says the work is still
@@ -338,10 +338,10 @@
     blurs what is behind the element *within the page*, and there is nothing
     there; a real desktop blur needs a compositor backdrop, which with a
     transparent tint samples the desktop and turns murky grey. So the sheet is
-    drawn instead: a dark fill, `--sheen` for the light falling down it, and
-    `--bevel-tile` for the edge, that being the pair of opposing insets the
-    palette note calls the thing that gives an edge the thickness of glass. A
-    single ring is the same weight on all four sides and reads as an outline.
+    drawn instead, by `.sill-glaze`: a dark base, `--sheen` for the light
+    falling down it, the rim lit along the top and the highlight caught in
+    the middle. This pill is the one glazed surface with nothing under it but
+    the desktop, so it keeps its own deep base and its own long shadow.
   */
   .pill {
     display: inline-flex;
@@ -349,10 +349,8 @@
     justify-content: center;
     min-width: 174px;
     padding: var(--space-2) var(--space-4);
-    border-radius: var(--radius-pill);
-    background-image: var(--sheen);
-    background-color: var(--shade-5);
-    box-shadow: var(--bevel-tile), var(--elevation-pill);
+    --glaze-base: var(--shade-5);
+    box-shadow: var(--glaze-edge), var(--elevation-pill);
   }
 
   /* The word, and the row running underneath it. */

@@ -60,6 +60,8 @@
   let wall = $state<keyof typeof WALLS>("dark");
   let theme = $state<(typeof THEMES)[number]>("frost");
   let face = $state("satoshi");
+  /** The window not in front, which unlights every glazed surface. */
+  let blurred = $state(false);
   let toggled = $state(true);
   let segment = $state("acrylic");
   let rows = $state(10);
@@ -94,10 +96,16 @@
 
 <svelte:head><title>Sill primitives</title></svelte:head>
 
-<div class="page" style:background={WALLS[wall]}>
+<div class="page" style:background={WALLS[wall]} data-window-blurred={blurred ? "true" : undefined}>
   <div class="controls">
     <strong>Sill primitives</strong>
     <span class="sp"></span>
+    <label>Window
+      <select bind:value={blurred}>
+        <option value={false}>In front</option>
+        <option value={true}>Behind</option>
+      </select>
+    </label>
     <label>Wallpaper
       <select bind:value={wall}>
         <option value="dark">Dark</option>
@@ -311,6 +319,73 @@
         </div>
       {/each}
     </div>
+  </div>
+
+  <h2>The glaze: controls, at rest and lit</h2>
+  <!-- Heights stated so drift is visible: 30 for the row's controls, 34 for a
+       cluster and a bar pill, 22 for the two in the clipboard bar. -->
+  <div class="glaze-row">
+    <button class="g-trigger sill-glaze sill-glaze-control">
+      <ExtIcon icon={{ kind: "mark", name: "AppWindowGrid3x3" }} small />
+      <span>Everything</span>
+    </button>
+    <button class="g-trigger sill-glaze sill-glaze-control" aria-expanded="true">
+      <ExtIcon icon={{ kind: "mark", name: "AppWindowGrid3x3" }} small />
+      <span>Everything</span>
+    </button>
+    <button class="g-menu sill-glaze sill-glaze-control" aria-label="Sill menu">
+      <img src="/sill.png" alt="" width="20" height="20" />
+    </button>
+    <div class="g-bar">
+      <button class="g-crumb sill-glaze sill-glaze-control">Release notes <em>4</em></button>
+      <span class="sp"></span>
+      <button class="g-small sill-glaze sill-glaze-control">Collections</button>
+      <button class="g-small sill-glaze sill-glaze-control">All kinds</button>
+    </div>
+    <button class="g-asker sill-glaze sill-glaze-control"><span class="g-pip"></span>gpt-5</button>
+    <button class="g-who sill-glaze sill-glaze-control"><span class="g-pip"></span>claude-sonnet-5 <small>OpenRouter</small></button>
+  </div>
+
+  <h2>The glaze: a cluster, a floating bar, and the pill on the desktop</h2>
+  <div class="glaze-row">
+    <div class="g-cluster sill-glaze sill-glaze-cluster">
+      <button class="g-icon on" aria-label="Arrow"><ExtIcon icon={{ kind: "mark", name: "ArrowRight" }} small /></button>
+      <button class="g-icon" aria-label="Text"><ExtIcon icon={{ kind: "mark", name: "Text" }} small /></button>
+      <button class="g-icon" aria-label="Highlight"><ExtIcon icon={{ kind: "mark", name: "Highlight" }} small /></button>
+      <span class="g-split"></span>
+      <button class="g-icon" aria-label="Undo"><ExtIcon icon={{ kind: "mark", name: "Undo" }} small /></button>
+    </div>
+    <div class="g-window">
+      <div class="g-titlebar">
+        <img src="/sill.png" alt="" width="20" height="20" />
+        <span class="g-title">Ask</span>
+        <span class="sp"></span>
+        <button class="g-who sill-glaze sill-glaze-control"><span class="g-pip"></span>claude-sonnet-5 <small>OpenRouter</small></button>
+        <span class="g-caption">&#x2013;</span>
+        <span class="g-caption close">&#x2715;</span>
+      </div>
+      <div class="g-rail"></div>
+      <p class="g-prose">The prose starts under the bar and, scrolled, travels beneath it; the bar has no band of its own.</p>
+    </div>
+    <div class="g-pill sill-glaze">Listening</div>
+  </div>
+
+  <h2>The glaze at card size, and the tooltip</h2>
+  <div class="glaze-row">
+    <div class="g-card sill-glaze sill-glaze-card" style:--glaze-base="var(--tint-panel)">
+      <span>Ask anything about this machine</span>
+    </div>
+    <div class="g-card asked sill-glaze sill-glaze-card" style:--glaze-base="var(--menu-base)">
+      <strong>Read the selection</strong>
+      <span>This reads what you have selected.</span>
+    </div>
+    <div class="sill-hint sill-glaze sill-glaze-card g-hint">Change who answers</div>
+  </div>
+
+  <h2>A card and its rows, which are not glass</h2>
+  <div class="sill-card g-plain">
+    <div class="sill-setting g-setting"><span>Open at login</span><span class="sp"></span><em>On</em></div>
+    <div class="sill-setting g-setting"><span>Visible rows</span><span class="sp"></span><em>8 rows</em></div>
   </div>
 
   <h2>Settings</h2>
@@ -921,6 +996,129 @@
   .btns { display: flex; gap: var(--space-2); }
 
   .states { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+
+  /* The glaze mocks. Boxes and type only; every surface, edge and lit state
+     comes from the recipes under test. */
+  .glaze-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
+
+  .g-trigger, .g-small, .g-crumb, .g-asker, .g-who, .g-menu {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--text-meta);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .g-trigger { height: 30px; padding: 0 var(--space-2); }
+  .g-menu { height: 30px; padding: 0 var(--space-2); }
+  .g-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 34px;
+    width: 360px;
+    padding: 0 var(--space-2);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .g-small, .g-crumb { height: 22px; padding: 0 var(--space-2); color: var(--text-1); font-size: var(--text-label); }
+  .g-crumb em { font-style: normal; color: var(--text-3); }
+  .g-asker { padding: var(--space-snug) var(--space-2) var(--space-snug) var(--space-2); gap: var(--space-2); }
+  .g-who { height: 34px; padding: 0 var(--space-3); gap: var(--space-2); }
+  .g-who small { color: var(--text-3); font-size: var(--text-micro); }
+  .g-pip { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+
+  .g-icon {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--text-2);
+  }
+  .g-icon.on { background: var(--accent); color: var(--core-background); }
+  .g-split { width: 1px; height: 16px; margin: 0 var(--space-1); background: var(--hairline); }
+
+  /* A window with a floating bar: the rail's hairline runs to the corner and
+     the caption buttons own the corner pixel. */
+  .g-window {
+    position: relative;
+    width: 420px;
+    height: 150px;
+    overflow: hidden;
+    border-radius: var(--radius-window);
+    background-color: var(--core-secondary-background);
+    background-image: linear-gradient(var(--tint), var(--tint));
+    box-shadow: var(--bevel-window);
+  }
+  .g-titlebar {
+    position: absolute;
+    inset: 0 0 auto 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 42px;
+    padding-left: var(--space-4);
+  }
+  .g-title { font-size: var(--text-meta); color: var(--text-2); }
+  .g-caption {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 42px;
+    color: var(--text-2);
+    font-size: var(--text-meta);
+  }
+  .g-caption.close:hover { background: var(--titlebar-close); color: var(--text-1); }
+  .g-rail { position: absolute; inset: 0 auto 0 0; width: 120px; border-right: 1px solid var(--hairline); }
+  .g-prose {
+    margin: 0;
+    padding: calc(42px + var(--space-4)) var(--space-4) 0 calc(120px + var(--space-4));
+    font-size: var(--text-body);
+    color: var(--text-2);
+  }
+
+  .g-pill {
+    display: inline-flex;
+    align-items: center;
+    height: 54px;
+    min-width: 174px;
+    justify-content: center;
+    padding: var(--space-2) var(--space-4);
+    --glaze-base: var(--shade-5);
+    box-shadow: var(--glaze-edge), var(--elevation-pill);
+    color: var(--text-1);
+    font-size: var(--text-body);
+  }
+
+  .g-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    width: 320px;
+    padding: var(--space-3);
+    box-shadow: var(--glaze-edge), var(--elevation-2);
+    color: var(--text-2);
+    font-size: var(--text-body);
+  }
+  .g-card.asked { box-shadow: var(--menu-edge), var(--elevation-2); }
+  .g-card strong { color: var(--accent); font-weight: var(--weight-medium); }
+  .g-hint { position: static; }
+
+  .g-plain { width: 420px; }
+  .g-setting {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-body);
+    color: var(--text-1);
+  }
+  .g-setting em { font-style: normal; color: var(--text-2); }
 
   .foot {
     margin-top: var(--space-10);

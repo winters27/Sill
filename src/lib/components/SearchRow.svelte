@@ -262,7 +262,7 @@
       placeholder says what it searches; this repeats both in a picture.
     -->
     <span class="lead" aria-hidden="true">
-      <svg class="glass" width="20" height="20" viewBox="0 0 24 24">
+      <svg class="line glass" width="20" height="20" viewBox="0 0 24 24">
         <circle cx="10.5" cy="10.5" r="6.75" stroke="currentColor" stroke-width="1.8" fill="none" />
         <path d="M15.4 15.4 20.5 20.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
       </svg>
@@ -354,7 +354,7 @@
 
   {#if mode === "root" && answersWith}
     <button
-      class="asker"
+      class="asker sill-glaze sill-glaze-control"
       class:unset={!answersWith.ready}
       onclick={() => void openSettings("ai")}
       use:hint={askingIs}
@@ -490,38 +490,35 @@
    * and takes the accent only when there is nothing set up, which is the one
    * state that is asking to be pressed.
    */
+  /* A capsule on the glaze: the surface, the edge and the lit states come
+     from `.sill-glaze`, so the fill and the ring this carried are gone. */
   .asker {
     display: inline-flex;
     align-items: center;
     flex: none;
     gap: var(--space-2);
     padding: var(--space-snug) var(--space-2) var(--space-snug) var(--space-1);
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--fill-1);
-    box-shadow: var(--ring);
     color: var(--text-2);
     font: inherit;
     font-size: var(--text-meta);
     white-space: nowrap;
     cursor: pointer;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
+    transition: color var(--motion-state) var(--ease);
   }
 
   .asker:hover {
-    background: var(--fill-2);
     color: var(--text-1);
   }
 
   .asker:focus-visible {
     outline: none;
-    box-shadow: var(--ring-accent);
+    box-shadow: var(--glaze-edge), var(--ring-accent);
   }
 
+  /* Nothing set up is the one state asking to be pressed, and it takes the
+     accent fill over the glaze's base: a scoped rule beats the global one. */
   .asker.unset {
-    background: var(--accent-fill);
+    background-color: var(--accent-fill);
     box-shadow: none;
     color: var(--accent);
   }
@@ -546,5 +543,16 @@
      because it is the one thing in the row nobody needs to read. */
   .glass {
     color: var(--text-3);
+  }
+  /*
+   * The one weight for line-drawn glyphs, `--stroke-glyph`, on the shapes
+   * themselves: a presentation attribute on a shape beats a value inherited
+   * from its svg, so the rule reaches down rather than relying on
+   * inheritance. The attribute stays as the drawing that survives if this
+   * rule ever stops matching.
+   */
+  .line,
+  .line :where(path, circle, line, polyline) {
+    stroke-width: var(--stroke-glyph);
   }
 </style>

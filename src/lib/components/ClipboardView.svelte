@@ -573,9 +573,9 @@
       <!-- Which set is being looked at, and the way back out of it. The whole
            history is not a collection, so it is not another entry in a
            dropdown; it is what you get when you leave this one. -->
-      <button class="crumb" onclick={() => (inside = null)}>
+      <button class="crumb sill-glaze sill-glaze-control" onclick={() => (inside = null)}>
         {inside.name}
-        <svg width="9" height="9" viewBox="0 0 12 12" aria-hidden="true">
+        <svg class="line" width="9" height="9" viewBox="0 0 12 12" aria-hidden="true">
           <path
             d="M3 3l6 6M9 3l-6 6"
             stroke="currentColor"
@@ -592,12 +592,13 @@
     {#if collections.length && !inside}
       <div class="filter">
         <button
-          class="trigger"
+          class="trigger sill-glaze sill-glaze-control"
           onclick={() => (open = open === "collections" ? null : "collections")}
           aria-haspopup="menu"
+          aria-expanded={open === "collections"}
         >
           Collections
-          <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true">
+          <svg class="line" width="10" height="10" viewBox="0 0 12 12" aria-hidden="true">
             <path
               d="M2.5 4.5 6 8l3.5-3.5"
               stroke="currentColor"
@@ -641,9 +642,14 @@
     {/if}
 
     <div class="filter">
-      <button class="trigger" onclick={() => (open = open === "kind" ? null : "kind")} aria-haspopup="menu">
+      <button
+        class="trigger sill-glaze sill-glaze-control"
+        onclick={() => (open = open === "kind" ? null : "kind")}
+        aria-haspopup="menu"
+        aria-expanded={open === "kind"}
+      >
         {KIND_FILTERS.find((f) => f.id === kind)?.label}
-        <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true">
+        <svg class="line" width="10" height="10" viewBox="0 0 12 12" aria-hidden="true">
           <path
             d="M2.5 4.5 6 8l3.5-3.5"
             stroke="currentColor"
@@ -736,7 +742,7 @@
           <!-- A name somebody gave the entry stands in for its first line. -->
           <span class="line">{row.entry.title ?? preview(row.entry.text)}</span>
           {#if row.entry.pinned}
-            <svg class="pin" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true">
+            <svg class="line pin" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true">
               <path
                 d="M9 3h6l-1 6 4 3v2H6v-2l4-3Z M12 14v7"
                 fill="none"
@@ -843,17 +849,17 @@
   }
 
   /* Which collection is open. A button because its whole job is leaving. */
+  /* The same padding as the triggers beside it, so both come out at 22px in
+     the bar: wrapping two controls in one material is how a 4px difference
+     between them stops being invisible. Surface and edge are the glaze's. */
   .crumb {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    padding: var(--space-half) var(--space-2);
+    padding: var(--space-1) var(--space-2);
     font: inherit;
     font-size: var(--text-label);
     color: var(--text-1);
-    background: var(--fill-2);
-    border: none;
-    border-radius: var(--radius-sm);
     cursor: pointer;
   }
 
@@ -924,23 +930,16 @@
     position: relative;
   }
 
+  /* Surface, edge and the lit states are `.sill-glaze`'s; the box is here. */
   .trigger {
     display: flex;
     align-items: center;
     gap: var(--space-1);
     padding: var(--space-1) var(--space-2);
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--fill-2);
     color: var(--text-1);
     font: inherit;
     font-size: var(--text-meta);
     cursor: pointer;
-    transition: background-color var(--motion-state) var(--ease);
-  }
-
-  .trigger:hover {
-    background: var(--fill-3);
   }
 
   .scrim {
@@ -1189,5 +1188,16 @@
 
   .nothing {
     flex: 1;
+  }
+  /*
+   * The one weight for line-drawn glyphs, `--stroke-glyph`, on the shapes
+   * themselves: a presentation attribute on a shape beats a value inherited
+   * from its svg, so the rule reaches down rather than relying on
+   * inheritance. The attribute stays as the drawing that survives if this
+   * rule ever stops matching.
+   */
+  .line,
+  .line :where(path, circle, line, polyline) {
+    stroke-width: var(--stroke-glyph);
   }
 </style>

@@ -234,7 +234,7 @@
   moving the selection with no visible cause.
 -->
 <button
-  class="trigger"
+  class="trigger sill-glaze sill-glaze-control"
   class:open
   tabindex="-1"
   aria-label="Sill menu"
@@ -252,18 +252,17 @@
 </button>
 
 <style>
+  /* A capsule on the glaze, the same material as the menu it opens. The
+     surface, the edge and the lit states (hover, and `aria-expanded` while
+     the menu is up) come from `.sill-glaze`; the box is here. */
   .trigger {
     display: grid;
     place-items: center;
     flex: none;
     height: var(--control-height);
     padding: 0 var(--space-2);
-    border: 0;
-    border-radius: var(--radius-lg);
-    background: transparent;
     font: inherit;
     cursor: default;
-    transition: background-color var(--motion-state) var(--ease);
   }
 
   /*
@@ -278,11 +277,6 @@
     width: var(--icon-tile-sm);
     height: var(--icon-tile-sm);
     -webkit-user-drag: none;
-  }
-
-  .trigger:hover,
-  .trigger.open {
-    background-color: var(--fill-2);
   }
 
   .scrim {

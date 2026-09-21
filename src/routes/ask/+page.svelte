@@ -28,6 +28,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
   import TitleBar from "$lib/components/TitleBar.svelte";
+  import { watchFocus } from "$lib/chrome";
   import Instead from "$lib/components/Instead.svelte";
   import AiMark from "$lib/components/settings/AiMark.svelte";
   import ApprovalCard from "$lib/components/chat/ApprovalCard.svelte";
@@ -364,6 +365,10 @@
     return () => clearInterval(ticking);
   });
 
+  // The glaze on the title bar's control goes out while another window is in
+  // front. One listener, one attribute flip per focus change; see `$lib/chrome`.
+  onMount(() => watchFocus());
+
   onMount(() => {
     let dropped: UnlistenFn | undefined;
     let heard: UnlistenFn | undefined;
@@ -482,13 +487,38 @@
 />
 
 <div class="window" class:hovering>
-  <TitleBar {title} />
+  <TitleBar {title}>
+    <!--
+      Who answers, in the bar.
+
+      The mark, the model, and where it runs. Pressing it goes to where that
+      is chosen. Until this the window never said which model you were
+      talking to, and switching meant knowing to open Settings. It is the
+      bar's one control, on the same glaze as every other control that opens
+      something, and it carries no drag attribute so a press is a press.
+    -->
+    <button
+      class="who sill-glaze sill-glaze-control"
+      class:unset={!answersWith?.ready}
+      onclick={() => void openSettings("ai")}
+      use:hint={answersWith?.ready ? "Change who answers" : (answersWith?.whyNot ?? "Set up AI Chat")}
+    >
+      {#if answersWith?.ready}
+        <span class="pip" aria-hidden="true"></span>
+        <AiMark name={answersWith.id} size={14} />
+        <span class="model">{answersWith.model || answersWith.name}</span>
+        <span class="where">{whereFrom(answersWith)}</span>
+      {:else}
+        <span class="model">Set up AI Chat</span>
+      {/if}
+    </button>
+  </TitleBar>
 
   <div class="body">
     <aside class="rail">
       <!-- A well to narrow the list, quiet until it is needed. -->
       <label class="well">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <svg class="line" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path
             d="M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM16 16l5 5"
             stroke="currentColor"
@@ -525,7 +555,7 @@
                 use:hint={"Forget this conversation"}
                 onclick={() => void forget(one.id)}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <svg class="line" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path
                     d="M4 7h16M10 4h4M6 7l1 13h10l1-13M10 11v6M14 11v6"
                     stroke="currentColor"
@@ -547,28 +577,6 @@
         />
       </div>
 
-      <!--
-        Who answers, at the foot of the rail.
-
-        The mark, the model, and where it runs. Pressing it goes to where
-        that is chosen. Until this the window never said which model you were
-        talking to, and switching meant knowing to open Settings.
-      -->
-      <button
-        class="who"
-        class:unset={!answersWith?.ready}
-        onclick={() => void openSettings("ai")}
-        use:hint={answersWith?.ready ? "Change who answers" : (answersWith?.whyNot ?? "Set up AI Chat")}
-      >
-        {#if answersWith?.ready}
-          <span class="pip" aria-hidden="true"></span>
-          <AiMark name={answersWith.id} size={14} />
-          <span class="model">{answersWith.model || answersWith.name}</span>
-          <span class="where">{whereFrom(answersWith)}</span>
-        {:else}
-          <span class="model">Set up AI Chat</span>
-        {/if}
-      </button>
     </aside>
 
     <main class="pane">
@@ -638,6 +646,8 @@
   }
 
   .window {
+    /* The title bar floats over this box, so it needs the box to float in. */
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100vh;
@@ -666,13 +676,15 @@
 
   /* ----------------------------------------------------------------- the rail */
 
+  /* Starts at the window's top edge, under the floating bar, so its hairline
+     runs to the corner; the padding keeps the well out from under the chrome. */
   .rail {
     width: 232px;
     flex: none;
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    padding: var(--space-2) var(--space-2) var(--space-3);
+    padding: calc(var(--titlebar-height) + var(--space-2)) var(--space-2) var(--space-3);
     border-right: 1px solid var(--hairline);
   }
 
@@ -864,36 +876,31 @@
     color: var(--danger);
   }
 
+  /* A 34px capsule in the 42px bar, four pixels above and below, which is
+     the proportion a title-bar pill keeps. Surface, edge and the lit states
+     are `.sill-glaze`'s; the box and the type are here. */
   .who {
     display: flex;
     align-items: center;
     gap: var(--space-2);
     height: 34px;
+    max-width: 320px;
     padding: 0 var(--space-3);
-    border: 0;
-    border-radius: var(--radius-md);
-    /* The same quiet surface as the composer: the panel tint and one light
-       catch, so it reads as part of the rail rather than a button on it. */
-    background: var(--tint-panel);
-    box-shadow: var(--catch);
     color: var(--text-2);
     font: inherit;
     font-size: var(--text-meta);
     text-align: left;
     cursor: pointer;
-    transition:
-      background-color var(--motion-state) var(--ease),
-      color var(--motion-state) var(--ease);
+    transition: color var(--motion-state) var(--ease);
   }
 
   .who:hover {
-    background: var(--fill-1);
     color: var(--text-1);
   }
 
   .who:focus-visible {
     outline: none;
-    box-shadow: var(--catch), var(--ring-accent);
+    box-shadow: var(--glaze-edge), var(--ring-accent);
   }
 
   /* Live, in the one colour that means something is answering. */
@@ -940,6 +947,14 @@
     flex-direction: column;
   }
 
+  /* The prose scrolls under the floating bar; the scrollbar must not. A
+     scroller's padding moves its content and not its box, so the track is
+     the one thing that can start below the chrome while the content still
+     travels beneath it. */
+  .transcript::-webkit-scrollbar-track {
+    margin-top: var(--titlebar-height);
+  }
+
   /*
    * One measured column, centred on the glass.
    *
@@ -951,7 +966,8 @@
     width: min(74ch, 100%);
     box-sizing: border-box;
     margin: 0 auto;
-    padding: var(--space-6) var(--space-5) var(--space-3);
+    /* Below the floating bar at rest; scrolled, the prose travels under it. */
+    padding: calc(var(--titlebar-height) + var(--space-6)) var(--space-5) var(--space-3);
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
@@ -970,5 +986,16 @@
    */
   .hovering {
     box-shadow: var(--bevel-window), var(--focus-ring-inset);
+  }
+  /*
+   * The one weight for line-drawn glyphs, `--stroke-glyph`, on the shapes
+   * themselves: a presentation attribute on a shape beats a value inherited
+   * from its svg, so the rule reaches down rather than relying on
+   * inheritance. The attribute stays as the drawing that survives if this
+   * rule ever stops matching.
+   */
+  .line,
+  .line :where(path, circle, line, polyline) {
+    stroke-width: var(--stroke-glyph);
   }
 </style>

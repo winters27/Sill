@@ -393,13 +393,13 @@
    * highlight is a reflection of the room rather than of the surface, so it
    * does not take the accent even where the rim does.
    *
-   * The intensity is one number. Raise `--menu-glaze` to make the whole
-   * effect stronger and lower it to make it nearly nothing; it is the dial,
-   * the way `--menu-lift` is the dial for how dark a popover reads.
+   * The intensity is one number, `--glaze-opacity` below, shared with the
+   * control glaze so a popover and the button that opened it are lit
+   * alike; it is the dial, the way `--menu-lift` is the dial for how dark
+   * a popover reads.
    */
   --menu-rim: rgba(var(--accent-rgb), 0.50);
   --menu-spec: rgba(255, 255, 255, 0.55);
-  --menu-glaze: 0.85;
 
   /*
    * The line outside the rim, which is separation rather than a second edge.
@@ -411,6 +411,56 @@
    * as a drawn outline rather than as a shadow.
    */
   --menu-edge: 0 0 0 1px rgba(0, 0, 0, 0.45);
+
+  /*
+   * ---- The glaze on a control --------------------------------------------
+   *
+   * The popover's material, retuned for a 30px capsule sitting ON the window
+   * rather than a 400px popover floating over it: a lighter edge, light along
+   * the top only, and a half pixel of bounce along the bottom. `.sill-glaze`
+   * reads these; `.sill-menu` reads the `--menu-*` set above. Same recipe,
+   * two sizes.
+   *
+   * The tint carries the accent by identity, as `--menu-lift` does, so a
+   * control belongs to the theme it sits in rather than arriving neutral
+   * grey on a violet or a warm one. The highlight is white on every theme: a
+   * rim highlight reflects the room, not the surface.
+   *
+   * The lift is ink, not accent, for the reason the palette note gives: a
+   * hover is not a selection. Frost-light sets its own values below; the
+   * five other dark themes inherit these.
+   */
+  --glaze-tint: rgba(var(--accent-rgb), 0.06);
+  --glaze-ring: rgba(var(--accent-rgb), 0.3);
+  --glaze-inner: rgba(var(--accent-rgb), 0.1);
+  --glaze-spec: rgba(255, 255, 255, 0.3);
+  --glaze-spec-soft: rgba(255, 255, 255, 0.08);
+  --glaze-bounce: rgba(255, 255, 255, 0.08);
+  --glaze-edge: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  --glaze-lift: rgba(var(--ink), 0.05);
+  --glaze-ring-lit: rgba(var(--accent-rgb), 0.42);
+  --glaze-spec-lit: rgba(255, 255, 255, 0.45);
+
+  /* The popover's inner fall and soft highlight, which were literals on the
+     rule and are read by `.sill-glaze-card` as well now. */
+  --menu-inner: rgba(var(--accent-rgb), 0.16);
+  --menu-spec-soft: rgba(255, 255, 255, 0.1);
+
+  /*
+   * One dial for every glazed surface, popover and control alike. Raise it
+   * to make the whole effect stronger, lower it to make it nearly nothing.
+   */
+  --glaze-opacity: 0.85;
+
+  /*
+   * The floating title bar's band, in the three windows that draw one.
+   *
+   * Not mirrored in Rust: no window is sized from it. The bar is out of the
+   * flow, so a page's content starts at the window's top edge and pads by
+   * this much, which is what lets the sidebar's hairline run to the corner
+   * and a transcript scroll under the chrome.
+   */
+  --titlebar-height: 42px;
 
   /*
    * A window that is only a menu, which is a different problem again.
@@ -1096,6 +1146,20 @@
   /* The dark theme's 0.45 black is a drawn outline on a near-white popover.
      This is the same job in the ink the rest of the theme separates with. */
   --menu-edge: 0 0 0 1px rgba(var(--ink), 0.12);
+  /* The control glaze on a pale surface. White lifts here, as `--menu-lift`
+     does; the accent is dark on this theme, so a stronger ring reads as a
+     drawn line sooner and the highlight has to be nearly white to catch. */
+  --glaze-tint: rgba(255, 255, 255, 0.4);
+  --glaze-ring: rgba(var(--accent-rgb), 0.26);
+  --glaze-inner: rgba(var(--accent-rgb), 0.06);
+  --glaze-spec: rgba(255, 255, 255, 0.85);
+  --glaze-spec-soft: rgba(255, 255, 255, 0.35);
+  --glaze-bounce: rgba(255, 255, 255, 0.5);
+  --glaze-edge: 0 0 0 1px rgba(var(--ink), 0.1);
+  --glaze-lift: rgba(var(--ink), 0.03);
+  --glaze-ring-lit: rgba(var(--accent-rgb), 0.36);
+  --glaze-spec-lit: rgba(255, 255, 255, 1);
+  --menu-spec-soft: rgba(255, 255, 255, 0.4);
   --well: inset 0 1px 2px rgba(0, 0, 0, 0.1);
   --bevel-tile: inset 1px 1px 0 0 rgba(255, 255, 255, 0.8),
     inset -1px -1px 0 0 rgba(0, 0, 0, 0.07);
@@ -1747,6 +1811,163 @@ body {
  * window rather than being the window, so unlike `main` it does get an in-page
  * blur and a real border. A card radius, not a row radius.
  */
+/*
+ * ---- The glaze, on a control ---------------------------------------------
+ *
+ * The material `.sill-menu` below wears, on the things that are pressed:
+ * a pill trigger, a title-bar control, the dictation pill, a toolbar
+ * cluster. One recipe, so a control and the popover it opens are cut from
+ * the same glass, and so the next surface takes a class rather than a copy.
+ *
+ * What makes it read as glass and not as a bordered chip is the same two
+ * things the popover learned: the edge is lit along the top only (a ring of
+ * one strength all the way round is an outline somebody drew), and the
+ * highlight is a band masked to the middle (light catches part of a curved
+ * edge, never all of it). `--glaze-edge`, the dark line outside, is the
+ * silhouette, and it is the only line that goes all the way round.
+ *
+ * No `backdrop-filter`, for the reason written on `.sill-menu`: it is inert
+ * in a transparent window and was removed rather than left dormant.
+ *
+ * Layers sit BEHIND the content on a control. A control's content is inset
+ * by its padding, so the rim has room to show, and keeping the layers under
+ * it means no highlight can wash across a label or a glyph. The popover puts
+ * its layers ABOVE its rows, because its rows fill to the edge and a
+ * selected row's fill would paint over a rim underneath it. `isolation:
+ * isolate` is what lets a negative z-index stay inside the control.
+ *
+ * Capsule by default: a control is a pill. A card-shaped thing (the
+ * composer, the permission card, the tooltip) says `sill-glaze-card` and
+ * takes the popover's corner and its top-weighted rim, because at card size
+ * a capsule is an ellipse, which StreamNook found out at 330 by 230.
+ *
+ * Every value is a token so a component adds a class and nothing else;
+ * `verify:source` refuses a px shadow or a literal colour in a component.
+ */
+.sill-glaze,
+.sill-menu {
+  position: relative;
+  isolation: isolate;
+}
+
+.sill-glaze {
+  border-radius: var(--radius-pill);
+  /* A component may set `--glaze-base` to the surface token it sits on. */
+  background-color: var(--glaze-base, var(--fill-1));
+  /* Top layer first: the light off the edge, over the flat accent tint. */
+  background-image: var(--sheen), linear-gradient(var(--glaze-tint), var(--glaze-tint));
+  border: 0;
+  box-shadow: var(--glaze-edge);
+}
+
+.sill-glaze::before,
+.sill-glaze::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  opacity: var(--glaze-opacity);
+  pointer-events: none;
+}
+
+/* The edge: light along the top, a fall inside it, a bounce along the
+   bottom from the surface it rests on. The lift rides on this layer's
+   background so a hover fades rather than snapping: a gradient in the
+   element's own fill does not interpolate. */
+.sill-glaze::before {
+  background-color: transparent;
+  box-shadow:
+    inset 0 1px 0 0 var(--glaze-ring),
+    inset 0 0 6px 1px var(--glaze-inner),
+    inset 0 -0.5px 0 0 var(--glaze-bounce);
+  transition:
+    box-shadow var(--motion-state) var(--ease),
+    background-color var(--motion-state) var(--ease);
+}
+
+/* The highlight, masked to the middle. No compositor layer of its own: a
+   launcher has four to six of these at rest, and that would be four to six
+   layers for nothing. The popover's specular keeps its layer, because rows
+   repaint under it on every arrow key. */
+.sill-glaze::after {
+  box-shadow:
+    inset 0 0 2px 1px var(--glaze-spec),
+    inset 0 0 4px 1px var(--glaze-spec-soft);
+  mask-image: linear-gradient(90deg, transparent, black, transparent);
+  transition: box-shadow var(--motion-state) var(--ease);
+}
+
+/*
+ * A single control IS the button, so the whole surface answers the pointer,
+ * the keyboard, and the menu it opens being open. A cluster (below) stays
+ * inert and lets the buttons inside it light one at a time.
+ *
+ * The lift is ink, not accent: a hover is not a selection. The edge gets
+ * more light and the highlight gets brighter, which is a surface catching
+ * the light rather than changing colour.
+ */
+.sill-glaze-control:is(:hover, :focus-visible, .open, [aria-expanded="true"])::before {
+  background-color: var(--glaze-lift);
+  box-shadow:
+    inset 0 1px 0 0 var(--glaze-ring-lit),
+    inset 0 0 6px 1px var(--glaze-inner),
+    inset 0 -0.5px 0 0 var(--glaze-bounce);
+}
+
+.sill-glaze-control:is(:hover, :focus-visible, .open, [aria-expanded="true"])::after {
+  box-shadow:
+    inset 0 0 2px 1px var(--glaze-spec-lit),
+    inset 0 0 4px 1px var(--glaze-spec-soft);
+}
+
+/* A cluster: related controls in one pill. 30px buttons in 2px of padding
+   is 34px, and every cluster on one bar must come out at 34, or the
+   difference reads as a mistake rather than a size step. */
+.sill-glaze-cluster {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-half) var(--space-cozy);
+}
+
+/* A card: the popover's corner and its top-weighted rim, on a thing that is
+   not a menu. The same tokens `.sill-menu` reads, so the two cannot drift. */
+.sill-glaze-card {
+  border-radius: var(--radius-lg);
+}
+
+.sill-glaze-card::before {
+  box-shadow:
+    inset 0 0 0 1px var(--menu-rim),
+    inset 0 0 8px 1px var(--menu-inner);
+  mask-image: linear-gradient(180deg, black, rgba(0, 0, 0, 0.25));
+}
+
+.sill-glaze-card::after {
+  box-shadow:
+    inset 0 0 2px 1px var(--menu-spec),
+    inset 0 0 4px 1px var(--menu-spec-soft);
+}
+
+/*
+ * Unlit when the window is not in front.
+ *
+ * The highlight goes and the rim goes; the dark contour on the element stays
+ * so the shape still separates. Lit chrome on a background window is the
+ * tell that a surface is painted on rather than real. `$lib/chrome` writes
+ * the attribute from the window's focus; an attribute selector rather than
+ * `:root` so the gallery can set it on a wrapper and show both states.
+ */
+[data-window-blurred="true"] :is(.sill-glaze, .sill-menu)::after {
+  display: none;
+}
+
+[data-window-blurred="true"] :is(.sill-glaze, .sill-menu)::before {
+  box-shadow: none;
+  background-color: transparent;
+}
+
 .sill-menu {
   /*
    * StreamNook's `.glass-flyout`, in this app's tokens.
@@ -1811,9 +2032,6 @@ body {
   /* Nothing inside a popover paints past its corner. A collection name
      longer than the menu used to carry its count out over the rows. */
   overflow: hidden;
-  /* The rim below is drawn by children, and a child cannot be positioned
-     against a parent that is not. */
-  position: relative;
 }
 
 /*
@@ -1836,7 +2054,7 @@ body {
   inset: 0;
   z-index: var(--z-raised);
   border-radius: inherit;
-  opacity: var(--menu-glaze);
+  opacity: var(--glaze-opacity);
   pointer-events: none;
 }
 
@@ -1851,7 +2069,7 @@ body {
 .sill-menu::before {
   box-shadow:
     inset 0 0 0 1px var(--menu-rim),
-    inset 0 0 8px 1px rgba(var(--accent-rgb), 0.16);
+    inset 0 0 8px 1px var(--menu-inner);
   /*
    * The rim fades down rather than closing a uniform loop.
    *
@@ -1883,7 +2101,7 @@ body {
 .sill-menu::after {
   box-shadow:
     inset 0 0 2px 1px var(--menu-spec),
-    inset 0 0 4px 1px rgba(255, 255, 255, 0.10);
+    inset 0 0 4px 1px var(--menu-spec-soft);
   mask-image: linear-gradient(90deg, transparent, black, transparent);
   transform: translateZ(0);
 }
@@ -1900,14 +2118,18 @@ body {
  * arriving when somebody has finished with it.
  */
 .sill-hint {
+  /* Fixed, and stated after `.sill-glaze` sets relative: same
+     specificity, later wins. */
   position: fixed;
   z-index: var(--z-menu);
   max-width: 260px;
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--hairline);
+  /* Smaller than a card's corner: six words, not a menu. */
   border-radius: var(--radius-md);
-  background-color: rgba(0, 0, 0, 0.88);
-  box-shadow: var(--elevation-menu);
+  /* The popover's base under the glaze, which used to be a literal
+     near-black here, the one floating surface not on the material. */
+  --glaze-base: var(--menu-base);
+  box-shadow: var(--menu-edge), var(--elevation-menu);
   color: var(--text-1);
   font-size: var(--text-meta);
   line-height: var(--line-meta);
@@ -1994,6 +2216,7 @@ body {
    * to the same forced colour as the surface behind it, so the edge vanishes.
    */
   .sill-menu,
+  .sill-glaze,
   .sill-hint,
   .sill-key {
     border: 1px solid ButtonBorder;

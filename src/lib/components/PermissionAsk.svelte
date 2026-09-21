@@ -111,5 +111,8 @@
    */
   .scrim > :global(*) {
     align-self: center;
+    /* Over a scrim rather than in a chat flow, the card floats higher: the
+       menu's shadow rather than the contact shadow it wears inline. */
+    box-shadow: var(--menu-edge), var(--elevation-menu);
   }
 </style>

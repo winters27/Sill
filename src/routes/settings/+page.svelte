@@ -18,6 +18,7 @@
   import LaunchIcon from "$lib/components/LaunchIcon.svelte";
   import { COLOURS as MARKUP_COLOURS } from "$lib/markup";
   import TitleBar from "$lib/components/TitleBar.svelte";
+  import { watchFocus } from "$lib/chrome";
   import Toggle from "$lib/components/Toggle.svelte";
   import Instead from "$lib/components/Instead.svelte";
   import Section from "$lib/components/settings/Section.svelte";
@@ -780,6 +781,10 @@
     });
   }
 
+  // The glaze on the title bar's controls goes out while another window is in
+  // front. One listener, one attribute flip per focus change; see `$lib/chrome`.
+  onMount(() => watchFocus());
+
   onMount(() => {
     void showOnceDrawn();
 
@@ -893,7 +898,7 @@
   <div class="body">
     <aside>
       <div class="search">
-        <svg
+        <svg class="line"
           width="13"
           height="13"
           viewBox="0 0 24 24"
@@ -913,7 +918,7 @@
         />
         {#if filter}
           <button class="clear" aria-label="Clear search" onclick={() => (filter = "")}>
-            <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+            <svg class="line" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
               <path
                 d="M1 1l10 10M11 1L1 11"
                 stroke="currentColor"
@@ -2431,6 +2436,8 @@
   }
 
   .window {
+    /* The title bar floats over this box, so it needs the box to float in. */
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100vh;
@@ -2454,15 +2461,16 @@
     min-height: 0;
   }
 
-  /* Both columns start on the same line, `--space-5` below the title bar.
-     They sat at 2px and 4px, which read as the content having been shoved up
-     against the chrome rather than placed under it. */
+  /* Both columns start on the same line, `--space-5` below the floating
+     title bar. The bar is out of the flow, so this column starts at the
+     window's top edge and its hairline runs to the corner; the padding is
+     what keeps the search well from sitting under the chrome. */
   aside {
     display: flex;
     flex-direction: column;
     width: 228px;
     flex: none;
-    padding: var(--space-5) 0 var(--space-2);
+    padding: calc(var(--titlebar-height) + var(--space-5)) 0 var(--space-2);
     border-right: 1px solid var(--hairline);
   }
 
@@ -2651,7 +2659,9 @@
     align-items: center;
     gap: var(--space-4);
     flex: none;
-    padding: var(--space-6) var(--settings-gutter) var(--space-6);
+    /* The same line as the sidebar's search well: the bar's band, then the
+       same gap the sidebar keeps. */
+    padding: calc(var(--titlebar-height) + var(--space-5)) var(--settings-gutter) var(--space-6);
   }
 
   .hero-text {
@@ -2824,5 +2834,16 @@
     margin: var(--space-1) 0 0;
     font-size: var(--text-body);
     color: var(--text-2);
+  }
+  /*
+   * The one weight for line-drawn glyphs, `--stroke-glyph`, on the shapes
+   * themselves: a presentation attribute on a shape beats a value inherited
+   * from its svg, so the rule reaches down rather than relying on
+   * inheritance. The attribute stays as the drawing that survives if this
+   * rule ever stops matching.
+   */
+  .line,
+  .line :where(path, circle, line, polyline) {
+    stroke-width: var(--stroke-glyph);
   }
 </style>

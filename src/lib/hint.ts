@@ -98,7 +98,10 @@ export function hint(node: HTMLElement, text: string | undefined) {
 
     bubble = document.createElement("div");
     bubble.id = id;
-    bubble.className = "sill-hint";
+    // The popover's material at tooltip size: `sill-glaze` is the recipe,
+    // `sill-glaze-card` the corner and the top-weighted rim, and `sill-hint`
+    // the size, the position and the base it draws on.
+    bubble.className = "sill-hint sill-glaze sill-glaze-card";
     bubble.setAttribute("role", "tooltip");
     bubble.textContent = saying;
     document.body.appendChild(bubble);

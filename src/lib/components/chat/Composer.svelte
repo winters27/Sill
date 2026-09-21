@@ -131,7 +131,7 @@
 </script>
 
 <div class="dock">
-  <div class="composer" class:busy={asking}>
+  <div class="composer sill-glaze sill-glaze-card" class:busy={asking}>
     {#if carrying.length}
       <div class="waiting">
         {#each carrying as one (one.name)}
@@ -168,7 +168,7 @@
 
     <div class="tools">
       <button class="round attach" onclick={onpick} aria-label="Attach a file" use:hint={"Attach a file"}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <svg class="line" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path
             d="M21 11.5l-8.5 8.5a5.5 5.5 0 01-7.8-7.8l8.7-8.7a3.7 3.7 0 015.2 5.2l-8.6 8.6a1.8 1.8 0 01-2.6-2.6l7.9-7.9"
             stroke="currentColor"
@@ -235,7 +235,7 @@
           aria-label="Send"
           use:hint={"Send"}
         >
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <svg class="line" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path
               d="M8 13V3M8 3L3.5 7.5M8 3l4.5 4.5"
               stroke="currentColor"
@@ -271,20 +271,18 @@
     width: min(74ch, 100%);
     display: flex;
     flex-direction: column;
-    border-radius: var(--radius-lg);
-    /* The panel tint, not a fill: it lifts off the glass without turning
-       into a slab on it. The tile bevel catches the light on two edges and
-       the short shadow gives it contact; the hero bevel's brighter highlight
-       read as a hard surface here. */
-    background: var(--tint-panel);
-    box-shadow: var(--bevel-tile), var(--elevation-2);
+    /* The panel tint under the glaze, not a fill: it lifts off the glass
+       without turning into a slab on it. The rim and the highlight are the
+       card glaze's; the short shadow gives it contact. */
+    --glaze-base: var(--tint-panel);
+    box-shadow: var(--glaze-edge), var(--elevation-2);
     transition: box-shadow var(--motion-state) var(--ease);
   }
 
   /* Focus lifts the card a shade rather than ringing it: a ring on the one
      object that is always focused would be a permanent frame. */
   .composer:focus-within {
-    box-shadow: var(--bevel-tile), var(--elevation-2), var(--ring-fill-soft);
+    box-shadow: var(--glaze-edge), var(--elevation-2), var(--ring-fill-soft);
   }
 
   /* What is waiting to go with the next question, on the card's top edge. */
@@ -477,5 +475,16 @@
     background: var(--fill-2);
     color: var(--text-3);
     cursor: default;
+  }
+  /*
+   * The one weight for line-drawn glyphs, `--stroke-glyph`, on the shapes
+   * themselves: a presentation attribute on a shape beats a value inherited
+   * from its svg, so the rule reaches down rather than relying on
+   * inheritance. The attribute stays as the drawing that survives if this
+   * rule ever stops matching.
+   */
+  .line,
+  .line :where(path, circle, line, polyline) {
+    stroke-width: var(--stroke-glyph);
   }
 </style>

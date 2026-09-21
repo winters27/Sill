@@ -96,7 +96,7 @@
   <button
     bind:this={trigger}
     type="button"
-    class="trigger"
+    class="trigger sill-glaze sill-glaze-control"
     class:open
     aria-haspopup="menu"
     aria-expanded={open}
@@ -165,33 +165,31 @@
 
   /* The same height and surface as the dropdown an extension gets, so the
      two read as one family of controls beside the field. */
+  /* The surface, the edge and the lit states come from `.sill-glaze`; what
+     is left here is the box and the type. The glaze's own `--glaze-edge` is
+     the one outer line, so the hairline border this carried is gone. */
   .trigger {
     display: flex;
     gap: var(--space-1);
     align-items: center;
     height: var(--control-height);
     padding: 0 var(--space-2);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-sm);
-    background-color: var(--fill-1);
-    background-image: var(--sheen);
     color: var(--text-2);
     font: inherit;
     font-size: var(--text-meta);
     white-space: nowrap;
     cursor: pointer;
-    transition: background-color var(--motion-state) var(--ease);
+    transition: color var(--motion-state) var(--ease);
   }
 
   .trigger:hover,
   .trigger.open {
-    background-color: var(--fill-2);
     color: var(--text-1);
   }
 
   .trigger:focus-visible {
     outline: none;
-    box-shadow: var(--focus-ring);
+    box-shadow: var(--glaze-edge), var(--focus-ring);
   }
 
   .label {
@@ -205,7 +203,7 @@
     height: 10px;
     fill: none;
     stroke: currentColor;
-    stroke-width: 1.5;
+    stroke-width: var(--stroke-glyph);
     stroke-linecap: round;
     stroke-linejoin: round;
     opacity: var(--opacity-muted);
