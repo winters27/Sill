@@ -58,12 +58,11 @@ host still renders real extensions cannot answer that from a frozen copy.
 `scripts/device-tests.ps1` measures what a build actually costs on a machine.
 The budgets it checks against are in [budgets.md](budgets.md).
 
-What Sill costs is the pitch, so it is written down where anybody can check
-it: [benchmark.md](benchmark.md) carries every reading with the machine, the
-build and the day it came from, and the command that takes the same reading
-on your own machine. Nothing on that page is typed. It is generated from what
-the measuring scripts wrote down, and `npm run verify` fails if the committed
-copy is not what they say.
+Performance and low idle resource use are product claims, so the measurements
+are published in [benchmark.md](benchmark.md). Each reading includes the
+machine, build, date, and command needed to repeat it. The page is generated
+from measurement output, and `npm run verify` fails if the committed copy does
+not match that output.
 
 ```bash
 npm run benchmark

@@ -1,10 +1,10 @@
 # Using Sill
 
-Sill is a launcher. One key opens a search field over whatever you were
-doing, you type, and it finds programs, files, settings pages, snippets,
-saved links, things you have copied, open windows, emoji and the machine's
-own switches. Press Enter and it does the obvious thing. Press Escape and it
-goes away again.
+Sill is a keyboard-first launcher and command palette for Windows 11. Press
+**Alt+Space** to search applications, files, settings, snippets, quicklinks,
+clipboard history, open windows, emoji, and system controls. Press Enter to
+open the selected result, use its action menu for more commands, or press
+Escape to close the launcher.
 
 This page is about using it. Building it is in the
 [README](../README.md), and writing an extension for it is in
@@ -57,7 +57,7 @@ more words to narrow them.
 Typing nothing shows the root list, which is where the things that have no
 search term live.
 
-## Doing something with what you found
+## Result actions
 
 Enter runs the thing under the cursor. What that means depends on what it is,
 and everything Sill knows about is a kind of thing with its own set of
@@ -80,7 +80,7 @@ Actions that can be taken back offer to be. After one that can, Ctrl+Z undoes
 it. Most cannot, and the key does nothing rather than claiming to have undone
 something.
 
-## Everything you have copied
+## Clipboard history
 
 Sill keeps a history of the clipboard: text, images and files, with the
 program each came from, searchable by content. You can pin something so it
@@ -98,7 +98,7 @@ the typo in the thing you copied three times. Both come back with Undo. An
 edit that would turn one entry into the text of another is refused rather
 than quietly merged.
 
-## Text you type over and over
+## Snippets and text expansion
 
 A snippet is saved text with a keyword. Type the keyword anywhere on the
 machine and the text replaces it. Snippets can hold the clipboard, the date,
@@ -108,7 +108,7 @@ snippet can put you in the middle of what it just wrote.
 They can also be limited to one program, and grouped, and pasted from the
 launcher rather than expanded, if you would rather not have a keyword.
 
-## Addresses you use with a search term
+## Quicklinks and web search
 
 A quicklink is a saved address with a hole in it. Type the quicklink's name,
 then what goes in the hole, and Sill opens the address in the browser you
@@ -123,7 +123,7 @@ its own; for any other scheme the link's editor shows a switch, and turning it
 on lets that one link open that one scheme. A file you import arrives with
 every such switch off, and the schemes that run code can never be switched on.
 
-## Sums
+## Calculator and conversions
 
 Type a sum and the answer appears. It handles units and conversions, and it
 is deliberately hard to trigger: a version number is not a sum, and something
@@ -181,7 +181,7 @@ front of somebody else does not put a paragraph of yours under an application.
 
 Switched off, Sill does not open the notes file at all.
 
-## Windows
+## Window switching and management
 
 The switcher key opens Sill straight into a list of open windows with a
 picture of each. Typing narrows it.
@@ -205,7 +205,7 @@ resolution` the second display's. Enter sets one, then asks whether to keep
 it; with no answer in fifteen seconds it goes back by itself, and Undo puts
 it back later.
 
-## The machine's own switches
+## Windows system controls
 
 Volume, one program's volume on its own, which speakers or headphones sound
 comes out of, Wi-Fi, Bluetooth, dark mode, emptying the recycle bin, sleep,
@@ -213,7 +213,7 @@ hibernate, sign out, restart and shut down, and the settings pages behind all
 of them. These are rows in the list you press Enter on, not pages Sill opens
 for you to click through.
 
-## Pictures of the screen, and text out of them
+## Screenshots and OCR
 
 Sill takes a screenshot of an area, a window, one display or everything, and
 opens it in a small editor. The editor keeps what you draw as a list of
@@ -245,7 +245,7 @@ panel. What a code holds is copied and named, never opened: a code on a page
 was put there by whoever made the page, so following it stays a separate,
 deliberate keystroke.
 
-## Speaking, and being read to
+## Dictation and text-to-speech
 
 Dictation turns speech into text locally. The model is downloaded the first
 time you use it, loaded when you start speaking, and the process shuts itself
@@ -254,7 +254,7 @@ down after sitting idle, so it costs nothing when you are not dictating.
 Text to speech reads text out loud: something you copied, or a text result
 in the list.
 
-## Asking a model
+## AI answers and chat
 
 With something typed in the launcher, **Tab** asks it as a question instead
 of searching for it. The answer appears in place. Escape comes straight back
@@ -316,7 +316,7 @@ never been started. And **an action from a server counts as running a program**,
 because that is what it is, so a scheduled trigger cannot use one and Sill's
 own AI has to prove somebody is at the machine first.
 
-## The keys
+## Keyboard shortcuts
 
 **Press `?` with an empty search field.** That opens the keyboard reference,
 and it is the real one: Sill builds it from the keys that are actually
@@ -372,7 +372,7 @@ It opens at the size Raycast opens its settings at, about two thirds of a
 Rows sit on the window itself, full width, one idea each, with a hairline
 between them and a plain heading over each group.
 
-## Updates, and the one thing Sill counts
+## Updates and privacy
 
 Sill checks for a newer version while you are using it, and an answer is good
 for half an hour. That check is the only thing Sill sends anywhere on its own.
@@ -393,7 +393,7 @@ open is involved in any way.
 The worker that does it is in the repository, in `updates/`, and is about
 sixty lines. If it is ever down, Sill asks GitHub directly and updates carry on.
 
-## When something is not working
+## Troubleshooting
 
 Sill reports trouble rather than logging it where nobody looks. A key it
 could not register, a startup entry that did not take, a file it could not

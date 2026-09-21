@@ -1,8 +1,8 @@
-# What Sill is allowed to cost
+# Performance budgets
 
-Efficiency is a product requirement here, not a nice-to-have, and a
-requirement nobody measures is a preference. This is what has been measured,
-what it is allowed to grow to, and which test says so.
+This document defines Sill's measured performance baselines, allowed
+regressions, and the checks that enforce them. Efficiency is a product
+requirement, and each requirement needs a repeatable measurement.
 
 Every number was taken on one machine (Windows 11, 16 cores, 32 GB) against a
 release build. They are a baseline to notice changes from, not a specification
@@ -88,7 +88,7 @@ about what the product does rather than a number to stay under: there is no
 acceptable amount of traffic from a window that has been put away. Either it is
 quiet or the claim is false.
 
-It was false. A weather widget pinned to the chin asked a service for a reading
+It was false. A weather widget pinned to the launcher footer asked a service for a reading
 every ten minutes for as long as the application was running, because
 `setInterval` in `onMount` runs until the component is destroyed and hiding a
 window destroys nothing. Six calls an hour on behalf of a window nobody could

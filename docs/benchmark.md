@@ -1,15 +1,13 @@
-# What Sill costs
+# Performance benchmarks
 
-Sill is meant to be almost free to leave running, and that is a claim about
-numbers rather than a feeling. This page is those numbers. Every row says what
-was measured, on which machine, in which build and on what day, and under each
-table is the command that takes those readings on your own machine. Where a
-cost has no reading, or no command that would take one, the row says that
-instead.
+This page reports measured startup and search latency, memory, CPU, network
+activity, and idle work for Sill. Every row records what was measured, the
+machine, build, and date, plus the command that takes the same reading. A row
+without a result or a repeatable command says so explicitly.
 
-Generated for version 0.4.0 on 2026-09-03. Nothing on this page is written by
-hand: it is assembled from what the measuring scripts concluded, and the build
-refuses a copy that has been edited.
+Generated for version 0.4.0 on 2026-09-03. This page is assembled from
+measurement output, and verification fails if the committed page differs from
+the generated result.
 
 **Three readings are provisional and cannot be compared to the budgets beside
 them.** A development build and a release build are two orders of magnitude

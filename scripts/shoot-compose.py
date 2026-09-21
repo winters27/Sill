@@ -177,30 +177,6 @@ def font(size: int, weight: str = "semibold") -> ImageFont.FreeTypeFont:
     return ImageFont.load_default(size)
 
 
-# The two ends of the wash behind the letters "AI".
-AI_WARM = (255, 146, 52)
-AI_COOL = (233, 78, 190)
-
-
-def _gradient_text(text: str, font_: ImageFont.FreeTypeFont) -> Image.Image:
-    """The text as an image, its letters filled with the warm-to-cool wash."""
-    box = font_.getbbox(text)
-    w, h = box[2] - box[0], box[3] - box[1]
-    mask = Image.new("L", (w, h), 0)
-    ImageDraw.Draw(mask).text((-box[0], -box[1]), text, font=font_, fill=255)
-
-    wash = Image.new("RGB", (w, h))
-    px = wash.load()
-    for x in range(w):
-        f = x / max(w - 1, 1)
-        px[x, 0] = tuple(int(AI_WARM[i] * (1 - f) + AI_COOL[i] * f) for i in range(3))
-    wash.paste(wash.crop((0, 0, w, 1)).resize((w, h), Image.NEAREST), (0, 0))
-
-    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    out.paste(wash, (0, 0), mask)
-    return out
-
-
 def social(mark: Image.Image) -> Image.Image:
     """The card link previews show.
 
@@ -214,7 +190,8 @@ def social(mark: Image.Image) -> Image.Image:
     card = backdrop((w, h), "oilslick")
     draw = ImageDraw.Draw(card)
 
-    headline = ("Your Windows toolbox, summoned with a keystroke.", font(34, "regular"), (222, 226, 232))
+    headline = ("Open-source Windows launcher and command palette.",
+                font(34, "regular"), (222, 226, 232))
     chip_font = font(21, "regular")
 
     name = wordmark(76)
@@ -235,21 +212,14 @@ def social(mark: Image.Image) -> Image.Image:
     draw.text(((w - (hbox[2] - hbox[0])) / 2 - hbox[0], y - hbox[1]), headline[0], font=headline[1], fill=headline[2])
     y += (hbox[3] - hbox[1]) + 48
 
-    # The row underneath: three claims of two words each, divided by hairlines.
-    # No fill and no border, and no ornament: the wash on one word is the whole
-    # decoration, and it stays legible by being the only one.
+    # The row underneath: three plain product facts divided by hairlines.
+    # No fill or border, because the line is information rather than a control.
     row_font = font(22, "regular")
-    ai_font = font(24)
     dim = (150, 156, 167)
 
-    lead = "Local "
-    lead_w = int(draw.textlength(lead, font=row_font))
-    ai_w = _gradient_text("AI", ai_font).width
-    items = [
-        ("Built in Rust", int(draw.textlength("Built in Rust", font=row_font))),
-        ("AI", lead_w + ai_w),
-        ("Open source", int(draw.textlength("Open source", font=row_font))),
-    ]
+    labels = ["Built in Rust", "Windows 11", "Raycast extensions"]
+    items = [(label, int(draw.textlength(label, font=row_font)))
+             for label in labels]
 
     rule = 34
     x = (w - (sum(width for _, width in items) + rule * (len(items) - 1))) // 2
@@ -257,15 +227,8 @@ def social(mark: Image.Image) -> Image.Image:
     box = row_font.getbbox("Hg")
     baseline = mid - (box[3] - box[1]) // 2 - box[1]
 
-    for i, (kind, width) in enumerate(items):
-        if kind == "AI":
-            draw.text((x, baseline), lead, font=row_font, fill=dim)
-            # `_gradient_text` returns the ink alone, so it sits on the row's
-            # baseline by being offset the way the glyphs would have been.
-            letters = _gradient_text("AI", ai_font)
-            card.paste(letters, (x + lead_w, baseline + ai_font.getbbox("AI")[1]), letters)
-        else:
-            draw.text((x, baseline), kind, font=row_font, fill=dim)
+    for i, (label, width) in enumerate(items):
+        draw.text((x, baseline), label, font=row_font, fill=dim)
         x += width
         if i < len(items) - 1:
             # The same 1px rule the launcher separates things with.
@@ -300,7 +263,11 @@ if __name__ == "__main__":
         RAW.mkdir(parents=True, exist_ok=True)
         backdrop().save(RAW / "backdrop.png", optimize=True)
         print(RAW / "backdrop.png")
+    elif what == "social":
+        OUT.mkdir(parents=True, exist_ok=True)
+        social(logo()).save(OUT / "social-preview.png", optimize=True)
+        print(OUT / "social-preview.png")
     elif what == "compose":
         compose()
     else:
-        sys.exit(f"unknown step {what}; use backdrop or compose")
+        sys.exit(f"unknown step {what}; use backdrop, social, or compose")

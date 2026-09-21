@@ -1,7 +1,7 @@
 # Changelog
 
-What changed, said the way somebody using Sill would notice it. Not a list of
-commits: half of those are merges, and most of the rest name a mechanism.
+User-visible changes in each Sill release. Entries use standard feature names
+and describe the result rather than reproducing commit messages.
 
 `.github/workflows/release.yml` reads the section for the version being tagged
 and uses it as the release body, and it refuses to build if the section is not
@@ -15,52 +15,30 @@ npm run changelog -- research
 ```
 
 That prints where the work went, what modules appeared and went away, the new
-IPC surface, the dependencies added, and every commit body in full. What goes
-in a section here is the subset of that which somebody would notice, said
-differently.
+IPC surface, the dependencies added, and every commit body in full. Use the
+relevant subset under recognizable feature labels, with measured results where
+available.
 
 ## 0.4.0
 
-**Typing keeps up.** Every keystroke asked Windows for the list of open
-windows, and on a busy desktop that is most of a second of work: with 276
-windows open the middle keystroke took 151ms and the worst 909ms. Searching
-reads the answer it already has now, and takes 22ms. The list is still
-current; it is refreshed a moment after you type rather than while you wait.
-
-**The top left says which place you are in.** It used to be Sill's logo on
-every screen, with the name of the place beside it. Now it is that place: an
-extension's own icon, or the art of the settings panel a launcher screen
-belongs to, so a screen and the row that opened it are one picture. Nothing is
-written next to it, because the picture already said it. At the root, where
-you are not inside anything, it is a magnifier.
-
-**Sill's own mark is in the bottom left**, on the button that opens its menu,
-where a caret used to be.
-
-**The clock, the battery and the weather sit in the middle of the chin.** They
-hung off the keys on the right before, so pinning a second reading pushed the
-first one sideways. One, two or three now grow out from the centre and stay
-there.
-
-**You can rank, pin, name and bind a row from the action panel.** Those were
-settings you had to go and find, about a row you were already looking at.
-Naming was already there; the other four have joined it, and all of them are
-reachable from a key, from the model and from an automation as well.
-
-**Menus are your theme's colour.** The light across the top of a popover was
-white, which washes a hue out rather than lifting it, so a menu floated on the
-window looking a third as coloured as the window under it. Light themes keep
-the white, where a tinted highlight would read as a stain.
-
-**A Detail view draws pictures.** An extension that makes its own chart has
-nowhere to put it but the text, and the wall of characters you saw instead of
-one was the picture, printed.
-
-**The launcher opens at 750 by 509.** A fresh install only; if you have ever
-changed the size, yours is the one that counts.
-
-**Sill is licensed under the AGPL, version 3.** Everything up to and including
-the 0.3.0 tag was published under MIT and stays available under it.
+- **Search performance:** Search no longer enumerates open windows on every
+  keystroke. With 276 open windows, search now takes 22 ms; the previous path
+  measured 151 ms for the middle keystroke and 909 ms in the worst case. The
+  window list refreshes immediately after the query.
+- **Navigation icons:** Extension and settings views now show the icon of the
+  item that opened them. The root search view uses a magnifier.
+- **Launcher menu:** Sill's logo now identifies the menu button in the lower
+  left.
+- **Footer widgets:** Clock, battery, and weather widgets remain centered as
+  widgets are added or removed.
+- **Result actions:** Ranking, pinning, renaming, and shortcut assignment are
+  available from each result's action panel and through automation.
+- **Theme consistency:** Menus now use the active theme's accent treatment.
+- **Extension details:** Detail views now render markdown images.
+- **Default window size:** New installations open the launcher at 750 by 509.
+  Existing custom window sizes are preserved.
+- **License:** Sill 0.4.0 and later use AGPL-3.0-only. Versions up to and
+  including 0.3.0 remain available under the MIT License.
 
 ## 0.3.0
 

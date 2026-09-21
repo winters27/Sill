@@ -1,7 +1,28 @@
 {
   "name": "sill",
   "version": "0.4.0",
-  "description": "",
+  "description": "Open-source Windows launcher and command palette for search, automation, dictation, AI, and Raycast extensions",
+  "keywords": [
+    "windows",
+    "launcher",
+    "command-palette",
+    "productivity",
+    "raycast",
+    "file-search",
+    "clipboard-manager",
+    "speech-to-text",
+    "ai",
+    "tauri",
+    "rust"
+  ],
+  "homepage": "https://github.com/winters27/Sill#readme",
+  "bugs": {
+    "url": "https://github.com/winters27/Sill/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/winters27/Sill.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite dev",

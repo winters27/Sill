@@ -1,8 +1,8 @@
 # Contributing to Sill
 
-Thanks for looking. This page is about how Sill is built, not how to
-build it. [The README](README.md) covers building, verifying, releasing
-and the repository layout, and it is worth reading first.
+Thanks for looking. This page describes Sill's architecture and the rules for
+changing it. [The development guide](docs/developing.md) covers building,
+verifying, releasing, and the repository layout.
 
 Everything here comes down to one sentence:
 

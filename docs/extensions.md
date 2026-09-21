@@ -2,12 +2,12 @@
 
 Sill runs extensions written for the Raycast API. An extension is a small
 Node program that draws a list, a grid, a form or a page inside the launcher
-and acts on whatever the reader picks. If you have written one before, the
-same code runs here; if you have not, the API is documented at
+and acts on the selected item. Many extensions run without source changes. If
+you have not written one before, the API is documented at
 [developers.raycast.com](https://developers.raycast.com/).
 
-Coverage is partial and this page says exactly how partial, name by name. It
-is checked against the code by `npm run verify:source`, so a name that
+Compatibility is partial, and this page lists support name by name. It is
+checked against the code by `npm run verify:source`, so a name that
 appears here and nowhere in the host, or the other way round, is a failure
 rather than a page nobody re-read.
 
@@ -110,7 +110,7 @@ them from the reader yet, so treat them as always empty for now.
 `environment.assetsPath` and `environment.supportPath` both point inside the
 installed extension's own folder.
 
-## What an extension is allowed to reach
+## Extension permissions
 
 An extension starts with nothing beyond drawing in the window. Everything
 else is a permission somebody agrees to, either on the screen that installs
@@ -199,7 +199,7 @@ reply). The host refuses a listening socket to any extension without the
 grant, so the rule opens nothing the person did not allow; the uninstaller
 removes it.
 
-### The honest limit of that
+### Security limitations
 
 This is a permission boundary. It is **not** a container for hostile code,
 and Sill's own interface says so rather than implying otherwise.
@@ -340,7 +340,7 @@ say "every `.png`", because Sill builds the panel once for the kind rather than
 once for the thing selected. Filter inside your command and say why when you
 decline.
 
-## What your extension costs, and where somebody sees it
+## Resource usage and diagnostics
 
 Settings, under Extensions, says how long each extension took to open and how
 much memory it was holding. It is the screen somebody goes to when their
@@ -374,7 +374,7 @@ You can see all of it for one command without building Sill:
 node scripts/run-extension.mjs extensions/build/<name>/<command>.js <name> --measure
 ```
 
-## What happens when Sill does not cover something
+## Unsupported API behavior
 
 The module an extension receives for `@raycast/api` and `@raycast/utils` is a
 proxy. Anything present is handed over. Anything absent throws its own name

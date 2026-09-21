@@ -34,7 +34,7 @@ file, that is `path`. Leave it blank for a tool that takes nothing.
 The action is then in the panel under `mcp.<server>.<tool>`, which is also the
 name a keyboard shortcut refers to in the Shortcuts panel.
 
-### What one costs
+### Process lifecycle and performance
 
 **A call is a process start.** Sill starts the program, does the handshake,
 calls the one tool, reads the answer and closes it, every time. Nothing is kept
@@ -56,7 +56,7 @@ entirely somebody else's program starting.
 If it does not answer at all, Sill stops waiting, closes it, and says which
 server it was: ten seconds for the handshake, a minute for the call itself.
 
-## What it cannot do
+## Security and execution restrictions
 
 Four refusals, and none of them are about MCP specifically. They fall out of
 the one thing an MCP action declares about itself, which is that **it runs an
@@ -79,7 +79,7 @@ running a program then applies to it unchanged.
 Running one yourself, out of the action panel, just runs it. You configured the
 server, its name is on the row, and what happened is written to Activity.
 
-## What is deliberately missing
+## Unsupported MCP features
 
 - **No environment variables.** A server wanting an API key would put it in the
   settings file in the clear, where every backup takes a copy. Until that goes

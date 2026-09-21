@@ -1,5 +1,5 @@
 /**
- * Writes the public page that says what Sill costs.
+ * Writes the public performance benchmark page.
  *
  * The efficiency claim is the pitch, so the page's job is not to be
  * impressive. It is to be checkable: every number says what was measured, on
@@ -194,22 +194,21 @@ function page(catalogue, taken, version, today) {
 
   const parts = [];
 
-  parts.push("# What Sill costs");
+  parts.push("# Performance benchmarks");
   parts.push(
     wrap(
-      "Sill is meant to be almost free to leave running, and that is a claim " +
-        "about numbers rather than a feeling. This page is those numbers. " +
-        "Every row says what was measured, on which machine, in which build " +
-        "and on what day, and under each table is the command that takes " +
-        "those readings on your own machine. Where a cost has no reading, " +
-        "or no command that would take one, the row says that instead.",
+      "This page reports measured startup and search latency, memory, CPU, " +
+        "network activity, and idle work for Sill. Every row records what was " +
+        "measured, the machine, build, and date, plus the command that takes " +
+        "the same reading. A row without a result or a repeatable command says " +
+        "so explicitly.",
     ),
   );
   parts.push(
     wrap(
-      `Generated for version ${version} on ${today}. Nothing on this page is ` +
-        "written by hand: it is assembled from what the measuring scripts " +
-        "concluded, and the build refuses a copy that has been edited.",
+      `Generated for version ${version} on ${today}. This page is assembled ` +
+        "from measurement output, and verification fails if the committed " +
+        "page differs from the generated result.",
     ),
   );
 
@@ -399,10 +398,10 @@ if (check) {
     );
     process.exit(1);
   }
-  console.log("the published cost page matches the measurements");
+  console.log("the published performance page matches the measurements");
 } else {
   writeFileSync(PAGE, rendered, "utf8");
   console.log(
-    `docs/benchmark.md written: ${taken.size} reading(s) across ${catalogue.rows.length} costs`,
+    `docs/benchmark.md written: ${taken.size} reading(s) across ${catalogue.rows.length} metrics`,
   );
 }

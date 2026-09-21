@@ -55,6 +55,11 @@
   },
   "bundle": {
     "active": true,
+    "homepage": "https://github.com/winters27/Sill",
+    "copyright": "Copyright © 2026 Brandon Winters",
+    "category": "Productivity",
+    "shortDescription": "Open-source Windows launcher and command palette.",
+    "longDescription": "Launch apps, search files, manage windows and clipboard history, run commands and extensions, dictate text, and use configurable AI providers from one keyboard-first interface.",
     "windows": {
       "nsis": {
         "installerHooks": "./installer/hooks.nsh"
