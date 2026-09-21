@@ -38,12 +38,12 @@ available.
 - **Widgets:** The "This machine" widget is gone, and so is the live CPU, RAM
   and Sill MB line under the Widgets row. While the launcher is open, Sill no
   longer walks every process once a second: with the launcher visible on an
-  empty query for 60 s, sill.exe measured 0.03% of one core, down from 7.05%
-  with the widget pinned, and 1,528 context switches instead of 14,108
-  (`Get-Counter '\Process(sill)\% Processor Time' -SampleInterval 1
-  -MaxSamples 60`, debug build). Clock, World clock and Weather are
-  unchanged; a pinned "machine" entry in an existing preferences file is
-  ignored.
+  empty query for 60 s, the release build measured 0.21% of one core, down
+  from 5.04% on 0.4.0 with the widget pinned, and 5,096 context switches
+  instead of 12,752 (`Get-Counter '\Process(sill)\% Processor Time'
+  -SampleInterval 1 -MaxSamples 60`, same machine, same day). Clock, World
+  clock and Weather are unchanged; a pinned "machine" entry in an existing
+  preferences file is ignored.
 - **Chrome:** Every floating surface wears the same glass: the launcher's
   popovers, the model chip and menu button, the clipboard bar's filters, the
   store filter, the tooltip, the AI composer and permission card, the
