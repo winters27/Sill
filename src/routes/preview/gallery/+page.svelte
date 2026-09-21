@@ -326,11 +326,11 @@
        cluster and a bar pill, 22 for the two in the clipboard bar. -->
   <div class="glaze-row">
     <button class="g-trigger sill-glaze sill-glaze-control">
-      <ExtIcon icon={{ kind: "mark", name: "AppWindowGrid3x3" }} small />
+      <ExtIcon icon={{ kind: "mark", name: "Compass" }} small />
       <span>Everything</span>
     </button>
     <button class="g-trigger sill-glaze sill-glaze-control" aria-expanded="true">
-      <ExtIcon icon={{ kind: "mark", name: "AppWindowGrid3x3" }} small />
+      <ExtIcon icon={{ kind: "mark", name: "Compass" }} small />
       <span>Everything</span>
     </button>
     <button class="g-menu sill-glaze sill-glaze-control" aria-label="Sill menu">
@@ -349,11 +349,11 @@
   <h2>The glaze: a cluster, a floating bar, and the pill on the desktop</h2>
   <div class="glaze-row">
     <div class="g-cluster sill-glaze sill-glaze-cluster">
-      <button class="g-icon on" aria-label="Arrow"><ExtIcon icon={{ kind: "mark", name: "ArrowRight" }} small /></button>
-      <button class="g-icon" aria-label="Text"><ExtIcon icon={{ kind: "mark", name: "Text" }} small /></button>
-      <button class="g-icon" aria-label="Highlight"><ExtIcon icon={{ kind: "mark", name: "Highlight" }} small /></button>
+      <button class="g-icon on" aria-label="Arrow"><ExtIcon icon={{ kind: "mark", name: "Crop" }} small /></button>
+      <button class="g-icon" aria-label="Text"><ExtIcon icon={{ kind: "mark", name: "Highlight" }} small /></button>
+      <button class="g-icon" aria-label="Highlight"><ExtIcon icon={{ kind: "mark", name: "Eraser" }} small /></button>
       <span class="g-split"></span>
-      <button class="g-icon" aria-label="Undo"><ExtIcon icon={{ kind: "mark", name: "Undo" }} small /></button>
+      <button class="g-icon" aria-label="Undo"><ExtIcon icon={{ kind: "mark", name: "ClearFormatting" }} small /></button>
     </div>
     <div class="g-window">
       <div class="g-titlebar">
