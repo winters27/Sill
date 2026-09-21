@@ -147,10 +147,14 @@ pub async fn clipboard_paste(
 
     // The watcher would otherwise see Sill's own write and move the entry to
     // the top of the history, reordering the list under the user's hands.
-    clipboard.ignore_next();
-
-    let mut board = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    crate::clipboard::write::put(&mut board, &payload)?;
+    // Reserved for exactly this write, and taken back if the write fails: a
+    // reservation nothing consumes swallows the user's next real copy.
+    clipboard.own_write(|| {
+        let mut board = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+        crate::selection::traced("paste history entry", || {
+            crate::clipboard::write::put(&mut board, &payload)
+        })
+    })?;
 
     if !paste {
         return Ok(());
@@ -211,7 +215,7 @@ pub fn clipboard_keep_current(
     app: tauri::AppHandle,
     clipboard: State<'_, Clipboard>,
 ) -> Result<(), String> {
-    crate::clipboard::monitor::keep_current(&app, &clipboard)
+    crate::clipboard::monitor::keep_current(&app, &clipboard).map(|_| ())
 }
 
 /// Several entries joined into one piece of text.

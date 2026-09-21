@@ -168,9 +168,7 @@ pub(super) fn copy_with_undo(
 ) -> Result<Outcome, String> {
     let previous = ctx.app.clipboard().read_text().ok();
 
-    ctx.app
-        .clipboard()
-        .write_text(text.to_string())
+    crate::selection::traced("copy", || ctx.app.clipboard().write_text(text.to_string()))
         .map_err(|err| format!("Could not copy: {err}"))?;
 
     Ok(match previous {
@@ -2915,24 +2913,21 @@ impl Action for CopyClipboardEntry {
         // rather than a reason to refuse the copy.
         let previous = ctx.app.clipboard().read_text().ok();
 
-        let mut board =
-            arboard::Clipboard::new().map_err(|err| format!("Could not copy: {err}"))?;
-
         // Sill's own write, so the watcher must not see it as a fresh copy and
         // move the row to the top of the list under the user's hands. The same
         // reservation `clipboard_paste` makes, and taken back when the write it
         // was reserved for does not happen: a reservation nothing consumes
         // swallows whatever the user really copies next.
-        let history = ctx.app.try_state::<crate::clipboard::monitor::Clipboard>();
-        if let Some(history) = &history {
-            history.ignore_next();
-        }
-
-        if let Err(err) = crate::clipboard::write::put(&mut board, &payload) {
-            if let Some(history) = &history {
-                history.forget_ignored();
-            }
-            return Err(err);
+        let write = || {
+            let mut board =
+                arboard::Clipboard::new().map_err(|err| format!("Could not copy: {err}"))?;
+            crate::selection::traced("copy history entry", || {
+                crate::clipboard::write::put(&mut board, &payload)
+            })
+        };
+        match ctx.app.try_state::<crate::clipboard::monitor::Clipboard>() {
+            Some(history) => history.own_write(write)?,
+            None => write()?,
         }
 
         let message = match payload {

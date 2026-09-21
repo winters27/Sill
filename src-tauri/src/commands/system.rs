@@ -584,13 +584,14 @@ fn put_image_on_clipboard(app: &AppHandle, shot: crate::capture::Shot) -> Result
         pixel[3] = 255;
     }
 
-    app.clipboard()
-        .write_image(&tauri::image::Image::new(
+    crate::selection::traced("capture image", || {
+        app.clipboard().write_image(&tauri::image::Image::new(
             &rgba,
             shot.width as u32,
             shot.height as u32,
         ))
-        .map_err(|err| format!("could not put that picture on the clipboard: {err}"))
+    })
+    .map_err(|err| format!("could not put that picture on the clipboard: {err}"))
 }
 
 /// The picture the markup window is currently working on.
@@ -1015,8 +1016,7 @@ pub(crate) async fn upload_markup(app: AppHandle, png: String) -> Result<String,
     // The link is the whole point, so it goes where a link is used from.
     {
         use tauri_plugin_clipboard_manager::ClipboardExt;
-        app.clipboard()
-            .write_text(link.clone())
+        crate::selection::traced("copy link", || app.clipboard().write_text(link.clone()))
             .map_err(|err| format!("could not copy the link: {err}"))?;
     }
 

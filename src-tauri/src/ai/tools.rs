@@ -699,7 +699,20 @@ async fn read_selection(app: &AppHandle) -> Value {
         return refused;
     }
 
-    match crate::selection::capture(app) {
+    // Off the runtime: the capture waits up to 400 ms on another application.
+    // Borrowed and given straight back, so Sill's own Ctrl+C never stays on
+    // the person's clipboard and the history never records it.
+    let handle = app.clone();
+    let text = tokio::task::spawn_blocking(move || {
+        let held = crate::selection::Held::take(&handle);
+        let text = held.capture();
+        held.give_back();
+        text
+    })
+    .await
+    .unwrap_or(None);
+
+    match text {
         Some(text) if !text.trim().is_empty() => {
             json!({ "text": text.chars().take(MOST_BYTES).collect::<String>() })
         }

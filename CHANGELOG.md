@@ -19,6 +19,23 @@ IPC surface, the dependencies added, and every commit body in full. Use the
 relevant subset under recognizable feature labels, with measured results where
 available.
 
+## 0.4.1
+
+- **Clipboard:** Sill no longer empties the clipboard or writes over a copy
+  you made while it was working. A shortcut that reads the clipboard
+  (Ctrl+Alt+J, K, R by default) pressed with a picture or a file list on the
+  clipboard used to leave it empty; a copy made during a transform or a
+  snippet paste used to be replaced by the older text Sill put back. Sill now
+  keeps the number Windows gives every clipboard change, restores only when
+  the last change was its own, and never restores by emptying. Extensions
+  and the AI reading the selection, and snippets with a `{selection}`
+  placeholder, no longer leave Sill's own copy on your clipboard. A dictated
+  transcript that is pasted is no longer recorded in clipboard history as
+  though you had copied it. Every write Sill makes to the clipboard, and
+  every change the history watcher sees, is one line in `sill.log` with the
+  change numbers around it, so a copy that goes missing can be placed
+  against what Sill was doing at that moment.
+
 ## 0.4.0
 
 - **Search performance:** Search no longer enumerates open windows on every

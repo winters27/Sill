@@ -592,8 +592,7 @@ fn microphone(settings: &DictationSettings) -> Option<String> {
 fn copy(app: &AppHandle, text: &str) -> Result<()> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
 
-    app.clipboard()
-        .write_text(text.to_string())
+    crate::selection::traced("dictation", || app.clipboard().write_text(text.to_string()))
         .map_err(|e| DictationError::Other(format!("Could not write the transcript: {e}")))
 }
 
@@ -602,8 +601,24 @@ fn copy(app: &AppHandle, text: &str) -> Result<()> {
 /// The panel window is declared `focus: false` and `skipTaskbar`, so showing
 /// it never moves focus and whatever the user was typing into is still
 /// frontmost here.
+///
+/// The history is told to expect the write. A pasted transcript is Sill
+/// typing on the person's behalf, not something they copied, and it used to
+/// land at the top of the clipboard history as though it had come from the
+/// foreground application. A paste that lands in the wrong window is
+/// recovered from the dictation history, which is where a transcript
+/// belongs. `copy` above deliberately does not reserve: there the person
+/// asked for the transcript on the clipboard and may want it from the
+/// history later.
 fn paste(app: &AppHandle, text: &str) -> Result<()> {
-    copy(app, text)?;
+    use tauri::Manager;
+
+    match app.try_state::<crate::clipboard::monitor::Clipboard>() {
+        Some(history) => history
+            .own_write(|| copy(app, text).map_err(|e| e.to_string()))
+            .map_err(DictationError::Other)?,
+        None => copy(app, text)?,
+    }
     std::thread::sleep(PASTE_SETTLE);
     crate::dictation::paste::chord();
     Ok(())

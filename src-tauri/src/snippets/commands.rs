@@ -170,7 +170,23 @@ pub fn expand_snippet(
     id: String,
     values: Option<std::collections::BTreeMap<String, String>>,
 ) -> Result<Expansion, String> {
-    let file = store::path(&app);
+    expand_within(&app, &id, values, None)
+}
+
+/// The expansion, inside a borrow the caller already holds.
+///
+/// `type_snippet` takes the clipboard before expanding, so that a
+/// `{selection}` placeholder's copy and the paste that follows are one borrow
+/// with one previous value to put back. Without that the paste borrowed
+/// afterwards, read Sill's own selection copy as "what was there", and
+/// faithfully restored it over the person's real clipboard.
+pub(crate) fn expand_within(
+    app: &AppHandle,
+    id: &str,
+    values: Option<std::collections::BTreeMap<String, String>>,
+    held: Option<&crate::selection::Held>,
+) -> Result<Expansion, String> {
+    let file = store::path(app);
     let mut snippets = store::load(&file);
 
     let snippet = snippets
@@ -183,7 +199,7 @@ pub fn expand_snippet(
     let markup = snippet.html.clone();
     let _ = store::save(&file, &snippets);
 
-    let mut context = context(&app, &content);
+    let mut context = context_within(app, &content, held);
     context.fields = values.unwrap_or_default();
 
     let mut expansion = placeholder::expand(&content, &context);
@@ -217,11 +233,27 @@ pub fn type_snippet(
     id: String,
     backspaces: usize,
 ) -> Result<(), String> {
-    let expansion = expand_snippet(app, id, None)?;
+    // One borrow for the whole thing: a `{selection}` placeholder's copy and
+    // the paste that may follow. Taken before the expansion so that what it
+    // remembers is the person's clipboard, not Sill's own copy.
+    let held = crate::selection::Held::take(&app);
+    let expansion = match expand_within(&app, &id, None, Some(&held)) {
+        Ok(expansion) => expansion,
+        Err(err) => {
+            held.give_back();
+            return Err(err);
+        }
+    };
 
     #[cfg(windows)]
     {
-        crate::snippets::expander::replace(&expander, backspaces, &expansion.text, &expansion.html);
+        crate::snippets::expander::replace(
+            &expander,
+            backspaces,
+            &expansion.text,
+            &expansion.html,
+            held,
+        );
 
         // After the text is in, walk the caret back to where the snippet
         // asked for it.
@@ -232,7 +264,10 @@ pub fn type_snippet(
     }
 
     #[cfg(not(windows))]
-    let _ = (expander, backspaces, expansion);
+    {
+        held.give_back();
+        let _ = (expander, backspaces, expansion);
+    }
 
     Ok(())
 }
@@ -246,9 +281,29 @@ pub fn type_snippet(
 /// Shared with quicklinks rather than copied, so both speak the same grammar
 /// and gain the same tokens at the same time.
 pub fn context(app: &AppHandle, template: &str) -> Context {
+    context_within(app, template, None)
+}
+
+/// The context, read through a borrow when the caller holds one.
+///
+/// With a borrow, `{clipboard}` is what the borrow remembers rather than what
+/// is on the clipboard now, because by the time a `{selection}` has been read
+/// the clipboard holds Sill's own copy. Without one, a `{selection}` takes a
+/// borrow of its own for exactly the copy, so Sill's Ctrl+C never stays on
+/// the person's clipboard.
+pub(crate) fn context_within(
+    app: &AppHandle,
+    template: &str,
+    held: Option<&crate::selection::Held>,
+) -> Context {
     let clipboard = if placeholder::needs_clipboard(template) {
-        use tauri_plugin_clipboard_manager::ClipboardExt;
-        app.clipboard().read_text().unwrap_or_default()
+        match held {
+            Some(held) => held.previous().unwrap_or_default().to_string(),
+            None => {
+                use tauri_plugin_clipboard_manager::ClipboardExt;
+                app.clipboard().read_text().unwrap_or_default()
+            }
+        }
     } else {
         String::new()
     };
@@ -260,7 +315,15 @@ pub fn context(app: &AppHandle, template: &str) -> Context {
     // copy chord and takes the clipboard over for a moment, which is far too
     // rude to do on the chance that a snippet might have wanted it.
     let selection = if placeholder::needs_selection(template) {
-        crate::selection::capture(app).unwrap_or_default()
+        match held {
+            Some(held) => held.capture().unwrap_or_default(),
+            None => {
+                let own = crate::selection::Held::take(app);
+                let text = own.capture().unwrap_or_default();
+                own.give_back();
+                text
+            }
+        }
     } else {
         String::new()
     };

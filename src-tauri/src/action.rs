@@ -670,9 +670,7 @@ pub fn undo(ctx: &ActionCtx, undo: &Undo) -> Result<String, String> {
 
     match undo {
         Undo::RestoreClipboard { text } => {
-            ctx.app
-                .clipboard()
-                .write_text(text.clone())
+            crate::selection::traced("undo copy", || ctx.app.clipboard().write_text(text.clone()))
                 .map_err(|err| format!("could not restore the clipboard: {err}"))?;
             Ok("Clipboard restored".to_string())
         }

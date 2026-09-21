@@ -411,17 +411,14 @@ pub(crate) async fn fire(app: &AppHandle, binding: &Binding) {
     }
 
     if may_paste_back(binding, origin) {
-        if let Some(text) = produced {
-            // Blocking, like the capture: it waits on another application.
-            let handle = app.clone();
-            let result =
-                tokio::task::spawn_blocking(move || crate::selection::replace(&handle, &text))
-                    .await;
+        if let (Some(text), Some(held)) = (produced, held.as_ref()) {
+            // Blocking, like the capture, and for the same reason: the paste
+            // writes through the borrow, which cannot move to another thread
+            // and must not be cloned. There is one clipboard and one owner.
+            let result = tokio::task::block_in_place(|| crate::selection::replace(held, &text));
 
-            match result {
-                Ok(Err(reason)) => crate::say!("{}: {reason}", binding.accelerator),
-                Err(err) => crate::say!("{}: the paste did not finish: {err}", binding.accelerator),
-                Ok(Ok(())) => {}
+            if let Err(reason) = result {
+                crate::say!("{}: {reason}", binding.accelerator);
             }
         }
 
@@ -502,7 +499,7 @@ async fn resolve(
                 // another thread and must not be cloned: there is one
                 // clipboard and one owner of it.
                 tokio::task::block_in_place(|| {
-                    crate::selection::Captured::selection_or_clipboard(app, held)
+                    crate::selection::Captured::selection_or_clipboard(held)
                 })
             } else {
                 crate::selection::Captured::clipboard(held)

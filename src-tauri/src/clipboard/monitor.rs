@@ -337,6 +337,27 @@ impl Clipboard {
         self.ignoring.store(0, Ordering::SeqCst);
     }
 
+    /// One write of Sill's own: reserved so the watcher does not record it,
+    /// and the reservation taken back if the write never happened.
+    ///
+    /// Taken back one at a time rather than with [`Self::forget_ignored`],
+    /// because another reservation may be legitimately outstanding. A
+    /// reservation nothing consumes swallows whatever the user really copies
+    /// next, and two call sites used to leak one on a failed write.
+    pub fn own_write<T>(
+        &self,
+        write: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.ignore_next();
+        let result = write();
+        if result.is_err() {
+            let _ = self
+                .ignoring
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+        }
+        result
+    }
+
     /// Records nothing at all until [`Self::resume`].
     ///
     /// For an operation that writes an unknown number of times: a shortcut
@@ -511,12 +532,19 @@ struct Handler {
 
 impl clipboard_master::ClipboardHandler for Handler {
     fn on_clipboard_change(&mut self) -> clipboard_master::CallbackResult {
+        // One line per change, with the number Windows gave it, so a copy
+        // that goes missing on a real desktop can be placed against what the
+        // watcher saw at that moment. Kinds and lengths only, never content.
+        let seq = crate::selection::sequence();
+
         if self.clipboard.take_ignore() {
+            crate::say!("clipboard change seq {seq}: Sill's own, not recorded");
             return clipboard_master::CallbackResult::Next;
         }
 
-        if let Err(err) = capture(&self.app, &self.clipboard) {
-            crate::say!("could not record a clipboard change: {err}");
+        match capture(&self.app, &self.clipboard) {
+            Ok(seen) => crate::say!("clipboard change seq {seq}: {seen}"),
+            Err(err) => crate::say!("clipboard change seq {seq}: could not record it: {err}"),
         }
         clipboard_master::CallbackResult::Next
     }
@@ -541,8 +569,76 @@ pub struct Skipped {
     pub length: usize,
 }
 
+/// What one clipboard change turned out to be, for the one log line per
+/// change. Kinds, counts and sizes; never a byte of what was copied.
+pub enum Seen {
+    /// The owner asked for it not to be kept; nothing was read.
+    Confidential,
+    /// Recording is off.
+    Off,
+    /// Copied in an application the rules leave out.
+    IgnoredApp(String),
+    /// Whitespace, or past the size limit.
+    Blank,
+    Text {
+        chars: usize,
+        from: Option<String>,
+    },
+    /// Looked like a secret and the policy was to skip it.
+    Secret {
+        what: String,
+        from: Option<String>,
+    },
+    Files {
+        count: usize,
+        from: Option<String>,
+    },
+    Image {
+        width: usize,
+        height: usize,
+        /// How long the clipboard was held open for the read and decode.
+        held_ms: u128,
+        from: Option<String>,
+    },
+    /// No text, no files, no picture worth keeping.
+    Nothing {
+        from: Option<String>,
+    },
+}
+
+impl std::fmt::Display for Seen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn from(name: &Option<String>) -> String {
+            name.as_deref()
+                .map(|name| format!(" from {name}"))
+                .unwrap_or_default()
+        }
+
+        match self {
+            Seen::Confidential => write!(f, "confidential, not read"),
+            Seen::Off => write!(f, "recording is off"),
+            Seen::IgnoredApp(name) => write!(f, "ignored application {name}"),
+            Seen::Blank => write!(f, "blank or oversized text"),
+            Seen::Text { chars, from: who } => write!(f, "text {chars} chars{}", from(who)),
+            Seen::Secret { what, from: who } => write!(f, "skipped {what}{}", from(who)),
+            Seen::Files { count, from: who } => write!(f, "{count} file(s){}", from(who)),
+            Seen::Image {
+                width,
+                height,
+                held_ms,
+                from: who,
+            } => write!(
+                f,
+                "image {width}x{height}{}, lock held {held_ms} ms",
+                from(who)
+            ),
+            Seen::Nothing { from: who } => write!(f, "nothing to record{}", from(who)),
+        }
+    }
+}
+
 /// Reads whatever is on the clipboard now and records it.
-fn capture(app: &AppHandle, clipboard: &Clipboard) -> Result<(), String> {
+fn capture(app: &AppHandle, clipboard: &Clipboard) -> Result<Seen, String> {
     let policy = clipboard.rules().secrets;
     capture_with(app, clipboard, policy)
 }
@@ -556,7 +652,7 @@ fn capture(app: &AppHandle, clipboard: &Clipboard) -> Result<(), String> {
 /// A password manager's exclusion is still honoured. That is the application
 /// saying so about its own data, not a guess, and no button in Sill overrides
 /// somebody else's stated intent.
-pub fn keep_current(app: &AppHandle, clipboard: &Clipboard) -> Result<(), String> {
+pub fn keep_current(app: &AppHandle, clipboard: &Clipboard) -> Result<Seen, String> {
     capture_with(app, clipboard, sensitive::Policy::Keep)
 }
 
@@ -564,10 +660,10 @@ fn capture_with(
     app: &AppHandle,
     clipboard: &Clipboard,
     policy: sensitive::Policy,
-) -> Result<(), String> {
+) -> Result<Seen, String> {
     if is_confidential() {
         // A password manager said so. Nothing is read, so nothing can leak.
-        return Ok(());
+        return Ok(Seen::Confidential);
     }
 
     let rules = clipboard.rules();
@@ -575,7 +671,7 @@ fn capture_with(
     // read, because a recording that is not going to happen should not cost a
     // window enumeration either.
     if !rules.enabled {
-        return Ok(());
+        return Ok(Seen::Off);
     }
 
     let source = crate::dictation::context::foreground_app_full();
@@ -584,7 +680,7 @@ fn capture_with(
     let exe = source.as_ref().map(|app| app.path.clone());
 
     if !records(&rules, name.as_deref()) {
-        return Ok(());
+        return Ok(Seen::IgnoredApp(name.unwrap_or_default()));
     }
 
     let Some(mut board) = open_clipboard() else {
@@ -597,7 +693,7 @@ fn capture_with(
         // Whitespace is what a text field leaves behind when it is cleared,
         // not something anyone meant to copy.
         if trimmed.is_empty() || text.len() > MAX_TEXT_BYTES {
-            return Ok(());
+            return Ok(Seen::Blank);
         }
 
         // Before anything is written. The history is a plain file on disk, so
@@ -617,7 +713,10 @@ fn capture_with(
                     };
                     clipboard.note_skipped(Some(notice.clone()));
                     let _ = app.emit("clipboard:skipped", notice);
-                    return Ok(());
+                    return Ok(Seen::Secret {
+                        what: what.to_string(),
+                        from: name,
+                    });
                 }
                 sensitive::Policy::Redact => {
                     text = crate::clipboard::sensitive::redacted(what, text.chars().count());
@@ -660,7 +759,10 @@ fn capture_with(
         clipboard.note_skipped(None);
 
         after_recording(app, clipboard, &rules);
-        return Ok(());
+        return Ok(Seen::Text {
+            chars: text.chars().count(),
+            from: name,
+        });
     }
 
     /*
@@ -698,15 +800,25 @@ fn capture_with(
 
                 after_recording(app, clipboard, &rules);
             }
-            return Ok(());
+            return Ok(Seen::Files {
+                count: paths.len(),
+                from: name,
+            });
         }
     }
 
-    if !rules.keep_images {
-        return Ok(());
+    if !rules.keep_images || !offers_image() {
+        return Ok(Seen::Nothing { from: name });
     }
 
-    if let Ok(image) = board.get_image() {
+    // Timed, because this is the one read that holds the clipboard open for
+    // as long as a decode takes, and the log is where that shows up.
+    let opened = std::time::Instant::now();
+    let image = board.get_image();
+    let held_ms = opened.elapsed().as_millis();
+
+    if let Ok(image) = image {
+        let (width, height) = (image.width, image.height);
         let bytes = image.bytes.len();
         let label = format!("Image {}x{}", image.width, image.height);
         let store = clipboard.store();
@@ -764,28 +876,27 @@ fn capture_with(
         drop(store);
 
         after_recording(app, clipboard, &rules);
+        return Ok(Seen::Image {
+            width,
+            height,
+            held_ms,
+            from: name,
+        });
     }
 
-    Ok(())
+    Ok(Seen::Nothing { from: name })
 }
 
-/// Opens the clipboard, waiting out whoever else has it.
+/// A handle to the clipboard, which on Windows opens nothing.
+///
+/// `arboard` opens the clipboard inside each read and write and closes it
+/// when that call returns, so constructing the handle cannot fail on a lock
+/// and there is nothing here to wait out. The waiting lives in `read_text`
+/// and `read_files`, one open per attempt. A retry ladder used to sit here
+/// with a "could not open the clipboard" line at the end of it; that line
+/// could never print, and its absence from the log proved nothing.
 fn open_clipboard() -> Option<arboard::Clipboard> {
-    for attempt in 0..CLIPBOARD_ATTEMPTS {
-        match arboard::Clipboard::new() {
-            Ok(board) => return Some(board),
-            Err(err) => {
-                if attempt + 1 == CLIPBOARD_ATTEMPTS {
-                    crate::say!(
-                        "could not open the clipboard after {CLIPBOARD_ATTEMPTS} tries: {err}"
-                    );
-                    return None;
-                }
-                std::thread::sleep(RETRY_DELAY);
-            }
-        }
-    }
-    None
+    arboard::Clipboard::new().ok()
 }
 
 /// The formatted version of what was copied, when the source offered one.
@@ -842,11 +953,34 @@ fn read_text(board: &mut arboard::Clipboard) -> Option<String> {
         match board.get_text() {
             Ok(text) => return Some(text),
             Err(arboard::Error::ContentNotAvailable) => return None,
-            Err(_) if attempt + 1 == CLIPBOARD_ATTEMPTS => return None,
+            Err(err) if attempt + 1 == CLIPBOARD_ATTEMPTS => {
+                // Said with the error code, which is how a locked clipboard
+                // (5, access denied) is told from anything else. `arboard`
+                // has closed the clipboard by now, so the code is the last
+                // failing open on this thread only if nothing set it since.
+                crate::say!(
+                    "clipboard text read gave up after {CLIPBOARD_ATTEMPTS} tries: {err}, \
+                     last error {}",
+                    last_error()
+                );
+                return None;
+            }
             Err(_) => std::thread::sleep(RETRY_DELAY),
         }
     }
     None
+}
+
+/// The thread's last Win32 error code, for a log line.
+#[cfg(windows)]
+fn last_error() -> u32 {
+    // SAFETY: reads a thread-local value and takes nothing.
+    unsafe { windows::Win32::Foundation::GetLastError() }.0
+}
+
+#[cfg(not(windows))]
+fn last_error() -> u32 {
+    0
 }
 
 /// The paths a file copy is recorded as, one per line.
@@ -910,6 +1044,12 @@ fn read_files() -> Option<Vec<String>> {
         }
 
         if attempt + 1 == CLIPBOARD_ATTEMPTS {
+            // Fresh, unlike the text reader's: nothing has run between the
+            // failing open and this line.
+            crate::say!(
+                "clipboard file list read gave up after {CLIPBOARD_ATTEMPTS} tries, last error {}",
+                last_error()
+            );
             break;
         }
         std::thread::sleep(RETRY_DELAY);
@@ -996,6 +1136,39 @@ fn is_confidential() -> bool {
 #[cfg(not(windows))]
 fn is_confidential() -> bool {
     false
+}
+
+/// Whether the clipboard offers a picture at all.
+///
+/// Asked before the clipboard is opened for one. Reading a picture holds
+/// the clipboard open for the whole decode, tens of milliseconds for a
+/// screenshot, and on a copy that carries no picture that is a lock held for
+/// nothing while the application that just copied may want it back. Windows
+/// synthesises `CF_DIBV5` for every bitmap owner, and `PNG` is the other
+/// format `arboard` reads, so between them this is the same answer the read
+/// would give.
+#[cfg(windows)]
+fn offers_image() -> bool {
+    use windows::core::w;
+    use windows::Win32::System::DataExchange::{
+        IsClipboardFormatAvailable, RegisterClipboardFormatW,
+    };
+
+    const CF_DIBV5: u32 = 17;
+
+    // SAFETY: format probes; no open, no handle.
+    unsafe {
+        if IsClipboardFormatAvailable(CF_DIBV5).is_ok() {
+            return true;
+        }
+        let png = RegisterClipboardFormatW(w!("PNG"));
+        png != 0 && IsClipboardFormatAvailable(png).is_ok()
+    }
+}
+
+#[cfg(not(windows))]
+fn offers_image() -> bool {
+    true
 }
 
 /// The deduplication key.
@@ -1200,6 +1373,45 @@ mod tests {
             !clipboard.take_ignore(),
             "a stale reservation would eat the user's next copy"
         );
+    }
+
+    #[test]
+    fn a_failed_own_write_takes_its_reservation_back() {
+        // Two call sites used to reserve, fail the write, and leave the
+        // reservation standing to eat the user's next real copy.
+        let clipboard = Clipboard::for_test();
+
+        let result = clipboard.own_write(|| Err::<(), _>("no".to_string()));
+
+        assert!(result.is_err());
+        assert!(
+            !clipboard.take_ignore(),
+            "a reservation for a write that never happened would eat the user's next copy"
+        );
+    }
+
+    #[test]
+    fn a_failed_own_write_leaves_other_reservations_standing() {
+        // Taken back one at a time, not with `forget_ignored`: somebody else
+        // may have a reservation outstanding for a write that is about to land.
+        let clipboard = Clipboard::for_test();
+        clipboard.ignore_next();
+
+        let _ = clipboard.own_write(|| Err::<(), _>("no".to_string()));
+
+        assert!(clipboard.take_ignore(), "the other reservation is still owed");
+        assert!(!clipboard.take_ignore());
+    }
+
+    #[test]
+    fn a_successful_own_write_is_ignored_exactly_once() {
+        let clipboard = Clipboard::for_test();
+
+        let result = clipboard.own_write(|| Ok::<(), String>(()));
+
+        assert!(result.is_ok());
+        assert!(clipboard.take_ignore());
+        assert!(!clipboard.take_ignore());
     }
 
     #[test]

@@ -1074,7 +1074,13 @@ mod windows_impl {
     ///
     /// Called from the app, not the hook: it sends input, which a hook
     /// callback must not sit and wait on.
-    pub fn replace(expander: &Expander, backspaces: usize, text: &str, html: &str) {
+    pub fn replace(
+        expander: &Expander,
+        backspaces: usize,
+        text: &str,
+        html: &str,
+        held: crate::selection::Held,
+    ) {
         use windows::Win32::UI::Input::KeyboardAndMouse::{
             SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
             KEYEVENTF_UNICODE,
@@ -1107,7 +1113,12 @@ mod windows_impl {
         }
 
         if paste {
-            paste_text(text, html);
+            paste_text(text, html, held);
+        } else {
+            // Typed, so the clipboard was never written. The borrow was taken
+            // before the expansion in case a placeholder read the selection,
+            // and ends here having changed nothing.
+            held.give_back();
         }
 
         expander.inner.replacing.store(false, Ordering::SeqCst);
@@ -1171,27 +1182,20 @@ mod windows_impl {
     /// `Held` suspends the history for the whole borrow instead of trying to
     /// count the changes.
     ///
-    /// What goes back is text. An image on the clipboard does not survive,
-    /// which is true of every borrow in Sill and is written down here because
-    /// this is the one somebody triggers by typing.
-    fn paste_text(text: &str, html: &str) {
-        let Some(app) = APP.get() else {
-            crate::say!("no app handle, so a snippet cannot be pasted");
-            return;
+    /// What goes back is text. A picture on the clipboard is not restored:
+    /// the snippet stays on the clipboard instead of the clipboard being
+    /// emptied, which is true of every borrow in Sill and is written down
+    /// here because this is the one somebody triggers by typing.
+    ///
+    /// The borrow arrives from `type_snippet`, which took it before the
+    /// expansion so that a `{selection}` placeholder's copy and this paste
+    /// are one borrow, with one previous value to put back.
+    fn paste_text(text: &str, html: &str, held: crate::selection::Held) {
+        let wrote = if html.is_empty() {
+            held.write(text, "snippet")
+        } else {
+            held.write_html(html, text, "snippet")
         };
-
-        let held = crate::selection::Held::take(app);
-
-        let wrote = arboard::Clipboard::new().ok().is_some_and(|mut board| {
-            if html.is_empty() {
-                board.set_text(text.to_string()).is_ok()
-            } else {
-                board
-                    .set()
-                    .html(html.to_string(), Some(text.to_string()))
-                    .is_ok()
-            }
-        });
 
         if !wrote {
             crate::say!("could not put a snippet on the clipboard");

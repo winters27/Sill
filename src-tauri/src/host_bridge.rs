@@ -37,35 +37,39 @@ impl SillBridge {
     }
 
     fn write(&self, clip: &Clip) -> Result<(), String> {
+        let put = || -> Result<(), String> {
+            // HTML first when both are present, because it carries the plain
+            // text alongside it and writing them separately would leave
+            // whichever went last on the clipboard alone.
+            if let Some(html) = clip.html.as_deref() {
+                let plain = clip.text.as_deref().unwrap_or(html);
+                return crate::selection::traced("extension write", || {
+                    self.app.clipboard().write_html(html, Some(plain))
+                })
+                .map_err(|err| format!("could not copy: {err}"));
+            }
+
+            let text = clip
+                .as_text()
+                .ok_or_else(|| "that copy carried nothing to put on the clipboard".to_string())?;
+
+            crate::selection::traced("extension write", || self.app.clipboard().write_text(text))
+                .map_err(|err| format!("could not copy: {err}"))
+        };
+
         // Told before the write, not after. The clipboard listener fires on a
         // thread of its own the moment the contents change, so a flag set
-        // afterwards is set too late and the secret is already recorded.
+        // afterwards is set too late and the secret is already recorded. The
+        // reservation is taken back if the write fails, so it cannot swallow
+        // the person's next real copy.
         if clip.concealed {
-            if let Some(history) = self.app.try_state::<crate::clipboard::monitor::Clipboard>() {
-                history.ignore_next();
-            }
+            return match self.app.try_state::<crate::clipboard::monitor::Clipboard>() {
+                Some(history) => history.own_write(put),
+                None => put(),
+            };
         }
 
-        // HTML first when both are present, because it carries the plain text
-        // alongside it and writing them separately would leave whichever went
-        // last on the clipboard alone.
-        if let Some(html) = clip.html.as_deref() {
-            let plain = clip.text.as_deref().unwrap_or(html);
-            return self
-                .app
-                .clipboard()
-                .write_html(html, Some(plain))
-                .map_err(|err| format!("could not copy: {err}"));
-        }
-
-        let text = clip
-            .as_text()
-            .ok_or_else(|| "that copy carried nothing to put on the clipboard".to_string())?;
-
-        self.app
-            .clipboard()
-            .write_text(text)
-            .map_err(|err| format!("could not copy: {err}"))
+        put()
     }
 }
 
@@ -87,9 +91,10 @@ impl Bridge for SillBridge {
     }
 
     fn clipboard_clear(&self) -> Result<(), String> {
-        self.app
-            .clipboard()
-            .clear()
+        // The one place Sill empties the clipboard, and only because an
+        // extension asked for exactly that. Traced like every other write, so
+        // an emptied clipboard can be laid at the extension's door.
+        crate::selection::traced("extension clear", || self.app.clipboard().clear())
             .map_err(|err| format!("could not clear the clipboard: {err}"))
     }
 
@@ -112,9 +117,13 @@ impl Bridge for SillBridge {
     fn selected_text(&self) -> Result<Option<String>, String> {
         // The same capture the launcher's own text actions use, so an
         // extension asking what is selected gets exactly what a built-in
-        // action would have acted on, including the part where the clipboard
-        // is put back afterwards.
-        Ok(crate::selection::capture(&self.app))
+        // action would have acted on. Borrowed and given straight back: the
+        // copy Sill's Ctrl+C leaves behind must not stay on the person's
+        // clipboard, and the history must not record it.
+        let held = crate::selection::Held::take(&self.app);
+        let text = held.capture();
+        held.give_back();
+        Ok(text)
     }
 
     fn default_application(&self, target: &str) -> Result<Option<AppInfo>, String> {
