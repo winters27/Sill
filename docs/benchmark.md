@@ -5,7 +5,7 @@ activity, and idle work for Sill. Every row records what was measured, the
 machine, build, and date, plus the command that takes the same reading. A row
 without a result or a repeatable command says so explicitly.
 
-Generated for version 0.4.0 on 2026-09-20. This page is assembled from
+Generated for version 0.4.1 on 2026-09-20. This page is assembled from
 measurement output, and verification fails if the committed page differs from
 the generated result.
 
@@ -30,7 +30,7 @@ hardware happens to run it, and a reader gets the same answer.
 | Working out what to show for one letter typed, against an index of 1,500 things | 27.1 ms for the worst of four queries over 1,500 entries (provisional) | 20 ms release, 60 ms debug | 2026-09-03, debug build, machine A, **version 0.1.0** |
 | Whether that cost grows in step with the index rather than faster than it | still linear | at most 40x for 8x the entries | 2026-09-03, debug build, machine A, **version 0.1.0** |
 | Whether opening and closing the launcher five hundred times leaves anything behind | the check holds | no growth | 2026-09-03, debug build, machine A, **version 0.1.0** |
-| Repeating timers in the window with nothing saying why being put away stops them | 0 unaccounted for, of 2 repeating timers in the window | 0 unaccounted | 2026-09-20, debug build, machine A |
+| Repeating timers in the window with nothing saying why being put away stops them | 0 unaccounted for, of 2 repeating timers in the window | 0 unaccounted | 2026-09-20, debug build, machine A, **version 0.4.0** |
 | How large the clipboard's write-ahead file is allowed to get | **not measured yet** | at most 2 MB | never |
 
 Take these yourself:
