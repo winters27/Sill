@@ -559,19 +559,6 @@
     inset 0 -1px 0 0 rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.45);
 
   /*
-   * The recess a settings glyph is cut into.
-   *
-   * Same idea as the bevels above and the same light: the groove's far wall is
-   * in shadow and its near lip catches. `SettingsIcon` draws the shape twice,
-   * once in this colour offset up by a pixel and once in `currentColor` at the
-   * true position, and the pair reads as engraved rather than drawn on.
-   *
-   * A colour rather than a shadow because it is a stroke, and the only thing
-   * `box-shadow` can do to an SVG stroke is blur the whole element.
-   */
-  --etch: rgba(0, 0, 0, 0.62);
-
-  /*
    * The window's edge: one hairline ring, and nothing else.
    *
    * DWM defines the shape and clips to it, so the ring is drawn inside the
@@ -854,6 +841,39 @@
   --stroke-glyph: 1.25;
   --icon-tile-sm: 20px;
   --icon-tile-xs: 16px;
+
+  /*
+   * ---- Tile hues ---------------------------------------------------------
+   *
+   * The colour behind a settings mark: fourteen hues at one lightness and a
+   * chroma of about a tenth (OKLCH L 0.55, C 0.10, cyan and teal a shade
+   * lower to stay in gamut, brown and slate lower still), converted to sRGB.
+   * A column of twenty-one of them has to read as a palette, not a row of
+   * buttons, which is what a set before this one became.
+   *
+   * These sit outside the rule that nothing which is merely a surface may be
+   * tinted: a tile is the icon's own body, not a surface anything sits on,
+   * and no state is read from its hue. None of them is near any theme's
+   * accent. Frost-light lifts every one of them; the other themes inherit.
+   *
+   * `--tile-ink` is the glyph on the tile, white on every theme, the way a
+   * platform draws its own.
+   */
+  --tile-red: #a45953;
+  --tile-orange: #9e6033;
+  --tile-amber: #906a21;
+  --tile-olive: #70782c;
+  --tile-green: #49814c;
+  --tile-teal: #28836e;
+  --tile-cyan: #267e90;
+  --tile-blue: #4773ab;
+  --tile-indigo: #646bab;
+  --tile-violet: #7b63a3;
+  --tile-magenta: #955a89;
+  --tile-rose: #9f5774;
+  --tile-brown: #816249;
+  --tile-slate: #677380;
+  --tile-ink: #ffffff;
 
   /*
    * ---- Layers -------------------------------------------------------------
@@ -1160,22 +1180,28 @@
   --glaze-ring-lit: rgba(var(--accent-rgb), 0.36);
   --glaze-spec-lit: rgba(255, 255, 255, 1);
   --menu-spec-soft: rgba(255, 255, 255, 0.4);
+  /* The tile hues on a pale surface: the same hues a step lighter (L 0.62),
+     so a tile still reads as a body and not a hole. */
+  --tile-red: #bb6d67;
+  --tile-orange: #b47548;
+  --tile-amber: #a67f38;
+  --tile-olive: #848d42;
+  --tile-green: #5e9660;
+  --tile-teal: #339a83;
+  --tile-cyan: #2695ac;
+  --tile-blue: #5c88c1;
+  --tile-indigo: #7880c2;
+  --tile-violet: #8f78ba;
+  --tile-magenta: #ab6e9e;
+  --tile-rose: #b56c89;
+  --tile-brown: #99795f;
+  --tile-slate: #7b8895;
   --well: inset 0 1px 2px rgba(0, 0, 0, 0.1);
   --bevel-tile: inset 1px 1px 0 0 rgba(255, 255, 255, 0.8),
     inset -1px -1px 0 0 rgba(0, 0, 0, 0.07);
   --bevel-hero: inset 1px 1px 0 0 rgba(255, 255, 255, 0.9),
     inset -1px -1px 0 0 rgba(0, 0, 0, 0.09), 0 4px 10px rgba(0, 0, 0, 0.1);
 
-  /*
-   * The settings glyph groove, inverted.
-   *
-   * `SettingsIcon` draws the shape twice: this colour lifted a pixel, then
-   * `currentColor` at the true position. On the dark themes the second pass
-   * is the pale line you see and this is its shadow. Here `currentColor` is
-   * dark, so this becomes the highlight instead; a black one would give a
-   * dark line under a dark shadow, which is mud rather than engraving.
-   */
-  --etch: rgba(255, 255, 255, 0.85);
 
   /* A pale key in its own soft shadow, rather than a dark one lit from above. */
   --keycap: radial-gradient(75% 75% at 50% 92%, #eaebee, #c7c9cf);

@@ -46,6 +46,7 @@
     "verify:page": "node scripts/benchmark-page.mjs --check",
     "benchmark": "node scripts/benchmark-page.mjs",
     "benchmark:take": "node scripts/measure-checks.mjs",
+    "icons:vendor": "node scripts/vendor-phosphor.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "changelog": "node scripts/changelog.mjs",
     "version:set": "node scripts/set-version.mjs",
@@ -62,6 +63,7 @@
     "@tauri-apps/plugin-opener": "^2"
   },
   "devDependencies": {
+    "@phosphor-icons/core": "^2.1.1",
     "@sveltejs/adapter-static": "^3.0.6",
     "@sveltejs/kit": "^2.9.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

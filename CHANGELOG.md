@@ -53,6 +53,11 @@ available.
   band of their own any more: the sidebar's line runs to the corner and a
   conversation scrolls under the bar. When one of those windows is behind
   another, its glass goes out.
+- **Icons:** The settings panels and the launcher's own rows draw Phosphor
+  icons, white on a coloured tile, in place of the rendered plaques and the
+  hand-drawn line glyphs. Fourteen muted hues, with related panels sharing
+  one. The clipboard kinds and the AI timeline's step marks are Phosphor
+  too. The 126 plaque images are gone from the app.
 
 ## 0.4.0
 

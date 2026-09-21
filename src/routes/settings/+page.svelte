@@ -935,9 +935,9 @@
         <nav>
           {#each matches as match (match.panel + match.title)}
             <button class="result" onclick={() => jumpTo(match.panel)}>
-              <span class="result-tile">
-                <SettingsIcon name={match.panel as PanelId} size={13} />
-              </span>
+              <!-- The mark's own tile is the result's tile, at the size the
+                   wrapper used to be. -->
+              <SettingsIcon name={match.panel as PanelId} size={22} />
               <span class="result-text">
                 <span class="result-title">{match.title}</span>
                 <span class="result-panel">{match.panelName}</span>
@@ -2607,18 +2607,6 @@
 
   .result:hover {
     background-color: var(--fill-1);
-  }
-
-  .result-tile {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    flex: none;
-    border-radius: var(--radius-sm);
-    background: var(--fill-2);
-    box-shadow: var(--bevel-tile);
-    color: var(--text-1);
   }
 
   .result-text {

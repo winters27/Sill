@@ -1,5 +1,17 @@
 <script lang="ts">
+  /**
+   * The mark for a kind of clipboard entry: a Phosphor glyph from the
+   * generated table, in the row's own colour.
+   *
+   * Bare rather than on a tile, for three reasons. The colour kind's swatch
+   * below is itself a coloured square, so a tiled link row and a red colour
+   * entry would be the same shape at fourteen pixels. A colour per kind in a
+   * dense list is a legend to learn, and the type filter already spells the
+   * kind out beside the glyph. And menus keep monochrome marks, which the
+   * launcher menu decided for the same reason.
+   */
   import type { ClipKind } from "$lib/clipboard";
+  import { CLIP_GLYPHS } from "$lib/components/glyphs";
 
   interface Props {
     kind: ClipKind;
@@ -16,34 +28,8 @@
   <span class="swatch" style:background={swatch} style:width="{size}px" style:height="{size}px"
   ></span>
 {:else}
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.7"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    aria-hidden="true"
-  >
-    {#if kind === "link"}
-      <path d="M9.5 14.5a3.5 3.5 0 0 0 5 0l3-3a3.54 3.54 0 0 0-5-5l-1 1" />
-      <path d="M14.5 9.5a3.5 3.5 0 0 0-5 0l-3 3a3.54 3.54 0 0 0 5 5l1-1" />
-    {:else if kind === "email"}
-      <rect x="2.5" y="5" width="19" height="14" rx="2" />
-      <path d="m3 7 9 6 9-6" />
-    {:else if kind === "image"}
-      <rect x="2.5" y="4" width="19" height="16" rx="2" />
-      <circle cx="8.5" cy="9.5" r="1.6" />
-      <path d="m3 16 5-4 5 4 3-2.5 5 4" />
-    {:else if kind === "file"}
-      <path d="M13.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5Z" />
-      <path d="M13.5 3v5.5H19" />
-    {:else}
-      <!-- Text: lines on a page, which is what a copied paragraph is. -->
-      <path d="M5 5h14M5 9.5h14M5 14h10M5 18.5h7" />
-    {/if}
+  <svg width={size} height={size} viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+    <path d={CLIP_GLYPHS[kind]} />
   </svg>
 {/if}
 

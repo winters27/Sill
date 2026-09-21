@@ -4971,26 +4971,32 @@ if (tracked.status !== 0) {
 /**
  * Every panel Rust knows about has a drawing, and every drawing is reachable.
  *
- * This replaces a check that held `SettingsIcon`'s `ART` set against the PNGs
- * in `static/settings`, from when the icons were artwork. The artwork is gone;
- * the mistake it caught is not. A panel added to `PANELS` with no branch in
- * the glyph chain falls to the empty frame, and an empty frame is a real
- * drawing rather than a broken image, so it is *quieter* than the failure it
- * replaced and no easier to notice.
+ * Three lists have to agree: `PANELS` in `settings_index.rs` (what Rust can
+ * open), `PANEL_ICONS` in `SettingsIcon.svelte` (what the sidebar can cast
+ * to), and the keys of `SETTINGS_GLYPHS` in the generated `glyphs.ts` (what
+ * has a Phosphor path). The table is typed `Record<IconName, string>`, so
+ * `npm run check` already refuses a name with no path and a path with no
+ * name; this holds Rust's list to both, which the type system cannot see.
  *
- * `scripts` is why both versions of this exist. It was listed as having art
- * nobody had drawn, and because `script_record` hands every script without its
- * own icon `panel: "scripts"`, the broken image reached the launcher's result
- * list as well as the settings sidebar.
+ * `scripts` is why this exists. It was once listed as having art nobody had
+ * drawn, and because `script_record` hands every script without its own icon
+ * `panel: "scripts"`, the broken image reached the launcher's result list as
+ * well as the settings sidebar.
  */
 {
   const ICON = "src/lib/components/SettingsIcon.svelte";
+  const TABLE = "src/lib/components/glyphs.ts";
   const INDEX = "src-tauri/src/settings_index.rs";
   const text = readFileSync(ICON, "utf8");
 
   const list = readFileSync(INDEX, "utf8").match(/PANELS: &\[&str\] = &\[([\s\S]*?)\];/);
   const panels = list ? [...list[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]) : [];
-  const drawn = new Set([...text.matchAll(/name === "([a-z-]+)"/g)].map((m) => m[1]));
+  const table = readFileSync(TABLE, "utf8").match(
+    /export const SETTINGS_GLYPHS: Record<IconName, string> = \{([\s\S]*?)\r?\n\};/,
+  );
+  const drawn = new Set(
+    [...(table?.[1] ?? "").matchAll(/^\s*"([a-z][a-z0-9-]*)":/gm)].map((m) => m[1]),
+  );
   const named = new Set(
     [
       ...(text.match(/PANEL_ICONS = \[([\s\S]*?)\] as const/)?.[1] ?? "").matchAll(/"([a-z-]+)"/g),
@@ -5005,7 +5011,7 @@ if (tracked.status !== 0) {
     fail(INDEX, null, "no `PANELS` were read, so this is parsing rather than checking");
   }
   if (drawn.size === 0) {
-    fail(ICON, null, "no glyph branches were read, so this is parsing rather than checking");
+    fail(TABLE, null, "no `SETTINGS_GLYPHS` keys were read, so this is parsing rather than checking");
   }
   if (named.size === 0) {
     fail(ICON, null, "no `PANEL_ICONS` were read, so this is parsing rather than checking");
@@ -5021,10 +5027,10 @@ if (tracked.status !== 0) {
       );
     } else if (!drawn.has(panel)) {
       fail(
-        ICON,
+        TABLE,
         null,
-        `settings has a "${panel}" panel with no branch in the glyph chain, so ` +
-          "it wears the empty frame and says nothing about what it is",
+        `settings has a "${panel}" panel with no path in SETTINGS_GLYPHS, so ` +
+          "its tile is empty and says nothing about what it is",
       );
     }
   }
@@ -5032,90 +5038,21 @@ if (tracked.status !== 0) {
   for (const name of named) {
     if (drawn.has(name)) continue;
     fail(
-      ICON,
-      lineOf(text, text.indexOf(`"${name}"`)),
-      `PANEL_ICONS offers "${name}" and no branch draws it, so anything asking ` +
-        "for it gets the empty frame",
+      TABLE,
+      null,
+      `PANEL_ICONS offers "${name}" and SETTINGS_GLYPHS has no path for it, so ` +
+        "anything asking for it gets an empty tile",
     );
   }
-}
 
-/**
- * Every name in `SettingsIcon`'s `ART` set has all of its art on disk, and
- * every file on disk is claimed by a name at a width the component offers.
- *
- * The set is a *claim* about the filesystem, and nothing checked it. When the
- * claim is wrong the component takes the `<img>` path, the request 404s, and
- * the fallback glyph written to prevent exactly that is skipped. A name
- * listed there with no art is strictly worse than a name left out.
- *
- * `scripts` is why this exists. It was in the set with nothing drawn for it,
- * and because `script_record` hands every script without its own icon
- * `panel: "scripts"`, the broken image reached the launcher's result list as
- * well as the settings sidebar.
- *
- * The other direction catches the opposite waste: `browsers` and `websearch`
- * both had six widths on disk that no call site could ever ask for.
- */
-{
-  const ICON = "src/lib/components/SettingsIcon.svelte";
-  const ART_DIR = "static/settings";
-  const text = readFileSync(ICON, "utf8");
-
-  const set = text.match(/const ART = new Set<IconName>\(\[([\s\S]*?)\]\)/);
-  const names = set ? [...set[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]) : [];
-  const widths = [
-    ...(text.match(/const WIDTHS = \[([\d,\s]+)\]/)?.[1] ?? "").matchAll(/\d+/g),
-  ].map((m) => Number(m[0]));
-
-  /*
-   * Parsing rather than checking. Either pattern can stop matching after an
-   * ordinary rename, and a check that reads nothing passes every time.
-   */
-  if (names.length === 0) {
-    fail(ICON, null, "no `ART` names were read, so this is parsing rather than checking");
-  }
-  if (widths.length === 0) {
-    fail(ICON, null, "no `WIDTHS` were read, so this is parsing rather than checking");
-  }
-  if (!existsSync(ART_DIR)) {
-    fail(ART_DIR, null, "the settings art folder is missing, so every drawn panel is a 404");
-  }
-
-  const claimed = new Set(names);
-  const offered = new Set(widths);
-
-  for (const name of names) {
-    const gone = widths.filter((w) => !existsSync(join(ART_DIR, `${name}-${w}.png`)));
-    if (gone.length === 0) continue;
-
+  for (const name of drawn) {
+    if (named.has(name)) continue;
     fail(
-      ICON,
-      lineOf(text, text.indexOf(`"${name}"`, set.index)),
-      `"${name}" is in ART and ${gone.map((w) => `${name}-${w}.png`).join(", ")} ` +
-        `${gone.length === 1 ? "is" : "are"} not in ${ART_DIR}/, so it draws a ` +
-        "broken image instead of the fallback glyph that exists for this",
+      TABLE,
+      null,
+      `SETTINGS_GLYPHS carries "${name}", which PANEL_ICONS does not name, so ` +
+        "that drawing is one nothing can ask for",
     );
-  }
-
-  for (const file of existsSync(ART_DIR) ? readdirSync(ART_DIR) : []) {
-    const drawn = file.match(/^([a-z-]+)-(\d+)\.png$/);
-
-    if (!drawn) {
-      fail(ART_DIR, null, `${file} is not <name>-<width>.png, so nothing can ask for it`);
-    } else if (!claimed.has(drawn[1])) {
-      fail(
-        ART_DIR,
-        null,
-        `${file} is art for "${drawn[1]}", which is not in ART, so it is drawn nowhere`,
-      );
-    } else if (!offered.has(Number(drawn[2]))) {
-      fail(
-        ART_DIR,
-        null,
-        `${file} is a width WIDTHS does not offer, so no browser will ever pick it`,
-      );
-    }
   }
 }
 

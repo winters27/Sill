@@ -18,7 +18,7 @@
    */
   import "$lib/theme/theme.css";
   import LaunchIcon from "$lib/components/LaunchIcon.svelte";
-  import SettingsIcon, { PANEL_ICONS } from "$lib/components/SettingsIcon.svelte";
+  import SettingsIcon, { HUE, PANEL_ICONS } from "$lib/components/SettingsIcon.svelte";
   import Toggle from "$lib/components/Toggle.svelte";
   import Segmented from "$lib/components/settings/Segmented.svelte";
   import Slider from "$lib/components/settings/Slider.svelte";
@@ -467,13 +467,19 @@
     {/each}
   </div>
 
-  <h2>Every settings panel icon ({PANEL_ICONS.length}), at both sizes it is used</h2>
+  <h2>Every settings panel icon ({PANEL_ICONS.length}), at the three sizes it is used</h2>
+  <!-- 38 in the settings hero, 26 in the sidebar and the launcher's rows, 22
+       in the settings search results. The hue under each name is the tile's. -->
   <div class="icons">
     {#each PANEL_ICONS as name (name)}
       <div class="icon panel-icon">
         <SettingsIcon {name} size={38} />
         <SettingsIcon {name} size={26} />
-        <span>{name}</span>
+        <SettingsIcon {name} size={22} />
+        <span>
+          {name}
+          <em>{HUE[name]}</em>
+        </span>
       </div>
     {/each}
   </div>
@@ -971,8 +977,10 @@
     cursor: pointer;
   }
 
+  /* The real sidebar's selection is the accent fill; the mock matches it so
+     the tile-over-selection case is the one being judged here. */
   .s-nav.selected {
-    background-color: var(--fill-2);
+    background-color: var(--accent-fill);
     color: var(--text-1);
   }
 
