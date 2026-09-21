@@ -44,6 +44,15 @@ available.
   -MaxSamples 60`, debug build). Clock, World clock and Weather are
   unchanged; a pinned "machine" entry in an existing preferences file is
   ignored.
+- **Chrome:** Every floating surface wears the same glass: the launcher's
+  popovers, the model chip and menu button, the clipboard bar's filters, the
+  store filter, the tooltip, the AI composer and permission card, the
+  screenshot editor's toolbar groups, the dictation pill, and the model pill
+  in the AI Chat window, which moved from the foot of the side rail into the
+  title bar. The Settings, AI Chat and screenshot editor title bars have no
+  band of their own any more: the sidebar's line runs to the corner and a
+  conversation scrolls under the bar. When one of those windows is behind
+  another, its glass goes out.
 
 ## 0.4.0
 
