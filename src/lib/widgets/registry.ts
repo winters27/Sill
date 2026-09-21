@@ -11,7 +11,7 @@
  * the chin pull in the board's dependencies and vice versa; the two surfaces
  * pick their own components by id and this holds only what both need to know.
  */
-export type WidgetId = "clock" | "worldclock" | "weather" | "machine";
+export type WidgetId = "clock" | "worldclock" | "weather";
 
 export interface WidgetInfo {
   id: WidgetId;
@@ -19,8 +19,6 @@ export interface WidgetInfo {
   name: string;
   /** One line, for the settings list where it is chosen. */
   blurb: string;
-  /** Takes both columns of the board, for a widget with a list in it. */
-  wide?: boolean;
 }
 
 export const WIDGETS: WidgetInfo[] = [
@@ -38,12 +36,6 @@ export const WIDGETS: WidgetInfo[] = [
     id: "weather",
     name: "Weather",
     blurb: "Now, and today's high and low, for a place you choose",
-  },
-  {
-    id: "machine",
-    name: "This machine",
-    blurb: "Processor, memory, the heaviest programs, and what Sill costs",
-    wide: true,
   },
 ];
 

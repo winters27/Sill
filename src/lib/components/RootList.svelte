@@ -11,14 +11,6 @@
 
   interface Props {
     commands: RankedCommand[];
-    /**
-     * Subtitles that are a measurement rather than a description.
-     *
-     * By id, and absent for nearly every row. Kept out of `commands` itself
-     * because that list is replaced on every search, and a subtitle patched
-     * into it would be written over by the next keystroke.
-     */
-    live?: Record<string, string>;
     selected: number;
     onselect: (index: number) => void;
     onrun: (index: number) => void;
@@ -61,8 +53,8 @@
     /**
      * How an extension update that was started from the row is going.
      *
-     * Null unless a batch is running. Its own prop rather than a `live`
-     * subtitle because there is a bar as well as a line, and because the row
+     * Null unless a batch is running. Its own prop rather than a subtitle
+     * because there is a bar as well as a line, and because the row
      * stops being pressable while it is set: pressing it again would start a
      * second batch on top of the one already running.
      *
@@ -97,7 +89,6 @@
     selected,
     onselect,
     onrun,
-    live,
     asking = "",
     query = "",
     numeric = false,
@@ -572,12 +563,6 @@
   }
 
   function sourceOf(command: RankedCommand): string {
-    // A measurement wins over anything written down, and it is checked first
-    // because the rules below are about descriptions. A row showing what the
-    // machine is doing right now is not describing where that can be found.
-    const measured = live?.[command.id];
-    if (measured) return measured;
-
     /*
      * An extension command names its extension, and its own subtitle too.
      *

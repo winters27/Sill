@@ -276,7 +276,6 @@ pub const SETTINGS: &[Setting] = &[
         "pin widget launcher weather temperature forecast",
         "mark:weather",
     ),
-    s("widgets", "Widgets", "This machine", "pin widget launcher processor memory cpu ram cost programs"),
     m(
         "widgets",
         "Widgets",

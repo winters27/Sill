@@ -51,11 +51,9 @@ pub mod keysheet;
 pub mod layouts;
 pub mod lazy_windows;
 pub mod leavings;
-pub mod live;
 pub mod lnk;
 pub mod log;
 pub mod media;
-pub mod meter;
 pub mod navigation;
 pub mod notes;
 pub mod object;
@@ -1847,7 +1845,6 @@ pub fn run() {
         // presses Enter on a row that would end the session.
         .manage(system::Asked::default())
         .manage(activity::Activity::default())
-        .manage(meter::Meter::default())
         // Empty until somebody opens the store, and empty again the moment
         // they leave it. Nothing here fetches, warms up or refreshes.
         .manage(store::StoreState::default())
@@ -2444,18 +2441,15 @@ pub fn run() {
             commands::scripts::script_arguments,
             commands::scripts::run_script,
             commands::scripts::cancel_script,
-            commands::system::live_rows,
             commands::system::save_workspace,
             commands::system::restore_workspace,
             commands::system::make_workspace_portable,
             commands::system::forget_workspace,
-            commands::system::machine_reading,
             commands::system::find_place,
             commands::system::weather_now,
             commands::system::world_clocks,
             commands::system::throw_confetti,
             commands::system::finish_confetti,
-            commands::system::forget_machine_reading,
             commands::system::activity,
             commands::system::undo_activity,
             commands::system::clear_activity,

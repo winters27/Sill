@@ -78,10 +78,9 @@
   Each opens with the switch that pins it and carries its own settings under
   that switch, so the reader never has to scroll to find out whether a widget
   has any. It used to be one list of switches and then three unrelated
-  sections, and "This machine" had none, which could only be learned by
-  looking for it.
+  sections.
 -->
-<!-- indexed as "Clock", "World clock", "Weather", "This machine" -->
+<!-- indexed as "Clock", "World clock", "Weather" -->
 {#each WIDGETS as widget (widget.id)}
   <Section
     label={widget.name}

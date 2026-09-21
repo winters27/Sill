@@ -2,7 +2,6 @@
   import Clock from "./Clock.svelte";
   import WorldClock from "./WorldClock.svelte";
   import Weather from "./Weather.svelte";
-  import Machine from "./Machine.svelte";
   import { WIDGETS } from "./registry";
   import type { Preferences } from "$lib/settings";
   import { hint } from "$lib/hint";
@@ -26,7 +25,7 @@
 -->
 <div class="board">
   {#each WIDGETS as widget (widget.id)}
-    <div class="tile" style:grid-column={`span ${widget.wide ? 2 : 1}`}>
+    <div class="tile">
       <div class="body">
         {#if widget.id === "clock"}
           <Clock seconds={prefs?.widgets.seconds ?? false} />
@@ -34,8 +33,6 @@
           <WorldClock clocks={prefs?.widgets.clocks ?? []} />
         {:else if widget.id === "weather"}
           <Weather />
-        {:else if widget.id === "machine"}
-          <Machine />
         {/if}
       </div>
 

@@ -686,16 +686,15 @@ pub fn toggle(window: &WebviewWindow) {
 
 /// Whether any of Sill's windows is on screen.
 ///
-/// Asked by the readings a widget polls for, so a poll that outlives the
-/// window it was drawn in costs a visibility check rather than a walk of every
-/// process on the machine. The window layer already stops polling when it is
-/// told it was hidden; this is the same rule stated where it cannot be
-/// forgotten by a second caller, which for these two readings includes an
-/// extension.
+/// Asked by the weather reading a widget polls for, so a poll that outlives
+/// the window it was drawn in costs a visibility check rather than a network
+/// call. The window layer already stops polling when it is told it was
+/// hidden; this is the same rule stated where it cannot be forgotten by a
+/// second caller.
 ///
-/// Every window rather than the launcher alone: the readout can be pinned in
-/// the launcher's chin and it can also be a view of its own, and a reading is
-/// worth taking if anything is showing it.
+/// Every window rather than the launcher alone: a widget can be pinned in
+/// the launcher's chin and shown on the board, and a reading is worth taking
+/// if anything is showing it.
 pub fn anything_visible(app: &tauri::AppHandle) -> bool {
     app.webview_windows()
         .values()

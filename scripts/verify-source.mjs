@@ -4426,9 +4426,9 @@ if (tracked.status !== 0) {
  *
  * The fix was `pollWhileVisible`, and this is what stops the next widget from
  * missing it. A repeating timer that reaches Rust is the shape the bug had:
- * `weather_now` is a network call and `machine_reading` walks every process on
- * the machine, and from this file neither is distinguishable from the other,
- * which is the point. Both are work done for nobody.
+ * `weather_now` is a network call, and from this file it is indistinguishable
+ * from a poll that walks every process on the machine, which is the point.
+ * Both are work done for nobody.
  *
  * **Scoped to `setInterval` deliberately.** A `setTimeout` that reschedules
  * itself is the same hazard and cannot be recognised without following the
@@ -4452,13 +4452,6 @@ if (tracked.status !== 0) {
    * line at a time.
    */
   const ALLOWED = {
-    // Stopped by Rust rather than by the page. `liveRows` returns nothing once
-    // Rust decides the launcher is not visible, and the ticker stops itself on
-    // an empty answer. Deliberately not the page's own decision: the window
-    // goes away by the hotkey, by a click elsewhere and by an action putting
-    // it away, and a timer recognising all three would be right until somebody
-    // added a fourth.
-    "src/routes/+page.svelte": "stops on an empty answer from `liveRows`",
     // The settings window, which is closed rather than hidden, so there is no
     // hidden state for a poller to survive into. It reads a local setup's
     // progress and reaches no network at all.
@@ -4487,9 +4480,9 @@ if (tracked.status !== 0) {
    * What gets published is the count this rule can stand behind: how many
    * repeating timers are in the window, and how many of those are unaccounted
    * for. Not how many reach Rust. This finds a call to Rust by the word
-   * `invoke` in the same file, and the two timers that do reach it go through
-   * a wrapper a module away, so a published figure for that would be a figure
-   * this cannot see.
+   * `invoke` in the same file, and the one timer that does reach it goes
+   * through a wrapper a module away, so a published figure for that would be
+   * a figure this cannot see.
    */
   let unaccounted = 0;
 

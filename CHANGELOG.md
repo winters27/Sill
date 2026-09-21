@@ -35,6 +35,15 @@ available.
   every change the history watcher sees, is one line in `sill.log` with the
   change numbers around it, so a copy that goes missing can be placed
   against what Sill was doing at that moment.
+- **Widgets:** The "This machine" widget is gone, and so is the live CPU, RAM
+  and Sill MB line under the Widgets row. While the launcher is open, Sill no
+  longer walks every process once a second: with the launcher visible on an
+  empty query for 60 s, sill.exe measured 0.03% of one core, down from 7.05%
+  with the widget pinned, and 1,528 context switches instead of 14,108
+  (`Get-Counter '\Process(sill)\% Processor Time' -SampleInterval 1
+  -MaxSamples 60`, debug build). Clock, World clock and Weather are
+  unchanged; a pinned "machine" entry in an existing preferences file is
+  ignored.
 
 ## 0.4.0
 

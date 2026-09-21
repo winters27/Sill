@@ -152,8 +152,8 @@ explicit approval.
     <td width="50%" valign="top">
       <img src="docs/media/themes.png" alt="Seven themes in Settings">
       <p><b>Themes and widgets.</b> Choose from seven translucent themes and
-      pin widgets for clocks, weather, CPU, memory, and temperature to the
-      launcher footer. Sill also includes snippets, quicklinks, web search,
+      pin a clock, a world clock, and the weather to the launcher footer.
+      Sill also includes snippets, quicklinks, web search,
       reminders, workspaces, screenshots, OCR, and text-to-speech.</p>
     </td>
     <td width="50%" valign="top">

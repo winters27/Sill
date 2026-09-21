@@ -1192,42 +1192,6 @@ pub(crate) fn clear_activity(app: tauri::AppHandle) {
     app.state::<crate::activity::Activity>().clear();
 }
 
-/// What the machine is doing, for the readout.
-///
-/// Blocking: it opens a handle to every process. Off the async runtime so a
-/// poll never holds up anything else the window asked for.
-#[tauri::command]
-pub(crate) async fn machine_reading(
-    app: tauri::AppHandle,
-) -> Result<crate::meter::Reading, String> {
-    // Refused when nothing is on screen. The window layer stops polling when
-    // it is told it was hidden, and this is the same rule where a second
-    // caller cannot forget it: opening a handle to every process on the
-    // machine for a gauge nobody can see is the exact cost this pair of
-    // changes exists to remove.
-    if !crate::summon::anything_visible(&app) {
-        return Err("Nothing is on screen to show a reading in.".to_string());
-    }
-
-    tauri::async_runtime::spawn_blocking(move || {
-        use tauri::Manager;
-        app.state::<crate::meter::Meter>().read()
-    })
-    .await
-    .map_err(|err| format!("could not read the machine: {err}"))
-}
-
-/// Forgets the previous reading, when the readout closes.
-///
-/// Without this the next reading would be measured against a sample from
-/// whenever the view was last open, and an average over an hour would be shown
-/// as what is happening now.
-#[tauri::command]
-pub(crate) fn forget_machine_reading(app: tauri::AppHandle) {
-    use tauri::Manager;
-    app.state::<crate::meter::Meter>().forget();
-}
-
 /// Looks a place up by name, for the weather widget's setting.
 #[tauri::command]
 pub(crate) async fn find_place(name: String) -> Result<crate::weather::Place, String> {
@@ -1345,7 +1309,8 @@ pub(crate) async fn world_clocks(
 pub(crate) async fn weather_now(app: tauri::AppHandle) -> Result<crate::weather::Weather, String> {
     use tauri::Manager;
 
-    // The same rule as the machine readout, and here it is a network call.
+    // Refused when nothing is on screen: this is a network call, and a
+    // reading nobody can see is work done for nobody.
     if !crate::summon::anything_visible(&app) {
         return Err("Nothing is on screen to show the weather in.".to_string());
     }
@@ -1540,14 +1505,4 @@ pub(crate) fn forget_workspace(app: tauri::AppHandle, name: String) -> Result<()
 
     crate::reload_index(&app);
     Ok(())
-}
-
-/// The rows whose subtitle is a measurement, and what it says now.
-///
-/// Answers with nothing when the launcher is not visible, which is the
-/// window's signal to stop asking. See `crate::live` for why the refusal lives
-/// there rather than in the timer.
-#[tauri::command]
-pub(crate) fn live_rows(app: tauri::AppHandle) -> Vec<crate::live::Live> {
-    crate::live::rows(&app)
 }

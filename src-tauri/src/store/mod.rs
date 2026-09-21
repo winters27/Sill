@@ -953,8 +953,7 @@ fn best_match(
 ///
 /// Held rather than re-read because a keystroke has to filter three thousand
 /// listings and reading two megabytes off disk per keystroke is not a
-/// keystroke budget. Dropped the moment the store closes, which is the same
-/// bargain [`crate::meter::Meter::forget`] makes and for the same reason:
+/// keystroke budget. Dropped the moment the store closes, because
 /// there is no version of "at rest, do almost nothing" where a launcher
 /// nobody is using holds a product catalogue.
 /// How long the catalogue stays held after the store is closed.

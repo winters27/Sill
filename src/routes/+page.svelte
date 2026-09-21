@@ -74,7 +74,6 @@
   import StoreView from "$lib/components/StoreView.svelte";
   import { storeClose, type StoreRow } from "$lib/store";
   import WidgetBoard from "$lib/widgets/Board.svelte";
-  import WidgetChin from "$lib/widgets/Chin.svelte";
   import {
     actionFor,
     collectActions,
@@ -126,8 +125,6 @@
     type Finished,
     snippetFields,
     pasteSnippetFilled,
-    liveRows,
-    type LiveRow,
     performBuiltin,
     searchElsewhere,
     searchWindows,
@@ -468,14 +465,6 @@
   }
 
   /**
-   * Subtitles that are a measurement, by row id.
-   *
-   * Separate from `commands` because that is replaced on every search and a
-   * subtitle patched into it would be gone on the next keystroke.
-   */
-  let live = $state<Record<string, string>>({});
-
-  /**
    * Which hole is being asked about, and what Enter will do with it.
    *
    * Counted out loud because a field that just asks again looks like the last
@@ -533,56 +522,8 @@
     }
   }
 
-  /** The ticker, while there is one. */
-  let ticking: ReturnType<typeof setInterval> | undefined;
-
   let finishedScript: UnlistenFn | undefined;
 
-  /**
-   * Asks what the live rows say, and stops when the answer is nothing.
-   *
-   * Nothing means Rust has decided the launcher is not visible. That decision
-   * is deliberately not made here: the window can go away by the hotkey, by a
-   * click elsewhere, or because an action put it away, and a timer that had to
-   * recognise all three would be right until the day somebody added a fourth.
-   * Asking something that always knows, and stopping when it says to, is right
-   * however it was dismissed.
-   */
-  async function tick() {
-    let rows: LiveRow[] = [];
-
-    try {
-      rows = await liveRows();
-    } catch {
-      // Nothing worth saying on screen: a subtitle that keeps its last value
-      // is better than an error where a measurement was.
-      rows = [];
-    }
-
-    if (rows.length === 0) {
-      stopTicking();
-      return;
-    }
-
-    live = Object.fromEntries(rows.map((row) => [row.id, row.subtitle]));
-  }
-
-  function startTicking() {
-    if (ticking) return;
-
-    void tick();
-    ticking = setInterval(() => void tick(), 1000);
-  }
-
-  function stopTicking() {
-    if (!ticking) return;
-
-    clearInterval(ticking);
-    ticking = undefined;
-
-    // Left as it was rather than blanked. The launcher is on its way out and
-    // emptying the row first would be a flicker on the way.
-  }
   let version = $state(0);
 
   /**
@@ -4500,15 +4441,6 @@
       });
 
 
-      // Summoning must hand the keyboard straight to the search field.
-      // Focusing only on mount is not enough: that runs once, while the
-      // window is still hidden, and focus does not survive hide and show.
-      // Once on mount as well as on every summon. The launcher starts hidden,
-      // so this usually stops itself on the first answer, which costs one call
-      // and means a window that was already up when this page loaded is not
-      // waiting for a summon that already happened.
-      startTicking();
-
       finishedScript = await listen<Finished>("sill://script-done", (event) => {
         // Only the one being watched. A script started, left running, and
         // followed by another would otherwise overwrite the one on screen with
@@ -4575,10 +4507,6 @@
          * selection and the measurement, but not for this.
          */
         searchInput?.focus();
-
-        // Measuring starts when the window appears and stops when Rust says
-        // nobody is looking, so a launcher nobody can see costs nothing.
-        startTicking();
 
         /*
          * What this window last failed to read, forgotten before it asks
@@ -4786,8 +4714,6 @@
       disposed = true;
       // A pending file query has nowhere to land once this is torn down.
       clearTimeout(fileTimer);
-      // And a measurement has nobody to show it to.
-      stopTicking();
       unlisten?.();
       updating?.();
       behindChanging?.();
@@ -4985,7 +4911,6 @@
         bind:this={rootList}
         {commands}
         {selected}
-        {live}
         {query}
         {building}
         working={updatingRow ? { line: updatingLine, far: updatingFar } : null}

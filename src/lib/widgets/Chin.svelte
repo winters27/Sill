@@ -2,7 +2,6 @@
   import Clock from "./Clock.svelte";
   import WorldClock from "./WorldClock.svelte";
   import Weather from "./Weather.svelte";
-  import Machine from "./Machine.svelte";
   import { widget } from "./registry";
   import type { Preferences } from "$lib/settings";
 
@@ -34,8 +33,6 @@
           <WorldClock compact clocks={prefs?.widgets.clocks ?? []} />
         {:else if id === "weather"}
           <Weather compact />
-        {:else if id === "machine"}
-          <Machine compact />
         {/if}
       </span>
     {/each}
