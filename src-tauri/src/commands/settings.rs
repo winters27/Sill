@@ -88,6 +88,40 @@ pub(crate) async fn set_preferences(
 
     prefs.save(&state.path).map_err(|e| e.to_string())?;
 
+    /*
+     * A chord recorded a moment ago is still under the finger that recorded
+     * it: the recorder saves on the key-down. Windows repeats a held key, and
+     * binding the chord now, through the hook or through `RegisterHotKey`,
+     * hands the next repeat to it. Recording Alt+Home as the summon key
+     * summoned the launcher over this window, twice over, once per path.
+     *
+     * So nothing below binds until every key of a chord that is new in this
+     * save has come up. Only the new chords: a key somebody happens to hold
+     * during an unrelated save is not a reason to stall it. Bounded at three
+     * seconds, which is longer than any key-up takes and shorter than a
+     * settings write anybody would notice.
+     */
+    let before: std::collections::HashSet<String> = crate::hotkeys::from_prefs(&previous)
+        .into_iter()
+        .map(|one| one.accelerator)
+        .collect();
+    let fresh: Vec<u32> = crate::hotkeys::from_prefs(&prefs)
+        .into_iter()
+        .filter(|one| !before.contains(&one.accelerator))
+        .map(|one| one.chord.vk)
+        .collect();
+    if fresh.iter().any(|&vk| crate::hotkeys::key_down(vk)) {
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            crate::hotkeys::wait_for_release(
+                &fresh,
+                crate::hotkeys::key_down,
+                || std::thread::sleep(std::time::Duration::from_millis(10)),
+                300,
+            )
+        })
+        .await;
+    }
+
     if previous.appearance.visible_rows != prefs.appearance.visible_rows
         || previous.appearance.window_width != prefs.appearance.window_width
     {

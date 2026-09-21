@@ -376,9 +376,72 @@ pub fn key_down(_vk: u32) -> bool {
     false
 }
 
+/// Waits until none of `keys` is down, polling `down` and calling `pause`
+/// between polls, giving up after `max_polls`. Answers whether they were all
+/// released.
+///
+/// For a chord that was just recorded. The settings window saves on the
+/// key-down that recorded it, and Windows repeats a held key, so binding the
+/// chord while its key is still under the finger hands the next repeat to
+/// the binding: recording Alt+Home as the summon key summoned the launcher
+/// over the settings window. Nothing is bound until the key has come up.
+pub fn wait_for_release(
+    keys: &[u32],
+    down: impl Fn(u32) -> bool,
+    pause: impl Fn(),
+    max_polls: usize,
+) -> bool {
+    for _ in 0..max_polls {
+        if !keys.iter().any(|&vk| down(vk)) {
+            return true;
+        }
+        pause();
+    }
+    !keys.iter().any(|&vk| down(vk))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn binding_waits_for_the_recorded_key_to_come_up() {
+        // Home is down for three polls, the way a key still under the finger
+        // that recorded it is, then up. The wait ends on the first poll that
+        // finds nothing down, and pauses once per poll that found something.
+        let polls = Cell::new(0);
+        let pauses = Cell::new(0);
+        let released = wait_for_release(
+            &[0x24],
+            |_| {
+                polls.set(polls.get() + 1);
+                polls.get() <= 3
+            },
+            || pauses.set(pauses.get() + 1),
+            300,
+        );
+
+        assert!(released);
+        assert_eq!(pauses.get(), 3, "one pause per poll that found the key down");
+    }
+
+    #[test]
+    fn a_key_that_never_comes_up_stops_the_wait_at_the_bound() {
+        // A stuck key must not hold the settings save for ever.
+        let pauses = Cell::new(0);
+        let released = wait_for_release(&[0x24], |_| true, || pauses.set(pauses.get() + 1), 5);
+
+        assert!(!released);
+        assert_eq!(pauses.get(), 5);
+    }
+
+    #[test]
+    fn nothing_down_means_no_wait_at_all() {
+        let pauses = Cell::new(0);
+        assert!(wait_for_release(&[0x24, 0x51], |_| false, || pauses.set(pauses.get() + 1), 300));
+        assert_eq!(pauses.get(), 0);
+    }
 
     fn chord(ctrl: bool, alt: bool, shift: bool, win: bool, vk: u32) -> Chord {
         Chord {
