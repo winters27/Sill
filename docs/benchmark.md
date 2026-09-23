@@ -5,7 +5,7 @@ activity, and idle work for Sill. Every row records what was measured, the
 machine, build, and date, plus the command that takes the same reading. A row
 without a result or a repeatable command says so explicitly.
 
-Generated for version 0.4.2 on 2026-09-20. This page is assembled from
+Generated for version 0.4.3 on 2026-09-20. This page is assembled from
 measurement output, and verification fails if the committed page differs from
 the generated result.
 

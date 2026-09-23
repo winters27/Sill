@@ -1,6 +1,6 @@
 {
   "name": "sill",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Open-source Windows launcher and command palette for search, automation, dictation, AI, and Raycast extensions",
   "keywords": [
     "windows",
