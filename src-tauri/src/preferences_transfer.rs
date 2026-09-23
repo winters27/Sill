@@ -62,7 +62,29 @@ pub struct Panel {
     /// The top-level keys of the preferences document this panel is the whole
     /// of, in the spelling the document uses.
     pub sections: &'static [&'static str],
+    /// Single keys of a section the panel shows only part of, as
+    /// `(section, key)`.
+    ///
+    /// The hotkey section is the one this exists for. Its summon and switcher
+    /// keys and the three summon switches are rows on General, its two
+    /// screenshot keys are rows on Screenshots, and Shortcuts shows none of
+    /// them. Owned whole by Shortcuts, "Reset" on Shortcuts put back keys it
+    /// never displayed and "Reset" on General left the summon key alone. A
+    /// reset is what the panel shows, so the section is split by key.
+    pub fields: &'static [(&'static str, &'static str)],
 }
+
+/// Sections split key by key between panels. See [`Panel::fields`].
+pub const SPLIT: &[&str] = &["hotkey"];
+
+/// Sections no panel's Reset touches.
+///
+/// Private mode is the one. It stops the clipboard, dictation and capture from
+/// recording, and it is off by default, so any reset that reached it turned
+/// recording back on: "Reset" on General did exactly that, under a button that
+/// said nothing about it. No reset may start recording. Private mode is
+/// switched off by its own switch, where the switch says so.
+pub const NOT_RESET: &[&str] = &["privacy"];
 
 /// Which settings panel owns which parts of the preferences.
 ///
@@ -72,40 +94,52 @@ pub struct Panel {
 /// is text. Offering "reset" on a panel with nothing to reset would be a
 /// button that does nothing.
 ///
-/// Shortcuts owns seven sections because it is genuinely one screen for every
-/// key Sill answers to, from the summon hotkey down to per-command aliases.
-/// Splitting it here so the table looked neater would mean "reset Shortcuts"
-/// left half the keys set.
+/// Shortcuts owns seven sections because it is one screen for the keys it
+/// draws, from bound actions down to per-command aliases. The summon and
+/// capture keys are not among them: they are rows on General and Screenshots,
+/// and those panels reset them. A reset puts back what its panel shows.
 pub const PANELS: &[Panel] = &[
     Panel {
         id: "general",
-        // Private mode is here because it is a fact about the machine rather
-        // than about any one feature: it overrides the clipboard, dictation
-        // and capture settings at once, and filing it under any of those three
-        // would mean resetting that panel decided whether Sill was recording
-        // the other two.
-        sections: &["general", "privacy"],
+        // Private mode is shown here, and is in `NOT_RESET` rather than here:
+        // it is a fact about the machine, overriding the clipboard, dictation
+        // and capture at once, and resetting it would turn recording back on.
+        sections: &["general"],
+        // The rows General draws from the hotkey section: the two keys that
+        // open the launcher and the three switches about what a summon does.
+        fields: &[
+            ("hotkey", "summon"),
+            ("hotkey", "switcher"),
+            ("hotkey", "dismissOnBlur"),
+            ("hotkey", "selectQueryOnSummon"),
+            ("hotkey", "resetOnSummon"),
+        ],
     },
     Panel {
         id: "appearance",
         sections: &["appearance"],
+        fields: &[],
     },
     Panel {
         id: "snippets",
         sections: &["snippets"],
+        fields: &[],
     },
     Panel {
         id: "clipboard",
         sections: &["clipboard"],
+        fields: &[],
     },
     Panel {
         id: "emoji",
         sections: &["emoji"],
+        fields: &[],
     },
     Panel {
         id: "shortcuts",
+        // Not the hotkey section: none of its keys are drawn here. See
+        // `Panel::fields`.
         sections: &[
-            "hotkey",
             "bindings",
             "aliases",
             "taps",
@@ -116,46 +150,65 @@ pub const PANELS: &[Panel] = &[
             // that send windows to them.
             "layouts",
         ],
+        fields: &[],
     },
     Panel {
         id: "screenshot",
         sections: &["screenshot"],
+        // The two capture keys are rows on this panel.
+        fields: &[("hotkey", "capture"), ("hotkey", "captureScreen")],
     },
     Panel {
         id: "sources",
-        sections: &["sources", "browsers", "webSearch"],
+        sections: &["sources"],
+        fields: &[],
+    },
+    Panel {
+        // Its own panel, and its rows are these two sections. They were reset
+        // by Applications, which draws neither.
+        id: "websearch",
+        sections: &["browsers", "webSearch"],
+        fields: &[],
     },
     Panel {
         id: "files",
         sections: &["files"],
+        fields: &[],
     },
     Panel {
         id: "extensions",
         sections: &["store"],
+        fields: &[],
     },
     Panel {
         id: "scripts",
         sections: &["scripts"],
+        fields: &[],
     },
     Panel {
         id: "ai",
         sections: &["ai"],
+        fields: &[],
     },
     Panel {
         id: "dictation",
         sections: &["dictation"],
+        fields: &[],
     },
     Panel {
         id: "tts",
         sections: &["tts"],
+        fields: &[],
     },
     Panel {
         id: "widgets",
         sections: &["widgets"],
+        fields: &[],
     },
     Panel {
         id: "mcp",
         sections: &["mcp"],
+        fields: &[],
     },
 ];
 
@@ -397,6 +450,22 @@ pub fn reset(prefs: &Preferences, panel: &str) -> Result<Preferences, String> {
         return Err("Sill could not read its own settings".to_string());
     };
 
+    for (section, key) in found.fields {
+        let fresh_value = fresh_fields.get(*section).and_then(|one| one.get(*key)).cloned();
+        let Some(held) = current_fields.get_mut(*section).and_then(|one| one.as_object_mut()) else {
+            continue;
+        };
+
+        match fresh_value {
+            Some(value) => {
+                held.insert((*key).to_string(), value);
+            }
+            None => {
+                held.remove(*key);
+            }
+        }
+    }
+
     for section in found.sections {
         match fresh_fields.get(*section) {
             Some(value) => {
@@ -421,7 +490,10 @@ pub fn reset(prefs: &Preferences, panel: &str) -> Result<Preferences, String> {
 /// Answered from `PANELS` rather than from a second list, so there is one
 /// place a section is named and the test below ties it to the document itself.
 fn known_section(name: &str) -> bool {
-    PANELS.iter().any(|panel| panel.sections.contains(&name))
+    NOT_RESET.contains(&name)
+        || PANELS.iter().any(|panel| {
+            panel.sections.contains(&name) || panel.fields.iter().any(|(section, _)| *section == name)
+        })
 }
 
 /// Takes every credential out of a document, naming the ones that held something.
@@ -974,6 +1046,65 @@ mod tests {
             .unwrap_or(Value::Null)
     }
 
+    /// The keys of one section, as the document spells them.
+    fn keys_of(prefs: &Preferences, name: &str) -> Vec<String> {
+        section(prefs, name)
+            .as_object()
+            .map(|fields| fields.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// One key of one section.
+    fn field(prefs: &Preferences, name: &str, key: &str) -> Value {
+        section(prefs, name).get(key).cloned().unwrap_or(Value::Null)
+    }
+
+    /// Private mode survives every reset.
+    ///
+    /// It is off by default, so a reset that reached it turned recording back
+    /// on. General's did, under a button that said nothing about it.
+    #[test]
+    fn no_reset_turns_private_mode_off() {
+        let mut mine = nothing_default();
+        mine.privacy.paused = true;
+
+        for panel in PANELS {
+            let after = reset(&mine, panel.id).expect("a panel resets");
+            assert!(
+                after.privacy.paused,
+                "resetting {} switched private mode off, and recording back on",
+                panel.id
+            );
+        }
+    }
+
+    /// Reset on General puts back the summon key, which General shows, and
+    /// leaves the capture key, which Screenshots shows.
+    #[test]
+    fn general_resets_the_summon_key_it_shows() {
+        let mut mine = nothing_default();
+        mine.hotkey.summon = "Alt+Home".into();
+        mine.hotkey.capture = "Ctrl+Alt+S".into();
+
+        let after = reset(&mine, "general").expect("general resets");
+
+        assert_eq!(after.hotkey.summon, Preferences::default().hotkey.summon);
+        assert_eq!(after.hotkey.capture, "Ctrl+Alt+S");
+    }
+
+    /// Reset on Applications leaves the web search, which is another panel's.
+    #[test]
+    fn applications_leaves_the_web_panel_alone() {
+        let mut mine = nothing_default();
+        mine.web_search.engine = "ddg".into();
+
+        let after = reset(&mine, "sources").expect("applications resets");
+        assert_eq!(after.web_search.engine, "ddg");
+
+        let after = reset(&mine, "websearch").expect("web resets");
+        assert_eq!(after.web_search.engine, Preferences::default().web_search.engine);
+    }
+
     /// A key in every place `preferences::SEALED` names one.
     ///
     /// Written by hand rather than derived, so that a credential added to
@@ -1101,6 +1232,43 @@ mod tests {
         let sections = sections_of(&Preferences::default());
 
         for name in &sections {
+            let claimed_whole = PANELS.iter().any(|panel| panel.sections.contains(&name.as_str()));
+
+            // Never reset, so never claimed, by a whole section or a key of one.
+            if NOT_RESET.contains(&name.as_str()) {
+                assert!(
+                    !claimed_whole
+                        && !PANELS
+                            .iter()
+                            .any(|panel| panel.fields.iter().any(|(section, _)| section == name)),
+                    "{name} is never reset, and a panel claims it anyway"
+                );
+                continue;
+            }
+
+            // Split key by key: every key has exactly one owner.
+            if SPLIT.contains(&name.as_str()) {
+                assert!(!claimed_whole, "{name} is split by key, and a panel claims it whole");
+
+                for key in keys_of(&Preferences::default(), name) {
+                    let owners: Vec<&str> = PANELS
+                        .iter()
+                        .filter(|panel| {
+                            panel.fields.iter().any(|(section, one)| section == name && *one == key)
+                        })
+                        .map(|panel| panel.id)
+                        .collect();
+
+                    assert_eq!(
+                        owners.len(),
+                        1,
+                        "{name}.{key} is owned by {owners:?}; every key of a split section \
+                         belongs to exactly one panel"
+                    );
+                }
+                continue;
+            }
+
             let owners: Vec<&str> = PANELS
                 .iter()
                 .filter(|panel| panel.sections.contains(&name.as_str()))
@@ -1120,6 +1288,15 @@ mod tests {
                 assert!(
                     sections.contains(&(*named).to_string()),
                     "the {} panel claims a {named} section the preferences do not have",
+                    panel.id
+                );
+            }
+
+            for (named, key) in panel.fields {
+                assert!(SPLIT.contains(named), "{} claims a key of {named}, which is not split", panel.id);
+                assert!(
+                    keys_of(&Preferences::default(), named).contains(&(*key).to_string()),
+                    "the {} panel claims {named}.{key}, which the preferences do not have",
                     panel.id
                 );
             }
@@ -1451,13 +1628,40 @@ mod tests {
     /// default, so a reset reaching a neighbour has nowhere to hide.
     #[test]
     fn a_reset_changes_one_panel_and_nothing_else() {
-        let mine = nothing_default();
+        let mut mine = nothing_default();
+        // Every key of the split section away from its default too, so a key
+        // reset by the wrong panel has nowhere to hide either.
+        mine.hotkey.switcher = "Ctrl+Alt+J".into();
+        mine.hotkey.capture = "Ctrl+Alt+S".into();
+        mine.hotkey.capture_screen = "Ctrl+Alt+D".into();
+        mine.hotkey.dismiss_on_blur = !mine.hotkey.dismiss_on_blur;
+        mine.hotkey.select_query_on_summon = !mine.hotkey.select_query_on_summon;
+        mine.hotkey.reset_on_summon = !mine.hotkey.reset_on_summon;
         let fresh = Preferences::default();
 
         for panel in PANELS {
             let after = reset(&mine, panel.id).expect("a panel resets");
 
             for name in sections_of(&mine) {
+                if SPLIT.contains(&name.as_str()) {
+                    for key in keys_of(&mine, &name) {
+                        let owned = panel
+                            .fields
+                            .iter()
+                            .any(|(section, one)| *section == name && *one == key);
+                        let expected = if owned { &fresh } else { &mine };
+
+                        assert_eq!(
+                            field(&after, &name, &key),
+                            field(expected, &name, &key),
+                            "resetting {} {} {name}.{key}",
+                            panel.id,
+                            if owned { "left at something other than its default" } else { "also reset" },
+                        );
+                    }
+                    continue;
+                }
+
                 if panel.sections.contains(&name.as_str()) {
                     assert_eq!(
                         section(&after, &name),

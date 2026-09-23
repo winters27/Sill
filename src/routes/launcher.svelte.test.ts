@@ -104,7 +104,15 @@ const ANSWERS: Record<string, unknown> = {
   default_browser: null,
   // The movement preset, which is decided in Rust so the window and the
   // settings screen cannot disagree about which key means what.
-  navigation_chords: { Down: "next", Up: "previous", Home: "first" },
+  navigation_chords: {
+    Down: "next",
+    Up: "previous",
+    Home: "first",
+    End: "last",
+    Enter: "open",
+    Escape: "back",
+    "Ctrl+K": "actions",
+  },
   search_commands: [row("app:a", "Alpha"), row("app:b", "Beta"), row("app:c", "Gamma")],
   keyboard_reference: [{ title: "Moving", keys: [{ chord: "Down", action: "Next" }] }],
   index_building: false,
@@ -114,7 +122,17 @@ const ANSWERS: Record<string, unknown> = {
   welcome: null,
 };
 
+/**
+ * Answers a test sets for itself, ahead of the shared ones, and cleared after
+ * each test so one test's world never leaks into the next.
+ */
+const OVERRIDES: Record<string, unknown> = {};
+
 const invoke = vi.fn(async (command: string, _args?: unknown) => {
+  if (command in OVERRIDES) {
+    const answer = OVERRIDES[command];
+    return typeof answer === "function" ? (answer as () => unknown)() : answer;
+  }
   if (command in ANSWERS) return ANSWERS[command];
   // Everything else is a list of rows. An empty root list is a legitimate
   // state and the one that keeps these tests about the keyboard.
@@ -126,8 +144,31 @@ vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => path,
 }));
 
+/**
+ * Every listener the page and its modules registered, by event name, so a
+ * test can deliver an event the way Rust would.
+ *
+ * Kept for the whole file rather than cleared per test: `$lib/visible`
+ * subscribes once for the life of the module, and clearing would leave it
+ * deaf for every test after the first. The page's own listeners take
+ * themselves out when it unmounts.
+ */
+const heard = new Map<string, Set<(event: { payload: unknown }) => void>>();
+
+function hear(name: string, handler: (event: { payload: unknown }) => void) {
+  const all = heard.get(name) ?? new Set();
+  all.add(handler);
+  heard.set(name, all);
+  return () => all.delete(handler);
+}
+
+/** Delivers an event to everything listening for it. */
+function fire(name: string, payload: unknown = null) {
+  for (const handler of [...(heard.get(name) ?? [])]) handler({ payload });
+}
+
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: async () => () => {},
+  listen: async (name: string, handler: (event: { payload: unknown }) => void) => hear(name, handler),
   emit: async () => {},
 }));
 
@@ -189,7 +230,63 @@ function press(key: string, modifiers: Partial<KeyboardEventInit> = {}) {
 
 beforeEach(() => {
   invoke.mockClear();
+  for (const key of Object.keys(OVERRIDES)) delete OVERRIDES[key];
+
+  /*
+   * Reduced motion, so the panel and the menu open and close in no time.
+   *
+   * happy-dom runs a transition's animation and rejects it when the element
+   * goes before it finishes, which is every panel a test opens and closes.
+   * `$lib/motion` makes a zero-length transition under reduced motion, and
+   * nothing these tests assert depends on an animation.
+   */
+  vi.spyOn(window, "matchMedia").mockImplementation(
+    (query: string) =>
+      ({
+        matches: query.includes("reduce"),
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      }) as MediaQueryList,
+  );
 });
+
+/** Lets promises settle and Svelte draw, a few times over. */
+async function settle(tick: () => Promise<void>, rounds = 8) {
+  for (let i = 0; i < rounds; i += 1) {
+    await Promise.resolve();
+    await tick();
+  }
+}
+
+/** Every command the page asked Rust for since the last clear. */
+function asked(): string[] {
+  return invoke.mock.calls.map(([command]) => command);
+}
+
+/** Types into a field the way a person does, through its input event. */
+function typeInto(field: HTMLInputElement, text: string) {
+  field.focus();
+  field.value = text;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** One action, as `actions_for` answers. */
+const COPY = { id: "sill.file.copy", title: "Copy", icon: "Clipboard", primary: false };
+
+/**
+ * Enough actions for the panel to draw its filter, which it does only once
+ * there are more than five to narrow.
+ */
+const SIX = ["one", "two", "three", "four", "five", "six"].map((name) => ({
+  ...COPY,
+  id: `sill.test.${name}`,
+  title: `Do ${name}`,
+}));
 
 afterEach(async () => {
   if (mounted) {
@@ -355,5 +452,299 @@ describe("moving through the results", () => {
     press("ArrowDown");
     await tick();
     expect(highlighted(target)).toContain("Alpha");
+  });
+});
+
+describe("the action panel owns the keys typed into it", () => {
+  /**
+   * `P0`: Delete in the panel's filter forgot the conversation under it.
+   *
+   * The conversation list's Delete ran before the panel had a chance to
+   * claim the key, and it read the launcher's empty query rather than the
+   * filter, so a Delete meant for one letter forgot a conversation for good.
+   */
+  it("edits the filter rather than forgetting a conversation", async () => {
+    OVERRIDES.ai_conversations = [
+      { id: "c1", title: "First", replies: 1, age: 5, open: false },
+      { id: "c2", title: "Second", replies: 1, age: 9, open: false },
+    ];
+    OVERRIDES.actions_for = SIX;
+
+    const { target, tick } = await launcher();
+    fire("sill://run", "sill:conversations");
+    await settle(tick);
+
+    press("k", { ctrlKey: true });
+    await settle(tick);
+
+    const filter = target.querySelector<HTMLInputElement>('input[aria-label="Filter actions"]');
+    expect(filter, "the panel did not open").not.toBe(null);
+    typeInto(filter!, "x");
+    await tick();
+
+    invoke.mockClear();
+    press("Delete");
+    await settle(tick);
+
+    expect(asked()).not.toContain("ai_forget");
+  });
+
+  /** The other half: with no panel open, Delete on an empty field does forget. */
+  it("still forgets the conversation when no panel is open", async () => {
+    OVERRIDES.ai_conversations = [{ id: "c1", title: "First", replies: 1, age: 5, open: false }];
+
+    const { tick } = await launcher();
+    fire("sill://run", "sill:conversations");
+    await settle(tick);
+
+    invoke.mockClear();
+    press("Delete");
+    await settle(tick);
+
+    expect(asked()).toContain("ai_forget");
+  });
+
+  it("types a question mark into the filter instead of opening the key sheet", async () => {
+    OVERRIDES.actions_for = SIX;
+
+    const { target, tick } = await launcher();
+    press("k", { ctrlKey: true });
+    await settle(tick);
+    expect(target.querySelector('input[aria-label="Filter actions"]')).not.toBe(null);
+
+    press("?");
+    await settle(tick);
+
+    expect(target.querySelector(".sheet")).toBe(null);
+  });
+
+  it("closes when the launcher is hidden", async () => {
+    OVERRIDES.actions_for = [COPY];
+
+    const { target, tick } = await launcher();
+    press("k", { ctrlKey: true });
+    await settle(tick);
+    expect(target.querySelector('[role="menu"].panel')).not.toBe(null);
+
+    fire("sill://hidden", "main");
+    await settle(tick);
+
+    expect(target.querySelector('[role="menu"].panel')).toBe(null);
+
+    // And the keys are the list's again: Down moves the highlight rather than
+    // walking a panel nobody can see.
+    press("ArrowDown");
+    await tick();
+    expect(highlighted(target)).toContain("Beta");
+  });
+});
+
+describe("undo is offered for the moment after an action", () => {
+  async function ranAnAction() {
+    OVERRIDES.actions_for = [COPY];
+    OVERRIDES.run_action = { message: "Copied Alpha", undoneBy: 7 };
+
+    const view = await launcher();
+    press("k", { ctrlKey: true });
+    await settle(view.tick);
+    press("Enter");
+    await settle(view.tick);
+    view.field.focus();
+    return view;
+  }
+
+  it("takes back the action on Ctrl+Z straight afterwards", async () => {
+    const { tick } = await ranAnAction();
+
+    invoke.mockClear();
+    press("z", { ctrlKey: true });
+    await settle(tick);
+
+    expect(asked()).toContain("undo_activity");
+  });
+
+  /**
+   * `P0`: Ctrl+Z undid the last action whenever one was on offer, even while
+   * text was being edited, even hours later. Typing is somebody who has moved
+   * on, and from then on Ctrl+Z is theirs.
+   */
+  it("withdraws the offer once something is typed", async () => {
+    const { field, tick } = await ranAnAction();
+
+    typeInto(field, "a");
+    await settle(tick);
+
+    invoke.mockClear();
+    press("z", { ctrlKey: true });
+    await settle(tick);
+
+    expect(asked()).not.toContain("undo_activity");
+  });
+});
+
+describe("Enter acts on the answer to what was typed", () => {
+  /**
+   * `P1`: an Enter that beat the search opened a row from the previous
+   * query's list. The screenshot runbook recorded two runs that opened
+   * Clipboard History that way while meaning to open something else.
+   */
+  it("waits for the search to answer before opening", async () => {
+    let answer: (rows: unknown) => void = () => {};
+    const { field, tick } = await launcher();
+
+    OVERRIDES.search_commands = () => new Promise((resolve) => (answer = resolve));
+    typeInto(field, "br");
+    await settle(tick);
+
+    invoke.mockClear();
+    press("Enter");
+    await settle(tick);
+    expect(asked(), "opened before the answer arrived").not.toContain("launch_command");
+
+    answer([row("app:bravo", "Bravo")]);
+    await settle(tick, 16);
+
+    const launched = invoke.mock.calls.find(([command]) => command === "launch_command");
+    expect(launched, "the waiting Enter never ran").toBeDefined();
+    expect(JSON.stringify(launched![1])).toContain("app:bravo");
+  });
+
+  it("does not open anything when the search it waited for fails", async () => {
+    let fail: (why: unknown) => void = () => {};
+    const { field, tick } = await launcher();
+
+    OVERRIDES.search_commands = () => new Promise((_, reject) => (fail = reject));
+    typeInto(field, "br");
+    await settle(tick);
+
+    invoke.mockClear();
+    press("Enter");
+    await settle(tick);
+    fail(new Error("index unavailable"));
+    await settle(tick, 16);
+
+    expect(asked()).not.toContain("launch_command");
+  });
+
+  it("abandons a waiting Enter when another key is typed first", async () => {
+    const answers: ((rows: unknown) => void)[] = [];
+    const { field, tick } = await launcher();
+
+    OVERRIDES.search_commands = () => new Promise((resolve) => answers.push(resolve));
+    typeInto(field, "b");
+    await settle(tick);
+    press("Enter");
+    typeInto(field, "br");
+    await settle(tick);
+
+    invoke.mockClear();
+    answers[0]?.([row("app:b", "B")]);
+    answers[1]?.([row("app:bravo", "Bravo")]);
+    await settle(tick, 16);
+
+    expect(asked()).not.toContain("launch_command");
+  });
+});
+
+describe("what a summon comes back to", () => {
+  /**
+   * `P1`: the switcher's own key opened it, Escape put it away, and the
+   * ordinary summon brought the switcher back, where Escape put it away
+   * again. The root was unreachable without the tray.
+   */
+  it("leaves the switcher for the root once it is put away", async () => {
+    const { field, tick } = await launcher();
+
+    fire("sill://switcher");
+    await settle(tick);
+    expect(field.placeholder).toContain("Switch to a window");
+
+    press("Escape");
+    await settle(tick);
+    fire("sill://hidden", "main");
+    await settle(tick);
+    fire("sill://shown", "main");
+    await settle(tick);
+
+    expect(field.placeholder).toContain("Search for apps and commands");
+  });
+
+  it("goes back from the key sheet instead of closing the launcher", async () => {
+    const { target, field, tick } = await launcher();
+
+    press("?");
+    await settle(tick);
+    expect(target.querySelector(".sheet")).not.toBe(null);
+
+    invoke.mockClear();
+    press("Escape");
+    await settle(tick);
+
+    expect(target.querySelector(".sheet")).toBe(null);
+    expect(asked()).not.toContain("dismiss");
+    expect(field.placeholder).toContain("Search for apps and commands");
+  });
+});
+
+describe("a permission card", () => {
+  const CARD = { id: "card-1", title: "Read the clipboard", subject: "history", touches: "reads what you copied" };
+
+  /**
+   * `P0`: a card that arrives while somebody is typing was allowed by the
+   * next Enter, which was meant for the row or the draft.
+   */
+  it("does not let an Enter that arrives with it allow it", async () => {
+    let now = 1000;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      const { tick } = await launcher();
+      fire("sill://ai-asking", CARD);
+      await settle(tick);
+
+      invoke.mockClear();
+      press("Enter");
+      await settle(tick);
+      expect(asked(), "allowed before it could be read").not.toContain("ai_decide");
+      expect(asked(), "the Enter fell through to the row").not.toContain("launch_command");
+
+      now += 5000;
+      press("Enter");
+      await settle(tick);
+      const decided = invoke.mock.calls.find(([command]) => command === "ai_decide");
+      expect(decided).toBeDefined();
+      expect(JSON.stringify(decided![1])).toContain("true");
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("is taken down on a summon once Rust says it was settled elsewhere", async () => {
+    const { target, tick } = await launcher();
+    fire("sill://ai-asking", CARD);
+    await settle(tick);
+    expect(target.textContent).toContain("Read the clipboard");
+
+    OVERRIDES.ai_outstanding = null;
+    fire("sill://shown", "main");
+    await settle(tick);
+
+    expect(target.textContent).not.toContain("Read the clipboard");
+  });
+});
+
+describe("starting up", () => {
+  /**
+   * The arrows, Enter and Escape live in the chord map. It was read after
+   * three other calls, and any of them failing left the launcher unable to
+   * move for the rest of the run.
+   */
+  it("can still move when an earlier read fails", async () => {
+    OVERRIDES.actions_for = () => Promise.reject(new Error("not ready"));
+
+    const { target, tick } = await launcher();
+    press("ArrowDown");
+    await tick();
+
+    expect(highlighted(target)).toContain("Beta");
   });
 });

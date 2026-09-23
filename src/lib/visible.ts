@@ -66,7 +66,16 @@ function watch() {
   // Asked once. The label of the window a page is drawn in cannot change, and
   // reading it per event would be a call into Rust's metadata on every summon
   // of every window.
-  const mine = getCurrentWindow().label;
+  //
+  // Outside Tauri there is no window to ask about: a component test, or a
+  // preview route in a browser. Nothing will ever say the page was hidden
+  // there, so it stays visible, which is the truth of a page in a browser tab.
+  let mine: string;
+  try {
+    mine = getCurrentWindow().label;
+  } catch {
+    return;
+  }
 
   void listen<string>("sill://hidden", ({ payload }) => {
     if (payload !== mine) return;

@@ -42,8 +42,14 @@
   let trouble = $state<Record<string, string>>({});
   /** The one being asked right now, so only its own button says so. */
   let checking = $state("");
-  /** The one whose Remove has been pressed once and is asking. */
-  let confirming = $state("");
+  /**
+   * The server whose Remove has been pressed once and is asking, by object.
+   *
+   * By name it confused servers: a new server has an empty name, which the
+   * empty starting value already matched, so its first Remove removed it
+   * without asking, and two servers with one name asked together.
+   */
+  let confirming = $state<McpServer | null>(null);
 
   const servers = $derived(prefs.mcp.servers);
 
@@ -63,12 +69,16 @@
   }
 
   function remove(server: McpServer) {
-    if (confirming !== server.name) {
-      confirming = server.name;
+    if (confirming !== server) {
+      confirming = server;
+      // Disarmed after a moment, like every other two-click confirm here.
+      setTimeout(() => {
+        if (confirming === server) confirming = null;
+      }, 4000);
       return;
     }
 
-    confirming = "";
+    confirming = null;
     prefs.mcp.servers = servers.filter((one) => one !== server);
     commit();
   }
@@ -160,7 +170,7 @@
             onclick={() => void check(server)}
           />
           <Button
-            label={confirming === server.name ? "Remove it?" : "Remove"}
+            label={confirming === server ? "Remove it?" : "Remove"}
             tone="danger"
             onclick={() => remove(server)}
           />

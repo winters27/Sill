@@ -166,7 +166,25 @@
     }
   }
 
+  /**
+   * The extension whose Remove has been pressed once and is asking.
+   *
+   * Two clicks, like every other thing Settings throws away. Removing deletes
+   * its commands, its saved data and every permission it was given, and it
+   * went on the first click.
+   */
+  let confirmingRemove = $state("");
+
   async function remove(one: InstalledExtension) {
+    if (confirmingRemove !== one.extension) {
+      confirmingRemove = one.extension;
+      setTimeout(() => {
+        if (confirmingRemove === one.extension) confirmingRemove = "";
+      }, 4000);
+      return;
+    }
+
+    confirmingRemove = "";
     try {
       // What Rust said, rather than what this hoped. The removal is a registry
       // action now and it reports whether there was anything there to remove.
@@ -332,7 +350,11 @@
       description="Deletes its commands and forgets every permission it was given."
     >
       {#snippet control()}
-        <Button onclick={() => void remove(one)} label="Remove" tone="danger" />
+        <Button
+          onclick={() => void remove(one)}
+          label={confirmingRemove === one.extension ? "Remove it?" : "Remove"}
+          tone="danger"
+        />
       {/snippet}
     </Row>
   </Section>

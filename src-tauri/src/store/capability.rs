@@ -425,10 +425,33 @@ pub fn grantable() -> Vec<Permission> {
 /// list, because it invites a trust nothing here has earned.
 pub const NOT_ENFORCED: &str = "Installing grants these, and Sill refuses them until you do. \
     This list is what the code appears to use, read from its own source; the gate is what \
-    actually holds, and it refuses a Node module nobody granted whether or not this list \
-    mentioned it. It is still not a sandbox: a permission is granted whole, a dependency does \
-    whatever the extension does, and starting other programs puts what they do beyond Sill \
-    entirely. Anything not listed is still asked for when it happens. Install what you would run.";
+    actually holds, and it refuses a Node module nobody granted. What the extension's \
+    dependencies need is only known once it is built, so that is granted with the install, \
+    and Sill says so when it happens. It is still not a sandbox: a permission is granted \
+    whole, a dependency does whatever the extension does, and starting other programs puts \
+    what they do beyond Sill entirely. Anything else not listed is asked for when it happens. \
+    Install what you would run.";
+
+/// The titles of what `after` holds that `before` did not, lower-cased to sit
+/// inside a sentence.
+///
+/// For saying, after an install, what was granted beyond the list somebody
+/// agreed to. The titles are the install screen's own words, so what is said
+/// afterwards is recognisably the same thing the screen would have said.
+pub fn titles_beyond(before: &[String], after: &[String]) -> Vec<String> {
+    after
+        .iter()
+        .filter(|id| !before.contains(id))
+        .filter_map(|id| CAPABILITIES.iter().find(|it| it.id == *id))
+        .map(|capability| {
+            let mut words = capability.title.chars();
+            match words.next() {
+                Some(first) => first.to_lowercase().chain(words).collect(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
 
 /// A capability the source appears to reach, and where it was seen.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -1037,6 +1060,19 @@ mod tests {
             grantable().contains(&Permission::LauncherDismiss),
             "the refusal says to grant it in Settings and Settings does not list it",
         );
+    }
+
+    /// What an install granted beyond the list is named in the list's words,
+    /// and what was listed is not named twice.
+    #[test]
+    fn what_was_granted_beyond_the_list_is_named() {
+        let listed = vec!["network".to_string()];
+        let granted = vec!["network".to_string(), "processes".to_string(), "filesystem".to_string()];
+
+        let beyond = titles_beyond(&listed, &granted);
+
+        assert_eq!(beyond, vec!["run other programs".to_string(), "read and write files".to_string()]);
+        assert!(titles_beyond(&granted, &granted).is_empty());
     }
 
     #[test]

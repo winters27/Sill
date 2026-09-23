@@ -196,7 +196,9 @@
     class:recording
     class:refused={Boolean(contested)}
     class:blank={!chord && !recording}
-    aria-label={ariaLabel}
+    aria-label={ariaLabel
+      ? `${ariaLabel}: ${recording ? "press a key" : chord || "not set"}`
+      : undefined}
     aria-pressed={recording}
     data-recording={recording || undefined}
     disabled={saving}
@@ -234,7 +236,7 @@
 </div>
 
 {#if standing}
-  <p class="note" class:refused={standing.refused} use:hint={standing.more}>{standing.text}</p>
+  <p class="note" class:refused={standing.refused} role="status" use:hint={standing.more}>{standing.text}</p>
 {/if}
 
 <style>

@@ -99,6 +99,10 @@
         <div class="section" role="presentation">{str(cell.node, "title")}</div>
       {:else}
         {@const content = contentOf(cell.node)}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- An option in a combobox, never focused: the search field keeps focus and
+             reads every key, and aria-activedescendant names this row. A key handler
+             here only ever made Enter run twice. -->
         <div
           id={optionId(cell.index)}
           class="cell"
@@ -108,7 +112,7 @@
           tabindex="-1"
           onmousemove={() => onselect(cell.index)}
           onclick={() => onrun(cell.index)}
-          onkeydown={(e) => e.key === "Enter" && onrun(cell.index)}
+          onmousedown={(e) => e.preventDefault()}
         >
           <div
             class="tile"

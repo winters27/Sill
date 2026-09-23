@@ -2,6 +2,7 @@
   import { openSettings, quitApp } from "$lib/settings";
   import { popover } from "$lib/motion";
   import { itemId } from "$lib/results";
+  import { whenHidden } from "$lib/visible";
 
   interface Props {
     /** Runs a Sill built-in by id, e.g. "reload". */
@@ -24,6 +25,10 @@
    * reactive would re-run the effect that sets it.
    */
   let came: HTMLElement | null = null;
+
+  // A menu is about the moment it was opened in. Left open across a hide, the
+  // next summon came back to it over whatever the launcher was showing by then.
+  $effect(() => whenHidden(() => (open = false)));
 
   /*
    * The menu takes focus while it is open, and gives it back when it closes.

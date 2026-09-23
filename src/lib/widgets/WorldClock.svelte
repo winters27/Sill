@@ -10,6 +10,7 @@
    * a minute would run on for a window nobody could see.
    */
   import { onMount } from "svelte";
+  import { whenHidden, whenVisible } from "$lib/visible";
   import { invoke } from "@tauri-apps/api/core";
   import { orElse } from "$lib/status";
 
@@ -59,7 +60,21 @@
     };
 
     tick();
-    return () => clearTimeout(timer);
+
+    // Nothing to redraw while the launcher is put away, so no wakeup either:
+    // the timer stops at the hide and starts again, on the right boundary,
+    // at the next summon.
+    const offHidden = whenHidden(() => clearTimeout(timer));
+    const offShown = whenVisible(() => {
+      clearTimeout(timer);
+      tick();
+    });
+
+    return () => {
+      offHidden();
+      offShown();
+      clearTimeout(timer);
+    };
   });
 
   /** The clock in a zone, or a dash when the zone is not one this machine knows. */

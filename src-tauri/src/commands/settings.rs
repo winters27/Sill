@@ -374,6 +374,72 @@ pub(crate) async fn set_markup_defaults(
     snapshot.save(&state.path).map_err(|e| e.to_string())
 }
 
+/// The size the settings window asks for, in logical pixels.
+///
+/// What Raycast opens its settings at, measured on a 2560x1440 display at
+/// 100%: about two thirds of the width and most of the height. A settings
+/// window is read slowly and wants air; 1180x800 read as cramped beside it.
+const SETTINGS_SIZE: (f64, f64) = (1740.0, 1240.0);
+
+/// The smallest it may be: where the right pane starts reading as a column.
+const SETTINGS_LEAST: (f64, f64) = (940.0, 620.0);
+
+/// The share of the work area the window may take at most.
+const ROOM: f64 = 0.92;
+
+/// The screen a window is about to open on, as far as placing it needs.
+struct Screen {
+    /// The work area in logical pixels, for sizing.
+    work_logical: (f64, f64),
+    /// The work area in physical pixels, for placing.
+    work_origin: (i32, i32),
+    work_size: (u32, u32),
+}
+
+/// The monitor under the cursor, which is where somebody is looking.
+fn settings_screen(app: &AppHandle) -> Option<Screen> {
+    let cursor = app.cursor_position().ok()?;
+    let monitor = app
+        .monitor_from_point(cursor.x, cursor.y)
+        .ok()
+        .flatten()
+        .or_else(|| app.primary_monitor().ok().flatten())?;
+
+    let area = monitor.work_area();
+    let scale = monitor.scale_factor().max(0.1);
+
+    Some(Screen {
+        work_logical: (area.size.width as f64 / scale, area.size.height as f64 / scale),
+        work_origin: (area.position.x, area.position.y),
+        work_size: (area.size.width, area.size.height),
+    })
+}
+
+/**
+The size a window gets on a screen: what it wants, if the screen has room.
+
+1740x1240 is a comfortable size on a 1440p monitor and taller than the whole
+work area of a 1080p one, or of a laptop at 125% or 150%. There the window
+opened with its title bar above the top of the screen, and it has no Escape, so
+nothing could move or close it but Alt+F4. Capped at `ROOM` of the work area,
+and never below the minimum the window declares anyway.
+*/
+fn fit(wanted: (f64, f64), work: (f64, f64), least: (f64, f64)) -> (f64, f64) {
+    (
+        wanted.0.min(work.0 * ROOM).max(least.0),
+        wanted.1.min(work.1 * ROOM).max(least.1),
+    )
+}
+
+/// Where a window of this outer size sits, centred in a work area, with its
+/// top left never outside it. Physical pixels throughout.
+fn centre_in(outer: (u32, u32), origin: (i32, i32), work: (u32, u32)) -> (i32, i32) {
+    let spare_x = (work.0 as i64 - outer.0 as i64).max(0) / 2;
+    let spare_y = (work.1 as i64 - outer.1 as i64).max(0) / 2;
+
+    (origin.0 + spare_x as i32, origin.1 + spare_y as i32)
+}
+
 /// Opens the settings window, creating it the first time.
 ///
 /// A separate window rather than a view inside the launcher: settings are read
@@ -402,16 +468,18 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
         return Ok(());
     }
 
+    let screen = settings_screen(&app);
+    let (width, height) = match &screen {
+        Some(one) => fit(SETTINGS_SIZE, one.work_logical, SETTINGS_LEAST),
+        None => SETTINGS_SIZE,
+    };
+
     let window =
         tauri::WebviewWindowBuilder::new(&app, "settings", tauri::WebviewUrl::App(route.into()))
             .title("Settings")
-            // The size Raycast opens its settings at, measured on a 2560x1440
-            // display at 100%: about two thirds of the width and most of the
-            // height. A settings window is read slowly and wants air; 1180x800
-            // read as cramped beside it. The minimum below is where the right
-            // pane starts reading as a column.
-            .inner_size(1740.0, 1240.0)
-            .min_inner_size(940.0, 620.0)
+            // See `SETTINGS_SIZE`, and `fit` for why it is not simply that.
+            .inner_size(width, height)
+            .min_inner_size(SETTINGS_LEAST.0, SETTINGS_LEAST.1)
             .resizable(true)
             // Frameless and transparent, so the page draws its own title bar and the
             // same glass the launcher uses. A default title bar next to a glass body
@@ -439,6 +507,17 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
             .build()
             .map_err(|e| e.to_string())?;
     crate::webchrome::quiet(&window);
+
+    // On the screen the cursor is on, inside the part of it the taskbar
+    // leaves. `center` above uses whichever monitor the window was created
+    // on and the whole of it, which on a laptop put the title bar above the
+    // top of the screen, where nothing can drag it back.
+    if let Some(one) = &screen {
+        if let Ok(outer) = window.outer_size() {
+            let (x, y) = centre_in((outer.width, outer.height), one.work_origin, one.work_size);
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+    }
 
     // The launcher must not hand the screen back to whatever was in front
     // before it. See the same note in `open_ask`.
@@ -1071,6 +1150,44 @@ pub(crate) async fn terminal_profiles() -> Vec<crate::terminals::Profile> {
     tokio::task::spawn_blocking(crate::terminals::available)
         .await
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod placing_the_settings_window {
+    use super::*;
+
+    /// A 1080p screen at 100% has a work area of about 1920x1032, less than
+    /// the 1240 the window asked for, and the title bar opened off the top.
+    #[test]
+    fn it_fits_a_screen_smaller_than_it_wants() {
+        let (w, h) = fit(SETTINGS_SIZE, (1920.0, 1032.0), SETTINGS_LEAST);
+
+        assert!(w <= 1920.0 * ROOM && h <= 1032.0 * ROOM, "{w}x{h} does not fit");
+    }
+
+    #[test]
+    fn it_keeps_its_size_where_there_is_room() {
+        assert_eq!(fit(SETTINGS_SIZE, (2560.0, 1400.0), SETTINGS_LEAST), SETTINGS_SIZE);
+    }
+
+    #[test]
+    fn it_never_goes_below_its_minimum() {
+        assert_eq!(fit(SETTINGS_SIZE, (1280.0, 600.0), SETTINGS_LEAST).1, SETTINGS_LEAST.1);
+    }
+
+    /// Centred, and on a second screen to the left of the first, not the
+    /// first screen's coordinates.
+    #[test]
+    fn it_is_centred_in_the_work_area_of_its_screen() {
+        assert_eq!(centre_in((1000, 800), (-1920, 0), (1920, 1040)), (-1460, 120));
+    }
+
+    /// Bigger than the work area, it is pinned to the top left rather than
+    /// centred off the edge, so the title bar can always be reached.
+    #[test]
+    fn a_window_too_big_keeps_its_title_bar_on_screen() {
+        assert_eq!(centre_in((3000, 2000), (0, 0), (1920, 1040)), (0, 0));
+    }
 }
 
 #[cfg(test)]

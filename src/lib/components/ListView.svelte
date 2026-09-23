@@ -136,6 +136,10 @@
         {/if}
       </div>
     {:else}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- An option in a combobox, never focused: the search field keeps focus and
+           reads every key, and aria-activedescendant names this row. A key handler
+           here only ever made Enter run twice. -->
       <div
         id={optionId(row.index)}
         class="sill-row"
@@ -145,7 +149,7 @@
         tabindex="-1"
         onmousemove={() => onselect(row.index)}
         onclick={() => onrun(row.index)}
-        onkeydown={(e) => e.key === "Enter" && onrun(row.index)}
+        onmousedown={(e) => e.preventDefault()}
       >
         <!--
           Title and subtitle stay on ONE line, side by side.

@@ -253,22 +253,53 @@ pub fn search_with(
 
         // Supersedable: this is the keystroke path, and the window keeps only
         // the answer to the last one anybody typed.
-        let hits = ipc::search_newest(query, limit, flags);
-        if !hits.is_empty() {
-            return hits;
-        }
+        //
+        // Any answer is final, including an empty one. See
+        // `search_newest_answered` for why an empty answer is not a reason to
+        // ask the command-line client the same question.
+        answered_or_client(ipc::search_newest_answered(query, limit, flags), || {
+            search_via_client(query, limit, match_case, regex)
+        })
     }
 
-    search_via_client(query, limit)
+    #[cfg(not(windows))]
+    {
+        search_via_client(query, limit, match_case, regex)
+    }
 }
 
+/// Everything's answer, or the command-line client's when Everything could not
+/// be asked at all.
+///
+/// Its own function so the rule can be tested without Everything installed:
+/// an answer, empty or not, is final.
+fn answered_or_client(answer: Option<Vec<FileHit>>, client: impl FnOnce() -> Vec<FileHit>) -> Vec<FileHit> {
+    match answer {
+        Some(hits) => hits,
+        None => client(),
+    }
+}
+
+/// How long the command-line client is given before its answer is abandoned.
+///
+/// This runs on a keystroke. A client waiting on an Everything that has
+/// stopped answering held the file and browser results behind it for as long
+/// as it waited, with no bound at all.
+const CLIENT_PATIENCE: std::time::Duration = std::time::Duration::from_millis(1500);
+
 /// The fallback path, spawning Everything's command line client.
-fn search_via_client(query: &str, limit: usize) -> Vec<FileHit> {
+///
+/// Reached only when Everything could not be asked directly; see
+/// `everything_ipc::search_newest_answered`.
+fn search_via_client(query: &str, limit: usize, match_case: bool, regex: bool) -> Vec<FileHit> {
+    use std::io::Read;
+
     let Some(client) = client() else {
         return Vec::new();
     };
 
-    let output = std::process::Command::new(client)
+    let mut command = std::process::Command::new(client);
+    command
         .args([
             "-n",
             &limit.to_string(),
@@ -276,16 +307,54 @@ fn search_via_client(query: &str, limit: usize) -> Vec<FileHit> {
             // directory, so the UI does not have to stat every result.
             "-p",
             "-attributes",
-            query,
         ])
-        .output();
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
 
-    let Ok(output) = output else {
+    // The same match settings the direct path applies. Matching the path is
+    // already on, through `-p`.
+    if match_case {
+        command.arg("-case");
+    }
+    if regex {
+        command.arg("-regex");
+    }
+    command.arg(query);
+
+    // A console program started from a windowed one gets a console window of
+    // its own unless told otherwise, and this runs on a keystroke.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+
+    let Ok(mut child) = command.spawn() else {
         return Vec::new();
     };
 
+    // Read on a thread so the wait can be bounded, and the client killed if it
+    // runs past it, rather than left to finish on its own.
+    let stdout = child.stdout.take();
+    let (sent, answer) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut out) = stdout {
+            let _ = out.read_to_end(&mut bytes);
+        }
+        let _ = sent.send(bytes);
+    });
+
+    let Ok(bytes) = answer.recv_timeout(CLIENT_PATIENCE) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Vec::new();
+    };
+    let _ = child.wait();
+
     // Everything's output is not guaranteed UTF-8 on every locale.
-    let text = String::from_utf8_lossy(&output.stdout);
+    let text = String::from_utf8_lossy(&bytes);
 
     text.lines().filter_map(parse_line).take(limit).collect()
 }
@@ -512,6 +581,37 @@ fn still_there(target: &str) -> bool {
     }
 
     std::path::Path::new(target).exists()
+}
+
+#[cfg(test)]
+mod asking_the_client {
+    use super::{answered_or_client, FileHit};
+
+    /// A keystroke thrown away for a newer one, and a query that matched
+    /// nothing, are both answers. Spawning the command-line client for them
+    /// started a process on every superseded keystroke.
+    #[test]
+    fn an_empty_answer_is_final() {
+        let mut asked = false;
+        let hits = answered_or_client(Some(Vec::new()), || {
+            asked = true;
+            Vec::new()
+        });
+
+        assert!(hits.is_empty());
+        assert!(!asked, "the client was started for a question Everything had answered");
+    }
+
+    #[test]
+    fn the_client_is_asked_only_when_everything_is_not_there() {
+        let mut asked = false;
+        let _ = answered_or_client(None, || {
+            asked = true;
+            Vec::<FileHit>::new()
+        });
+
+        assert!(asked);
+    }
 }
 
 #[cfg(test)]

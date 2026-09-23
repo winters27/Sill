@@ -45,6 +45,7 @@ vi.mock("$lib/notes", async (original) => {
 vi.mock("$lib/settings", () => ({
   getPreferences: async () => ({}),
   applyAppearance: () => {},
+  refreshAppearance: async () => {},
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({

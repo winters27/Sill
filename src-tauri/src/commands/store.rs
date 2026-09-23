@@ -355,11 +355,14 @@ pub(crate) async fn store_install(
     // build back on a blocking thread itself.
     let done = install::finish_placing(data_dir, esbuild, node, name, say).await?;
 
-    // **The join.** What the screen showed is what gets granted, keyed by the
-    // extension's own name because that is what the worker asks about.
+    // **The join.** What the screen showed, plus what the built bundle turned
+    // out to require, is what gets granted, keyed by the extension's own name
+    // because that is what the worker asks about. The second part is named
+    // back to the person in `granted_beyond_listed`, on the line that reports
+    // the install.
     //
     // Done here rather than in `finish`, which takes paths and knows nothing
-    // about services. Anything not on this list is still asked for on a card
+    // about services. Anything else not on this list is asked for on a card
     // the first time it happens.
     let granting = crate::store::capability::granted_by(&done.capabilities);
     if !granting.is_empty() {

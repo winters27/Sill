@@ -525,3 +525,32 @@ export function croppedTo(
 
   return { x: left, y: top, w, h };
 }
+
+/** How long a first Escape over unsaved marks waits for the second. */
+export const DISCARD_ARMED_MS = 2000;
+
+/** What Escape does in the editor. */
+export type EscapeMeans = "deselect" | "arm" | "discard";
+
+/**
+ * What Escape means, given what is on the picture.
+ *
+ * It lets go of a selected mark first, as it always did. Past that it used to
+ * close the editor and throw away every mark and the crop with it, on one key
+ * and with nothing to bring them back. Now, with anything drawn, the first
+ * Escape says what the second one will do, and only a second within
+ * `DISCARD_ARMED_MS` does it. A picture with nothing drawn on it has nothing
+ * to lose, so one Escape still closes it.
+ */
+export function escapeMeans(state: {
+  marks: number;
+  cropped: boolean;
+  chosen: number;
+  armedAt: number | null;
+  now: number;
+}): EscapeMeans {
+  if (state.chosen >= 0) return "deselect";
+  if (state.marks === 0 && !state.cropped) return "discard";
+  if (state.armedAt !== null && state.now - state.armedAt <= DISCARD_ARMED_MS) return "discard";
+  return "arm";
+}

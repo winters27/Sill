@@ -312,7 +312,34 @@
    * Panels sitting ON that surface take --tint-panel, the near-transparent
    * white of .glass-panel, which lifts without colouring.
    */
-  --tint: color-mix(in srgb, var(--core-secondary-background) 88%, transparent);
+  --tint-alpha: 88%;
+  --tint: color-mix(in srgb, var(--core-secondary-background) var(--tint-alpha), transparent);
+
+  /*
+   * The window's surface, finished: the tint laid over the glass base as one
+   * colour.
+   *
+   * **Never paint a flat wash as a gradient.** It was
+   * `background-image: linear-gradient(var(--tint), var(--tint))`, and
+   * Chromium dithers every gradient, even one whose two stops are the same
+   * colour, whenever that colour is not opaque. On these near-black surfaces
+   * the dither is a fixed two-pixel checker: measured in Edge 1.26 of checker
+   * energy on this exact tint as a gradient, 0.000 as a colour.
+   *
+   * `color-mix` with an OPAQUE colour at the tint's alpha is exactly the
+   * tint composited over the base, so this is the same pixel the two layers
+   * made, arrived at without a gradient. Every window reads this rather than
+   * repeating the mix, which the five of them used to do.
+   */
+  --window-fill: color-mix(
+    in srgb,
+    var(--core-secondary-background) var(--tint-alpha),
+    color-mix(
+      in srgb,
+      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
+      var(--surface-base)
+    )
+  );
   --tint-panel: rgba(255, 255, 255, 0.03);
 
   /*
@@ -376,8 +403,13 @@
    * `--core-secondary-background` at 92% and the window is the same colour
    * at 88%, so before this the popover was the same value as the thing it
    * floated on and nothing about it read as raised.
+   *
+   * An opaque ink and how much of it, rather than one translucent colour,
+   * because `.sill-menu` mixes it into its base colour: see `--window-fill`
+   * for why a flat layer is never a gradient.
    */
-  --menu-lift: rgba(var(--accent-rgb), 0.13);
+  --menu-lift-ink: rgb(var(--accent-rgb));
+  --menu-lift: 13%;
 
   /*
    * ---- The lit rim -------------------------------------------------------
@@ -430,7 +462,8 @@
    * hover is not a selection. Frost-light sets its own values below; the
    * five other dark themes inherit these.
    */
-  --glaze-tint: rgba(var(--accent-rgb), 0.06);
+  --glaze-tint-ink: rgb(var(--accent-rgb));
+  --glaze-tint: 6%;
   --glaze-ring: rgba(var(--accent-rgb), 0.3);
   --glaze-inner: rgba(var(--accent-rgb), 0.1);
   --glaze-spec: rgba(255, 255, 255, 0.3);
@@ -475,7 +508,18 @@
    * tint, and takes a heavier one. 216px is not enough surface for the eye to
    * average out whatever is behind it the way it does over a 750px window.
    */
-  --tint-menu: color-mix(in srgb, var(--core-secondary-background) 94%, transparent);
+  --tint-menu-alpha: 94%;
+  --tint-menu: color-mix(in srgb, var(--core-secondary-background) var(--tint-menu-alpha), transparent);
+  /* The tray window's finished surface, built as `--window-fill` is. */
+  --window-fill-menu: color-mix(
+    in srgb,
+    var(--core-secondary-background) var(--tint-menu-alpha),
+    color-mix(
+      in srgb,
+      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
+      var(--surface-base)
+    )
+  );
 
   /*
    * The chin's own surface, and it is the one wash that goes DARKER.
@@ -581,7 +625,28 @@
      row has no border to stack it on. */
   --catch: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
 
-  --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+  /*
+   * The wash every glass surface takes above its base: flat, not a fall.
+   *
+   * It was a vertical gradient from 5% white to 1.5%, and Chromium dithers
+   * a gradient into a fixed two-pixel checker, which on these near-black
+   * surfaces is the crosshatch: measured on the action panel, rows
+   * alternating 46/45 and 44/43. So the wash is flat at the gradient's mean
+   * and the light off the top edge is left to the inset rings on
+   * `.sill-glaze::before` and `.sill-menu::before`, which are shadows and
+   * are not dithered.
+   *
+   * **An SVG, not a gradient of one colour.** A `linear-gradient` whose two
+   * stops are the same translucent colour is dithered exactly like a real
+   * one (see `--window-fill`). A one-rectangle SVG is rasterised as a plain
+   * fill. It stays an image so every `background-image` that layers it still
+   * can, and it takes no `var()`, which is why it is white at a literal
+   * alpha: an `url()` cannot read a token.
+   *
+   * Frost Light keeps its gradient: its range is forty times this one, and
+   * dithering is not what reads on a pale surface.
+   */
+  --sheen: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='white' fill-opacity='0.03'/%3E%3C/svg%3E");
 
   /*
    * ---- Rings --------------------------------------------------------------
@@ -1085,6 +1150,47 @@
   --chroma-strength: 1;
 }
 
+/*
+ * The chroma wash, on a layer of its own under a window's content.
+ *
+ * Painted straight into a surface's background it came out cross-hatched: the
+ * wash is low-alpha radial gradients, and the browser dithers every gradient
+ * it draws to eight bits with a fixed two-pixel pattern. On near-black that
+ * pattern is the texture, a regular ±1 checker across the whole window (read
+ * off a capture of the launcher on Oilslick: rows alternating 31/32 and 33).
+ * Fewer, stronger layers made it fainter and could not make it go, because
+ * the dither is what the browser does to any gradient.
+ *
+ * A one-pixel blur on the layer removes it. A two-pixel checker is the
+ * highest frequency a screen has, and a Gaussian of one pixel leaves under a
+ * hundredth of it, while the wash itself, which changes over hundreds of
+ * pixels, is untouched. What can be left is the gradient's own banding, one
+ * level at a time, which is what every undithered gradient on an eight-bit
+ * display has and which a regular pattern made far more visible.
+ *
+ * Cost: one layer the size of the window, drawn once and kept by the
+ * compositor, redrawn only when the window changes size. Nothing at rest, and
+ * nothing at all in a theme with no wash, where the layer is not displayed.
+ *
+ * The surface that holds it needs `position: relative` and
+ * `isolation: isolate`, so `z-index: -1` puts it above the surface's own
+ * background and below everything drawn in it.
+ */
+.sill-chroma {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--chroma);
+  filter: blur(1px);
+}
+
+[data-theme="oilslick"] .sill-chroma,
+[data-theme="aberration"] .sill-chroma {
+  display: block;
+}
+
 /* Neutral near-black, desaturated blue-grey accent. Shared with StreamNook. */
 [data-theme="frost"] {
   --core-background: #0c0c0d;
@@ -1162,14 +1268,16 @@
   --sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.25));
   /* Far stronger than the dark theme's 0.08: lifting a near-white popover
      off a near-white window takes more than lifting off near-black. */
-  --menu-lift: rgba(255, 255, 255, 0.55);
+  --menu-lift-ink: #fff;
+  --menu-lift: 55%;
   /* The dark theme's 0.45 black is a drawn outline on a near-white popover.
      This is the same job in the ink the rest of the theme separates with. */
   --menu-edge: 0 0 0 1px rgba(var(--ink), 0.12);
   /* The control glaze on a pale surface. White lifts here, as `--menu-lift`
      does; the accent is dark on this theme, so a stronger ring reads as a
      drawn line sooner and the highlight has to be nearly white to catch. */
-  --glaze-tint: rgba(255, 255, 255, 0.4);
+  --glaze-tint-ink: #fff;
+  --glaze-tint: 40%;
   --glaze-ring: rgba(var(--accent-rgb), 0.26);
   --glaze-inner: rgba(var(--accent-rgb), 0.06);
   --glaze-spec: rgba(255, 255, 255, 0.85);
@@ -1878,10 +1986,17 @@ body {
 
 .sill-glaze {
   border-radius: var(--radius-pill);
-  /* A component may set `--glaze-base` to the surface token it sits on. */
-  background-color: var(--glaze-base, var(--fill-1));
-  /* Top layer first: the light off the edge, over the flat accent tint. */
-  background-image: var(--sheen), linear-gradient(var(--glaze-tint), var(--glaze-tint));
+  /* A component may set `--glaze-base` to the surface token it sits on.
+     The accent tint is mixed into it rather than laid over it as a layer:
+     a flat gradient is dithered (see `--window-fill`), and mixing an opaque
+     ink at the tint's amount is the same pixel. The light off the edge is
+     the one image, over both. */
+  background-color: color-mix(
+    in srgb,
+    var(--glaze-tint-ink) var(--glaze-tint),
+    var(--glaze-base, var(--fill-1))
+  );
+  background-image: var(--sheen);
   border: 0;
   box-shadow: var(--glaze-edge);
 }
@@ -2033,10 +2148,11 @@ body {
    * routes.** The `--chin` note's "prove it on a real build first" means a
    * real build.
    */
-  background-color: var(--menu-base);
-  /* Top layer first, the way `background-image` stacks: the light off the
-     edge sits over the flat lift, which sits over the base colour. */
-  background-image: var(--sheen), linear-gradient(var(--menu-lift), var(--menu-lift));
+  /* The lift mixed into the base as one colour, and the light off the edge
+     over it. The lift was a second layer, a gradient of one colour, and
+     that is what left the crosshatch on every popover: see `--window-fill`. */
+  background-color: color-mix(in srgb, var(--menu-lift-ink) var(--menu-lift), var(--menu-base));
+  background-image: var(--sheen);
   /*
    * No border, and no `--bevel-tile`, because the rim below is the edge now.
    *

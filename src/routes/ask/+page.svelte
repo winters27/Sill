@@ -314,7 +314,25 @@
     field?.focus();
   }
 
+  /**
+   * The conversation whose bin has been pressed once and is asking.
+   *
+   * Two clicks, as everywhere else that throws something away, and a
+   * forgotten conversation has no undo. It went on one click of a button that
+   * only appears under the pointer.
+   */
+  let confirmingForget = $state("");
+
   async function forget(id: string) {
+    if (confirmingForget !== id) {
+      confirmingForget = id;
+      setTimeout(() => {
+        if (confirmingForget === id) confirmingForget = "";
+      }, 4000);
+      return;
+    }
+
+    confirmingForget = "";
     try {
       past = await aiForget(id);
     } catch (err) {
@@ -487,6 +505,7 @@
 />
 
 <div class="window" class:hovering>
+  <div class="sill-chroma" aria-hidden="true"></div>
   <TitleBar {title}>
     <!--
       Who answers, in the bar.
@@ -551,8 +570,13 @@
               </button>
               <button
                 class="bin"
-                aria-label="Forget this conversation"
-                use:hint={"Forget this conversation"}
+                class:armed={confirmingForget === one.id}
+                aria-label={confirmingForget === one.id
+                  ? "Click again to forget this conversation"
+                  : "Forget this conversation"}
+                use:hint={confirmingForget === one.id
+                  ? "Click again to forget it"
+                  : "Forget this conversation"}
                 onclick={() => void forget(one.id)}
               >
                 <svg class="line" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -653,13 +677,10 @@
     height: 100vh;
     /* The same recipe every other Sill window uses: mixed toward the base
        colour rather than toward transparency, so the surface stays opaque and
-       subpixel text rendering stays on. */
-    background-color: color-mix(
-      in srgb,
-      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
-      var(--surface-base)
-    );
-    background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
+       subpixel text rendering stays on. See `--window-fill` in theme.css;
+       the chroma wash is `.sill-chroma`. */
+    background-color: var(--window-fill);
+    isolation: isolate;
     border-radius: var(--radius-window);
     box-shadow: var(--bevel-window);
     overflow: hidden;
@@ -868,8 +889,14 @@
   }
 
   .row:hover .bin,
-  .bin:focus-visible {
+  .bin:focus-visible,
+  .bin.armed {
     opacity: 1;
+  }
+
+  /* Asking for the second click: the colour it takes on hover, held. */
+  .bin.armed {
+    color: var(--danger);
   }
 
   .bin:hover {

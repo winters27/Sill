@@ -14,6 +14,7 @@
    * because that is where somebody is already looking.
    */
   import type { AiAsking } from "$lib/exthost/commands";
+  import { SETTLES_MS, settled, shownAt } from "$lib/approval";
 
   interface Props {
     asked: AiAsking;
@@ -21,6 +22,33 @@
   }
 
   let { asked, ondecide }: Props = $props();
+
+  /*
+   * Allow waits until the card has been on screen long enough to be read.
+   *
+   * Enter is held to the same pause (see `$lib/approval`), and a key that
+   * does nothing with no visible reason reads as a broken card. Drawn as not
+   * yet pressable instead, so the pause is seen rather than guessed at.
+   *
+   * One timeout per card, for well under a second, and only while a card is
+   * up. Nothing runs when there is no card.
+   */
+  let ready = $state(false);
+
+  $effect(() => {
+    const card = asked;
+    const now = performance.now();
+    shownAt(card, now);
+
+    if (settled(card, now)) {
+      ready = true;
+      return;
+    }
+
+    ready = false;
+    const wait = setTimeout(() => (ready = true), SETTLES_MS);
+    return () => clearTimeout(wait);
+  });
 </script>
 
 <div class="permission sill-glaze sill-glaze-card" role="group" aria-label={asked.title}>
@@ -34,9 +62,13 @@
   {#if asked.instead}
     <p class="instead">{asked.instead}, so pressing Enter is all this asks for.</p>
   {/if}
+  <!-- A yes that is remembered says so, where the yes is given. -->
+  {#if asked.lasting}
+    <p class="instead">{asked.lasting}</p>
+  {/if}
   <div class="answers">
-    <button class="allow" onclick={() => ondecide(true)}>
-      <span class="sill-key">Enter</span> Do it
+    <button class="allow" disabled={!ready} onclick={() => ondecide(true)}>
+      <span class="sill-key">Enter</span> {asked.lasting ? "Allow" : "Do it"}
     </button>
     <button class="refuse" onclick={() => ondecide(false)}>
       <span class="sill-key">Esc</span> Not now
@@ -126,6 +158,13 @@
 
   .allow:hover {
     background: var(--accent-fill-strong);
+  }
+
+  /* Not yet: the card has only just arrived. Quieter, not hidden, so the
+     button does not jump when it becomes pressable. */
+  .allow:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .answers button:focus-visible {

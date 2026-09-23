@@ -18,10 +18,11 @@
    * `hidden` is for the one mode that already draws the card in its own
    * place. Two cards for one question would answer it twice.
    */
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-  import { aiDecide, type AiAsking } from "$lib/exthost/commands";
+  import { aiDecide, aiOutstanding, type AiAsking } from "$lib/exthost/commands";
+  import { answersCard } from "$lib/approval";
   import ApprovalCard from "./chat/ApprovalCard.svelte";
 
   interface Props {
@@ -56,22 +57,54 @@
   }
 
   /**
+   * Asks Rust whether the card on screen is still waiting.
+   *
+   * A card can be answered in the chat window, run out its ninety seconds, or
+   * be refused when a turn is left, and nothing tells this window: it heard
+   * the question, not the answer. Held on anyway, it sat over the launcher as
+   * a modal and took the next Enter or Escape for a question already settled.
+   *
+   * Asked only while a card is held, so a summon with nothing on screen costs
+   * nothing. What comes back is checked for shape, because a command Tauri
+   * refuses resolves rather than rejects.
+   */
+  // Coming back into view, after the conversation that hid it, is the moment
+  // it may have been answered somewhere else.
+  $effect(() => {
+    if (!hidden) untrack(recheck);
+  });
+
+  export function recheck() {
+    const holding = asked;
+    if (!holding) return;
+
+    void aiOutstanding()
+      .then((now) => {
+        if (asked !== holding) return;
+        asked = now && typeof now.id === "string" ? now : null;
+      })
+      .catch(() => {
+        // Nothing to learn from a failed read; the card stays until answered.
+      });
+  }
+
+  /**
    * Enter and Escape answer the card, ahead of whatever the mode would do
    * with them. Captured at the window so the launcher's own handler, which
    * listens on the same window in the bubbling phase, never sees the key.
    */
   function onKeydown(event: KeyboardEvent) {
     if (hidden || !asked) return;
+    if (event.key !== "Enter" && event.key !== "Escape") return;
 
-    if (event.key === "Enter") {
-      event.preventDefault();
-      event.stopPropagation();
-      decide(true);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      decide(false);
-    }
+    // Swallowed either way: the card is modal, and an Enter that came too
+    // soon to allow it must not fall through to the row underneath either.
+    event.preventDefault();
+    event.stopPropagation();
+
+    const answer = answersCard(event, asked, performance.now());
+    if (answer === "allow") decide(true);
+    else if (answer === "refuse") decide(false);
   }
 </script>
 

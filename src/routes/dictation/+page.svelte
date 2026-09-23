@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getDictationPanelStatus } from "$lib/dictation";
-  import { applyAppearance, getPreferences } from "$lib/settings";
+  import { applyAppearance, getPreferences, refreshAppearance } from "$lib/settings";
   import "$lib/theme/theme.css";
 
   type PanelStatus = "listening" | "transcribing" | "copied" | "confirming";
@@ -252,6 +252,8 @@
       try {
         unlisten.push(
           await listen<PanelStatus>("dictation:status", (event) => {
+            // Coming back into view is when the theme may have changed.
+            if (!visible) void refreshAppearance();
             if (!visible) introStart = performance.now();
             status = event.payload;
             visible = true;

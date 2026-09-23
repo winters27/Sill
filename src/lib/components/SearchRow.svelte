@@ -44,6 +44,8 @@
     browsing: boolean;
     /** What the field is being borrowed for, when it is. */
     awaitingTitle: string | undefined;
+    /** What the borrowed field asks for, which differs by what borrowed it. */
+    awaitingPlaceholder?: string;
     /** The script whose output is on screen. */
     outputTitle: string | undefined;
     /** What is being moved, while somewhere is picked for it. */
@@ -91,6 +93,7 @@
     selected,
     browsing,
     awaitingTitle,
+    awaitingPlaceholder,
     outputTitle,
     movingTitle,
     namingTitle,
@@ -289,7 +292,9 @@
     bind:value={query}
     oninput={ontyped}
     placeholder={mode === "argument"
-      ? "Type what to search for, then Enter…"
+      ? (awaitingPlaceholder ?? "Type, then Enter…")
+      : mode === "keys"
+        ? "Esc to go back…"
       : mode === "emoji"
         ? "Search emoji by name…"
       : mode === "ai"

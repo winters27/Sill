@@ -13,21 +13,41 @@
   }
 
   let { title, description, disabled = false, control, children }: Props = $props();
+
+  // One id per row, so the control inside is announced with its name and the
+  // sentence under it, including an error written there about the setting.
+  const id = $props.id();
 </script>
 
-<div class="sill-setting" class:disabled>
+<!--
+  A group named by the row, so a screen reader entering the control hears
+  which setting it is and what the line under it says.
+
+  Disabled is `inert` on the controls, not only greyed and unclickable: a
+  greyed row whose switch could still be reached with Tab and flipped with
+  Space was a setting its parent had turned off and the keyboard had not.
+  The label stays readable, so the row still says what it is.
+-->
+<div
+  class="sill-setting"
+  class:disabled
+  role="group"
+  aria-labelledby="{id}-name"
+  aria-describedby={description ? `${id}-hint` : undefined}
+  aria-disabled={disabled || undefined}
+>
   <div class="line">
     <div class="label">
-      <span class="name">{title}</span>
-      {#if description}<span class="hint">{description}</span>{/if}
+      <span class="name" id="{id}-name">{title}</span>
+      {#if description}<span class="hint" id="{id}-hint">{description}</span>{/if}
     </div>
     {#if control}
-      <div class="control">{@render control()}</div>
+      <div class="control" inert={disabled}>{@render control()}</div>
     {/if}
   </div>
 
   {#if children}
-    <div class="wide">{@render children()}</div>
+    <div class="wide" inert={disabled}>{@render children()}</div>
   {/if}
 </div>
 

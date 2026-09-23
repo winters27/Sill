@@ -130,28 +130,47 @@ pub fn search_with(query: &str, limit: usize, flags: u32) -> Vec<FileHit> {
     ask(query, limit, flags, false)
 }
 
+/**
+The keystroke search, or `None` when Everything could not be asked at all.
+
+Separate from [`search_newest`] because "nothing" means two different things
+to the caller that has a fallback. An answer with no files in it, a keystroke
+thrown away because a newer one arrived, and a reply that took too long are all
+Everything having been asked, and asking again some other way would only repeat
+the question: the fallback spawned Everything's command-line client once for
+every superseded keystroke and every query that matched nothing. Only an
+Everything that is not there at all is a reason to try something else.
+*/
+pub fn search_newest_answered(query: &str, limit: usize, flags: u32) -> Option<Vec<FileHit>> {
+    ask_answered(query, limit, flags, true)
+}
+
 fn ask(query: &str, limit: usize, flags: u32, supersedable: bool) -> Vec<FileHit> {
+    ask_answered(query, limit, flags, supersedable).unwrap_or_default()
+}
+
+fn ask_answered(query: &str, limit: usize, flags: u32, supersedable: bool) -> Option<Vec<FileHit>> {
     let query = query.trim();
     if query.is_empty() {
-        return Vec::new();
+        return Some(Vec::new());
     }
 
-    let Some(sender) = QUERIES.get_or_init(start_worker) else {
-        return Vec::new();
-    };
+    // Not running: the one case a caller with a fallback should use it.
+    let sender = QUERIES.get_or_init(start_worker).as_ref()?;
 
     let (reply_tx, reply_rx) = mpsc::channel();
-    if sender
+    sender
         .send((query.to_string(), limit, flags, supersedable, reply_tx))
-        .is_err()
-    {
-        return Vec::new();
-    }
+        .ok()?;
 
-    // Bounded so a wedged Everything cannot hang a keystroke.
-    reply_rx
-        .recv_timeout(std::time::Duration::from_millis(2000))
-        .unwrap_or_default()
+    // Bounded so a wedged Everything cannot hang a keystroke. A timeout is an
+    // answer of nothing rather than an absence: Everything is there, and the
+    // client would wait on the same wedged window.
+    Some(
+        reply_rx
+            .recv_timeout(std::time::Duration::from_millis(2000))
+            .unwrap_or_default(),
+    )
 }
 
 /// Whether Everything is running and answering.

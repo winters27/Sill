@@ -174,7 +174,8 @@ pub const CATALOGUE: &[Tool] = &[
         description: "The most recent things copied on this machine, newest first, each \
                       with the application it came from. Use this when asked about \
                       something that was copied, or to work with what somebody just \
-                      copied without making them paste it.",
+                      copied without making them paste it. The person is asked \
+                      before it is read.",
         schema: || {
             json!({
                 "type": "object",
@@ -384,7 +385,7 @@ pub async fn run(app: &AppHandle, name: &str, args: &Value) -> Value {
         "search_web" => super::searching::run(app, &text("query")).await,
         "read_file" => read_file(app, &text("path")).await,
         "list_directory" => list_directory(app, &text("path")).await,
-        "read_clipboard" => read_clipboard(app, &text("query")),
+        "read_clipboard" => read_clipboard(app, &text("query")).await,
         "list_windows" => list_windows(),
         "system_state" => system_state(app),
         "read_selection" => read_selection(app).await,
@@ -493,6 +494,7 @@ async fn ask(app: &AppHandle, title: &str, subject: &str, touches: &str) -> Opti
             // capabilities the Hello gate covers, so nothing stronger than
             // this card was ever on offer and there is nothing to explain.
             instead: None,
+            lasting: None,
         },
     );
 
@@ -624,12 +626,41 @@ fn list_at(path: &Path) -> Value {
     json!({ "path": path, "found": entries.len(), "entries": entries })
 }
 
-fn read_clipboard(app: &AppHandle, query: &str) -> Value {
+/**
+The clipboard history, once somebody has said the model may read it.
+
+It asks first, like `read_selection` below it. The history holds up to thirty
+days of whatever was copied, from every program, and a clipboard is where
+passwords, keys and private messages pass through on their way somewhere else.
+Handing that to a model, which may be a cloud service, is the same kind of
+decision as handing it the current selection, and the selection has always
+asked. Reading the history did not, which made it the quieter way to the same
+data.
+*/
+async fn read_clipboard(app: &AppHandle, query: &str) -> Value {
     // Not running is an ordinary state rather than a fault: somebody can turn
     // clipboard history off, and the answer should say so instead of failing.
+    // Checked before asking, so nobody is asked about something that is off.
     let Some(clipboard) = app.try_state::<crate::clipboard::monitor::Clipboard>() else {
         return json!({ "error": "Clipboard history is not running on this machine." });
     };
+
+    let subject = if query.trim().is_empty() {
+        "what you copied most recently".to_string()
+    } else {
+        format!("what you copied that mentions '{}'", query.trim())
+    };
+
+    if let Some(refused) = ask(
+        app,
+        "Read the clipboard history",
+        &subject,
+        "reads what you have copied",
+    )
+    .await
+    {
+        return refused;
+    }
 
     let Ok(entries) = clipboard.store().search(query, None, MOST_ROWS) else {
         return json!({ "error": "Could not read the clipboard history." });
@@ -1063,6 +1094,7 @@ async fn run_action(
                     subject: object.title.clone(),
                     touches: touches.to_string(),
                     instead,
+                    lasting: None,
                 },
             );
 

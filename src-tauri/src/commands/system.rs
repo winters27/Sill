@@ -1056,7 +1056,7 @@ pub(crate) async fn finish_markup(app: AppHandle, png: String) -> Result<String,
 /// It is a picture of somebody's screen and nothing needs it once the window
 /// is gone. One function because both ways out of that window have to do it
 /// and only one of them did.
-fn forget_marking(app: &AppHandle) {
+pub(crate) fn forget_marking(app: &AppHandle) {
     if let Some(pending) = app.try_state::<Marking>() {
         if let Ok(mut held) = pending.0.lock() {
             *held = None;

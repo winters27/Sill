@@ -60,7 +60,28 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
             .resizable(true)
             .transparent(false)
             .shadow(true)
-            .build(),
+            .build()
+            .map(|window| {
+                /*
+                 * Closing is cancelling, however it is asked for.
+                 *
+                 * The editor's own Escape and its ✕ hide the window and forget
+                 * the picture it was holding. The title bar's close and Alt+F4
+                 * destroyed the window instead and forgot nothing, so a
+                 * full-screen capture of somebody's screen stayed in memory
+                 * for the rest of the run. One path for all of them, here,
+                 * where no page can skip it.
+                 */
+                let app = window.app_handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        hide(&app, "markup");
+                        crate::commands::system::forget_marking(&app);
+                    }
+                });
+                window
+            }),
 
         "capture" => builder("capture")
             .title("Sill capture")

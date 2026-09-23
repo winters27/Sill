@@ -705,6 +705,10 @@
         {#if row.heading}
           <div class="sill-group" role="presentation">{row.heading}</div>
         {/if}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- An option in a combobox, never focused: the search field keeps focus and
+             reads every key, and aria-activedescendant names this row. A key handler
+             here only ever made Enter run twice. -->
         <div
           id={optionId(row.index)}
           class="row"
@@ -729,7 +733,7 @@
             }
             void paste();
           }}
-          onkeydown={(e) => e.key === "Enter" && void paste()}
+          onmousedown={(e) => e.preventDefault()}
         >
           {#if picked.includes(row.entry.id)}
             <!-- The position in the merge, not a tick. Which order they go in

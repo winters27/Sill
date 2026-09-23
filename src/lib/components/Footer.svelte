@@ -12,6 +12,7 @@
   import LauncherMenu from "$lib/components/LauncherMenu.svelte";
   import WidgetChin from "$lib/widgets/Chin.svelte";
   import { shortcutKeys, type ActionEntry } from "$lib/exthost/actions";
+  import { keysOf } from "$lib/keys";
   import type { Mode } from "$lib/modes";
   import type { Preferences } from "$lib/settings";
 
@@ -43,6 +44,21 @@
     prefs: Preferences | null;
     /** The tag of a running command's view, so a form says Submit. */
     viewTag: string | undefined;
+    /**
+     * What Enter does here, or `null` where it does nothing.
+     *
+     * Named by the page from the mode table rather than guessed here. The
+     * guess said "Run" for quitting a program, switching to a window, and in
+     * the views where Enter does nothing at all.
+     */
+    primary?: string | null;
+    /**
+     * The chord that opens the action panel, as the movement preset has it.
+     *
+     * Not a fixed Ctrl+K: under the vim preset Ctrl+K moves up, and the pill
+     * named a key that did something else.
+     */
+    actionsChord?: string;
     /** Whether there is anything behind the action chord to offer. */
     hasActions: boolean;
     /** A builtin chosen from the launcher menu. */
@@ -63,6 +79,8 @@
     status,
     prefs,
     viewTag,
+    primary = "Open",
+    actionsChord = "Ctrl+K",
     hasActions,
     onbuiltin,
     onrun,
@@ -81,7 +99,13 @@
   part of the window into a boxed-in strip.
 -->
 <footer>
-  <div class="side">
+  <!--
+    Polite and live on the part that stays, because the line inside it comes
+    and goes: a live region that arrives with its text is often not read at
+    all. What lands here is an outcome ("Moved report.pdf to the recycle bin",
+    an update, a failure), never a keystroke, so it does not chatter.
+  -->
+  <div class="side" aria-live="polite" aria-relevant="additions text">
     <LauncherMenu {onbuiltin} />
     {#if toast}
     <span class="toast" data-style={toast.style}>{toast.title}</span>
@@ -173,17 +197,19 @@
     and the arrow keys would stop moving the selection with no visible
     cause.
   -->
-  <button
-    class="segment"
-    tabindex="-1"
-    onmousedown={(e) => e.preventDefault()}
-    onclick={onrun}
-  >
-    {mode === "clipboard" ? "Paste" : mode === "root" ? "Open" : viewTag === "Form" ? "Submit" : "Run"}
-    <span class="sill-key">↵</span>
-  </button>
+  {#if primary}
+    <button
+      class="segment"
+      tabindex="-1"
+      onmousedown={(e) => e.preventDefault()}
+      onclick={onrun}
+    >
+      {primary}
+      <span class="sill-key">↵</span>
+    </button>
+  {/if}
   {#if hasActions}
-    <span class="split"></span>
+    {#if primary}<span class="split"></span>{/if}
     <button
       class="segment"
       tabindex="-1"
@@ -191,7 +217,7 @@
       onclick={onactions}
     >
       Actions
-      <span class="sill-key">Ctrl K</span>
+      <span class="sill-key">{keysOf(actionsChord).join(" ")}</span>
     </button>
   {/if}
   </div>

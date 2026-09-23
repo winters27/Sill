@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { askedForTheKeys, deleteMeansTheRow, isTyping, typedInto } from "./typing";
+import { askedForTheKeys, deleteMeansTheRow, isTyping, ownsTheKey, typedInto } from "./typing";
 
 const press = (key: string, held: Partial<Record<"ctrlKey" | "altKey" | "metaKey", boolean>> = {}) => ({
   key,
@@ -112,5 +112,50 @@ describe("asking for the keys", () => {
 
   it("is only that key", () => {
     expect(askedForTheKeys(press("/"), "")).toBe(false);
+  });
+});
+
+describe("which keys a focused field keeps", () => {
+  it("lets a text area move between its lines and take a new line", () => {
+    for (const key of ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", "Enter"]) {
+      expect(ownsTheKey("textarea", press(key), ""), `${key} was taken from a text area`).toBe(true);
+    }
+  });
+
+  it("still submits a text area on Ctrl+Enter", () => {
+    expect(ownsTheKey("textarea", press("Enter", { ctrlKey: true }), "")).toBe(false);
+  });
+
+  it("lets a drop-down change its value", () => {
+    expect(ownsTheKey("select", press("ArrowDown"), "")).toBe(true);
+    expect(ownsTheKey("select", press("ArrowUp"), "")).toBe(true);
+    // Enter still submits the form the drop-down is in.
+    expect(ownsTheKey("select", press("Enter"), "")).toBe(false);
+  });
+
+  it("gives a form's single-line field Home and End, and nothing else", () => {
+    expect(ownsTheKey("input", press("Home"), "")).toBe(true);
+    expect(ownsTheKey("input", press("End"), "")).toBe(true);
+    expect(ownsTheKey("input", press("ArrowDown"), "")).toBe(false);
+    expect(ownsTheKey("input", press("Enter"), "")).toBe(false);
+  });
+
+  it("moves the search field's caret with Home and End once something is typed", () => {
+    expect(ownsTheKey("search", press("Home"), "notepad")).toBe(true);
+    expect(ownsTheKey("search", press("End"), "notepad")).toBe(true);
+  });
+
+  it("leaves Home and End to the rows on an empty search field", () => {
+    expect(ownsTheKey("search", press("Home"), "")).toBe(false);
+    expect(ownsTheKey("search", press("End"), "")).toBe(false);
+  });
+
+  it("never keeps the arrows or a chord in the search field", () => {
+    expect(ownsTheKey("search", press("ArrowDown"), "notepad")).toBe(false);
+    expect(ownsTheKey("search", press("Home", { ctrlKey: true }), "notepad")).toBe(false);
+  });
+
+  it("keeps nothing when nothing that edits text has focus", () => {
+    expect(ownsTheKey("other", press("ArrowDown"), "x")).toBe(false);
   });
 });

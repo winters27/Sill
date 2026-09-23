@@ -9,6 +9,7 @@
   import Instead from "../Instead.svelte";
   import { drawer } from "$lib/motion";
   import { hint } from "$lib/hint";
+  import { rovingTab, rovingTo } from "$lib/roving";
   import {
     aiHello,
     aiKnown,
@@ -214,6 +215,21 @@
     save();
   }
 
+  /**
+   * The arrows walk the providers and walking them picks one, as in every
+   * other radio group in Settings. This one was reachable only by Tab, which
+   * stopped on every card rather than once on the group.
+   */
+  function onPickKey(event: KeyboardEvent, at: number) {
+    const next = rovingTo(event.key, at, providers.length, "both");
+    if (next === null) return;
+
+    event.preventDefault();
+    choose(providers[next].id);
+    const group = (event.currentTarget as HTMLElement).closest('[role="radiogroup"]');
+    group?.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
+  }
+
   function add(one: AiProvider) {
     // The note is the settings window's own prose about the service. It
     // explains the row it is read from and has no business in the file.
@@ -239,7 +255,25 @@
     save();
   }
 
+  /**
+   * The provider whose Remove has been pressed once and is asking.
+   *
+   * Two clicks, as everywhere else in Settings that throws something away.
+   * This one deleted the provider and its API key on the first, and a key is
+   * the one thing here that cannot be typed back in from memory.
+   */
+  let confirmingRemove = $state("");
+
   function remove(id: string) {
+    if (confirmingRemove !== id) {
+      confirmingRemove = id;
+      setTimeout(() => {
+        if (confirmingRemove === id) confirmingRemove = "";
+      }, 4000);
+      return;
+    }
+
+    confirmingRemove = "";
     prefs.ai.providers = providers.filter((one) => one.id !== id);
     // A choice pointing at something removed would answer with nothing.
     if (prefs.ai.provider === id) prefs.ai.provider = "";
@@ -454,7 +488,7 @@
     />
   {:else}
     <div class="stack" role="radiogroup" aria-label="Who answers">
-      {#each providers as one (one.id)}
+      {#each providers as one, index (one.id)}
         <div class="provider" class:on={answering === one.id} class:open={editing === one.id}>
           <div class="head">
             <!--
@@ -468,7 +502,9 @@
               class="pick"
               role="radio"
               aria-checked={answering === one.id}
+              tabindex={rovingTab(index, providers.findIndex((p) => p.id === answering))}
               onclick={() => choose(one.id)}
+              onkeydown={(event) => onPickKey(event, index)}
             >
               <AiMark name={one.id} />
 
@@ -645,7 +681,11 @@
                   <Button label="Reset usage" onclick={() => void resetUsage(one.id)} />
                 {/if}
                 <span class="spacer"></span>
-                <Button label="Remove" tone="danger" onclick={() => remove(one.id)} />
+                <Button
+                  label={confirmingRemove === one.id ? "Remove it and its key?" : "Remove"}
+                  tone="danger"
+                  onclick={() => remove(one.id)}
+                />
               </div>
             </div>
           {/if}

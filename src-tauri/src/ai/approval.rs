@@ -56,6 +56,16 @@ pub struct Asking {
     */
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instead: Option<String>,
+    /**
+    What a yes is remembered as, when it is remembered at all.
+
+    Most cards allow one thing, once. An extension's card is different: a yes
+    is written down and holds for the life of the extension, so it is never
+    asked again. The card said "Do it" and nothing else, which is the wording
+    of a one-off. `None` for a one-off, and left out of the payload then.
+    */
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lasting: Option<String>,
 }
 
 /// How it was answered.
@@ -409,6 +419,7 @@ mod tests {
                 subject: r"C:\Users\me\notes.txt".to_string(),
                 touches: "opens something".to_string(),
                 instead: None,
+                lasting: None,
             }
         }
 

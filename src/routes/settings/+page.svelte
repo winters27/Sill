@@ -120,6 +120,15 @@
   ];
 
   const PANELS: Panel[] = [
+    /*
+     * Grouped by what somebody is doing, not by how Sill is built.
+     *
+     * The keys and the chin sit with General and Appearance, because they are
+     * how the launcher is used at all. "Workflow" held eight unrelated panels,
+     * and "AI Chat" and "Widgets" were headings over a single panel of the same
+     * name. Ids are unchanged, so every deep link and search result still
+     * lands where it did.
+     */
     {
       id: "general",
       name: "General",
@@ -131,45 +140,14 @@
       blurb: "Window size, backdrop material and how deep the glass sits",
     },
     {
-      id: "snippets",
-      name: "Snippets",
-      blurb: "Saved text, expanded by keyword or pasted from the launcher",
-      group: "Workflow",
-    },
-    {
-      id: "quicklinks",
-      name: "Quicklinks",
-      blurb: "Saved addresses that take what you type and go straight there",
-    },
-    {
-      id: "automations",
-      name: "Automations",
-      blurb: "Triggers Windows runs on a schedule, so Sill runs nothing while it waits",
-    },
-    {
-      id: "mcp",
-      name: "MCP Servers",
-      blurb: "Programs whose tools appear in the action panel, started only when you run one",
-    },
-    {
-      id: "clipboard",
-      name: "Clipboard History",
-      blurb: "What is kept from everything you copy, and for how long",
-    },
-    {
-      id: "emoji",
-      name: "Emoji",
-      blurb: "Skin tone, and what Enter does with the one you picked",
-    },
-    {
       id: "shortcuts",
       name: "Shortcuts",
-      blurb: "Every key Sill answers to, from the summon key down to the action keys",
+      blurb: "The keys that run actions, move around the launcher, and open commands",
     },
     {
-      id: "screenshot",
-      name: "Screenshots",
-      blurb: "What happens after you take one, and what the editor opens with",
+      id: "widgets",
+      name: "Widgets",
+      blurb: "The clock, the weather, and what rides along in the launcher",
     },
     {
       id: "sources",
@@ -178,14 +156,14 @@
       group: "Search",
     },
     {
-      id: "websearch",
-      name: "Web",
-      blurb: "Browser pages, open tabs and searching the web",
-    },
-    {
       id: "files",
       name: "File Search",
       blurb: "Everything integration, match rules and the folders it covers",
+    },
+    {
+      id: "websearch",
+      name: "Web",
+      blurb: "Browser pages, open tabs and searching the web",
     },
     {
       id: "extensions",
@@ -198,27 +176,57 @@
       blurb: "Folders of scripts the launcher can find and run",
     },
     {
+      id: "clipboard",
+      name: "Clipboard History",
+      blurb: "What is kept from everything you copy, and for how long",
+      group: "Text",
+    },
+    {
+      id: "snippets",
+      name: "Snippets",
+      blurb: "Saved text, expanded by keyword or pasted from the launcher",
+    },
+    {
+      id: "quicklinks",
+      name: "Quicklinks",
+      blurb: "Saved addresses that take what you type and go straight there",
+    },
+    {
+      id: "emoji",
+      name: "Emoji",
+      blurb: "Skin tone, and what Enter does with the one you picked",
+    },
+    {
       id: "ai",
       name: "AI Chat",
       blurb: "Who answers when you press Tab in the launcher",
-      group: "AI Chat",
+      group: "AI",
+    },
+    {
+      id: "mcp",
+      name: "MCP Servers",
+      blurb: "Programs whose tools appear in the action panel, started only when you run one",
+    },
+    {
+      id: "automations",
+      name: "Automations",
+      blurb: "Triggers Windows runs on a schedule, so Sill runs nothing while it waits",
+    },
+    {
+      id: "screenshot",
+      name: "Screenshots",
+      blurb: "What happens after you take one, and what the editor opens with",
+      group: "Capture & Voice",
     },
     {
       id: "dictation",
       name: "Dictation",
       blurb: "The trigger, where the transcript goes, and which engine hears it",
-      group: "Voice",
     },
     {
       id: "tts",
       name: "Text to Speech",
       blurb: "Which voice reads text out loud, and where it comes from",
-    },
-    {
-      id: "widgets",
-      name: "Widgets",
-      blurb: "The clock, the weather, and what rides along in the launcher",
-      group: "Widgets",
     },
     {
       id: "advanced",
@@ -641,6 +649,11 @@
   async function putBack(panel: PanelId) {
     if (confirmingReset !== panel) {
       confirmingReset = panel;
+      // Disarmed after a moment, like every other two-click confirm here.
+      // Left armed, one stray click much later reset a panel.
+      setTimeout(() => {
+        if (confirmingReset === panel) confirmingReset = null;
+      }, 4000);
       return;
     }
 
@@ -703,6 +716,20 @@
   }
 
   /** Only jump if the name is real, so a stale link cannot blank the page. */
+  /**
+   * Enter goes to the best match, which is the one somebody typing is looking
+   * at; Escape empties the search, the way it does in the launcher's field.
+   */
+  function searchKeys(event: KeyboardEvent) {
+    if (event.key === "Enter" && matches && matches.length > 0) {
+      event.preventDefault();
+      jumpTo(matches[0].panel);
+    } else if (event.key === "Escape" && filter) {
+      event.preventDefault();
+      filter = "";
+    }
+  }
+
   function jumpTo(name: string | null) {
     if (name && PANELS.some((p) => p.id === name)) {
       active = name as PanelId;
@@ -893,6 +920,7 @@
 
 
 <div class="window">
+  <div class="sill-chroma" aria-hidden="true"></div>
   <TitleBar />
 
   <div class="body">
@@ -915,6 +943,7 @@
           placeholder="Search settings"
           aria-label="Search settings"
           spellcheck="false"
+          onkeydown={searchKeys}
         />
         {#if filter}
           <button class="clear" aria-label="Clear search" onclick={() => (filter = "")}>
@@ -931,7 +960,11 @@
       </div>
 
       {#if matches}
-        <div class="group">Results</div>
+        <!-- The count, said as well as shown: a list that narrows as somebody
+             types says nothing to a screen reader otherwise. -->
+        <div class="group" role="status" aria-live="polite">
+          {matches.length === 1 ? "1 result" : `${matches.length} results`}
+        </div>
         <nav>
           {#each matches as match (match.panel + match.title)}
             <button class="result" onclick={() => jumpTo(match.panel)}>
@@ -964,6 +997,7 @@
             <button
               class="nav-item"
               class:selected={item.id === active}
+              aria-current={item.id === active ? "page" : undefined}
               onclick={() => (active = item.id)}
             >
               <SettingsIcon name={item.id} size={26} />
@@ -981,7 +1015,10 @@
           <h2>{panel.name}</h2>
           <p>{panel.blurb}</p>
         </div>
-        {#if status}<span class="status">{status}</span>{/if}
+        <!-- Always in the document, so a screen reader hears "Saved" when it
+             arrives: a live region that appears with its text is often not
+             announced at all. -->
+        <span class="status" role="status" aria-live="polite">{status}</span>
         <!--
           In the header rather than as a row at the foot of each panel, because
           it is about the whole panel and not one setting in it, and because a
@@ -2443,13 +2480,10 @@
     height: 100vh;
     /* Mixed toward the base colour rather than toward transparency. Glass
        strength still sets the tone, but the surface stays opaque, which is
-       what keeps subpixel text rendering switched on. See theme.css. */
-    background-color: color-mix(
-      in srgb,
-      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
-      var(--surface-base)
-    );
-    background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
+       what keeps subpixel text rendering switched on. See `--window-fill`
+       in theme.css; the chroma wash is `.sill-chroma`. */
+    background-color: var(--window-fill);
+    isolation: isolate;
     border-radius: var(--radius-window);
     box-shadow: var(--bevel-window);
     overflow: hidden;
@@ -2586,6 +2620,13 @@
   .nav-item.selected {
     background-color: var(--accent-fill);
     color: var(--text-1);
+  }
+
+  /* High contrast removes the fill, so the selection needs an edge of its own. */
+  @media (forced-colors: active) {
+    .nav-item.selected {
+      outline: 1px solid CanvasText;
+    }
   }
 
   .result {

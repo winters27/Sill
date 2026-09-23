@@ -326,6 +326,7 @@ impl Permits for Granted {
                 subject: plainly.to_string(),
                 touches: crate::ai::acting::what_it_touches(&wanted).to_string(),
                 instead: None,
+                lasting: Some(lasts_for(extension)),
             },
         );
 
@@ -364,6 +365,7 @@ impl Permits for Granted {
                     // Hello gate, which is spent on a single run, does not
                     // apply to it and nothing was withheld.
                     instead: None,
+                    lasting: Some(lasts_for(extension)),
                 },
             );
 
@@ -402,9 +404,30 @@ pub fn for_extension(app: &tauri::AppHandle, extension: &str) -> Vec<Capability>
         .unwrap_or_default()
 }
 
+/// What an extension's card says a yes is.
+///
+/// A yes here is written down and never asked again for that extension, so
+/// the card says so in the sentence under the question. Settings is where it
+/// is taken back, and the sentence names that too, because a permission that
+/// cannot be found again is one somebody cannot withdraw.
+pub fn lasts_for(extension: &str) -> String {
+    format!("Allowing remembers this for {extension}. Take it back in Settings, under Extensions.")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An extension's yes is remembered, and its card must say so. It said
+    /// "Do it", the wording of a one-off, for a grant that lasts.
+    #[test]
+    fn a_lasting_grant_says_that_it_lasts() {
+        let said = lasts_for("raycast/clipboard");
+
+        assert!(said.contains("remembers"));
+        assert!(said.contains("raycast/clipboard"));
+        assert!(said.contains("Settings"));
+    }
 
     /// The file as it exists on every machine that has granted anything: a
     /// bare map of extension to capabilities, with no version anywhere in it.

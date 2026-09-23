@@ -2072,7 +2072,18 @@ impl Action for RecycleFile {
             return Err(format!("{} is not there any more.", object.title));
         }
 
-        recycle(&path)?;
+        // Asked before anything is handed to the shell. A path the recycle bin
+        // cannot take is deleted outright by the same call, with no prompt,
+        // and the line below would then have said it was recycled.
+        recyclable(&path)?;
+
+        // Off the runtime. A large folder takes a while to move, and a file too
+        // big for the bin makes Windows stop and ask; neither should hold one
+        // of the threads every other command is answered on.
+        let moving = path.clone();
+        tokio::task::spawn_blocking(move || recycle(&moving))
+            .await
+            .map_err(|err| format!("The recycle bin could not be reached: {err}"))??;
 
         // No undo token. The recycle bin **is** the undo, it is where people
         // already know to look, and a token claiming to restore something the
@@ -2106,11 +2117,109 @@ pub fn name_of(target: &str) -> String {
         .unwrap_or_else(|| target.to_string())
 }
 
+/// The root of the drive a path is on, as the shell wants it: `C:\`.
+///
+/// `None` for anything that is not on a lettered drive, which is a share
+/// reached by its UNC name. The recycle bin never holds those.
+pub fn drive_root(path: &std::path::Path) -> Option<String> {
+    use std::path::{Component, Prefix};
+
+    match path.components().next()? {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+                Some(format!("{}:\\", letter as char))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether the recycle bin can take this path, asked before it is handed over.
+///
+/// The reason this exists: `SHFileOperationW` with `FOF_ALLOWUNDO` recycles
+/// what it can and **permanently deletes what it cannot**, and with
+/// `FOF_NOCONFIRMATION` it does so without asking. A share, a mapped network
+/// drive, a USB stick or a RAM disk has no recycle bin, so "Move to Recycle
+/// Bin" deleted the file for good and then reported that it had been moved.
+/// Microsoft's own documentation says as much: the confirmation flag answers
+/// Yes to every dialog, and the nuke warning is the one it only partly
+/// overrides.
+///
+/// Refused here instead, with a sentence saying why, because the one thing a
+/// launcher must never do behind a fuzzy search and one keypress is destroy
+/// something it said it was keeping.
+#[cfg(windows)]
+pub fn recyclable(path: &std::path::Path) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetDriveTypeW;
+    use windows::Win32::UI::Shell::{SHQueryRecycleBinW, SHQUERYRBINFO};
+
+    // From `winbase.h`. Named here rather than enabling a whole feature of the
+    // bindings for five integers.
+    const DRIVE_REMOVABLE: u32 = 2;
+    const DRIVE_REMOTE: u32 = 4;
+    const DRIVE_CDROM: u32 = 5;
+    const DRIVE_RAMDISK: u32 = 6;
+
+    let name = name_of(&path.to_string_lossy());
+    let refused = || {
+        format!(
+            "{name} is on a drive with no recycle bin, so it was left where it is. \
+             Sill does not delete permanently; Explorer can, if that is what you mean."
+        )
+    };
+
+    let Some(root) = drive_root(path) else {
+        return Err(refused());
+    };
+
+    let wide: Vec<u16> = root.encode_utf16().chain([0]).collect();
+
+    // SAFETY: `wide` is a null terminated root path that outlives both calls,
+    // and the info struct is sized as the API requires.
+    let kind = unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) };
+    if matches!(kind, DRIVE_REMOVABLE | DRIVE_REMOTE | DRIVE_CDROM | DRIVE_RAMDISK) {
+        return Err(refused());
+    }
+
+    let mut info = SHQUERYRBINFO {
+        cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: as above.
+    if unsafe { SHQueryRecycleBinW(PCWSTR(wide.as_ptr()), &mut info) }.is_err() {
+        return Err(refused());
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn recyclable(_path: &std::path::Path) -> Result<(), String> {
+    Err("Only Windows has a recycle bin.".to_string())
+}
+
+/// How a path is handed to the recycle bin.
+///
+/// `FOF_WANTNUKEWARNING` is the backstop for what `recyclable` cannot see in
+/// advance: a file larger than the bin will hold. Without it the shell deletes
+/// such a file outright and silently; with it, the shell asks first, and a No
+/// comes back as an aborted operation rather than a deletion.
+#[cfg(windows)]
+pub const RECYCLE_FLAGS: windows::Win32::UI::Shell::FILEOPERATION_FLAGS =
+    windows::Win32::UI::Shell::FILEOPERATION_FLAGS(
+        windows::Win32::UI::Shell::FOF_ALLOWUNDO.0
+            | windows::Win32::UI::Shell::FOF_NOCONFIRMATION.0
+            | windows::Win32::UI::Shell::FOF_SILENT.0
+            | windows::Win32::UI::Shell::FOF_WANTNUKEWARNING.0,
+    );
+
 /// Hands a path to the shell's recycle bin.
 ///
 /// `SHFileOperationW` rather than a delete, because the recycle bin is the
 /// whole point: it is undo that outlives the process, that survives a crash,
-/// and that people already know how to use.
+/// and that people already know how to use. Ask `recyclable` first.
 ///
 /// The path is double null terminated. The API takes a list of paths and reads
 /// until it finds an empty one, so a single terminator means it keeps reading
@@ -2118,9 +2227,7 @@ pub fn name_of(target: &str) -> String {
 #[cfg(windows)]
 pub fn recycle(path: &std::path::Path) -> Result<(), String> {
     use windows::core::PCWSTR;
-    use windows::Win32::UI::Shell::{
-        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW,
-    };
+    use windows::Win32::UI::Shell::{SHFileOperationW, FO_DELETE, SHFILEOPSTRUCTW};
 
     use std::os::windows::ffi::OsStrExt;
 
@@ -2131,7 +2238,7 @@ pub fn recycle(path: &std::path::Path) -> Result<(), String> {
         pFrom: PCWSTR(wide.as_ptr()),
         // The flags are declared wider than the field that holds them, which
         // is an oddity of the API rather than of the bindings.
-        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT).0 as u16,
+        fFlags: RECYCLE_FLAGS.0 as u16,
         ..Default::default()
     };
 
@@ -2143,10 +2250,14 @@ pub fn recycle(path: &std::path::Path) -> Result<(), String> {
         return Err(format!("Windows refused to recycle that (error {code})"));
     }
 
-    // Set when somebody cancelled a dialog. Not an error, but not a deletion
-    // either, and reporting success would be a lie.
+    // Set when somebody answered No to the shell's warning that this cannot be
+    // recycled, which in practice means too large for the bin. Not an error,
+    // but not a deletion either, and reporting success would be a lie.
     if operation.fAnyOperationsAborted.as_bool() {
-        return Err("That was not moved to the recycle bin.".to_string());
+        return Err(format!(
+            "{} was left where it is. It is too large for the recycle bin.",
+            name_of(&path.to_string_lossy())
+        ));
     }
 
     Ok(())
@@ -5324,5 +5435,59 @@ mod what_a_trigger_may_run {
     fn a_trigger_may_reach_a_note() {
         assert!(may_schedule(OpenNote.id(), OpenNote.capabilities()).is_ok());
         assert!(may_schedule(CopyNote.id(), CopyNote.capabilities()).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod moving_to_the_recycle_bin {
+    use super::*;
+
+    /// A path the bin cannot take was deleted outright by the call that was
+    /// meant to recycle it, and the outcome said it had been moved. A share is
+    /// the plainest case: no drive letter, no bin, ever.
+    #[test]
+    fn a_share_is_refused_before_anything_is_deleted() {
+        let refused = recyclable(std::path::Path::new(r"\\server\share\report.docx"));
+
+        assert!(refused.is_err(), "a UNC path was offered to the recycle bin");
+        assert!(refused.unwrap_err().contains("report.docx"));
+    }
+
+    #[test]
+    fn only_a_lettered_drive_has_a_root() {
+        assert_eq!(drive_root(std::path::Path::new(r"\\server\share\x.txt")), None);
+        assert_eq!(
+            drive_root(std::path::Path::new(r"C:\Users\x.txt")),
+            Some(r"C:\".to_string())
+        );
+        assert_eq!(
+            drive_root(std::path::Path::new(r"\\?\D:\very\long\path.txt")),
+            Some(r"D:\".to_string())
+        );
+    }
+
+    /// The system drive always has a bin, so the check must not refuse it. A
+    /// guard that says no to everything makes the action useless and looks,
+    /// from here, exactly like safety.
+    #[cfg(windows)]
+    #[test]
+    fn a_file_on_the_system_drive_is_recyclable() {
+        let here = std::env::temp_dir().join("sill-recycle-probe.txt");
+        std::fs::write(&here, b"probe").unwrap();
+
+        let answer = recyclable(&here);
+        let _ = std::fs::remove_file(&here);
+
+        assert_eq!(answer, Ok(()));
+    }
+
+    /// The backstop for a file larger than the bin: the shell asks rather than
+    /// deleting it silently.
+    #[cfg(windows)]
+    #[test]
+    fn the_shell_is_asked_to_warn_before_a_permanent_delete() {
+        use windows::Win32::UI::Shell::FOF_WANTNUKEWARNING;
+
+        assert_ne!(RECYCLE_FLAGS.0 & FOF_WANTNUKEWARNING.0, 0);
     }
 }

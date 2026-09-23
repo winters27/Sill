@@ -4595,6 +4595,148 @@ if (tracked.status !== 0) {
 }
 
 /*
+ * A widget that keeps time stops when the launcher is put away.
+ *
+ * The rule above cannot see a `setTimeout` that re-arms itself, and says why.
+ * The widgets are the one place that shape is certain to appear, because a
+ * clock is exactly a timeout re-armed at every boundary, and both clocks kept
+ * waking the machine once a minute for a launcher nobody could see. A widget
+ * is small enough that the right answer is readable from its imports: any
+ * timer or animation frame in one is in a file that listens for the hide.
+ */
+{
+  let widgets = 0;
+
+  for (const file of sources("src/lib/widgets")) {
+    if (!file.endsWith(".svelte") && !file.endsWith(".ts")) continue;
+    if (file.endsWith(".test.ts")) continue;
+
+    const text = readFileSync(file, "utf8");
+    const timer = /\b(setTimeout|setInterval|requestAnimationFrame)\s*\(/.exec(text);
+    if (!timer) continue;
+
+    widgets += 1;
+
+    if (!/\b(whenHidden|pollWhileVisible)\b/.test(text)) {
+      fail(
+        file,
+        lineOf(text, timer.index),
+        `a widget with \`${timer[1]}\` and no \`whenHidden\` or ` +
+          "`pollWhileVisible`, so it goes on waking the machine while the " +
+          "launcher is put away. Stop it on `whenHidden` and start it again on " +
+          "`whenVisible`, as the clocks do",
+      );
+    }
+  }
+
+  if (widgets === 0) {
+    fail(
+      "scripts/verify-source.mjs",
+      null,
+      "no widget keeps time any more, so the widget timer rule checks nothing",
+    );
+  }
+}
+
+/*
+ * The launcher changes mode in one place.
+ *
+ * `enterMode` supersedes every search started for the mode being left, lets
+ * go of a running command, and forgets an Enter that was waiting. A mode set
+ * directly skipped all three, and the shape of the bugs that caused was an
+ * old answer drawn into a new mode, and an extension left running behind the
+ * switcher. There were forty-eight direct assignments; there is one.
+ */
+{
+  const page = "src/routes/+page.svelte";
+  const text = readFileSync(page, "utf8");
+
+  for (const found of text.matchAll(/^[ \t]*mode = [^\n]*;/gm)) {
+    if (/^[ \t]*mode = next;/.test(found[0])) continue;
+
+    fail(
+      page,
+      lineOf(text, found.index ?? 0),
+      "the mode is set directly rather than through `enterMode`, so a search " +
+        "for the mode being left can still land in this one",
+    );
+  }
+}
+
+/*
+ * A flat colour is painted as a colour, never as a gradient of one colour.
+ *
+ * `linear-gradient(var(--tint), var(--tint))` was how a translucent wash got
+ * layered over a base, and Chromium dithers every gradient whose colour is
+ * not opaque, the two identical stops included. On Sill's near-black surfaces
+ * that is a fixed two-pixel checker, the crosshatch Brandon saw on every
+ * window and popover: measured in Edge, 1.26 of 2x2 checker energy on the
+ * window tint as a gradient and 0.000 as a colour. Mix the wash into
+ * `background-color` instead (`--window-fill`, `.sill-menu`), or, for an
+ * image layer that cannot read a token, use a one-rectangle SVG (`--sheen`).
+ */
+{
+  const stops = (args) => {
+    const parts = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < args.length; i++) {
+      const c = args[i];
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+      else if (c === "," && depth === 0) {
+        parts.push(args.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    parts.push(args.slice(start).trim());
+    // A direction is not a stop.
+    if (/^(to\s|-?[\d.]+(deg|turn|rad|grad)\b)/.test(parts[0])) parts.shift();
+    return parts;
+  };
+
+  let gradients = 0;
+
+  for (const file of sources("src")) {
+    const ext = extname(file);
+    if (ext !== ".css" && ext !== ".svelte") continue;
+
+    const text = readFileSync(file, "utf8");
+    const blocks =
+      ext === ".css"
+        ? [[0, text.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " "))]]
+        : styled(text);
+
+    for (const [at, css] of blocks) {
+      for (const found of css.matchAll(/linear-gradient\(/g)) {
+        let depth = 1;
+        let i = found.index + found[0].length;
+        while (i < css.length && depth > 0) {
+          if (css[i] === "(") depth++;
+          else if (css[i] === ")") depth--;
+          i++;
+        }
+        gradients += 1;
+        const colours = stops(css.slice(found.index + found[0].length, i - 1));
+        if (colours.length < 2 || colours.some((c) => c !== colours[0])) continue;
+
+        fail(
+          file,
+          lineOf(text, at + found.index),
+          "a gradient of one colour is dithered into a two-pixel checker when the " +
+            "colour is not opaque. Paint it as a colour: mix it into " +
+            "`background-color`, as `--window-fill` does",
+        );
+      }
+    }
+  }
+
+  if (gradients === 0) {
+    fail("scripts/verify-source.mjs", null, "no gradient found, so the flat-gradient rule checks nothing");
+  }
+}
+
+/*
  * Every form field an extension can declare is a field the form draws.
  *
  * `FormView.svelte` is a chain of `{:else if}` over tags with nothing at the

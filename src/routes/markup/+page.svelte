@@ -37,6 +37,7 @@
     boxOf,
     COLOURS,
     croppedTo,
+    escapeMeans,
     fitted,
     CAN_FILL,
     HIDE_BLOCK,
@@ -63,7 +64,7 @@
     saveMarkup,
     uploadMarkup,
   } from "$lib/capture";
-  import { applyAppearance, getPreferences, setMarkupDefaults } from "$lib/settings";
+  import { applyAppearance, getPreferences, refreshAppearance, setMarkupDefaults } from "$lib/settings";
   import { hint } from "$lib/hint";
 
   let picture = $state<HTMLImageElement | null>(null);
@@ -120,6 +121,9 @@
    * crop moves.
    */
   let crop = $state<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  /** When a first Escape asked to discard, so a second can confirm it. */
+  let discardArmedAt: number | null = null;
   /** Where the badges start counting. */
   let stepFrom = $state(1);
 
@@ -996,13 +1000,30 @@
 
     if (event.key === "Escape") {
       event.preventDefault();
-      // Escape lets go of a mark before it closes the window, so it is never
-      // one keystroke from losing the work.
-      if (chosen >= 0) {
+      // Escape lets go of a mark before it closes the window, and asks again
+      // before it throws marks away, so it is never one keystroke from losing
+      // the work. See `escapeMeans`.
+      const means = escapeMeans({
+        marks: shapes.length,
+        cropped: crop !== null,
+        chosen,
+        armedAt: discardArmedAt,
+        now: performance.now(),
+      });
+
+      if (means === "deselect") {
         chosen = -1;
         paint();
         return;
       }
+
+      if (means === "arm") {
+        discardArmedAt = performance.now();
+        status = "Press Escape again to discard your marks";
+        return;
+      }
+
+      discardArmedAt = null;
       void cancelMarkup();
       return;
     }
@@ -1088,7 +1109,10 @@
       });
 
     void load();
-    void listen("sill://markup", () => void load()).then((stop) => (off = stop));
+    void listen("sill://markup", () => {
+      void load();
+      void refreshAppearance();
+    }).then((stop) => (off = stop));
 
     // The picture is fitted to the window, so it has to be refitted when the
     // window changes size.

@@ -14,8 +14,37 @@
   import Instead from "$lib/components/Instead.svelte";
   import Chord from "$lib/components/Chord.svelte";
   import { standing } from "$lib/instead";
+  import { PAGE_KEYS } from "$lib/keys";
 
-  let sections = $state<KeySection[]>([]);
+  /**
+   * What Rust says can be bound, then what the launcher answers itself.
+   *
+   * The second half is written beside the handler that implements it, in
+   * `PAGE_KEYS`, because those keys are decided in the page and never reach
+   * Rust as a binding.
+   */
+  let bound = $state<KeySection[]>([]);
+  const sections = $derived<KeySection[]>([
+    ...bound,
+    ...PAGE_KEYS.map((section) => ({
+      title: section.title,
+      keys: section.keys.map((key) => ({ ...key, changed: false, contested: false, refused: false })),
+    })),
+  ]);
+  let sheet = $state<HTMLDivElement | null>(null);
+
+  /**
+   * Scrolls the reference by a step, for the arrow keys.
+   *
+   * The sheet is a page to read rather than a list to walk, so the keys that
+   * walk a list move the page instead. The search field keeps focus the whole
+   * time, which is why this is asked for rather than left to the browser.
+   */
+  export function scrollBy(steps: number, page = false) {
+    if (!sheet) return;
+    const step = page ? sheet.clientHeight * 0.9 : 48;
+    sheet.scrollBy({ top: steps * step });
+  }
   let failed = $state<string | null>(null);
   let loading = $state(true);
 
@@ -25,7 +54,7 @@
     keyboardReference()
       .then((found) => {
         if (!current) return;
-        sections = found;
+        bound = found;
         loading = false;
       })
       .catch((err) => {
@@ -45,7 +74,7 @@
   const tone = $derived(standing({ failed: failed !== null, loading, count }));
 </script>
 
-<div class="sheet">
+<div class="sheet" bind:this={sheet}>
   {#if tone === "content"}
     {#each sections as section (section.title)}
       <section>
@@ -56,7 +85,11 @@
               <dt><Chord chord={key.chord} /></dt>
               <dd>
                 {key.does}
-                {#if key.contested}
+                {#if key.refused}
+                  <!-- Set and doing nothing, which the sheet must not present
+                       as a key that works. -->
+                  <span class="note">Windows would not register this key</span>
+                {:else if key.contested}
                   <span class="note">another action takes this key</span>
                 {:else if key.changed}
                   <span class="note">changed by you</span>

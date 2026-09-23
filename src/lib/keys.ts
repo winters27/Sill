@@ -195,3 +195,57 @@ export function chordFor(
   const chord = chordFrom(event as KeyboardEvent);
   return chord ? { chord } : { refused: "That key cannot be a shortcut" };
 }
+
+/**
+ * The keys the launcher window answers itself, for the keyboard reference.
+ *
+ * The reference is assembled in Rust from everything that can be bound, and
+ * these cannot: they are decided in the launcher page's own key handler,
+ * depend on what is on screen, and never reach Rust as a binding. Left out,
+ * the sheet did not mention Tab, `?`, Ctrl+Z or any of the clipboard's keys,
+ * which were therefore discoverable only by reading the source.
+ *
+ * Kept here, beside the chord helpers, rather than in Rust, because the
+ * handler that implements each one is in the page, and the list has to change
+ * when it does: add a key to `onKeydown` in `src/routes/+page.svelte`, add it
+ * here.
+ */
+export const PAGE_KEYS: { title: string; keys: { chord: string; does: string }[] }[] = [
+  {
+    title: "In the launcher",
+    keys: [
+      { chord: "Tab", does: "Ask about what is typed, or finish a path" },
+      { chord: "?", does: "Show this reference, on an empty field" },
+      { chord: "Ctrl+,", does: "Open Settings" },
+      { chord: "Ctrl+Z", does: "Undo the action that just ran, when it offers to" },
+      { chord: "Ctrl+1", does: "Open a row by number, Ctrl+1 to Ctrl+9, when switched on" },
+    ],
+  },
+  {
+    title: "In clipboard history",
+    keys: [
+      { chord: "Ctrl+C", does: "Copy the entry without pasting it" },
+      { chord: "Ctrl+P", does: "Pin or unpin the entry" },
+      { chord: "Ctrl+T", does: "Show another kind of entry" },
+      { chord: "Ctrl+Space", does: "Pick the entry, to merge or collect several" },
+      { chord: "Ctrl+M", does: "Merge the picked entries" },
+      { chord: "Delete", does: "Remove the entry, on an empty field; Ctrl+Delete otherwise" },
+    ],
+  },
+  {
+    title: "In a conversation",
+    keys: [
+      { chord: "Ctrl+O", does: "Move the conversation into its own window" },
+      { chord: "Ctrl+N", does: "Start a new conversation" },
+      { chord: "Delete", does: "Forget the conversation, in the list of them" },
+    ],
+  },
+  {
+    title: "In the extension store",
+    keys: [
+      { chord: "Ctrl+R", does: "Fetch the catalogue again" },
+      { chord: "Ctrl+T", does: "Show another kind of listing" },
+      { chord: "Ctrl+Shift+X", does: "Remove the installed extension" },
+    ],
+  },
+];

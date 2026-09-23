@@ -706,6 +706,15 @@ pub(crate) fn apply_dictation(
 
     if !settings.enabled {
         service.disable_hotkey();
+
+        // And the local model goes with it. Switched off, dictation left the
+        // speech server holding the model in memory until its own half-hour
+        // idle limit ran out, which is the cost of a feature that is off.
+        // `try_state` because this also runs at startup, before the server is
+        // managed; there is nothing running then to stop.
+        if let Some(whisper) = app.try_state::<dictation::server::WhisperServer>() {
+            whisper.stop();
+        }
         return;
     }
 
@@ -864,9 +873,31 @@ fn show_tray_menu(app: &AppHandle, cursor: tauri::PhysicalPosition<f64>) {
         return;
     };
 
-    let scale = window.scale_factor().unwrap_or(1.0);
+    /*
+     * The screen the pointer is on, not the one the menu was last shown on.
+     *
+     * It read the window's own current monitor, which is wherever it was the
+     * previous time, so on two screens of different scale the size and the
+     * clamp were taken from the wrong one. And it clamped to the whole monitor
+     * while saying it clamped to the work area.
+     */
+    let monitor = window
+        .monitor_from_point(cursor.x, cursor.y)
+        .ok()
+        .flatten()
+        .or_else(|| window.current_monitor().ok().flatten());
+    let scale = monitor
+        .as_ref()
+        .map(|one| one.scale_factor())
+        .unwrap_or_else(|| window.scale_factor().unwrap_or(1.0));
+
     let (width, height) = TRAY_MENU_SIZE;
     let (w, h) = (width * scale, height * scale);
+
+    // The window is made the size this places, here, so the two cannot drift.
+    // `tauri.conf.json` built it 214 tall against the 206 above, which put an
+    // empty strip under the last row and took the gap below away.
+    let _ = window.set_size(tauri::LogicalSize::new(width, height));
 
     // A gap, so the menu is not welded to the pointer.
     let gap = 8.0 * scale;
@@ -874,13 +905,12 @@ fn show_tray_menu(app: &AppHandle, cursor: tauri::PhysicalPosition<f64>) {
     let mut y = cursor.y - h - gap;
 
     // The work area excludes the taskbar, which is exactly what must not be
-    // covered. Falling back to the full monitor is better than not showing.
-    if let Ok(Some(monitor)) = window.current_monitor() {
-        let area = monitor.size();
-        let origin = monitor.position();
-        let (min_x, min_y) = (f64::from(origin.x), f64::from(origin.y));
-        let max_x = min_x + f64::from(area.width) - w;
-        let max_y = min_y + f64::from(area.height) - h;
+    // covered.
+    if let Some(monitor) = monitor {
+        let area = monitor.work_area();
+        let (min_x, min_y) = (f64::from(area.position.x), f64::from(area.position.y));
+        let max_x = min_x + f64::from(area.size.width) - w;
+        let max_y = min_y + f64::from(area.size.height) - h;
         x = x.clamp(min_x, max_x.max(min_x));
         y = y.clamp(min_y, max_y.max(min_y));
     }

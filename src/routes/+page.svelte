@@ -16,6 +16,7 @@
   import { saveWorkspace } from "$lib/workspaces";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { whenHidden, whenVisible } from "$lib/visible";
+  import { answersCard } from "$lib/approval";
   import { Latency, aroundPaint, type Painted } from "$lib/latency";
   import { forgetUnreadable } from "$lib/status";
   import {
@@ -54,17 +55,27 @@
   import PermissionAsk from "$lib/components/PermissionAsk.svelte";
   import Welcome from "$lib/components/Welcome.svelte";
   import { isBrowsing, selectionAfter, shouldLoadMore } from "$lib/results";
-  import { askedForTheKeys, deleteMeansTheRow, isTyping, typedInto } from "$lib/typing";
+  import {
+    askedForTheKeys,
+    deleteMeansTheRow,
+    holderOf,
+    isTyping,
+    ownsTheKey,
+    typedInto,
+  } from "$lib/typing";
   import { asUrl, isPath, isUrl } from "$lib/typed";
   import { conversationRows as conversationsAsRows } from "$lib/conversations";
   import { selectionRows, type SelectedObject } from "$lib/selection";
   import { fileSearchRow } from "$lib/results";
   import {
     afterLaunch,
+    argumentPrompt,
     behaviourOf,
     drawsItsOwn,
+    enterLabel,
     handlesItsOwnEscape,
     hasRowActions,
+    leavesOnHide,
     searchesOnType,
     type Mode,
   } from "$lib/modes";
@@ -514,7 +525,7 @@
         code: null,
         ended: "finished",
       };
-      mode = "output";
+      enterMode("output");
       query = "";
       selected = 0;
     } catch (err) {
@@ -555,7 +566,11 @@
      * drew from, so the two cannot disagree.
      */
     if (updateProgress.kind === "ready") {
-      void restartForUpdate();
+      // Said when it fails. Otherwise the button reads "Restart" and a press
+      // that could not restart looks exactly like one that has not happened.
+      void restartForUpdate().catch((err: unknown) => {
+        status = `Could not restart for the update: ${err}`;
+      });
       return;
     }
 
@@ -632,6 +647,16 @@
    * narrows everything else here.
    */
   let panelFilter = $state("");
+
+  /** A panel asked for before the actions it shows had arrived. */
+  let panelWanted = false;
+
+  /** Opens the action panel, always unfiltered and on its first action. */
+  function openPanel() {
+    panelFilter = "";
+    panelSelected = 0;
+    panelOpen = true;
+  }
   let panelSelected = $state(0);
   let prefs = $state<Preferences | null>(null);
 
@@ -1000,6 +1025,19 @@
     }
   });
 
+  /*
+   * The highlight stays on a row that exists.
+   *
+   * A list that narrows under the cursor left the highlight past its end: arrow
+   * to the tenth conversation, type until three are left, and nothing is
+   * highlighted, so Enter and Delete quietly do nothing. Pulled back to the
+   * last row rather than the first, because that is the nearest one to where
+   * it was.
+   */
+  $effect(() => {
+    if (count > 0 && selected >= count) selected = count - 1;
+  });
+
   /**
    * Whether the field is filtering a list that is on screen and walkable.
    *
@@ -1151,6 +1189,40 @@
   let lastUndo = $state<number | null>(null);
 
   /**
+   * What the field said when the undo was offered.
+   *
+   * The offer holds for as long as the field still says that, which covers
+   * the one place it is wanted: an action ran, and the next thing done is
+   * Ctrl+Z. Typing anything withdraws it, because from then on Ctrl+Z is
+   * somebody undoing their own typing.
+   */
+  let undoFor: string | null = null;
+  let undoSeen: number | null = null;
+
+  $effect(() => {
+    const offer = lastUndo;
+    const typed = query;
+
+    if (offer === null) {
+      undoSeen = null;
+      return;
+    }
+
+    // A new offer: remember the field, and say the key once, beside the line
+    // the action already wrote. Nothing else in the launcher mentions it, and
+    // an undo nobody knows about is one nobody uses.
+    if (offer !== undoSeen) {
+      undoSeen = offer;
+      undoFor = typed;
+      const said = untrack(() => status);
+      if (said && !said.includes("Ctrl+Z")) status = `${said} · Ctrl+Z to undo`;
+      return;
+    }
+
+    if (typed !== undoFor) lastUndo = null;
+  });
+
+  /**
    * The kind the action list on screen belongs to.
    *
    * The comment below used to say the effect was "keyed on the kind, so
@@ -1217,10 +1289,22 @@
 
     askedFor = wanted;
 
-    void actionsFor(command.mode, asTarget(command)).then((list) => {
-      // The selection moved while this was in flight.
-      if (askedFor === wanted) rootActions = list;
-    });
+    void actionsFor(command.mode, asTarget(command))
+      .then((list) => {
+        // The selection moved while this was in flight.
+        if (askedFor !== wanted) return;
+
+        rootActions = list;
+        if (panelWanted) {
+          panelWanted = false;
+          openPanel();
+        }
+      })
+      .catch(() => {
+        // Nothing to offer rather than an unhandled rejection. Ctrl+K on the
+        // row then says there are no actions here, which is true of this read.
+        if (askedFor === wanted) rootActions = [];
+      });
   });
 
   /**
@@ -1236,6 +1320,56 @@
 
   /** The file query waiting to run, so a burst of typing runs one, not ten. */
   let fileTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * Which search is on its way, while one is.
+   *
+   * Enter reads the row under the cursor, and while a search is in flight
+   * that row belongs to the query before the last keystroke. Pressing Enter
+   * quickly after typing opened whatever the older list had selected, which
+   * the screenshot runbook recorded as a run that meant to open one program
+   * and opened Clipboard History instead, twice, with nothing looking wrong.
+   */
+  let answering: number | null = null;
+
+  /** The search an Enter is waiting for, when it arrived before the answer. */
+  let openWhenShown: number | null = null;
+
+  /**
+   * The Enter still being carried out, so a hide can wait for it.
+   *
+   * A snippet with holes pastes and then steps aside, and the window being
+   * hidden is how its hide arrives. Resetting the mode in that moment would
+   * pull the answers out from under the paste.
+   */
+  let inFlight: Promise<void> | null = null;
+
+  /** Where the key sheet was opened from, which is where Escape returns. */
+  let keysFrom: Mode = "root";
+  let keySheet = $state<ReturnType<typeof KeySheet> | null>(null);
+  let permissionAsk = $state<ReturnType<typeof PermissionAsk> | null>(null);
+
+  /**
+   * One way into a mode.
+   *
+   * Every mode change goes through here so that a search started for the
+   * mode being left cannot land in the one being entered. `sill://shown`
+   * arrives before `sill://act-on` and `sill://switcher`, so a root search
+   * started by a summon could otherwise answer after the selection rows were
+   * drawn and replace them. A new id makes every older answer stale.
+   */
+  function enterMode(next: Mode) {
+    // Leaving a command by any route lets go of it. The switcher key, a
+    // selection, a link and the rows this window opens itself all changed the
+    // mode and kept the session, and the extension's own `closed` later ran
+    // `goBack` in whatever mode was showing by then.
+    if (mode === "command" && next !== "command") leaveCommand();
+
+    ++searchId;
+    clearTimeout(fileTimer);
+    openWhenShown = null;
+    mode = next;
+  }
 
   /**
    * How long the file half waits before it runs.
@@ -1287,7 +1421,39 @@
    */
   const TROUBLE = "search failed: ";
 
+  /**
+   * Searches for what is typed, and carries out an Enter that was waiting.
+   *
+   * A wrapper rather than a change to the search itself, because the search
+   * has a dozen ways to finish and every one of them has to release a waiting
+   * Enter. `finally` is the one place all of them pass.
+   *
+   * The Enter runs only if the answer made it to the screen for the query in
+   * the field. A search that failed, or one that found no reason to draw
+   * anything, leaves the older rows up, and running one of those is the bug
+   * this exists to prevent.
+   */
   async function refreshRoot() {
+    const answer = searchNow();
+    // `searchNow` takes its id before its first await, so this is that id.
+    const id = searchId;
+    answering = id;
+
+    try {
+      await answer;
+    } finally {
+      if (answering === id) {
+        answering = null;
+
+        if (openWhenShown === id) {
+          openWhenShown = null;
+          if (showing === query) void openSelected();
+        }
+      }
+    }
+  }
+
+  async function searchNow() {
     const current = query;
     const id = ++searchId;
 
@@ -1543,7 +1709,7 @@
     // is, with the same field and the same keys.
     if (id === "sill:appVolume") {
       void recordUse(id, typed);
-      mode = "appVolume";
+      enterMode("appVolume");
       selected = 0;
       query = "";
       return true;
@@ -1551,7 +1717,7 @@
 
     if (id === "sill:processes") {
       void recordUse(id, typed);
-      mode = "processes";
+      enterMode("processes");
       selected = 0;
       query = "";
       return true;
@@ -1562,7 +1728,7 @@
     // feature cost nothing until it is asked for.
     if (id === "sill:controls") {
       void recordUse(id, typed);
-      mode = "controls";
+      enterMode("controls");
       selected = 0;
       query = "";
       return true;
@@ -1574,7 +1740,7 @@
     // field, and the field has to still be on screen.
     if (id === "sill:save-workspace") {
       void recordUse(id, typed);
-      mode = "namingWorkspace";
+      enterMode("namingWorkspace");
       selected = 0;
       query = "";
       return true;
@@ -1582,7 +1748,7 @@
 
     if (id === "sill:widgets") {
       void recordUse(id, typed);
-      mode = "widgets";
+      enterMode("widgets");
       selected = 0;
       query = "";
       return true;
@@ -1590,7 +1756,7 @@
 
     if (id === "sill:emoji") {
       void recordUse(id, typed);
-      mode = "emoji";
+      enterMode("emoji");
       selected = 0;
       query = "";
       return true;
@@ -1665,7 +1831,7 @@
     // it is reached for.
     if (id === "sill:clipboard") {
       void recordUse(id, typed);
-      mode = "clipboard";
+      enterMode("clipboard");
       selected = 0;
       query = "";
       return true;
@@ -1683,7 +1849,7 @@
     if (id === "sill:store" || id === "sill:store-updates") {
       void recordUse(id, typed);
       storeOnUpdates = id === "sill:store-updates";
-      mode = "store";
+      enterMode("store");
       selected = 0;
       query = "";
       return true;
@@ -1701,7 +1867,7 @@
    * the mode would leave it resident until the launcher was restarted.
    */
   async function leaveStore() {
-    mode = "root";
+    enterMode("root");
     selected = 0;
     query = "";
     storeOnUpdates = false;
@@ -1744,7 +1910,7 @@
     if (!said) return;
 
     greeting = said;
-    mode = "welcome";
+    enterMode("welcome");
     selected = 0;
     query = "";
   }
@@ -1782,12 +1948,13 @@
         return;
 
       case "showKeys":
-        mode = "keys";
+        keysFrom = "welcome";
+        enterMode("keys");
         selected = 0;
         return;
 
       case "finish":
-        mode = "root";
+        enterMode("root");
         selected = 0;
         query = "";
         await refreshRoot();
@@ -1795,7 +1962,33 @@
     }
   }
 
-  async function openSelected() {
+  /**
+   * Enter, on whatever is under the cursor.
+   *
+   * Two things are decided here before anything runs. An Enter that arrives
+   * while the list is still answering an older query waits for the answer to
+   * this one, rather than opening a row the person never saw. And the run is
+   * remembered while it lasts, so a hide that arrives in the middle of it
+   * waits too.
+   */
+  function openSelected(): Promise<void> {
+    if (searchesOnType(mode) && answering !== null && answering === searchId) {
+      openWhenShown = searchId;
+      return Promise.resolve();
+    }
+
+    const run = openSelectedNow();
+    inFlight = run;
+    void run
+      .finally(() => {
+        if (inFlight === run) inFlight = null;
+      })
+      .catch(() => {});
+
+    return run;
+  }
+
+  async function openSelectedNow() {
     if (mode === "welcome") {
       await runWelcomeStep(selected);
       return;
@@ -1866,7 +2059,7 @@
         try {
           status = (await runObjectAction("sill.window.layout", asked.of, query)).message;
           awaiting = null;
-          mode = "root";
+          enterMode("root");
           query = "";
           selected = 0;
           await dismiss();
@@ -1886,7 +2079,7 @@
           status = outcome.message;
           lastUndo = outcome.undoneBy ?? null;
           awaiting = null;
-          mode = "clipboard";
+          enterMode("clipboard");
           query = "";
           selected = 0;
           await clipboardView?.refresh();
@@ -1907,7 +2100,7 @@
         try {
           status = (await runObjectAction("sill.file.rename", asked.of, query)).message;
           awaiting = null;
-          mode = "root";
+          enterMode("root");
           query = "";
           selected = 0;
           await refreshRoot();
@@ -1953,7 +2146,7 @@
       }
 
       naming = null;
-      mode = "root";
+      enterMode("root");
       query = "";
       selected = 0;
       await refreshRoot();
@@ -1971,7 +2164,7 @@
         status = `${err}`;
       }
 
-      mode = "root";
+      enterMode("root");
       query = "";
       selected = 0;
       await refreshRoot();
@@ -1989,7 +2182,7 @@
         status = `${err}`;
       }
 
-      mode = "clipboard";
+      enterMode("clipboard");
       query = "";
       selected = 0;
       return;
@@ -2011,12 +2204,10 @@
      * in flight would interleave their answers into one paragraph.
      */
     if (mode === "ai") {
-      // A card is the only thing on screen worth answering, so Enter answers
-      // it rather than sending a question into a turn that is not listening.
-      if (aiLive.asked) {
-        decide(true);
-        return;
-      }
+      // A card is the only thing on screen worth answering, and it is answered
+      // by its own keys in `onKeydown` or its own buttons, never by the chin's
+      // Send: a click meant for sending is not a yes.
+      if (aiLive.asked) return;
 
       const next = query.trim();
       if (!next || aiLive.asking) return;
@@ -2043,7 +2234,7 @@
         lastUndo = outcome.undoneBy ?? null;
 
         moving = null;
-        mode = "root";
+        enterMode("root");
         selected = 0;
         query = "";
         await refreshRoot();
@@ -2299,7 +2490,7 @@
          */
         if (updateParked) {
           storeOnUpdates = true;
-          mode = "store";
+          enterMode("store");
           selected = 0;
           query = "";
           return;
@@ -2380,7 +2571,7 @@
             fields: asks,
             given: [],
           };
-          mode = "argument";
+          enterMode("argument");
           selected = 0;
           query = "";
           return;
@@ -2418,7 +2609,7 @@
             fields: holes,
             filled: {},
           };
-          mode = "argument";
+          enterMode("argument");
           selected = 0;
           query = "";
           return;
@@ -2435,7 +2626,7 @@
           title: command.title,
           link: command.subtitle,
         };
-        mode = "argument";
+        enterMode("argument");
         selected = 0;
         query = "";
         return;
@@ -2651,7 +2842,7 @@
           icon: command.icon ?? null,
           panel: command.panel ?? null,
         };
-        mode = "command";
+        enterMode("command");
         selected = 0;
         query = "";
         status = "";
@@ -2711,6 +2902,20 @@
    * whatever has been overridden, and Rust is where that is resolved.
    */
   let navKeys = $state<Record<string, MoveKey>>({});
+
+  /**
+   * The chord the preset gives the action panel, for the chin to name.
+   *
+   * Ctrl+K whenever the preset still opens the panel with it, which is the
+   * key people know; otherwise the preset's own, which is Alt+Enter under vim,
+   * where Ctrl+K moves up.
+   */
+  const actionsChord = $derived.by(() => {
+    const opening = Object.entries(navKeys)
+      .filter(([, move]) => move === "actions")
+      .map(([chord]) => chord);
+    return opening.includes("Ctrl+K") ? "Ctrl+K" : (opening[0] ?? "Ctrl+K");
+  });
 
   /**
    * How far a screenful moves.
@@ -2835,7 +3040,7 @@
       status = `${err}`;
     }
 
-    mode = "root";
+    enterMode("root");
     selected = 0;
     query = "";
   }
@@ -2892,7 +3097,7 @@
               title: text.slice(0, 40),
             },
           };
-          mode = "argument";
+          enterMode("argument");
           selected = 0;
           query = renaming ? (whole?.title ?? "") : text;
           return;
@@ -2927,7 +3132,7 @@
         case "Sill.ClipboardCollect":
           // The field becomes the name, the way it does for a quicklink that
           // needs a query. One way of asking for a word, not two.
-          mode = "collection";
+          enterMode("collection");
           query = "";
           panelOpen = false;
           return;
@@ -3001,7 +3206,7 @@
           title: command.title,
           of: asTarget(command),
         };
-        mode = "destination";
+        enterMode("destination");
         selected = 0;
         query = "";
         await refreshRoot();
@@ -3018,7 +3223,7 @@
           link: "Which layout?",
           of: asTarget(command),
         };
-        mode = "argument";
+        enterMode("argument");
         selected = 0;
         query = "";
         return;
@@ -3031,7 +3236,7 @@
        */
       if (chosen === "sill.row.alias") {
         naming = { id: command.id, title: command.title, of: asTarget(command) };
-        mode = "alias";
+        enterMode("alias");
         // The name it already carries, so changing one is an edit.
         query = command.alias ?? "";
         selected = 0;
@@ -3058,7 +3263,7 @@
           link: command.subtitle,
           of: asTarget(command),
         };
-        mode = "argument";
+        enterMode("argument");
         selected = 0;
         // The name it already has, so a small change is a small edit rather
         // than typing the whole thing again.
@@ -3312,7 +3517,7 @@
       return;
     }
 
-    mode = "conversations";
+    enterMode("conversations");
     selected = 0;
     query = "";
   }
@@ -3336,7 +3541,7 @@
     selected = Math.min(selected, Math.max(0, conversationRows.length - 1));
 
     if (pastConversations.length === 0) {
-      mode = "root";
+      enterMode("root");
       status = "Nothing left to go back to.";
       await refreshRoot();
     }
@@ -3406,7 +3611,7 @@
       aiLive.spent = null;
     }
 
-    mode = "ai";
+    enterMode("ai");
     selected = 0;
     aiWhoNot = "";
     begin(aiLive);
@@ -3440,7 +3645,7 @@
     }
 
     cameFrom = title;
-    mode = "ai";
+    enterMode("ai");
     selected = 0;
     aiWhoNot = "";
     reset(aiLive);
@@ -3491,19 +3696,22 @@
     switcherPreview?.drop();
     moving = null;
     awaiting = null;
-    mode = "selection";
+    enterMode("selection");
     commands = rows;
     selected = 0;
     query = "";
-    panelOpen = rows.length === 1;
-    panelSelected = 0;
+    // Opened once the row's actions have arrived, by the effect that fetches
+    // them. Opened here, it showed "No actions" for a moment and an Enter in
+    // that moment closed it without running anything.
+    panelOpen = false;
+    panelWanted = rows.length === 1;
   }
 
   async function openSwitcher() {
     panelOpen = false;
     // Whatever was on screen was a picture of a moment that has passed.
     switcherPreview?.drop();
-    mode = "switcher";
+    enterMode("switcher");
     selected = 0;
     query = "";
     commands = [];
@@ -3515,8 +3723,20 @@
     panelOpen = false;
 
     if (mode === "argument") {
+      // A rename or a correction of a clipboard entry was asked from the
+      // clipboard, and Enter returns there. Escape went to the root, which
+      // made changing your mind cost the history you were in.
+      const fromClipboard = awaiting?.what === "clipRename" || awaiting?.what === "clipEdit";
       awaiting = null;
-      mode = "root";
+
+      if (fromClipboard) {
+        enterMode("clipboard");
+        selected = 0;
+        query = "";
+        return;
+      }
+
+      enterMode("root");
       selected = 0;
       query = "";
       await refreshRoot();
@@ -3538,7 +3758,7 @@
       }
 
       output = null;
-      mode = "root";
+      enterMode("root");
       selected = 0;
       query = "";
       await refreshRoot();
@@ -3563,7 +3783,7 @@
 
       void aiRefusePending();
 
-      mode = "root";
+      enterMode("root");
       selected = 0;
       // The search this was opened from, so leaving lands where it started
       // rather than on an empty list.
@@ -3585,7 +3805,7 @@
     if (mode !== "root" && !handlesItsOwnEscape(mode)) {
       // Whatever was being moved is no longer being moved.
       moving = null;
-      mode = "root";
+      enterMode("root");
       selected = 0;
       query = "";
       await refreshRoot();
@@ -3593,7 +3813,7 @@
     }
 
     if (mode === "conversations") {
-      mode = "root";
+      enterMode("root");
       selected = 0;
       query = "";
       await refreshRoot();
@@ -3618,7 +3838,7 @@
         return;
       }
 
-      mode = "root";
+      enterMode("root");
       selected = 0;
       query = "";
       await refreshRoot();
@@ -3629,7 +3849,7 @@
     // than dropping out of the launcher entirely.
     if (mode === "alias") {
       naming = null;
-      mode = "root";
+      enterMode("root");
       query = "";
       selected = 0;
       await refreshRoot();
@@ -3639,7 +3859,7 @@
     // Naming a collection steps back to the history with the picks intact,
     // so changing your mind about the name does not undo the picking.
     if (mode === "collection") {
-      mode = "clipboard";
+      enterMode("clipboard");
       query = "";
       selected = 0;
       return;
@@ -3658,22 +3878,10 @@
     }
 
     if (mode === "command") {
-      const previous = session;
-      session = null;
-      running = null;
-      // The stack went with the worker. Left behind, the next command opened
-      // would start life believing it was two screens deep in the last one.
-      nav = NOT_NAVIGATED;
-      mode = "root";
+      const previous = takeCommand();
+      enterMode("root");
       selected = 0;
       query = "";
-      toast = null;
-      tree.reset();
-      version++;
-      // A throttled call still waiting would fire at a session that is on its
-      // way to being unloaded, and answer with an error about a command
-      // nobody is looking at any more.
-      relay.cancel();
       await refreshRoot();
 
       // Unloaded after the UI has moved on, so tearing down a worker never
@@ -3682,10 +3890,100 @@
       return;
     }
 
+    // Back from the key sheet to wherever it was opened, rather than out of
+    // the launcher. From the welcome that is the welcome, which would
+    // otherwise be gone for good: it is taken once and not offered again.
+    if (mode === "keys") {
+      enterMode(keysFrom);
+      query = "";
+      selected = 0;
+      if (keysFrom === "root") await refreshRoot();
+      return;
+    }
+
     void dismiss();
   }
 
+  /**
+   * Lets go of the command on screen, and hands back its session to unload.
+   *
+   * Everything a command leaves in the page goes here, so leaving one by any
+   * route leaves nothing behind.
+   */
+  function takeCommand(): string | null {
+    const previous = session;
+    session = null;
+    running = null;
+    // The stack went with the worker. Left behind, the next command opened
+    // would start life believing it was two screens deep in the last one.
+    nav = NOT_NAVIGATED;
+    toast = null;
+    tree.reset();
+    version++;
+    // A throttled call still waiting would fire at a session that is on its
+    // way to being unloaded, and answer with an error about a command nobody
+    // is looking at any more.
+    relay.cancel();
+    return previous;
+  }
+
+  /**
+   * Leaves a running command for some other mode, unloading it.
+   *
+   * Called by `enterMode`, so it cannot be forgotten by a new way in.
+   */
+  function leaveCommand() {
+    if (mode !== "command") return;
+
+    const previous = takeCommand();
+    if (previous) void unloadExtension(previous);
+  }
+
+  /**
+   * Back to the root list, from whatever was on screen, without the Escape.
+   *
+   * What a hide does to a mode that does not resume (see `leavesOnHide`), so
+   * the next summon lands on the root rather than on a question nobody is
+   * asking any more.
+   */
+  function leaveToRoot() {
+    if (mode === "switcher") switcherPreview?.forget();
+
+    moving = null;
+    awaiting = null;
+    naming = null;
+    panelOpen = false;
+    panelFilter = "";
+    panelSelected = 0;
+    enterMode("root");
+    selected = 0;
+    query = "";
+    void refreshRoot();
+  }
+
   function onKeydown(event: KeyboardEvent) {
+    // A key that belongs to an input method's unfinished composition is not
+    // the launcher's: Enter there picks a candidate, it does not open a row.
+    if (event.isComposing || event.keyCode === 229) return;
+
+    /*
+     * A card in the conversation answers Enter and Escape before anything else.
+     *
+     * The field is the composer, so whoever is looking at a card is usually
+     * halfway through typing the next question, and Enter is both "send" and
+     * "allow". The card allows only once it has been on screen long enough to
+     * have been read; see `$lib/approval`. An Enter that comes too soon does
+     * nothing at all, rather than sending the draft into a turn that is
+     * waiting on a question.
+     */
+    if (mode === "ai" && aiLive.asked && (event.key === "Enter" || event.key === "Escape")) {
+      event.preventDefault();
+      const answer = answersCard(event, aiLive.asked, performance.now());
+      if (answer === "allow") decide(true);
+      else if (answer === "refuse") decide(false);
+      return;
+    }
+
     /*
      * A character typed while the field does not have focus still lands in it.
      *
@@ -3745,9 +4043,79 @@
       return;
     }
 
-    // Ctrl+Z takes back the last action that offered it. Most do not, and
-    // the key does nothing rather than claiming to have undone something.
-    if (event.key.toLowerCase() === "z" && (event.ctrlKey || event.metaKey) && lastUndo) {
+    /*
+     * While the panel is open it owns the keyboard.
+     *
+     * Ahead of every key the page gives a meaning of its own: Ctrl+Z, Tab,
+     * `?`, and Delete on a conversation. With the panel open those are keys
+     * typed into its filter, and reading them as the page's own turned a
+     * Delete meant for a letter into a conversation forgotten for good.
+     *
+     * Except for the chord that opened it, which closes it again. That used to
+     * be a hardcoded Ctrl+K ahead of everything, which is what made the vim
+     * preset a lie: Rust binds Ctrl+K to Previous under vim and says so in a
+     * comment, and the window took the key anyway. The chord is asked for
+     * here, so whatever the preset says opens the panel also closes it, and
+     * Alt+Enter works for the first time.
+     */
+    if (panelOpen) {
+      if (chordFrom(event) && navKeys[chordFrom(event)!] === "actions") {
+        event.preventDefault();
+        panelOpen = false;
+        return;
+      }
+
+      // Nothing to move through, so the arrows would divide by zero.
+      const count = Math.max(1, shownActions.length);
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        panelSelected = (panelSelected + 1) % count;
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        panelSelected = (panelSelected - 1 + count) % count;
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        void runAction(panelSelected);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        // The filter goes first. Escape with something typed means "show me
+        // all of them again", and closing instead loses the panel as well as
+        // the filter for one keystroke.
+        if (panelFilter) {
+          panelFilter = "";
+          panelSelected = 0;
+        } else {
+          // Closes the panel only; the launcher stays put.
+          panelOpen = false;
+        }
+      } else if (event.key === "Tab") {
+        // Swallowed for the reason the page swallows it: left to the browser
+        // it takes focus out of the window, and the launcher dismisses itself.
+        event.preventDefault();
+      }
+      // Everything else falls through to the panel's own field, which has
+      // focus while it is open.
+      return;
+    }
+
+    /*
+     * Ctrl+Z takes back the last action that offered it. Most do not, and
+     * the key does nothing rather than claiming to have undone something.
+     *
+     * Only from the launcher's own field, and only while it still says what
+     * it said when the action ran. Ctrl+Z is also how text is undone, and an
+     * offer that outlived the moment it was made moved a file back or put the
+     * windows where they had been when somebody meant to undo a letter, hours
+     * later. Typing, or focus in an extension's own field, withdraws it.
+     */
+    if (
+      event.key.toLowerCase() === "z" &&
+      (event.ctrlKey || event.metaKey) &&
+      lastUndo &&
+      query === undoFor &&
+      document.activeElement === searchInput
+    ) {
       event.preventDefault();
       const token = lastUndo;
       lastUndo = null;
@@ -3816,7 +4184,8 @@
      */
     if (mode === "root" && askedForTheKeys(event, query)) {
       event.preventDefault();
-      mode = "keys";
+      keysFrom = "root";
+      enterMode("keys");
       return;
     }
 
@@ -3866,53 +4235,6 @@
     }
 
     /*
-     * While the panel is open it owns the keyboard.
-     *
-     * Except for the chord that opened it, which closes it again. That used to
-     * be a hardcoded Ctrl+K ahead of everything, which is what made the vim
-     * preset a lie: Rust binds Ctrl+K to Previous under vim and says so in a
-     * comment, and the window took the key anyway. The chord is asked for
-     * here, so whatever the preset says opens the panel also closes it, and
-     * Alt+Enter works for the first time.
-     */
-    if (panelOpen) {
-      if (chordFrom(event) && navKeys[chordFrom(event)!] === "actions") {
-        event.preventDefault();
-        panelOpen = false;
-        return;
-      }
-
-      // Nothing to move through, so the arrows would divide by zero.
-      const count = Math.max(1, shownActions.length);
-
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        panelSelected = (panelSelected + 1) % count;
-      } else if (event.key === "ArrowUp") {
-        event.preventDefault();
-        panelSelected = (panelSelected - 1 + count) % count;
-      } else if (event.key === "Enter") {
-        event.preventDefault();
-        void runAction(panelSelected);
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        // The filter goes first. Escape with something typed means "show me
-        // all of them again", and closing instead loses the panel as well as
-        // the filter for one keystroke.
-        if (panelFilter) {
-          panelFilter = "";
-          panelSelected = 0;
-        } else {
-          // Closes the panel only; the launcher stays put.
-          panelOpen = false;
-        }
-      }
-      // Everything else falls through to the panel's own field, which has
-      // focus while it is open.
-      return;
-    }
-
-    /*
      * The store's own keys, which only exist while it is open.
      *
      * Ctrl rather than bare letters throughout, because the launcher's search
@@ -3950,7 +4272,12 @@
     // naming a collection: Ctrl and M there is somebody typing a name.
     if (mode === "clipboard") {
       const ctrl = event.ctrlKey || event.metaKey;
-      if (ctrl && event.key.toLowerCase() === "c") {
+      // With part of the query selected, Ctrl+C copies that, as it would in
+      // any field: the selection guard further down says so, and this chord
+      // ran before it could.
+      const selectingText =
+        !!searchInput && searchInput.selectionStart !== searchInput.selectionEnd;
+      if (ctrl && event.key.toLowerCase() === "c" && !selectingText) {
         event.preventDefault();
         void clipboardView?.paste(false);
         return;
@@ -4046,6 +4373,10 @@
       }
     }
 
+    // A text area, a drop-down, or a field with a caret to move keeps the keys
+    // it edits with. See `ownsTheKey`.
+    if (ownsTheKey(holderOf(document.activeElement, searchInput), event, query)) return;
+
     // One lookup rather than a chain of comparisons. Which chord means what is
     // decided in Rust, so this and the settings screen cannot disagree.
     const chord = chordFrom(event);
@@ -4053,6 +4384,16 @@
     if (!movement) return;
 
     event.preventDefault();
+
+    // The key sheet is a page, so the keys that walk a list move it instead.
+    if (mode === "keys") {
+      if (movement === "next") keySheet?.scrollBy(1);
+      else if (movement === "previous") keySheet?.scrollBy(-1);
+      else if (movement === "pageDown") keySheet?.scrollBy(1, true);
+      else if (movement === "pageUp") keySheet?.scrollBy(-1, true);
+      else if (movement === "back") void goBack();
+      return;
+    }
 
     switch (movement) {
       case "next":
@@ -4098,10 +4439,7 @@
         break;
       case "actions":
         if (actions.length) {
-          panelOpen = true;
-          // A fresh panel is an unfiltered one.
-          panelFilter = "";
-          panelSelected = 0;
+          openPanel();
         } else {
           // Never silent: with nothing to show, say so, or a working key
           // press is indistinguishable from a dead one.
@@ -4151,6 +4489,13 @@
     if (searchesOnType(mode)) {
       void refreshRoot();
       return;
+    }
+
+    // A list narrowed by what is typed starts again from its best match, the
+    // way the root list does. Read without tracking: this is about the typing,
+    // and must not run again because the highlight moved.
+    if (mode === "clipboard" || mode === "conversations") {
+      untrack(() => (selected = 0));
     }
 
     /*
@@ -4490,6 +4835,36 @@
         for (const { what, tookUs } of drawn.flush()) {
           void reportPainted(what, tookUs).catch(() => {});
         }
+
+        /*
+         * An open panel is about the moment it was opened in.
+         *
+         * It survived a hide, filter and all, so the next summon came back to
+         * a panel over whatever the launcher was now showing. Closed here
+         * rather than on the summon, so the frame a summon paints is already
+         * the right one.
+         */
+        panelOpen = false;
+        panelFilter = "";
+        panelSelected = 0;
+
+        /*
+         * A mode that exists for one moment does not outlive the hide.
+         *
+         * After whatever Enter is still running, because a snippet with holes
+         * pastes and then steps aside, and its answers must still be there
+         * when the paste reads them. Only if nothing has moved the mode since:
+         * the switcher's own key or a selection can arrive in that time, and
+         * that is a newer instruction than this one.
+         */
+        const leaving = mode;
+        if (leavesOnHide(leaving, prefs?.hotkey.resetOnSummon ?? false)) {
+          void (inFlight ?? Promise.resolve())
+            .catch(() => {})
+            .finally(() => {
+              if (mode === leaving) leaveToRoot();
+            });
+        }
       });
 
       // Through `whenVisible` rather than a `listen` of its own, because an
@@ -4566,6 +4941,22 @@
          * ask anything.
          */
         void checkExtensionUpdates();
+
+        /*
+         * A card that is still up is asked about again, and only then.
+         *
+         * A card can be answered in the chat window, run out its ninety
+         * seconds, or be refused when a turn is left, and nothing tells this
+         * window. It stayed up as a modal over the launcher and took the next
+         * Enter or Escape for a question that was already settled.
+         */
+        permissionAsk?.recheck();
+
+        // The keys that move around, if the first read of them never landed.
+        // Without them the arrows, Enter and Escape do nothing at all.
+        if (Object.keys(navKeys).length === 0) {
+          void navigationChords().then((found) => (navKeys = found));
+        }
 
         // Re-asked on every summon. A file indexer can be started or stopped
         // between two uses of the launcher, and the alternative to asking here
@@ -4693,11 +5084,16 @@
       });
 
       if (disposed) return;
-      clipboardActions = await actionsFor("clipboard");
+      // First, and on its own. The arrows, Enter and Escape exist only in this
+      // map, and it was read fourth: a failure in any of the three reads ahead
+      // of it ended this function and left the launcher unable to move, open
+      // or close for the rest of the run. It never throws; see
+      // `navigationChords`.
+      navKeys = await navigationChords();
+      clipboardActions = await actionsFor("clipboard").catch(() => clipboardActions);
       prefs = await getPreferences();
       applyAppearance(prefs);
       browser = await defaultBrowser();
-      navKeys = await navigationChords();
       past = await queryHistory();
       void refreshWhoAnswers();
       building = await indexBuilding();
@@ -4735,6 +5131,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <main>
+  <div class="sill-chroma" aria-hidden="true"></div>
   <SearchRow
     {mode}
     bind:query
@@ -4743,6 +5140,7 @@
     {selected}
     {browsing}
     awaitingTitle={awaiting?.title}
+    awaitingPlaceholder={awaiting ? argumentPrompt(awaiting.what, query).placeholder : undefined}
     outputTitle={output?.title}
     movingTitle={moving?.title}
     namingTitle={naming?.title}
@@ -4801,12 +5199,8 @@
         -->
         {#if awaiting.what === "snippet"}
           {snippetAsking}
-        {:else if awaiting.what === "rename"}
-          Enter renames it. Escape leaves it as it was.
-        {:else if query.trim()}
-          Enter opens it with what you typed in place of the placeholder.
         {:else}
-          Type the words to search for. They are escaped before they go into the address.
+          {argumentPrompt(awaiting.what, query).hint}
         {/if}
       </p>
     </div>
@@ -4848,7 +5242,7 @@
          Rust from the keys that actually run, so it cannot promise one that
          does not work. -->
     <div class="listing">
-      <KeySheet />
+      <KeySheet bind:this={keySheet} />
     </div>
 
   {:else if mode === "welcome" && greeting}
@@ -5028,15 +5422,21 @@
     {status}
     prefs={prefs ?? null}
     viewTag={view?.tag}
+    primary={enterLabel(mode, view?.tag)}
+    actionsChord={actionsChord}
     hasActions={actions.length > 0}
     onbuiltin={(id) => {
-      const found = commands.find((c) => c.id === `sill:${id}`);
-      if (found) void launchCommand(found.id);
+      // Straight to the command, not through whatever rows happen to be on
+      // screen. It looked the row up in the current results first, so
+      // "Reload Index" did nothing unless a search had just listed it.
+      void launchCommand(`sill:${id}`).catch((err: unknown) => {
+        status = `${err}`;
+      });
     }}
     onrun={() => void openSelected()}
     onactions={() => {
-      panelOpen = !panelOpen;
-      panelSelected = 0;
+      if (panelOpen) panelOpen = false;
+      else openPanel();
     }}
     ontoastaction={(action) => void runExtensionAction(action)}
     update={chinLine(updateProgress)}
@@ -5047,7 +5447,7 @@
     conversation draws its own, so this stands down there. Inside `main`
     rather than beside it, so the window's rounded corners clip its scrim.
   -->
-  <PermissionAsk hidden={mode === "ai"} />
+  <PermissionAsk bind:this={permissionAsk} hidden={mode === "ai"} />
 </main>
 
 <style>
@@ -5078,15 +5478,11 @@
     height: 100vh;
     /* The tint sits on top; Windows composites the acrylic desktop blur
        underneath. An opaque background here would throw that away, and would
-       also be the only way to get subpixel text back. See theme.css. */
-    background-color: color-mix(
-      in srgb,
-      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
-      var(--surface-base)
-    );
-    /* Chroma above the tint. `none` in the themes that paint no wash, and
-       `none` is a valid layer, so there is no conditional here. */
-    background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
+       also be the only way to get subpixel text back. The tint is mixed in
+       as one colour, never a gradient: see `--window-fill` in theme.css. The
+       chroma wash is a layer of its own above it; see `.sill-chroma`. */
+    background-color: var(--window-fill);
+    isolation: isolate;
     border-radius: var(--radius-window);
     /* No border: DWM already clips the window to this radius, so a border here
        only stacks onto that edge. The single light inset is the glass catch. */

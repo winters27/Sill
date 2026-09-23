@@ -4,9 +4,12 @@ import {
   MODES,
   behaviourOf,
   drawsItsOwn,
+  enterLabel,
   handlesItsOwnEscape,
   hasRowActions,
   isListMode,
+  leavesOnHide,
+  resumesOnSummon,
   searchesOnType,
 } from "./modes";
 
@@ -191,5 +194,76 @@ describe("what each mode behaves like", () => {
     for (const mode of ["alias", "namingWorkspace", "root"]) {
       expect(drawsItsOwn(mode), `${mode} started drawing a view of its own`).toBe(false);
     }
+  });
+});
+
+describe("what a summon comes back to", () => {
+  /**
+   * The switcher's own key opened it, Escape put it away, and the ordinary
+   * summon key brought the switcher back, where Escape put it away again.
+   * The root was unreachable. A mode that exists for one moment must not be
+   * what the next summon shows.
+   */
+  it("does not come back to a mode that existed for one moment", () => {
+    for (const mode of ["switcher", "controls", "selection", "destination", "argument", "keys", "alias", "namingWorkspace"]) {
+      expect(resumesOnSummon(mode, false), `${mode} is resumed`).toBe(false);
+      expect(leavesOnHide(mode, false), `${mode} is left on screen after a hide`).toBe(true);
+    }
+  });
+
+  it("comes back to the lists somebody browses", () => {
+    for (const mode of ["clipboard", "emoji", "conversations", "store", "processes", "appVolume"]) {
+      expect(resumesOnSummon(mode, false), `${mode} is not resumed`).toBe(true);
+      expect(leavesOnHide(mode, false), `${mode} is left on hide`).toBe(false);
+    }
+  });
+
+  it("returns every mode to the root when that is what was asked for", () => {
+    for (const mode of MODES) {
+      if (mode === "root") continue;
+      expect(resumesOnSummon(mode, true), `${mode} survives "Return to the root list"`).toBe(false);
+    }
+  });
+
+  /**
+   * An extension can keep working after it closes the window, an answer can
+   * still be arriving, and a script can still be printing. The hide is not
+   * the moment to leave those.
+   */
+  it("never leaves work that is still going at the moment of hiding", () => {
+    for (const mode of ["command", "ai", "output"]) {
+      expect(leavesOnHide(mode, true), `${mode} is torn down on hide`).toBe(false);
+      expect(leavesOnHide(mode, false), `${mode} is torn down on hide`).toBe(false);
+    }
+  });
+
+  it("always comes back to the root", () => {
+    expect(resumesOnSummon("root", true)).toBe(true);
+    expect(leavesOnHide("root", true)).toBe(false);
+  });
+
+  it("says nothing resumes for a mode that does not exist", () => {
+    expect(resumesOnSummon("modeThatIsNotReal", false)).toBe(false);
+  });
+});
+
+describe("what the chin's primary button says", () => {
+  it("names what Enter does in each mode, or offers no button where it does nothing", () => {
+    for (const mode of MODES) {
+      const said = behaviourOf(mode)!.enter;
+      expect(said === null || said.trim().length > 0, `${mode} has an empty label`).toBe(true);
+    }
+
+    expect(enterLabel("switcher")).toBe("Switch");
+    expect(enterLabel("processes")).toBe("Quit");
+    expect(enterLabel("ai")).toBe("Send");
+    expect(enterLabel("keys")).toBe(null);
+    expect(enterLabel("widgets")).toBe(null);
+    expect(enterLabel("output")).toBe(null);
+  });
+
+  it("submits in a form, whatever the mode would say", () => {
+    expect(enterLabel("command", "Form")).toBe("Submit");
+    expect(enterLabel("command", "List")).toBe("Run");
   });
 });

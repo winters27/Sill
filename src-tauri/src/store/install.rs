@@ -884,6 +884,14 @@ pub struct Done {
     /// service and this function takes paths. The command layer owns that
     /// seam, which is the same division `finish` already keeps with esbuild.
     pub capabilities: Vec<String>,
+    /// What was granted that the install screen did not list, in its words.
+    ///
+    /// A dependency's needs are only known once the bundle exists, which is
+    /// after somebody agreed. They are granted rather than left to fail at
+    /// run time, and said here so the line that reports the install can say
+    /// it: a grant nobody was told about is the one kind the install screen
+    /// promises does not happen.
+    pub granted_beyond_listed: Vec<String>,
 }
 
 /// Step two: install the dependencies, build, and record where it came from.
@@ -972,6 +980,7 @@ fn finish_built(
             capabilities.push(extra);
         }
     }
+    let granted_beyond_listed = capability::titles_beyond(&origin.capabilities, &capabilities);
 
     // Rewritten so the record matches what was granted rather than only what
     // was forecast, which is what the settings screen reads back.
@@ -989,6 +998,7 @@ fn finish_built(
     Ok(Done {
         revision: origin.revision.clone(),
         capabilities,
+        granted_beyond_listed,
         installed,
     })
 }

@@ -8,6 +8,8 @@
  */
 import { describe, expect, test } from "vitest";
 import {
+  DISCARD_ARMED_MS,
+  escapeMeans,
   CAN_FILL,
   TOOL_KEYS,
   arrowHead,
@@ -712,5 +714,31 @@ describe("filling a shape", () => {
     // Falsy rather than false, which is what the drawing checks, so an old
     // mark is drawn exactly as it was drawn.
     expect(Boolean(older.fill)).toBe(false);
+  });
+});
+
+describe("what Escape does in the editor", () => {
+  const base = { marks: 0, cropped: false, chosen: -1, armedAt: null, now: 10_000 };
+
+  test("lets go of a selected mark first", () => {
+    expect(escapeMeans({ ...base, marks: 3, chosen: 1 })).toBe("deselect");
+  });
+
+  test("closes at once when there is nothing to lose", () => {
+    expect(escapeMeans(base)).toBe("discard");
+  });
+
+  /** One Escape threw away every mark, with nothing to bring them back. */
+  test("asks before throwing marks away", () => {
+    expect(escapeMeans({ ...base, marks: 2 })).toBe("arm");
+    expect(escapeMeans({ ...base, cropped: true })).toBe("arm");
+  });
+
+  test("throws them away on a second Escape soon after", () => {
+    expect(escapeMeans({ ...base, marks: 2, armedAt: 9_000 })).toBe("discard");
+  });
+
+  test("asks again once the first Escape has gone stale", () => {
+    expect(escapeMeans({ ...base, marks: 2, armedAt: 10_000 - DISCARD_ARMED_MS - 1 })).toBe("arm");
   });
 });

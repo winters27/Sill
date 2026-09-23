@@ -44,6 +44,19 @@
   let { path }: Props = $props();
 
   let look = $state<FileLook | null>(null);
+
+  /*
+   * Whether this list has shown a preview yet.
+   *
+   * The strip used to hold its width from the first frame, whether or not
+   * anything was ever drawn in it, so the rows sat in the left two thirds of
+   * the window with a blank third beside them, and a short list read as text
+   * pushed into the top-left corner. It now takes no room until there is
+   * something to put in it. Once it has shown something it keeps its width
+   * for the rest of this list, so arrowing past a row with nothing to show
+   * does not shuffle the rows sideways, which was the reason it was fixed.
+   */
+  let shown = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   /** Which file the text on screen belongs to, so a stale one is dropped. */
@@ -78,7 +91,10 @@
       void filePreview(wanted)
         .then((found) => {
           // The selection moved on while this was being read.
-          if (lookingAt === wanted) look = found;
+          if (lookingAt === wanted) {
+            look = found;
+            if (found) shown = true;
+          }
         })
         // A file that cannot be read is not an error worth a message, on the
         // surface or anywhere else. The strip is simply empty, and
@@ -112,7 +128,7 @@
   });
 </script>
 
-<aside class="look" aria-hidden="true">
+<aside class="look" class:unused={!shown} aria-hidden="true">
   {#if look?.kind === "image"}
     <img src={look.body} alt="" />
   {:else if look?.kind === "text"}
@@ -133,10 +149,18 @@
     flex: none;
     width: 280px;
     display: flex;
-    align-items: center;
+    /* From the top, beside the first row, rather than floating at half the
+       window's height with nothing level with it. */
+    align-items: flex-start;
     justify-content: center;
     padding: var(--space-3);
     overflow: hidden;
+  }
+
+  /* Nothing shown yet: no room taken, so the rows span the window. */
+  .look.unused {
+    width: 0;
+    padding: 0;
   }
 
   .look img {

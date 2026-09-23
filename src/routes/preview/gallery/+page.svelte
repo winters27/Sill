@@ -164,6 +164,7 @@
 
   <h2>Type scale</h2>
   <div class="launcher scale">
+    <div class="sill-chroma" aria-hidden="true"></div>
     {#each [["--text-hero", "40"], ["--text-display", "26"], ["--text-title", "20"], ["--text-query", "17"], ["--text-heading", "15"], ["--text-body", "13"], ["--text-meta", "12"], ["--text-label", "11"], ["--text-micro", "10"]] as [token, px] (token)}
       <div class="scale-row">
         <span class="scale-name">{token}</span>
@@ -175,6 +176,7 @@
 
   <h2>Launcher</h2>
   <div class="launcher">
+    <div class="sill-chroma" aria-hidden="true"></div>
     <div class="l-search">
       <SettingsIcon name="clipboard" size={26} />
       <input placeholder="Search for apps and commands…" spellcheck="false" />
@@ -212,6 +214,7 @@
 
   <h2>Row states</h2>
   <div class="launcher tight">
+    <div class="sill-chroma" aria-hidden="true"></div>
     <div class="sill-list">
       <div class="sill-group">Every state</div>
       <div class="sill-row">
@@ -309,6 +312,7 @@
          `.sill-menu`: there is no page content behind it for a backdrop
          filter to blur. -->
     <div class="pop tray">
+      <div class="sill-chroma" aria-hidden="true"></div>
       {#each [["Open Sill", "Alt Space", false, false], ["Clipboard History", "", false, false], ["Snippets", "", false, false], ["Dictate", "", false, false], ["Settings", "Ctrl ,", true, false], ["Quit Sill", "", true, true]] as [label, hint, breaks, danger], i (label)}
         {#if breaks}<div class="p-rule"></div>{/if}
         <div class="p-row tray-row" class:selected={i === 0} class:danger>
@@ -390,6 +394,7 @@
 
   <h2>Settings</h2>
   <div class="settings">
+    <div class="sill-chroma" aria-hidden="true"></div>
     <aside>
       <div class="s-search">Search settings</div>
       <button class="s-nav selected"><SettingsIcon name="general" size={26} />General</button>
@@ -453,6 +458,7 @@
   <div class="states">
     {#each STATES as [tone, head, hint] (head)}
       <div class="launcher tiny">
+        <div class="sill-chroma" aria-hidden="true"></div>
         <Instead tone={tone as Standing} headline={head} {hint} />
       </div>
     {/each}
@@ -462,6 +468,7 @@
   <div class="states">
     {#each STATES as [tone, head, hint] (head)}
       <div class="launcher tiny">
+        <div class="sill-chroma" aria-hidden="true"></div>
         <Instead tone={tone as Standing} inline headline={head} {hint} />
       </div>
     {/each}
@@ -633,12 +640,11 @@
   .launcher {
     width: 750px;
     max-width: 100%;
-    background-color: color-mix(
-      in srgb,
-      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
-      transparent
-    );
-    background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
+    /* The window's own surface, as in the app: see `--window-fill`. The
+       chroma wash is its own layer; see `.sill-chroma`. */
+    background-color: var(--window-fill);
+    position: relative;
+    isolation: isolate;
     border-radius: var(--radius-window);
     box-shadow: var(--bevel-window), var(--elevation-window);
     overflow: hidden;
@@ -859,7 +865,11 @@
      last row. */
   .tray {
     width: 216px;
-    background-image: var(--chroma), linear-gradient(var(--tint-menu), var(--tint-menu));
+    /* The wash is its own layer, as in the app: see `.sill-chroma`. The
+       tint is a colour, never a gradient: see `--window-fill`. */
+    background-color: var(--tint-menu);
+    position: relative;
+    isolation: isolate;
     border-radius: var(--radius-window);
     box-shadow: var(--bevel-window), var(--elevation-menu);
   }
@@ -881,12 +891,11 @@
     width: 980px;
     max-width: 100%;
     height: 520px;
-    background-color: color-mix(
-      in srgb,
-      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
-      transparent
-    );
-    background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
+    /* The window's own surface, as in the app: see `--window-fill`. The
+       chroma wash is its own layer; see `.sill-chroma`. */
+    background-color: var(--window-fill);
+    position: relative;
+    isolation: isolate;
     border-radius: var(--radius-window);
     box-shadow: var(--bevel-window), var(--elevation-window);
     overflow: hidden;
@@ -1060,7 +1069,6 @@
     overflow: hidden;
     border-radius: var(--radius-window);
     background-color: var(--core-secondary-background);
-    background-image: linear-gradient(var(--tint), var(--tint));
     box-shadow: var(--bevel-window);
   }
   .g-titlebar {

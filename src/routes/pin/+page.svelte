@@ -17,7 +17,7 @@
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { closePin, pinImage, scalePin } from "$lib/capture";
-  import { applyAppearance, getPreferences } from "$lib/settings";
+  import { applyAppearance, getPreferences, refreshAppearance } from "$lib/settings";
   import { silently } from "$lib/status";
   import "$lib/theme/theme.css";
 
@@ -65,6 +65,7 @@
     void listen("sill://pin", () => {
       scale = 1;
       void load();
+      void refreshAppearance();
     }).then((stop) => (off = stop));
 
     return () => off?.();

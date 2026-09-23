@@ -595,12 +595,8 @@
     width: 750px;
     max-width: 100%;
     height: 520px;
-    background-color: color-mix(
-      in srgb,
-      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
-      transparent
-    );
-    background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
+    background-color: var(--window-fill);
+    background-image: var(--chroma);
     border-radius: var(--radius-window);
     box-shadow: var(--bevel-window), var(--elevation-window);
     overflow: hidden;

@@ -619,6 +619,10 @@
       <!-- The update row is the one that still stacks: it carries a progress
            bar under its own line, and a bar beside a name is not a bar. -->
       {@const stacked = command.mode === "extensions-behind" && Boolean(outcome || working)}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- An option in a combobox, never focused: the search field keeps focus and
+           reads every key, and aria-activedescendant names this row. A key handler
+           here only ever made Enter run twice. -->
       <div
         id={optionId(index)}
         data-row={index}
@@ -651,7 +655,12 @@
           onselect(index);
         }}
         ondblclick={() => onrun(index)}
-        onkeydown={(e) => e.key === "Enter" && onrun(index)}
+        onmousedown={(e) => {
+          // Focus stays in the search field, which is where every key in
+          // this window is read. A clicked row that took focus ran twice on
+          // the next Enter: once for the row, once for the window.
+          e.preventDefault();
+        }}
       >
         {#if command.mode === "emoji"}
           <!-- The emoji is its own icon. A lettered tile beside the character

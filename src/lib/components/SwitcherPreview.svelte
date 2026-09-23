@@ -31,6 +31,19 @@
   let { entrypoint }: Props = $props();
 
   let preview = $state<string | null>(null);
+
+  /*
+   * Whether this list has shown a preview yet.
+   *
+   * The strip used to hold its width from the first frame, whether or not
+   * anything was ever drawn in it, so the rows sat in the left two thirds of
+   * the window with a blank third beside them, and a short list read as text
+   * pushed into the top-left corner. It now takes no room until there is
+   * something to put in it. Once it has shown something it keeps its width
+   * for the rest of this list, so arrowing past a row with nothing to show
+   * does not shuffle the rows sideways, which was the reason it was fixed.
+   */
+  let shown = $state(false);
   let previewTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Which row the picture on screen belongs to, so a stale one is dropped. */
@@ -54,6 +67,8 @@
   export function drop() {
     preview = null;
     previewOf = "";
+    // A new list, so the strip waits for its first picture again.
+    shown = false;
   }
 
   /**
@@ -88,7 +103,10 @@
       void windowPreview(wanted)
         .then((picture) => {
           // The selection moved on while this was being taken.
-          if (previewOf === wanted) preview = picture;
+          if (previewOf === wanted) {
+            preview = picture;
+            if (picture) shown = true;
+          }
         })
         // A window that closed or refuses to be photographed is not an error
         // worth a message, on the surface or anywhere else. The strip is
@@ -113,7 +131,7 @@
   });
 </script>
 
-<aside class="preview" aria-hidden="true">
+<aside class="preview" class:unused={!shown} aria-hidden="true">
   {#if preview}
     <img src={preview} alt="" />
   {/if}
@@ -132,10 +150,18 @@
     flex: none;
     width: 280px;
     display: flex;
-    align-items: center;
+    /* From the top, beside the first row, rather than floating at half the
+       window's height with nothing level with it. */
+    align-items: flex-start;
     justify-content: center;
     padding: var(--space-3);
     overflow: hidden;
+  }
+
+  /* Nothing shown yet: no room taken, so the rows span the window. */
+  .preview.unused {
+    width: 0;
+    padding: 0;
   }
 
   .preview img {

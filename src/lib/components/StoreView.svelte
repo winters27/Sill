@@ -551,8 +551,12 @@
       const refused = done.refused.length
         ? ` ${done.refused.length} command${done.refused.length === 1 ? "" : "s"} could not be installed.`
         : "";
+      const beyond = done.grantedBeyondListed ?? [];
+      const granted = beyond.length
+        ? ` Its dependencies also needed to ${beyond.join(", ")}, which was granted with it.`
+        : "";
       onstatus(
-        `Installed ${done.title}. Find it by typing ${done.commands[0] ?? done.title}.${refused}`,
+        `Installed ${done.title}. Find it by typing ${done.commands[0] ?? done.title}.${granted}${refused}`,
       );
       onchanged();
       // Clearing this is what puts the list back and reloads it, so the row

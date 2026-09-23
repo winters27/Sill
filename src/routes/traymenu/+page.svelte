@@ -53,7 +53,9 @@
     { label: "Clipboard History", glyph: "clipboard", run: () => summonWith("sill:clipboard") },
     { label: "Snippets", glyph: "scissors", run: () => summonWith("sill:snippets") },
     { label: "Dictate", glyph: "mic", run: () => summonWith("sill:dictate") },
-    { label: "Settings", glyph: "gear", hint: "Ctrl ,", breaks: true, run: () => openSettings() },
+    // No "Ctrl ," beside it: that key is the launcher's, and in a menu that
+    // opens from the tray it read as a key that works from anywhere.
+    { label: "Settings", glyph: "gear", breaks: true, run: () => openSettings() },
     { label: "Quit Sill", glyph: "power", breaks: true, danger: true, run: () => quitApp() },
   ];
 
@@ -175,6 +177,7 @@
   aria-label="Sill"
   aria-activedescendant={itemId(MENU, selected)}
 >
+  <div class="sill-chroma" aria-hidden="true"></div>
   {#each items as item, index (item.label)}
     {#if item.breaks}
       <div class="rule" role="separator"></div>
@@ -264,12 +267,11 @@
     flex-direction: column;
     height: 100vh;
     padding: var(--space-1);
-    background-color: color-mix(
-      in srgb,
-      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
-      var(--surface-base)
-    );
-    background-image: var(--chroma), linear-gradient(var(--tint-menu), var(--tint-menu));
+    /* One colour, never a gradient: see `--window-fill` in theme.css. The
+       chroma wash is `.sill-chroma`. */
+    background-color: var(--window-fill-menu);
+    position: relative;
+    isolation: isolate;
     border-radius: var(--radius-window);
     box-shadow: var(--bevel-window);
     overflow: hidden;

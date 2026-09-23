@@ -825,6 +825,13 @@ export interface AiAsking {
    * turned on.
    */
   instead?: string;
+  /**
+   * What a yes is remembered as, when it is remembered at all.
+   *
+   * Present on an extension's card, whose yes is written down and never asked
+   * again. Absent on a one-off, which allows one thing once.
+   */
+  lasting?: string;
 }
 
 /**

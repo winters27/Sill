@@ -86,6 +86,29 @@ pub fn centred_in(area: Area, width: i32, height: i32) -> (i32, i32) {
     (x.max(area.left), y.max(area.top))
 }
 
+/// Where a window of this size sits centred along the bottom of that screen,
+/// `margin` above the edge of its work area, which is above the taskbar.
+pub fn bottom_centre(area: Area, width: i32, height: i32, margin: i32) -> (i32, i32) {
+    let x = area.left + (area.width() - width) / 2;
+    let y = area.bottom - height - margin;
+
+    (x.max(area.left), y.max(area.top))
+}
+
+/// The work area of the screen the launcher would come up on, for the other
+/// small windows that should appear where somebody is looking.
+pub fn area_for(on: SummonOn) -> Option<Area> {
+    #[cfg(windows)]
+    {
+        win::area(on)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = on;
+        None
+    }
+}
+
 #[cfg(windows)]
 mod win {
     use super::Area;
@@ -212,7 +235,7 @@ pub fn centre_for_summon(window: &WebviewWindow, on: SummonOn) {
 
 #[cfg(test)]
 mod tests {
-    use super::{centred_in, Area, Placement};
+    use super::{bottom_centre, centred_in, Area, Placement};
     use crate::preferences::SummonOn;
 
     /// The second monitor here is portrait, to the left, at negative
@@ -273,6 +296,15 @@ mod tests {
     }
 
     /// The default of the atomic and the default of the preference agree.
+    #[test]
+    fn a_pill_sits_above_the_taskbar_of_a_second_screen() {
+        // A screen to the left of the primary, with a 48px taskbar at the
+        // bottom of it: the work area stops 48 short of the 1080 it has.
+        let area = Area { left: -1920, top: 0, right: 0, bottom: 1032 };
+
+        assert_eq!(bottom_centre(area, 240, 96, 24), (-1080, 912));
+    }
+
     #[test]
     fn a_placement_nobody_set_is_the_one_the_preferences_default_to() {
         assert_eq!(Placement::default().get(), SummonOn::Cursor);

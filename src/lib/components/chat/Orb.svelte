@@ -24,6 +24,7 @@
    * is picked up on the next live turn, and no theme has to know this exists.
    */
   import { onMount } from "svelte";
+  import { visible, whenHidden, whenVisible } from "$lib/visible";
 
   type Motion = "still" | "drift" | "live";
 
@@ -64,7 +65,9 @@
   // `onMount`; without it every orb would sit still until its motion changed.
   $effect(() => {
     const { pace, swell } = PACE[motion];
-    if (pace) run?.(pace, swell);
+    // Not while hidden: an answer that lands after a hide changes the pace,
+    // and that must not start drawing into a window nobody can see.
+    if (pace && visible()) run?.(pace, swell);
     else stop?.();
   });
 
@@ -306,7 +309,27 @@ void main(){
     const opening = PACE[motion];
     if (opening.pace) run(opening.pace, opening.swell);
 
+    /*
+     * Still the moment its window is put away, and moving again when it
+     * comes back.
+     *
+     * "Costs nothing with nobody looking" was true only once the renderer was
+     * put to sleep, twenty seconds after a hide. Until then the shader went on
+     * drawing every frame into a window nobody could see: measured at about a
+     * fifth of one core for those twenty seconds, every time the launcher was
+     * hidden from a conversation, against a quarter of one percent from the
+     * root list. Only the launcher is told it is hidden, so in the chat window
+     * these never fire and that window's own lifetime is the limit.
+     */
+    const offHidden = whenHidden(() => stop?.());
+    const offShown = whenVisible(() => {
+      const now = PACE[motion];
+      if (now.pace) run?.(now.pace, now.swell);
+    });
+
     return () => {
+      offHidden();
+      offShown();
       stop?.();
       run = null;
       stop = null;

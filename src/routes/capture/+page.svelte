@@ -27,7 +27,7 @@
     type Purpose,
   } from "$lib/capture";
   import { windowUnder } from "$lib/markup";
-  import { getPreferences } from "$lib/settings";
+  import { applyAppearance, getPreferences } from "$lib/settings";
   import { forgetUnreadable } from "$lib/status";
 
   /** Where the drag started, in this window's own pixels. */
@@ -278,6 +278,9 @@
 
       frame = { scale, x: position.x, y: position.y };
       purpose = asked;
+      // The overlay never wore the theme at all, so its selection was drawn
+      // in the stylesheet's default accent whatever somebody had chosen.
+      if (prefs && typeof prefs === "object" && "appearance" in prefs) applyAppearance(prefs);
       clickAWindow = prefs?.screenshot?.clickAWindow ?? true;
       targets = clickAWindow ? await captureTargets() : [];
     }

@@ -222,7 +222,62 @@ pub fn hide(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
+/// Gap above the bottom of the work area, which already stops at the taskbar.
+///
+/// `PANEL_BOTTOM_MARGIN` below is measured from the bottom of the whole
+/// monitor and carries the taskbar inside it; this is the same height with the
+/// taskbar taken out, so the pill lands where it always did on one screen.
+const ABOVE_WORK_AREA: f64 = 32.0;
+
 fn position_at_bottom_center<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Result<()> {
+    /*
+     * On the screen the launcher would come up on, above its taskbar.
+     *
+     * It was always the primary monitor, measured from the monitor's bottom
+     * edge rather than its work area and converted with the primary's scale.
+     * Dictating into a window on a second screen put the pill on the other
+     * one, and a taskbar taller than the margin covered it. The launcher's own
+     * "Summon On" setting answers "where is somebody looking" already, so it
+     * answers for the pill too.
+     */
+    let on = window
+        .app_handle()
+        .try_state::<crate::placement::Placement>()
+        .map(|placement| placement.get())
+        .unwrap_or(crate::preferences::SummonOn::Cursor);
+
+    if let Some(area) = crate::placement::area_for(on) {
+        let middle_x = f64::from(area.left) + f64::from(area.right - area.left) / 2.0;
+        let middle_y = f64::from(area.top) + f64::from(area.bottom - area.top) / 2.0;
+        let scale = window
+            .monitor_from_point(middle_x, middle_y)
+            .ok()
+            .flatten()
+            .map(|monitor| monitor.scale_factor())
+            .unwrap_or(1.0);
+
+        window
+            .set_size(tauri::Size::Logical(LogicalSize {
+                width: PANEL_WIDTH,
+                height: PANEL_HEIGHT,
+            }))
+            .map_err(|e| DictationError::Platform(format!("dictation panel set_size: {e}")))?;
+
+        let (x, y) = crate::placement::bottom_centre(
+            area,
+            (PANEL_WIDTH * scale).round() as i32,
+            (PANEL_HEIGHT * scale).round() as i32,
+            (ABOVE_WORK_AREA * scale).round() as i32,
+        );
+
+        window
+            .set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+            .map_err(|e| DictationError::Platform(format!("dictation panel set_position: {e}")))?;
+
+        return Ok(());
+    }
+
+    // Windows would not say where the screen is: the primary monitor, as before.
     let monitor = window
         .primary_monitor()
         .map_err(|e| DictationError::Platform(format!("primary_monitor: {e}")))?

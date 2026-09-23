@@ -146,6 +146,14 @@ export interface Done {
   /** The commands that were refused, one sentence each. */
   refused: string[];
   revision: string;
+  /**
+   * What was granted that the install screen did not list, in its words.
+   *
+   * A dependency's needs are only known once the bundle is built, after the
+   * screen was agreed to. Said on the install line so a grant is never one
+   * nobody was told about. Absent from an older build's answer.
+   */
+  grantedBeyondListed?: string[];
 }
 
 /**

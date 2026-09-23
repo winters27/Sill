@@ -113,6 +113,14 @@
 
   function play() {
     if (running || !canvas) return;
+
+    // Asked for less motion: a screen full of falling paper is the most
+    // motion Sill has, and the stylesheet's reduced-motion rule cannot reach
+    // a canvas. Put straight away instead, so nothing is left over the screen.
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      void invoke("finish_confetti");
+      return;
+    }
     const context = canvas.getContext("2d");
     if (!context) return;
 

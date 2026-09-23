@@ -7,6 +7,7 @@
   import Button from "./Button.svelte";
   import TextField from "./TextField.svelte";
   import type { Preferences, TtsEngine } from "$lib/settings";
+  import { rovingTab, rovingTo } from "$lib/roving";
 
   interface Props {
     prefs: Preferences;
@@ -104,6 +105,17 @@
     commit();
   }
 
+  /** The arrows walk the voices and pick one, as every radio group here does. */
+  function onPickKey(event: KeyboardEvent, at: number) {
+    const next = rovingTo(event.key, at, ENGINES.length, "both");
+    if (next === null) return;
+
+    event.preventDefault();
+    use(ENGINES[next].id);
+    const group = (event.currentTarget as HTMLElement).closest('[role="radiogroup"]');
+    group?.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
+  }
+
   async function download(id: string) {
     downloading = id;
     said = "";
@@ -186,14 +198,16 @@
   description="Used by Read Aloud in the action panel, and by any key you bind to it."
 >
   <div class="stack" role="radiogroup" aria-label="Which voice reads">
-    {#each ENGINES as engine (engine.id)}
+    {#each ENGINES as engine, index (engine.id)}
       <div class="card" class:on={prefs.tts.engine === engine.id}>
         <button
           type="button"
           class="pick"
           role="radio"
           aria-checked={prefs.tts.engine === engine.id}
+          tabindex={rovingTab(index, ENGINES.findIndex((one) => one.id === prefs.tts.engine))}
           onclick={() => use(engine.id)}
+          onkeydown={(event) => onPickKey(event, index)}
         >
           <span class="text">
             <span class="name">

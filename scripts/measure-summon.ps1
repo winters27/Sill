@@ -103,6 +103,11 @@ function Get-SummonChord {
             'super'   { $mods += [byte]0x5B; continue }
             'win'     { $mods += [byte]0x5B; continue }
             'space'   { $key = [byte]0x20; continue }
+            'home'    { $key = [byte]0x24; continue }
+            'end'     { $key = [byte]0x23; continue }
+            'pageup'  { $key = [byte]0x21; continue }
+            'pagedown' { $key = [byte]0x22; continue }
+            'insert'  { $key = [byte]0x2D; continue }
             default {
                 $one = $part.Trim()
                 if ($one -match '^[A-Za-z]$') { $key = [byte][char]$one.ToUpper() }

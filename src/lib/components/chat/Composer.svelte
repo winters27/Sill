@@ -24,6 +24,7 @@
   import type { AiAsking, AiAttached, AiReady } from "$lib/exthost/commands";
   import type { Live } from "$lib/chat/live";
   import { hint } from "$lib/hint";
+  import { answersCard } from "$lib/approval";
 
   interface Props {
     draft: string;
@@ -89,17 +90,22 @@
   });
 
   function onKey(event: KeyboardEvent) {
-    if (asked) {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        ondecide(true);
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        ondecide(false);
-        return;
-      }
+    /*
+     * A card answers Enter and Escape, with the pause `$lib/approval` sets.
+     *
+     * The composer is where somebody is typing when a card arrives, so the
+     * Enter on its way was meant for the draft. Allowing only a card that has
+     * been read, and never from Shift+Enter, is what keeps that Enter from
+     * approving something nobody saw. Shift+Enter stays a new line.
+     */
+    if (asked && (event.key === "Enter" || event.key === "Escape")) {
+      if (event.key === "Enter" && event.shiftKey) return;
+
+      event.preventDefault();
+      const answer = answersCard(event, asked, performance.now());
+      if (answer === "allow") ondecide(true);
+      else if (answer === "refuse") ondecide(false);
+      return;
     }
 
     if (asking && event.key === "Escape") {

@@ -139,6 +139,7 @@ async fn run(app: &AppHandle, ask: Ask) {
                 // levels above, so nothing stronger was withheld here and
                 // there is nothing to explain on the card.
                 instead: None,
+                lasting: None,
             },
         );
 

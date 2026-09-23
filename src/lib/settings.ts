@@ -491,6 +491,25 @@ export interface Preferences {
  * them; glass strength is a CSS variable the page reads, so it has to be set
  * here or the setting saves and does nothing.
  */
+/**
+ * Reads the preferences again and wears them, for a window being shown again.
+ *
+ * The dictation pill, the markup editor, the pinned picture and the note are
+ * built once and shown many times, and each wore the theme it was built in:
+ * change the accent in Settings, dictate again, and the pill still had the
+ * old one. Called from each window's own "you are being shown" event rather
+ * than by listening for every settings save, so a window that is hidden is
+ * not woken by somebody dragging a slider.
+ *
+ * The answer is checked before it is used, because a command Tauri refuses
+ * resolves rather than rejects, and a window with the default look is still
+ * a usable window.
+ */
+export async function refreshAppearance(): Promise<void> {
+  const prefs = await getPreferences().catch(() => null);
+  if (prefs && typeof prefs === "object" && "appearance" in prefs) applyAppearance(prefs);
+}
+
 export function applyAppearance(prefs: Preferences): void {
   const root = document.documentElement;
   root.style.setProperty("--glass-strength", String(prefs.appearance.glassStrength));
@@ -926,10 +945,10 @@ export type Move =
  *
  * Silent, unlike the reads around it, for two reasons. It is the launcher that
  * asks, not this window, so a report would land in the settings window's group
- * and be cleared by the act of opening settings to read it. And an empty map
- * is not a lie anybody believes: the arrows and Enter are not chords and keep
- * working, so what is left is Ctrl+N doing nothing, which is visible to the
- * person pressing it in the instant they press it.
+ * and be cleared by the act of opening settings to read it. Silence is not
+ * free, though: the launcher reads the arrows, Enter and Escape from this map
+ * too, so an empty one leaves it unable to move, open or close. It is read
+ * first at startup, and read again by a summon that finds it empty.
  */
 export function navigationChords(): Promise<Record<string, Move>> {
   return invoke<Record<string, Move>>("navigation_chords").catch(silently({}));

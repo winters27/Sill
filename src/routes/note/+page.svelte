@@ -16,7 +16,7 @@
   import { onDestroy, onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { forgetNote, readNote, saver, writeNote, type Standing } from "$lib/notes";
-  import { applyAppearance, getPreferences } from "$lib/settings";
+  import { applyAppearance, getPreferences, refreshAppearance } from "$lib/settings";
   import "$lib/theme/theme.css";
 
   let id = $state("");
@@ -99,6 +99,7 @@
           // different note. Opening a second note is the one moment the
           // debounce would otherwise lose the first one.
           void settle().then(() => open(payload));
+          void refreshAppearance();
         }),
       );
     })();
@@ -124,6 +125,7 @@
 </script>
 
 <main>
+  <div class="sill-chroma" aria-hidden="true"></div>
   <textarea
     bind:this={area}
     bind:value={text}
@@ -150,13 +152,11 @@
     height: 100vh;
     /* The same surface every other window paints, so a note is recognisably
        Sill's and the themes with a wash show it here too. It was the flat
-       primary background, which no other window uses. */
-    background-color: color-mix(
-      in srgb,
-      var(--core-secondary-background) calc((1 - var(--glass-strength)) * 100%),
-      var(--surface-base)
-    );
-    background-image: var(--chroma), linear-gradient(var(--tint), var(--tint));
+       primary background, which no other window uses. The chroma wash is
+       `.sill-chroma`. */
+    background-color: var(--window-fill);
+    position: relative;
+    isolation: isolate;
     color: var(--text-1);
   }
 

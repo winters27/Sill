@@ -107,3 +107,67 @@ export function askedForTheKeys(event: Keystroke, typed: string): boolean {
 
   return typed.length === 0;
 }
+
+/** Where focus is, as far as deciding who owns a key needs to know. */
+export type Holder =
+  /** The launcher's own search field. */
+  | "search"
+  /** A single-line field of an extension's form, or any other input. */
+  | "input"
+  /** A multi-line field. */
+  | "textarea"
+  /** A native drop-down. */
+  | "select"
+  /** Anything else, including nothing. */
+  | "other";
+
+/** Which kind of holder an element is. */
+export function holderOf(active: Element | null, search: Element | null): Holder {
+  if (!active) return "other";
+  if (active === search) return "search";
+  if (active instanceof HTMLTextAreaElement) return "textarea";
+  if (active instanceof HTMLSelectElement) return "select";
+  if (active instanceof HTMLInputElement) return "input";
+  if (active instanceof HTMLElement && active.isContentEditable) return "textarea";
+  return "other";
+}
+
+/**
+ * Whether the focused field keeps this key, rather than the launcher reading
+ * it as movement.
+ *
+ * Movement is looked up in a table of chords, and several of those chords are
+ * also how text is edited. Up and Down move between the lines of a text area
+ * and change a drop-down's value; Home and End move the caret. Taking them for
+ * the result list left a multi-line field that could not be navigated, a
+ * drop-down that could not be changed from the keyboard, and a query whose
+ * caret could not jump to its start.
+ *
+ * The search field keeps Home and End only once something is typed. On an
+ * empty field there is no caret to move, and they go back to meaning the first
+ * and last row.
+ *
+ * Enter in a text area is a new line. Ctrl+Enter still submits, which is how
+ * Raycast's own text areas behave.
+ */
+export function ownsTheKey(holder: Holder, event: Keystroke, typed: string): boolean {
+  const plain = !event.ctrlKey && !event.altKey && !event.metaKey;
+
+  switch (holder) {
+    case "textarea":
+      if (event.key === "Enter") return plain;
+      return plain && ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key);
+
+    case "select":
+      return plain && ["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key);
+
+    case "input":
+      return plain && (event.key === "Home" || event.key === "End");
+
+    case "search":
+      return plain && typed.length > 0 && (event.key === "Home" || event.key === "End");
+
+    default:
+      return false;
+  }
+}
