@@ -19,6 +19,70 @@ IPC surface, the dependencies added, and every commit body in full. Use the
 relevant subset under recognizable feature labels, with measured results where
 available.
 
+## 0.4.3
+
+- **Glass:** The fine crosshatch on the window, the action panel, menus and
+  the glass controls is gone, on every dark theme. Flat tints were painted
+  as one-colour gradients, which the browser engine dithers into a
+  two-pixel checker on near-black; they are plain colours now, the same
+  shade. Measured 1:1 on the release build, 2x2 checker energy on the
+  action panel went from 0.939 to 0.002 and on the launcher from 0.206 to
+  0.020.
+- **Launcher modes:** Escape in the window switcher followed by the summon
+  key opens the root list again instead of the switcher. Pickers, the
+  window switcher, system controls, selection actions and the key sheet
+  return to the root list once they are done or the launcher hides; lists
+  you browse, like clipboard history, still reopen where you left them.
+  "Return to the root list" now applies to every mode except a running
+  extension, an AI answer or script output. Enter pressed straight after
+  typing opens a result for what you typed, never one from the previous
+  list, and a clicked row followed by Enter runs once. The footer names what
+  Enter does (Switch, Send, Paste, Quit, Move Here) and shows your own
+  actions key.
+- **Keys:** Delete, `?` and Tab typed into the action panel's filter edit
+  the filter; Delete there used to forget the conversation underneath.
+  Home and End move the cursor when there is text in the search field.
+  Ctrl+Z undoes the last action only while the field still shows what it
+  showed when the action ran, and says so. Ctrl+C with text selected in
+  clipboard history copies that text. On the key sheet, arrows scroll and
+  Escape goes back to where it opened.
+- **Approvals:** An Enter that arrives as an approval card appears no longer
+  allows it: Allow is greyed for the first 0.7 s, and Shift+Enter or a held
+  key never allows. This covers the launcher, AI mode and the AI Chat
+  window. The AI asks before reading clipboard history. An extension's
+  permission card says when a yes is remembered for that extension.
+- **Recycle Bin:** Move to Recycle Bin never deletes permanently. A file on a
+  network share, removable drive, CD or RAM disk is refused with a message,
+  and one too large for the bin is kept.
+- **Settings:** The window fits the screen the pointer is on, including a
+  portrait second monitor. The sidebar is grouped into Search, Text, AI,
+  Capture & Voice and System. Reset resets only what that panel shows, never
+  turns Private mode off, and Web has its own. Enter in the settings search
+  opens the first result. Removing an AI provider, an extension, an MCP
+  server or an AI Chat conversation asks for a second click. Disabled rows
+  are skipped by the keyboard, and screen readers hear the selected panel,
+  saves and the result count.
+- **Extension store:** When an install grants modules the consent screen did
+  not list, the install line names them.
+- **Screenshot editor:** Escape with marks on the picture asks first; a
+  second Escape within 2 s discards. Closing the editor, including Alt+F4,
+  forgets the screenshot.
+- **File search:** Typing a query Everything has no hits for no longer opens
+  a console window that closed the launcher mid-typing. The command-line
+  fallback runs only when Everything cannot be reached, hidden and with a
+  time limit.
+- **Window switcher and file results:** The list takes the full width until
+  there is a preview to show, instead of sitting in the top left beside an
+  empty third.
+- **Quiet when hidden:** Hiding the launcher from an AI conversation stops
+  the orb at once: 0.35% of a core in the 18 s after hiding, down from
+  18.8%. Clock widgets stop while hidden, and switching dictation off stops
+  its speech engine.
+- **Other windows:** A theme change reaches the dictation pill, screenshot
+  editor, pins and notes the next time they open. The dictation pill and the
+  tray menu appear on the screen in use, inside its taskbar. Confetti is
+  skipped under reduced motion.
+
 ## 0.4.2
 
 - **Recording a hotkey:** Setting a key while it is still held no longer
