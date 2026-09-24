@@ -19,6 +19,18 @@ IPC surface, the dependencies added, and every commit body in full. Use the
 relevant subset under recognizable feature labels, with measured results where
 available.
 
+## 0.4.4
+
+- **Themes:** Each card in the Appearance theme picker previews its own
+  theme. The selected row, the text colour and the colour wash on every card
+  used to follow whichever theme was applied, so with Oilslick on, all seven
+  cards showed Oilslick's wash, and Frost Light's pale card had white text.
+  The glass and chroma sliders and the chosen font still carry into the
+  previews.
+- **Launcher:** The Sill menu button in the bottom left sits flat on the
+  footer, like the Open and Actions keys beside it, and lights only on hover
+  or while its menu is open.
+
 ## 0.4.3
 
 - **Glass:** The fine crosshatch on the window, the action panel, menus and
