@@ -92,6 +92,7 @@ pub mod summon;
 pub mod sums;
 pub mod synthetic;
 pub mod system;
+pub mod system_menu;
 pub mod taps;
 pub mod terminals;
 pub mod text;

@@ -507,6 +507,8 @@ pub(crate) async fn open_settings(app: AppHandle, section: Option<String>) -> Re
             .build()
             .map_err(|e| e.to_string())?;
     crate::webchrome::quiet(&window);
+    // So the key recorder can take Alt+Space. See `system_menu`.
+    crate::system_menu::decline_alt_space(&window);
 
     // On the screen the cursor is on, inside the part of it the taskbar
     // leaves. `center` above uses whichever monitor the window was created

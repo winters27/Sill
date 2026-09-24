@@ -28,7 +28,7 @@
 <script lang="ts">
   import Chord from "../Chord.svelte";
   import { hint } from "$lib/hint";
-  import { chordFor, type Scope } from "$lib/keys";
+  import { chordFor, swallowedPress, type Scope } from "$lib/keys";
   import { keyOwners, type KeyOwner } from "$lib/settings";
 
   interface Props {
@@ -69,11 +69,14 @@
   /** What the last press amounted to, said under the control. */
   let note = $state<{ text: string; refused: boolean; more?: string } | null>(null);
   let button = $state<HTMLButtonElement | null>(null);
+  /** Keys whose key-down arrived while recording. See `swallowedPress`. */
+  let pressed = new Set<string>();
 
   function start(): void {
     recording = true;
     held = [];
     note = null;
+    pressed = new Set();
   }
 
   function stop(): void {
@@ -133,6 +136,7 @@
     if (!recording) return;
     event.preventDefault();
     event.stopPropagation();
+    pressed.add(event.code);
 
     if (event.key === "Escape") {
       stop();
@@ -153,6 +157,11 @@
       return;
     }
 
+    await take(event);
+  }
+
+  /** The press that finishes a chord, or the modifiers held so far. */
+  async function take(event: KeyboardEvent): Promise<void> {
     const read = chordFor(scope, event);
     if ("held" in read) {
       held = read.held;
@@ -167,8 +176,14 @@
     await commit(read.chord, read.caution);
   }
 
-  function onkeyup(event: KeyboardEvent): void {
+  async function onkeyup(event: KeyboardEvent): Promise<void> {
     if (!recording) return;
+    if (swallowedPress(event, pressed)) {
+      event.preventDefault();
+      pressed.add(event.code);
+      await take(event);
+      return;
+    }
     // A modifier let go leaves the cursor, so the caps say what is still down.
     const stillHeld: string[] = [];
     if (event.ctrlKey) stillHeld.push("Ctrl");

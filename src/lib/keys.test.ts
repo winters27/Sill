@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chordFor, keyOf, keysOf, modifiersOf } from "./keys";
+import { chordFor, keyOf, keysOf, modifiersOf, swallowedPress } from "./keys";
 
 function press(
   key: string,
@@ -81,5 +81,26 @@ describe("what a recorder accepts", () => {
 
   it("names Space rather than writing a blank, so the chord can register", () => {
     expect(chordFor("hotkey", press(" ", { alt: true }))).toEqual({ chord: "Alt+Space" });
+  });
+});
+
+describe("a press the webview kept for itself", () => {
+  const up = (key: string, code: string, alt: boolean) => ({ key, code, altKey: alt });
+
+  it("reads Alt+Space from its key-up, because WebView2 never sends the key-down", () => {
+    // Measured on the settings window: Alt down, Space up, Alt up.
+    expect(swallowedPress(up(" ", "Space", true), new Set(["AltLeft"]))).toBe(true);
+  });
+
+  it("does not count a key-up whose key-down was already read", () => {
+    expect(swallowedPress(up("k", "KeyK", true), new Set(["AltLeft", "KeyK"]))).toBe(false);
+  });
+
+  it("ignores the Enter that started recording, which is a key-up with no key-down", () => {
+    expect(swallowedPress(up("Enter", "Enter", false), new Set())).toBe(false);
+  });
+
+  it("never reads Alt itself being let go as a press", () => {
+    expect(swallowedPress(up("Alt", "AltLeft", true), new Set())).toBe(false);
   });
 });

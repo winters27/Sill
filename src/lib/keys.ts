@@ -147,6 +147,26 @@ function types(event: Pick<KeyboardEvent, "key">): boolean {
 }
 
 /**
+ * Whether a key-up is the only sign of a press the webview kept for itself.
+ *
+ * WebView2 never hands the page the key-down of Alt+Space; the page sees Alt
+ * go down, then Space come up. A recorder that waits for a key-down therefore
+ * never records Sill's own default summon key. A release that arrives with Alt
+ * held, for a key whose press was never seen, is that press.
+ *
+ * Alt only. A key-up with no key-down is also what the Enter that started the
+ * recording leaves behind, and reading that as a press would record a bare
+ * Enter.
+ */
+export function swallowedPress(
+  event: Pick<KeyboardEvent, "key" | "code" | "altKey">,
+  pressed: ReadonlySet<string>,
+): boolean {
+  const isModifier = ["Control", "Alt", "Shift", "Meta", "OS"].includes(event.key);
+  return event.altKey && !isModifier && !pressed.has(event.code);
+}
+
+/**
  * What a keypress amounts to for a recorder in one scope.
  *
  * - `{ held }` while only modifiers are down, so the recorder can show the
