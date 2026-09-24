@@ -19,6 +19,15 @@ IPC surface, the dependencies added, and every commit body in full. Use the
 relevant subset under recognizable feature labels, with measured results where
 available.
 
+## 0.4.5
+
+- **Shortcuts:** Alt+Space can be recorded as a key again, including as the
+  summon key. Pressing it in a Settings key recorder used to open the
+  window's system menu, which cancelled the recording, and the Space never
+  reached the recorder.
+- **Launcher:** The AI model pill in the search bar has more room around the
+  service mark and the model name.
+
 ## 0.4.4
 
 - **Themes:** Each card in the Appearance theme picker previews its own
