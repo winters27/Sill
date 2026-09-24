@@ -81,9 +81,26 @@
  *
  * Outer shadows belong on tiles, not on the window. `main` IS the window, so
  * anything outward is clipped; DWM draws the real drop shadow.
+ *
+ * > [!IMPORTANT] Declared on every `[data-theme]`, not only on `:root`
+ * > A custom property's `var()` is resolved where it is declared, and what
+ * > inherits is the finished value. Declared on `:root` alone,
+ * > `--accent-fill: rgba(var(--accent-rgb), 0.16)` is worked out once from
+ * > the page's theme, and a theme card that sets its own `--accent-rgb`
+ * > still inherits the page's wash: every card in the picker previewed the
+ * > active theme's selection and text colour. Declaring the block again on
+ * > each `[data-theme]` element works every derived token out from that
+ * > element's own palette. The theme blocks below come later at the same
+ * > specificity, so their values still win.
+ * >
+ * > Anything set only on the root at runtime (a slider through
+ * > `style.setProperty`, the face through `:root[data-font]`) must NOT be in
+ * > this block, or every card would reset it to the default. Those live in
+ * > the `:root`-only blocks further down.
  */
 
-:root {
+:root,
+[data-theme] {
   /* Core. Neutral near-black; nothing here is blue. */
   --core-background: #0c0c0d;
   --core-secondary-background: #1a1a1b;
@@ -295,12 +312,8 @@
   --accent-fill-strong: rgba(var(--accent-rgb), 0.24);
   --accent-line: rgba(var(--accent-rgb), 0.32);
 
-  /*
-   * How glassy the surface is, 0 to 1. At 0 it goes fully solid; at 1 it is
-   * pure tint over the desktop blur. A token so it can become a setting
-   * without touching a single colour.
-   */
-  --glass-strength: 1;
+  /* `--glass-strength` is a slider, so it is declared on `:root` alone, with
+     `--chroma-strength`, under THEMES. */
 
   /*
    * Two different tints, matching how StreamNook layers them.
@@ -1104,21 +1117,8 @@
    */
   --line-row: 20px;
 
-  /* Overridden per face: only Segoe has a separate display cut. */
-  --font-display: var(--font);
-
-  /*
-   * Inter is bundled rather than named and hoped for: it is not installed on
-   * Windows, so the old stack silently fell through to Segoe UI Variable and
-   * the design was never seeing the face it was drawn against.
-   *
-   * Which face wins is a setting, because the answer depends on the display.
-   * Inter is drawn for screens where hinting no longer decides anything;
-   * Segoe UI Variable is hinted by Microsoft for Windows at 96 DPI, which is
-   * exactly where a 100% scale display sits. Neither is right in the
-   * abstract, so the eye in front of the screen picks.
-   */
-  --font: "Satoshi", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  /* `--font` and `--font-display` are a setting, so they are declared on
+     `:root` alone, beside the `:root[data-font]` rules that override them. */
   --font-mono: "Cascadia Mono", "Cascadia Code", "Consolas", ui-monospace, monospace;
 
 }
@@ -1143,11 +1143,25 @@
  * layer, so the surfaces need no conditional.
  */
 
-:root {
+/* On every `[data-theme]` for the reason at the top of the file: a card for a
+   theme with no wash must not inherit the page's. */
+:root,
+[data-theme] {
   --chroma: none;
-  /* Scaled by the Appearance slider. Declared here so a theme with no chroma
-     still resolves the variable rather than invalidating the whole gradient. */
+}
+
+/* The Appearance sliders, which `applyAppearance` sets on the root element.
+   `:root` alone, so a theme card inherits them rather than resetting them. */
+:root {
+  /* Declared here so a theme with no chroma still resolves the variable
+     rather than invalidating the whole gradient. */
   --chroma-strength: 1;
+
+  /*
+   * How glassy the surface is, 0 to 1. At 0 it goes fully solid; at 1 it is
+   * pure tint over the desktop blur.
+   */
+  --glass-strength: 1;
 }
 
 /*
@@ -1531,6 +1545,24 @@
   --accent-hover: #b1cdaa;
   --accent-bright: #cbe0c5;
   --accent-rgb: 157, 187, 150;
+}
+
+:root {
+  /* Overridden per face: only Segoe has a separate display cut. */
+  --font-display: var(--font);
+
+  /*
+   * Inter is bundled rather than named and hoped for: it is not installed on
+   * Windows, so the old stack silently fell through to Segoe UI Variable and
+   * the design was never seeing the face it was drawn against.
+   *
+   * Which face wins is a setting, because the answer depends on the display.
+   * Inter is drawn for screens where hinting no longer decides anything;
+   * Segoe UI Variable is hinted by Microsoft for Windows at 96 DPI, which is
+   * exactly where a 100% scale display sits. Neither is right in the
+   * abstract, so the eye in front of the screen picks.
+   */
+  --font: "Satoshi", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 :root[data-font="inter"] {
