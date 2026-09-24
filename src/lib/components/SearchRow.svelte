@@ -502,7 +502,7 @@
     align-items: center;
     flex: none;
     gap: var(--space-2);
-    padding: var(--space-snug) var(--space-2) var(--space-snug) var(--space-1);
+    padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2);
     color: var(--text-2);
     font: inherit;
     font-size: var(--text-meta);
