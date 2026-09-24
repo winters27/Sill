@@ -1,6 +1,6 @@
 [package]
 name = "sill"
-version = "0.4.4"
+version = "0.4.5"
 description = "Open-source Windows launcher and command palette"
 authors = ["Brandon Winters"]
 edition = "2021"
