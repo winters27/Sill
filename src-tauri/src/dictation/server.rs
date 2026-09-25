@@ -10,7 +10,7 @@
 //! ordinary `local` transcription provider, so a remote whisper server on
 //! another machine goes down the same code path.
 //!
-//! Its lifetime is tied to Asyar's by a job object (see `job`), so a crash
+//! Its lifetime is tied to Sill's by a job object (see `job`), so a crash
 //! takes the server down with it rather than stranding the model in memory.
 
 use serde::{Deserialize, Serialize};
@@ -750,8 +750,8 @@ mod tests {
     /// the model is loaded, and that the URL handed back transcribes.
     ///
     /// ```text
-    /// $env:ASYAR_WHISPER_SERVER = "C:\...\whisper-server.exe"
-    /// $env:ASYAR_WHISPER_MODEL  = "C:\...\ggml-base.en.bin"
+    /// $env:SILL_WHISPER_SERVER = "C:\...\whisper-server.exe"
+    /// $env:SILL_WHISPER_MODEL  = "C:\...\ggml-base.en.bin"
     /// cargo test --lib dictation::server::tests::spawn -- --ignored --nocapture
     /// ```
     #[tokio::test]
@@ -761,10 +761,10 @@ mod tests {
         use crate::dictation::transcriber::{build_transcription_client, transcribe};
 
         let (Ok(exe), Ok(model)) = (
-            std::env::var("ASYAR_WHISPER_SERVER"),
-            std::env::var("ASYAR_WHISPER_MODEL"),
+            std::env::var("SILL_WHISPER_SERVER"),
+            std::env::var("SILL_WHISPER_MODEL"),
         ) else {
-            panic!("set ASYAR_WHISPER_SERVER and ASYAR_WHISPER_MODEL");
+            panic!("set SILL_WHISPER_SERVER and SILL_WHISPER_MODEL");
         };
 
         let server = WhisperServer::new();
@@ -865,7 +865,7 @@ mod tests {
     }
 
     /// Starts a real server and then parks, so an external force-kill of
-    /// this test process stands in for Asyar crashing.
+    /// this test process stands in for Sill crashing.
     ///
     /// The job-object unit tests prove a closed job kills its members, and
     /// this proves the whisper server is actually one of them, using the
@@ -875,10 +875,10 @@ mod tests {
     #[ignore = "parks forever; meant to be force-killed from outside"]
     async fn spawn_parks_a_server_for_an_external_kill() {
         let (Ok(exe), Ok(model)) = (
-            std::env::var("ASYAR_WHISPER_SERVER"),
-            std::env::var("ASYAR_WHISPER_MODEL"),
+            std::env::var("SILL_WHISPER_SERVER"),
+            std::env::var("SILL_WHISPER_MODEL"),
         ) else {
-            panic!("set ASYAR_WHISPER_SERVER and ASYAR_WHISPER_MODEL");
+            panic!("set SILL_WHISPER_SERVER and SILL_WHISPER_MODEL");
         };
 
         let server = WhisperServer::new();

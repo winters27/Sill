@@ -197,13 +197,13 @@ mod tests {
     /// Ignored: it opens the microphone and spends money. Configure and run:
     ///
     /// ```text
-    /// $env:ASYAR_STT_KEY   = "gsk_..."
-    /// $env:ASYAR_STT_MODEL = "whisper-large-v3-turbo"
+    /// $env:SILL_STT_KEY   = "gsk_..."
+    /// $env:SILL_STT_MODEL = "whisper-large-v3-turbo"
     /// cargo test --lib dictation::transcriber::tests::probe_transcribes -- --ignored --nocapture
     /// ```
     ///
-    /// `ASYAR_STT_PROVIDER` (default `groq`), `ASYAR_STT_BASE_URL`,
-    /// `ASYAR_STT_SECONDS` (default 5) and `ASYAR_STT_LANGUAGE` also apply.
+    /// `SILL_STT_PROVIDER` (default `groq`), `SILL_STT_BASE_URL`,
+    /// `SILL_STT_SECONDS` (default 5) and `SILL_STT_LANGUAGE` also apply.
     /// For a local whisper-server, set provider `local` and a base URL; no key
     /// or model is needed.
     #[tokio::test]
@@ -215,8 +215,8 @@ mod tests {
         use crate::dictation::{resample, wav};
         use std::time::Instant;
 
-        let provider = std::env::var("ASYAR_STT_PROVIDER").unwrap_or_else(|_| "groq".to_string());
-        let seconds: u64 = std::env::var("ASYAR_STT_SECONDS")
+        let provider = std::env::var("SILL_STT_PROVIDER").unwrap_or_else(|_| "groq".to_string());
+        let seconds: u64 = std::env::var("SILL_STT_SECONDS")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(5);
@@ -225,20 +225,20 @@ mod tests {
             enabled: true,
             name: None,
             provider_type: None,
-            api_key: std::env::var("ASYAR_STT_KEY").ok(),
-            base_url: std::env::var("ASYAR_STT_BASE_URL").ok(),
-            last_model_id: std::env::var("ASYAR_STT_MODEL").ok(),
+            api_key: std::env::var("SILL_STT_KEY").ok(),
+            base_url: std::env::var("SILL_STT_BASE_URL").ok(),
+            last_model_id: std::env::var("SILL_STT_MODEL").ok(),
         };
 
         let request = transcription_request(
             &provider,
             &config,
             &TranscribeOptions {
-                language: std::env::var("ASYAR_STT_LANGUAGE").ok(),
+                language: std::env::var("SILL_STT_LANGUAGE").ok(),
                 ..Default::default()
             },
         )
-        .expect("build the request (set ASYAR_STT_KEY / ASYAR_STT_MODEL)");
+        .expect("build the request (set SILL_STT_KEY / SILL_STT_MODEL)");
         println!("\nPOST {}", request.url);
 
         println!("Recording {seconds}s. Speak now.");
@@ -271,7 +271,7 @@ mod tests {
         );
 
         // Kept so a wrong transcript can be listened to rather than guessed at.
-        let wav_path = std::env::temp_dir().join("asyar-dictation-probe.wav");
+        let wav_path = std::env::temp_dir().join("sill-dictation-probe.wav");
         let _ = std::fs::write(&wav_path, &bytes);
         println!("  audio written to {}", wav_path.display());
 

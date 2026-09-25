@@ -5,8 +5,8 @@
 //! a general way to kill a process tree filed under dictation is a thing the
 //! next person does not find.
 //!
-//! Killing the whisper server when Asyar quits is easy; the hard case is
-//! Asyar *not* quitting, but crashing or being force-killed. Nothing in the
+//! Killing the whisper server when Sill quits is easy; the hard case is
+//! Sill *not* quitting, but crashing or being force-killed. Nothing in the
 //! process gets to run then, so no `Drop`, no shutdown hook, and no signal
 //! handler can help. The server would keep running with the whole model
 //! resident, which for `medium.en` is nearly 1.8 GB.

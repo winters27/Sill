@@ -22,6 +22,10 @@ use std::collections::HashMap;
 /// after the user waits through the upload.
 const CLOUD_UPLOAD_LIMIT: usize = 25 * 1024 * 1024;
 
+/// Sill's public home, the `bundle.homepage` in `tauri.conf.json`. Sent as the
+/// referer OpenRouter attributes requests by.
+const HOMEPAGE: &str = "https://github.com/winters27/Sill";
+
 /// What the caller wants from this particular transcription, as opposed to
 /// the provider's standing configuration.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -77,14 +81,14 @@ pub fn transcription_request(
             "https://api.groq.com/openai/v1",
             &[],
         ),
-        // The attribution headers match `ai::models::provider_model_request`'s
-        // openrouter arm, so transcription shows up under the same app.
+        // OpenRouter credits a request to the app these two headers name, on
+        // its dashboard and in its app rankings.
         "openrouter" => cloud_request(
             provider_id,
             config,
             opts,
             "https://openrouter.ai/api/v1",
-            &[("HTTP-Referer", "https://asyar.app"), ("X-Title", "Asyar")],
+            &[("HTTP-Referer", HOMEPAGE), ("X-Title", "Sill")],
         ),
         "custom" => {
             let base = required_base_url(config, "The custom transcription endpoint")?;
@@ -332,9 +336,7 @@ mod tests {
     // ── OpenRouter ──────────────────────────────────────────────────────────
 
     #[test]
-    fn openrouter_sends_the_attribution_headers_the_rest_of_the_app_sends() {
-        // Matches `ai::models::provider_model_request`'s openrouter arm, which
-        // already identifies Asyar to OpenRouter's dashboard.
+    fn openrouter_credits_transcriptions_to_sill() {
         let request = transcription_request(
             "openrouter",
             &config("or-test", None, Some("openai/whisper-1")),
@@ -348,11 +350,23 @@ mod tests {
         );
         assert_eq!(
             request.headers.get("HTTP-Referer").map(String::as_str),
-            Some("https://asyar.app")
+            Some("https://github.com/winters27/Sill")
         );
         assert_eq!(
             request.headers.get("X-Title").map(String::as_str),
-            Some("Asyar")
+            Some("Sill")
+        );
+    }
+
+    #[test]
+    fn the_referer_is_the_homepage_the_bundle_declares() {
+        // Two copies of one URL in different files. A move of the repository
+        // updated in one place would credit transcriptions to a dead address.
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).expect("the config parses");
+        assert_eq!(
+            conf.pointer("/bundle/homepage").and_then(serde_json::Value::as_str),
+            Some(HOMEPAGE)
         );
     }
 
