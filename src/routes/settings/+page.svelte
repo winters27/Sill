@@ -35,6 +35,7 @@
   import Select from "$lib/components/settings/Select.svelte";
   import TextField from "$lib/components/settings/TextField.svelte";
   import DictationPanel from "$lib/components/settings/DictationPanel.svelte";
+  import { checkWhisperEngine, offersUpdate } from "$lib/dictation";
   import TtsPanel from "$lib/components/settings/TtsPanel.svelte";
   import WidgetsPanel from "$lib/components/settings/WidgetsPanel.svelte";
   import ActivityPanel from "$lib/components/settings/ActivityPanel.svelte";
@@ -788,6 +789,9 @@
    */
   let updateTrouble = $state<string | null>(null);
 
+  /** A newer whisper.cpp is waiting to be installed from the dictation panel. */
+  let engineUpdate = $state(false);
+
   /**
    * Installs the newer Sill, or restarts into one already downloaded.
    *
@@ -847,6 +851,18 @@
         update = { ...update, progress };
       });
       void checkForUpdate();
+
+      /*
+       * Whether a newer whisper.cpp is waiting, for the dot on Dictation.
+       *
+       * Asked here rather than by the dictation panel, so the dot is there to
+       * find before anybody opens that panel. Rust decides whether this means
+       * asking GitHub: at most every six hours, and never for an engine that
+       * is not installed or not the one dictation uses.
+       */
+      void checkWhisperEngine()
+        .then((standing) => (engineUpdate = offersUpdate(standing)))
+        .catch(() => {});
 
       /*
        * Settings written anywhere else.
@@ -1002,6 +1018,9 @@
             >
               <SettingsIcon name={item.id} size={26} />
               {item.name}
+              {#if item.id === "dictation" && engineUpdate}
+                <span class="nav-dot" role="img" aria-label="Engine update available"></span>
+              {/if}
             </button>
           {/each}
         </nav>
@@ -1464,7 +1483,11 @@
           {:else if active === "ai"}
             <AiPanel prefs={p} {commit} />
           {:else if active === "dictation"}
-            <DictationPanel prefs={p} {commit} />
+            <DictationPanel
+              prefs={p}
+              {commit}
+              onengine={(standing) => (engineUpdate = offersUpdate(standing))}
+            />
           {:else if active === "tts"}
             <TtsPanel prefs={p} {commit} />
           {:else if active === "widgets"}
@@ -2627,6 +2650,17 @@
     .nav-item.selected {
       outline: 1px solid CanvasText;
     }
+  }
+
+  /* Something in the panel is waiting to be done. The colour Sill's own update
+     wears in the launcher chin, so it reads as the same kind of news. */
+  .nav-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    margin-left: auto;
+    border-radius: 50%;
+    background: var(--info);
   }
 
   .result {

@@ -17,7 +17,6 @@
     listAudioInputDevices,
     listWhisperModels,
     installLocalDictation,
-    checkWhisperEngine,
     updateWhisperEngine,
     removeWhisperModel,
     stopWhisperServer,
@@ -26,6 +25,7 @@
     LANGUAGES,
     type HookState,
     type AudioInputDevice,
+    type EngineStanding,
     type LocalSetupStatus,
     type OutputMode,
     type SetupProgress,
@@ -40,9 +40,12 @@
      *  and those propagate through the same reactive object either way. */
     prefs: Preferences;
     commit: () => void;
+    /** Told what the engine's standing is each time the panel reads it, so
+     *  the sidebar's dot clears the moment an update lands. */
+    onengine?: (standing: EngineStanding) => void;
   }
 
-  let { prefs, commit }: Props = $props();
+  let { prefs, commit, onengine }: Props = $props();
 
   /** Longer than the clipboard's, because this is a record of your own use
    *  rather than a pile of one-time codes, and a year of it is worth reading
@@ -160,6 +163,7 @@
         listWhisperModels(),
         getLocalDictationStatus(),
       ]);
+      if (status?.engine) onengine?.(status.engine);
     } catch (err) {
       stage = `Could not read the dictation setup: ${err}`;
     }
@@ -196,6 +200,11 @@
       installing = false;
       progress = null;
       await refresh();
+      // A build that failed its checks is on the card already, in the update
+      // strip with its reason. Saying it again in the status line is the
+      // same sentence twice. A failure that never tried the build (a
+      // dictation would not finish) is not in the strip, so that one stays.
+      if (status?.engine.rejected) stage = "";
     }
   }
 
@@ -258,17 +267,6 @@
     (async () => {
       await refresh();
       unlisten = await listen<SetupProgress>("dictation:setup", ({ payload }) => apply(payload));
-
-      // Once per opening, and only when the local server card is what is on
-      // screen. Rust decides whether it is worth asking: at most every six
-      // hours, and never for an engine that is not installed.
-      if (isLocal && !prefs.dictation.provider.baseUrl) {
-        try {
-          if (await checkWhisperEngine()) await refresh();
-        } catch {
-          // An unanswered check changes nothing on the card.
-        }
-      }
     })();
 
     return () => {

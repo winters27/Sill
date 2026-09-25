@@ -139,6 +139,12 @@ export interface LocalSetupStatus {
   modelMemoryBytes: number;
 }
 
+/** Whether there is a newer engine to point somebody at. A build that already
+ *  failed here is on the card, with its reason, but is not news. */
+export function offersUpdate(standing: EngineStanding | null | undefined): boolean {
+  return !!standing?.update && !standing.rejected;
+}
+
 /** `1.9.4+b5130` as the `1.9.4` a sentence wants. */
 export function releaseOf(version: string): string {
   return version.split("+")[0];

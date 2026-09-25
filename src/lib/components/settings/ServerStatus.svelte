@@ -61,6 +61,40 @@
 </script>
 
 <div class="card" data-state={state}>
+  {#if update && !installing && status?.engineVersion}
+    <!--
+      First in the card, not last. At the foot of the facts it read as one
+      more fact, and a newer engine is the one thing on this card that asks
+      somebody to do something.
+    -->
+    <div class="update" class:rejected>
+      <div class="update-titles">
+        <span class="update-headline">
+          {rejected
+            ? `whisper.cpp ${releaseOf(update.version)} did not work on this machine`
+            : `whisper.cpp ${releaseOf(update.version)} is available`}
+        </span>
+        <span class="update-detail" id="engine-update">
+          {#if rejected}
+            Still on {releaseOf(status.engineVersion)}. {rejected.reason}
+          {:else}
+            You have {releaseOf(status.engineVersion)}. Dictation keeps working on it until the
+            new engine has downloaded, passed its checks and loaded the model.
+          {/if}
+        </span>
+      </div>
+      <button
+        type="button"
+        class="update-button"
+        aria-describedby="engine-update"
+        onclick={() => onupdate(rejected !== null)}
+      >
+        {rejected ? "Try again" : `Update to ${releaseOf(update.version)}`}
+        <span class="size">{formatBytes(update.bytes)}</span>
+      </button>
+    </div>
+  {/if}
+
   <div class="head">
     <span class="beacon" aria-hidden="true"></span>
 
@@ -136,23 +170,6 @@
       {/if}
     </dl>
 
-    {#if update && !installing}
-      <div class="update">
-        <span class="update-text" id="engine-update">
-          {#if rejected}
-            whisper.cpp {releaseOf(update.version)} did not start on this machine: {rejected.reason}
-          {:else}
-            whisper.cpp {releaseOf(update.version)} is available. Dictation keeps working on the
-            current engine until the new one has loaded the model.
-          {/if}
-        </span>
-        <Button
-          label={rejected ? "Try again" : `Update (${formatBytes(update.bytes)})`}
-          describedBy="engine-update"
-          onclick={() => onupdate(rejected !== null)}
-        />
-      </div>
-    {/if}
   {/if}
 </div>
 
@@ -310,21 +327,84 @@
     color: var(--text-2);
   }
 
+  /*
+   * The engine update, in the same tinted pane Sill's own update wears in the
+   * launcher chin, so "there is a newer one" looks the same wherever it is said.
+   */
   .update {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    margin-top: var(--space-3);
-    padding-top: var(--space-3);
-    border-top: 1px solid var(--hairline);
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    background-color: var(--info-fill);
+    background-image: var(--sheen);
   }
 
-  .update-text {
+  .update.rejected {
+    background-color: var(--fill-1);
+  }
+
+  .update-titles {
     flex: 1;
     min-width: 0;
+  }
+
+  .update-headline {
+    display: block;
+    font-size: var(--text-body);
+    font-weight: var(--weight-strong);
+    color: var(--info);
+  }
+
+  .update.rejected .update-headline {
+    color: var(--text-1);
+  }
+
+  .update-detail {
+    display: block;
+    margin-top: var(--space-half);
     max-width: 62ch;
     font-size: var(--text-meta);
     line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  /* The chin's update pill: light through a tinted pane, for a control that
+     has to be found. */
+  .update-button {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: none;
+    height: var(--control-height);
+    padding: 0 var(--space-4);
+    border: 0;
+    border-radius: var(--radius-lg);
+    background-color: var(--info-fill-strong);
+    background-image: var(--sheen);
+    box-shadow: var(--info-lit);
+    color: var(--info);
+    font: inherit;
+    font-size: var(--text-meta);
+    font-weight: var(--weight-strong);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color var(--motion-state) var(--ease);
+  }
+
+  .update-button:hover {
+    color: var(--text-1);
+  }
+
+  .update-button:focus-visible {
+    outline: none;
+    box-shadow: var(--info-lit), var(--focus-ring-gapped);
+  }
+
+  .update-button .size {
+    font-weight: normal;
     color: var(--text-2);
   }
 </style>

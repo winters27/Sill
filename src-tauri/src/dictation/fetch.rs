@@ -97,10 +97,12 @@ pub fn verify(path: &Path, expected: &str) -> Result<()> {
     }
 
     let _ = std::fs::remove_file(path);
-    Err(DictationError::Validation(format!(
-        "The download did not match its published checksum, so it was discarded. \
-         Expected {expected}, got {actual}"
-    )))
+    // The digests go to the log, where somebody diagnosing it can use them.
+    // In the sentence on screen they are two lines of hex nobody reads.
+    crate::say!("checksum mismatch for {}: expected {expected}, got {actual}", path.display());
+    Err(DictationError::Validation(
+        "The download did not match its published checksum, so it was discarded.".to_string(),
+    ))
 }
 
 /// Moves `staged` onto `destination` through a same-directory rename.
