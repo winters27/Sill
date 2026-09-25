@@ -17,6 +17,8 @@
     listAudioInputDevices,
     listWhisperModels,
     installLocalDictation,
+    checkWhisperEngine,
+    updateWhisperEngine,
     removeWhisperModel,
     stopWhisperServer,
     dictationHookState,
@@ -61,6 +63,8 @@
 
   let stage = $state("");
   let progress = $state<number | null>(null);
+  /** Which button started the stages arriving, for the word a failure uses. */
+  let doing = $state<"Setup" | "Update">("Setup");
 
   const isLocal = $derived(prefs.dictation.providerId === "local");
 
@@ -134,7 +138,7 @@
       stage = `Downloading ${prefs.dictation.modelId}, ${formatBytes(bytesDownloaded)} of ${formatBytes(totalBytes)}`;
       progress = fraction(bytesDownloaded, totalBytes);
     } else {
-      stage = `Setup failed: ${event.failed.error}`;
+      stage = `${doing} failed: ${event.failed.error}`;
       progress = null;
     }
   }
@@ -162,6 +166,7 @@
   }
 
   async function install() {
+    doing = "Setup";
     installing = true;
     stage = "Starting";
     progress = null;
@@ -174,6 +179,23 @@
     } finally {
       installing = false;
       progress = null;
+    }
+  }
+
+  async function updateEngine(retry: boolean) {
+    doing = "Update";
+    installing = true;
+    stage = "Starting";
+    progress = null;
+    try {
+      await updateWhisperEngine(retry);
+      stage = "";
+    } catch (err) {
+      stage = `Update failed: ${err}`;
+    } finally {
+      installing = false;
+      progress = null;
+      await refresh();
     }
   }
 
@@ -236,6 +258,17 @@
     (async () => {
       await refresh();
       unlisten = await listen<SetupProgress>("dictation:setup", ({ payload }) => apply(payload));
+
+      // Once per opening, and only when the local server card is what is on
+      // screen. Rust decides whether it is worth asking: at most every six
+      // hours, and never for an engine that is not installed.
+      if (isLocal && !prefs.dictation.provider.baseUrl) {
+        try {
+          if (await checkWhisperEngine()) await refresh();
+        } catch {
+          // An unanswered check changes nothing on the card.
+        }
+      }
     })();
 
     return () => {
@@ -672,6 +705,7 @@
       {progress}
       oninstall={install}
       onstop={() => void stopServer()}
+      onupdate={(retry) => void updateEngine(retry)}
     />
   </Section>
 {/if}

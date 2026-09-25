@@ -1,6 +1,6 @@
 <script lang="ts">
   import Button from "./Button.svelte";
-  import { formatBytes, type LocalSetupStatus } from "$lib/dictation";
+  import { formatBytes, releaseOf, type LocalSetupStatus } from "$lib/dictation";
 
   interface Props {
     status: LocalSetupStatus | null;
@@ -12,9 +12,14 @@
     progress: number | null;
     oninstall: () => void;
     onstop: () => void;
+    /** `retry` is set when the build on offer already failed here once. */
+    onupdate: (retry: boolean) => void;
   }
 
-  let { status, installing, stage, progress, oninstall, onstop }: Props = $props();
+  let { status, installing, stage, progress, oninstall, onstop, onupdate }: Props = $props();
+
+  const update = $derived(status?.engine.update ?? null);
+  const rejected = $derived(status?.engine.rejected ?? null);
 
   type State = "missing" | "ready" | "running" | "working";
 
@@ -123,11 +128,31 @@
           </div>
         {/if}
       {/if}
-      <div>
-        <dt>Engine</dt>
-        <dd class="mono">{status.engineVersion}</dd>
-      </div>
+      {#if status.engineVersion}
+        <div>
+          <dt>Engine</dt>
+          <dd class="mono">{status.engineVersion}</dd>
+        </div>
+      {/if}
     </dl>
+
+    {#if update && !installing}
+      <div class="update">
+        <span class="update-text" id="engine-update">
+          {#if rejected}
+            whisper.cpp {releaseOf(update.version)} did not start on this machine: {rejected.reason}
+          {:else}
+            whisper.cpp {releaseOf(update.version)} is available. Dictation keeps working on the
+            current engine until the new one has loaded the model.
+          {/if}
+        </span>
+        <Button
+          label={rejected ? "Try again" : `Update (${formatBytes(update.bytes)})`}
+          describedBy="engine-update"
+          onclick={() => onupdate(rejected !== null)}
+        />
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -282,6 +307,24 @@
   .mono {
     font-family: var(--font-mono);
     font-size: var(--text-meta);
+    color: var(--text-2);
+  }
+
+  .update {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--hairline);
+  }
+
+  .update-text {
+    flex: 1;
+    min-width: 0;
+    max-width: 62ch;
+    font-size: var(--text-meta);
+    line-height: 1.5;
     color: var(--text-2);
   }
 </style>

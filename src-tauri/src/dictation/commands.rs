@@ -6,7 +6,7 @@
 
 use crate::dictation::assets::{self, WhisperModel};
 use crate::dictation::capture::list_input_devices;
-use crate::dictation::engine;
+use crate::dictation::engine_update::{self, EngineStanding, EngineUpdates};
 use crate::dictation::history;
 use crate::dictation::models::{
     AudioInputDevice, DictationSettings, LocalSetupStatus, SetupProgress,
@@ -143,14 +143,19 @@ pub fn list_whisper_models(app: AppHandle) -> Vec<WhisperModel> {
 }
 
 /// What local dictation still needs before it can run.
+///
+/// Polled every two seconds while the panel is open, so the engine half is
+/// read from `EngineUpdates`' cache rather than from the disk each time.
 #[tauri::command]
 pub fn get_local_dictation_status(
     app: AppHandle,
     whisper: State<'_, WhisperServer>,
     state: State<'_, DictationService>,
+    engines: State<'_, EngineUpdates>,
 ) -> LocalSetupStatus {
     let model_id = state.settings().model_id;
-    let engine_installed = engine::is_installed(&app);
+    let engine = engines.standing(&app);
+    let engine_installed = engine.active.is_some();
     // Asked once and reused: `snapshot` reaps a dead child, so calling it
     // twice could report a server that the first call just cleared.
     let snapshot = whisper.snapshot();
@@ -166,9 +171,10 @@ pub fn get_local_dictation_status(
         }) + if engine_installed {
             0
         } else {
-            engine::ARCHIVE_BYTES
+            engines.first_download_bytes(&app)
         },
-        engine_version: engine::VERSION.to_string(),
+        engine_version: engine.active.clone(),
+        engine,
         model_label: assets::label_of(&model_id).unwrap_or(&model_id).to_string(),
         model_memory_bytes: assets::memory_of(&model_id).unwrap_or(0),
         model_id,
@@ -183,47 +189,40 @@ pub fn get_local_dictation_status(
 /// megabytes and the first model load takes seconds: without progress this
 /// looks like a button that does nothing.
 #[tauri::command]
-pub async fn install_local_dictation(
-    app: AppHandle,
-    whisper: State<'_, WhisperServer>,
-    model_id: String,
-) -> Result<(), String> {
-    let outcome = install_local_inner(&app, &whisper, &model_id).await;
-    match &outcome {
-        Ok(()) => SetupProgress::Ready.emit(&app),
-        Err(e) => SetupProgress::Failed {
-            error: e.to_string(),
-        }
-        .emit(&app),
-    }
+pub async fn install_local_dictation(app: AppHandle, model_id: String) -> Result<(), String> {
+    let outcome = engine_update::setup(&app, &model_id).await;
+    report(&app, &outcome);
     outcome.map_err(String::from)
 }
 
-async fn install_local_inner(
-    app: &AppHandle,
-    whisper: &WhisperServer,
-    model_id: &str,
-) -> crate::dictation::error::Result<()> {
-    if !engine::is_installed(app) {
-        SetupProgress::Engine.emit(app);
-        engine::ensure(app, |downloaded, total| {
-            SetupProgress::EngineDownload {
-                bytes_downloaded: downloaded,
-                total_bytes: total,
-            }
-            .emit(app);
-        })
-        .await?;
+/// Asks whether upstream has a newer whisper.cpp, unless it was asked lately.
+///
+/// Called when the local server's settings come on screen. `force` asks again
+/// regardless.
+#[tauri::command]
+pub async fn check_whisper_engine(app: AppHandle, force: bool) -> EngineStanding {
+    engine_update::check(&app, force).await
+}
+
+/// Installs the newer whisper.cpp the last check found, and switches to it.
+///
+/// `retry` tries a build that already failed here once more.
+#[tauri::command]
+pub async fn update_whisper_engine(app: AppHandle, retry: bool) -> Result<(), String> {
+    let outcome = engine_update::apply(&app, retry).await;
+    report(&app, &outcome);
+    outcome.map_err(String::from)
+}
+
+/// Ends a run of `dictation:setup` stages, one way or the other.
+fn report(app: &AppHandle, outcome: &crate::dictation::error::Result<()>) {
+    match outcome {
+        Ok(()) => SetupProgress::Ready.emit(app),
+        Err(e) => SetupProgress::Failed {
+            error: e.to_string(),
+        }
+        .emit(app),
     }
-
-    assets::ensure(app, model_id).await?;
-
-    // Started here rather than on the first dictation, so the model load is
-    // paid while the user is looking at a progress indicator instead of
-    // while they are holding a hotkey down waiting to speak.
-    SetupProgress::Starting.emit(app);
-    whisper.ensure(app, model_id).await?;
-    Ok(())
 }
 
 /// Deletes a downloaded model. Stops the server first when it is the one

@@ -2080,6 +2080,7 @@ pub fn run() {
             // exactly as long as the app does.
             app.manage(dictation::service::DictationService::new());
             app.manage(dictation::server::WhisperServer::default());
+            app.manage(dictation::engine_update::EngineUpdates::default());
             app.manage(dictation::panel::PanelState::default());
 
             // The hook reads its snippets from here, so they have to be
@@ -2502,6 +2503,8 @@ pub fn run() {
             dictation::commands::list_whisper_models,
             dictation::commands::get_local_dictation_status,
             dictation::commands::install_local_dictation,
+            dictation::commands::check_whisper_engine,
+            dictation::commands::update_whisper_engine,
             dictation::commands::remove_whisper_model,
             dictation::commands::stop_whisper_server,
             dictation::commands::dictation_history,

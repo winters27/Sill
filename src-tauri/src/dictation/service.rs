@@ -445,10 +445,17 @@ fn spawn_meter_pump(app: AppHandle, session: &CaptureSession, running: Arc<Atomi
 /// run time and cannot be stored in settings. A base URL the user typed in
 /// themselves still wins: that is how a whisper server on another machine is
 /// pointed at, and starting a local one alongside it would be pure waste.
+///
+/// The lease comes back with it and has to be held until the transcript
+/// arrives, so an engine switch waits for this request instead of cutting it
+/// off.
 async fn local_provider_config(
     app: &AppHandle,
     settings: &DictationSettings,
-) -> Result<crate::dictation::provider::ProviderConfig> {
+) -> Result<(
+    crate::dictation::provider::ProviderConfig,
+    Option<crate::dictation::server::Lease>,
+)> {
     let configured = settings
         .provider
         .base_url
@@ -456,16 +463,19 @@ async fn local_provider_config(
         .map(str::trim)
         .is_some_and(|base| !base.is_empty());
     if settings.provider_id != "local" || configured {
-        return Ok(settings.provider.clone());
+        return Ok((settings.provider.clone(), None));
     }
 
     let server = app.state::<crate::dictation::server::WhisperServer>();
-    let base = server.ensure(app, &settings.model_id).await?;
+    let lease = server.ensure(app, &settings.model_id).await?;
 
-    Ok(crate::dictation::provider::ProviderConfig {
-        base_url: Some(base),
-        ..settings.provider.clone()
-    })
+    Ok((
+        crate::dictation::provider::ProviderConfig {
+            base_url: Some(lease.url().to_string()),
+            ..settings.provider.clone()
+        },
+        Some(lease),
+    ))
 }
 
 async fn transcribe_and_deliver(
@@ -481,7 +491,7 @@ async fn transcribe_and_deliver(
     let samples = resample::to_target_rate(&clip.samples, clip.sample_rate)?;
     let bytes = wav::encode_mono_16bit(&samples, resample::TARGET_RATE);
 
-    let provider = local_provider_config(app, &settings).await?;
+    let (provider, lease) = local_provider_config(app, &settings).await?;
     let request = transcription_request(
         &settings.provider_id,
         &provider,
@@ -502,6 +512,9 @@ async fn transcribe_and_deliver(
     crate::say!("POST {}", request.url);
     let started = std::time::Instant::now();
     let transcript = transcribe(&build_transcription_client(), &request, bytes).await?;
+    // Finished with the server. Held through the paste, a switch would wait
+    // on a clipboard for no reason.
+    drop(lease);
     let transcribe_ms = started.elapsed().as_millis() as u64;
     crate::say!(
         "transcript: {} chars in {transcribe_ms} ms",

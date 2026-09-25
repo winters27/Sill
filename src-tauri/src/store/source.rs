@@ -261,7 +261,10 @@ pub fn rate_limited(remaining: Option<&str>) -> Option<String> {
 // ----------------------------------------------------------------- fetching
 
 /// One request to the GitHub API, with the token when there is one.
-async fn api(client: &reqwest::Client, url: &str, token: Option<&str>) -> Result<String, String> {
+///
+/// Also how dictation asks which whisper.cpp build is current, so a rate limit
+/// reads the same wherever it is hit.
+pub(crate) async fn api(client: &reqwest::Client, url: &str, token: Option<&str>) -> Result<String, String> {
     let mut request = client
         .get(url)
         .header(reqwest::header::USER_AGENT, USER_AGENT)

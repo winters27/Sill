@@ -101,6 +101,27 @@ export interface ServerSnapshot {
   memoryBytes: number;
 }
 
+/** One published whisper.cpp build. */
+export interface EngineBuild {
+  /** `1.9.4+b5130`: the release, then the build tag it is published under. */
+  version: string;
+  url: string;
+  sha256: string;
+  bytes: number;
+}
+
+/** Whether a newer whisper.cpp is available, and whether it failed here. */
+export interface EngineStanding {
+  /** The build that runs, or null before setup. */
+  active: string | null;
+  /** A newer build than the one running. */
+  update: EngineBuild | null;
+  /** Set when that newer build already failed on this machine. */
+  rejected: { version: string; reason: string } | null;
+  /** Why the last check got no answer. Logged, not shown. */
+  error: string | null;
+}
+
 export interface LocalSetupStatus {
   engineInstalled: boolean;
   modelInstalled: boolean;
@@ -110,10 +131,17 @@ export interface LocalSetupStatus {
   serverRunning: boolean;
   /** Live details while it is running, otherwise null. */
   server: ServerSnapshot | null;
-  engineVersion: string;
+  /** The whisper.cpp build that runs, or null before setup. */
+  engineVersion: string | null;
+  engine: EngineStanding;
   modelLabel: string;
   /** Roughly what the selected model holds once resident. */
   modelMemoryBytes: number;
+}
+
+/** `1.9.4+b5130` as the `1.9.4` a sentence wants. */
+export function releaseOf(version: string): string {
+  return version.split("+")[0];
 }
 
 /**
@@ -146,6 +174,23 @@ export function getLocalDictationStatus(): Promise<LocalSetupStatus> {
 /** Downloads the engine and the model, then starts the server. */
 export function installLocalDictation(modelId: string): Promise<void> {
   return invoke("install_local_dictation", { modelId });
+}
+
+/**
+ * Asks whether upstream has a newer whisper.cpp. Rust decides whether it is
+ * worth asking, so this is cheap to call whenever the server card appears.
+ *
+ * Checked for shape rather than trusted: a command the window is not allowed
+ * resolves with nothing rather than rejecting.
+ */
+export async function checkWhisperEngine(force = false): Promise<EngineStanding | null> {
+  const standing = await invoke<EngineStanding | null>("check_whisper_engine", { force });
+  return standing && typeof standing === "object" && "active" in standing ? standing : null;
+}
+
+/** Installs the newer whisper.cpp and switches the server over to it. */
+export function updateWhisperEngine(retry = false): Promise<void> {
+  return invoke("update_whisper_engine", { retry });
 }
 
 export function removeWhisperModel(modelId: string): Promise<boolean> {

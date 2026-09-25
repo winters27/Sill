@@ -18,6 +18,7 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -44,6 +45,11 @@ const IDLE_CHECK: Duration = Duration::from_secs(60);
 
 /// Lines of server output kept for error reporting.
 const LOG_TAIL: usize = 24;
+
+/// Longest a switch to a new engine waits for transcriptions already under
+/// way. A minute of `medium.en` on a slow machine is well inside it.
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(180);
+const DRAIN_POLL: Duration = Duration::from_millis(100);
 
 /// Never take the whole machine: dictation runs *while* the user is working,
 /// and whisper's gains flatten out well before the core count does.
@@ -136,6 +142,63 @@ struct Inner {
     /// Created on first use and held for as long as this server exists.
     /// Dropping it is what kills the members, so it must outlive them.
     job: OnceLock<Option<Job>>,
+    /// Transcriptions holding a [`Lease`] on the running server.
+    leases: AtomicUsize,
+    /// Set while the server is being replaced, so no new lease is handed out
+    /// on the one about to go. Read and written under `running`, which is
+    /// what makes "no lease was taken after this was set" true.
+    retiring: AtomicBool,
+}
+
+/// A running server, held for the length of one transcription.
+///
+/// Swapping the engine stops the server, and a transcription whose request is
+/// in flight at that moment would lose the whole dictation. So `ensure` hands
+/// out one of these, and [`WhisperServer::switch`] waits until none are held.
+pub struct Lease {
+    url: String,
+    _held: Held,
+}
+
+impl Lease {
+    /// The base URL to hand to the `local` provider.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+}
+
+/// Why a switch to another engine did not happen.
+///
+/// The two are handled oppositely, which is why they are told apart: one says
+/// nothing about the new engine and leaves the old server untouched, the other
+/// is the new engine failing to start and means it must not be used.
+#[derive(Debug)]
+pub enum SwitchFailed {
+    /// Never attempted: a transcription would not finish, or there is no
+    /// model to load. The old server is still running.
+    NotTried(DictationError),
+    /// The new engine did not come up. The old server has been stopped.
+    Failed(DictationError),
+}
+
+struct Held(Arc<Inner>);
+
+impl Held {
+    /// Counts one more lease.
+    ///
+    /// Called under `running` from `reuse`, and under the start lock from
+    /// `adopt`, which a switch holds for its whole length. Either way no lease
+    /// can appear between a switch draining them and stopping the server.
+    fn take(inner: &Arc<Inner>) -> Self {
+        inner.leases.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(inner))
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        self.0.leases.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// Owns the `whisper-server` process. Registered as Tauri managed state.
@@ -188,26 +251,28 @@ impl WhisperServer {
             .unwrap_or(false)
     }
 
-    /// The base URL of a server serving `model_id`, starting or restarting
-    /// one as needed. Returns the URL to hand to the `local` provider.
-    pub async fn ensure(&self, app: &AppHandle, model_id: &str) -> Result<String> {
-        if let Some(url) = self.reuse(model_id) {
-            return Ok(url);
+    /// A server serving `model_id` on the active engine, starting or
+    /// restarting one as needed.
+    ///
+    /// Hold the lease for as long as the server is being talked to: an engine
+    /// switch waits for it rather than cutting the request off.
+    pub async fn ensure(&self, app: &AppHandle, model_id: &str) -> Result<Lease> {
+        if let Some(lease) = self.reuse(model_id) {
+            return Ok(lease);
         }
 
         let _guard = self.inner.starting.lock().await;
         // Another caller may have started it while we waited for the lock.
-        if let Some(url) = self.reuse(model_id) {
-            return Ok(url);
+        if let Some(lease) = self.reuse(model_id) {
+            return Ok(lease);
         }
         self.stop();
 
-        let exe = engine::binary_path(app)?;
-        if !exe.is_file() {
+        let Some(engine) = engine::active(app) else {
             return Err(DictationError::NotFound(
                 "whisper.cpp is not installed yet".to_string(),
             ));
-        }
+        };
         let model = assets::model_path(app, model_id)?;
         if !model.is_file() {
             return Err(DictationError::NotFound(format!(
@@ -215,19 +280,97 @@ impl WhisperServer {
             )));
         }
 
-        let running = spawn(&exe, &model, model_id, self.job()).await?;
+        let running = spawn(&engine.exe, &model, model_id, self.job()).await?;
+        Ok(self.adopt(running))
+    }
+
+    /// Replaces whatever is running with a server on `exe`, loading `model_id`.
+    ///
+    /// This is the proof that a new engine works on this machine: it has to
+    /// load a real model and answer before anything else changes. So an
+    /// `Err` means the new engine is not to be used, and nothing is left
+    /// running on it.
+    ///
+    /// Stops the old server first rather than running both: two resident
+    /// copies of `medium.en` is nearly four gigabytes to save a few seconds.
+    /// Transcriptions already holding a lease finish first; ones that arrive
+    /// meanwhile wait on the start lock and are served by the new server.
+    pub async fn switch(
+        &self,
+        app: &AppHandle,
+        exe: &Path,
+        model_id: &str,
+    ) -> std::result::Result<(), SwitchFailed> {
+        let model = assets::model_path(app, model_id).map_err(SwitchFailed::NotTried)?;
+        if !model.is_file() {
+            return Err(SwitchFailed::NotTried(DictationError::NotFound(format!(
+                "The {model_id} model has not been downloaded yet"
+            ))));
+        }
+
+        let _guard = self.inner.starting.lock().await;
+        self.set_retiring(true);
+
+        let outcome = match self.drain().await {
+            Ok(()) => {
+                self.stop();
+                spawn(exe, &model, model_id, self.job())
+                    .await
+                    .map(|running| drop(self.adopt(running)))
+                    .map_err(SwitchFailed::Failed)
+            }
+            Err(err) => Err(SwitchFailed::NotTried(err)),
+        };
+
+        self.set_retiring(false);
+        outcome
+    }
+
+    /// Stores a freshly started server and hands out its first lease.
+    fn adopt(&self, running: Running) -> Lease {
         let url = base_url(running.port);
         if let Ok(mut state) = self.inner.running.lock() {
             *state = Some(running);
         }
         self.start_watchdog();
-        Ok(url)
+        Lease {
+            url,
+            _held: Held::take(&self.inner),
+        }
     }
 
-    /// Returns the running server's URL when it already serves `model_id`
-    /// and has not died, marking it used so the idle watchdog backs off.
-    fn reuse(&self, model_id: &str) -> Option<String> {
+    fn set_retiring(&self, retiring: bool) {
+        if let Ok(_state) = self.inner.running.lock() {
+            self.inner.retiring.store(retiring, Ordering::SeqCst);
+        }
+    }
+
+    /// Waits until no transcription holds a lease.
+    ///
+    /// Polls, but only for the length of a switch somebody pressed a button
+    /// for, and never at rest.
+    async fn drain(&self) -> Result<()> {
+        let deadline = Instant::now() + DRAIN_TIMEOUT;
+        while self.inner.leases.load(Ordering::SeqCst) > 0 {
+            if Instant::now() >= deadline {
+                return Err(DictationError::Other(
+                    "A dictation is still being transcribed. Try again once it has finished."
+                        .to_string(),
+                ));
+            }
+            tokio::time::sleep(DRAIN_POLL).await;
+        }
+        Ok(())
+    }
+
+    /// A lease on the running server when it already serves `model_id`, has
+    /// not died and is not being replaced, marking it used so the idle
+    /// watchdog backs off.
+    fn reuse(&self, model_id: &str) -> Option<Lease> {
         let mut state = self.inner.running.lock().ok()?;
+        if self.inner.retiring.load(Ordering::SeqCst) {
+            return None;
+        }
         let running = state.as_mut()?;
         if needs_restart(&running.model_id, model_id) {
             return None;
@@ -238,7 +381,10 @@ impl WhisperServer {
         match running.child.try_wait() {
             Ok(None) => {
                 running.last_used = Instant::now();
-                Some(base_url(running.port))
+                Some(Lease {
+                    url: base_url(running.port),
+                    _held: Held::take(&self.inner),
+                })
             }
             // It died on us. `ensure` will start a replacement, but this is
             // the only moment the dead server's own account of why it stopped
@@ -513,7 +659,7 @@ fn tail(log: &Arc<Mutex<VecDeque<String>>>) -> String {
 }
 
 #[cfg(windows)]
-fn no_window(command: &mut Command) {
+pub(crate) fn no_window(command: &mut Command) {
     use std::os::windows::process::CommandExt;
     // CREATE_NO_WINDOW: whisper-server is a console subsystem binary, and
     // without this every dictation session flashes a console window.
@@ -522,7 +668,7 @@ fn no_window(command: &mut Command) {
 }
 
 #[cfg(not(windows))]
-fn no_window(_command: &mut Command) {}
+pub(crate) fn no_window(_command: &mut Command) {}
 
 #[cfg(test)]
 mod tests {
@@ -754,6 +900,83 @@ mod tests {
     #[test]
     fn a_fresh_server_reports_nothing_running() {
         assert!(!WhisperServer::new().is_running());
+    }
+
+    /// A server with something alive in `running`, standing in for
+    /// whisper-server so leases can be tested without a model.
+    #[cfg(windows)]
+    fn serving(model_id: &str) -> WhisperServer {
+        let mut command = Command::new("ping");
+        command
+            .args(["-n", "60", "127.0.0.1"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        no_window(&mut command);
+        let child = command.spawn().expect("ping should start");
+
+        let server = WhisperServer::new();
+        *server.inner.running.lock().unwrap() = Some(Running {
+            child,
+            port: 1,
+            model_id: model_id.to_string(),
+            started: Instant::now(),
+            last_used: Instant::now(),
+            log: Arc::new(Mutex::new(VecDeque::new())),
+        });
+        server
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_lease_is_counted_while_held_and_released_when_dropped() {
+        let server = serving("small.en");
+
+        let lease = server.reuse("small.en").expect("a live server is reused");
+        assert_eq!(lease.url(), "http://127.0.0.1:1");
+        assert_eq!(server.inner.leases.load(Ordering::SeqCst), 1);
+
+        drop(lease);
+        assert_eq!(server.inner.leases.load(Ordering::SeqCst), 0);
+        server.stop();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn no_lease_is_handed_out_on_a_server_being_replaced() {
+        // Otherwise a dictation could be pointed at the old server in the
+        // moment between the switch draining leases and stopping it.
+        let server = serving("small.en");
+        server.set_retiring(true);
+
+        assert!(server.reuse("small.en").is_none());
+        assert_eq!(server.inner.leases.load(Ordering::SeqCst), 0);
+
+        server.set_retiring(false);
+        assert!(server.reuse("small.en").is_some());
+        server.stop();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_switch_waits_for_a_transcription_to_finish() {
+        let server = serving("small.en");
+        let lease = server.reuse("small.en").unwrap();
+
+        let released = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&released);
+        let holder = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            flag.store(true, Ordering::SeqCst);
+            drop(lease);
+        });
+
+        server.drain().await.expect("the lease is released in time");
+        assert!(
+            released.load(Ordering::SeqCst),
+            "drain returned while a transcription still held the server"
+        );
+        holder.await.unwrap();
+        server.stop();
     }
 
     #[cfg(windows)]

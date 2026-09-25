@@ -237,8 +237,10 @@ pub struct LocalSetupStatus {
     pub server_running: bool,
     /// Live details while it is, so the panel can show more than a word.
     pub server: Option<crate::dictation::server::ServerSnapshot>,
-    /// Which whisper.cpp build is installed, or would be.
-    pub engine_version: String,
+    /// Which whisper.cpp build runs, or `None` before setup.
+    pub engine_version: Option<String>,
+    /// Whether a newer build is available, and whether it failed here.
+    pub engine: crate::dictation::engine_update::EngineStanding,
     /// The selected model's display name, so the panel need not look it up.
     pub model_label: String,
     /// Roughly how much memory the selected model holds while resident.
