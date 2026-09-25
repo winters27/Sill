@@ -19,6 +19,22 @@ IPC surface, the dependencies added, and every commit body in full. Use the
 relevant subset under recognizable feature labels, with measured results where
 available.
 
+## 0.4.6
+
+- **Dictation:** The local whisper.cpp engine updates on its own schedule
+  instead of waiting for a Sill release. When a newer stable build is out,
+  Settings shows a dot on Dictation and an Update button at the top of the
+  Local server card; nothing installs until it is pressed. The new build
+  downloads beside the current one and has to match GitHub's published
+  checksum, still accept every option Sill starts it with, and load your model
+  before it replaces anything. A dictation being transcribed finishes first.
+  A build that fails is removed, the previous engine keeps running, and the
+  card says what went wrong.
+- **Dictation:** A first local setup installs whisper.cpp's newest release,
+  and falls back to 1.9.3 when GitHub cannot be reached or the newest will not
+  load a model.
+- **Dictation:** Transcriptions sent through OpenRouter are credited to Sill.
+
 ## 0.4.5
 
 - **Shortcuts:** Alt+Space can be recorded as a key again, including as the
