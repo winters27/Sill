@@ -19,6 +19,14 @@ IPC surface, the dependencies added, and every commit body in full. Use the
 relevant subset under recognizable feature labels, with measured results where
 available.
 
+## 0.4.7
+
+- **Screenshots:** Clicking a window to capture it takes exactly the window
+  you see. The picture used to start a few pixels left of the window, so a
+  band of the invisible resize border ran down the left edge and the same
+  width was cut off the right, with a band across the top of a maximised
+  window as well. The window previews in the switcher are fixed the same way.
+
 ## 0.4.6
 
 - **Dictation:** The local whisper.cpp engine updates on its own schedule
