@@ -510,11 +510,12 @@ pub fn window(
     handle: isize,
     fallback: (i32, i32, i32, i32),
 ) -> Result<Shot, String> {
-    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Foundation::{HWND, RECT};
     use windows::Win32::Graphics::Gdi::{
         CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
         ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
     };
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
     // Under Storage::Xps, not WindowsAndMessaging where the Win32 docs group
     // it. The crate files it by the header it is declared in.
     use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
@@ -533,19 +534,42 @@ pub fn window(
     let taken = unsafe {
         let hwnd = HWND(handle as *mut core::ffi::c_void);
 
+        /*
+         * Drawn whole, then cut down to what is seen.
+         *
+         * `PrintWindow` draws from the corner `GetWindowRect` names, and that
+         * rectangle includes the invisible resize border: about 5 px on the
+         * left, right and bottom of an ordinary window, and on all four sides
+         * of a maximised one. `fallback` is the visible frame. Drawn into a
+         * bitmap the visible size, the border came out as a flat band down the
+         * left edge and the same width of the window was cut off the right.
+         */
+        let mut whole = RECT::default();
+        let placed = GetWindowRect(hwnd, &mut whole).ok().and_then(|()| {
+            let whole = (
+                whole.left,
+                whole.top,
+                whole.right - whole.left,
+                whole.bottom - whole.top,
+            );
+            visible_within(whole, fallback).map(|at| (whole.2, whole.3, at))
+        });
+        let (drawn_width, drawn_height, (inset_x, inset_y)) =
+            placed.unwrap_or((width, height, (0, 0)));
+
         let screen = GetDC(None);
         let memory = CreateCompatibleDC(Some(screen));
-        let bitmap = CreateCompatibleBitmap(screen, width, height);
+        let bitmap = CreateCompatibleBitmap(screen, drawn_width, drawn_height);
         let previous = SelectObject(memory, HGDIOBJ(bitmap.0));
 
         let drew = PrintWindow(hwnd, memory, PRINT_WINDOW_FLAGS(FULL_CONTENT)).as_bool();
 
-        let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
+        let mut pixels = vec![0u8; (drawn_width as usize) * (drawn_height as usize) * 4];
         let mut info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: width,
-                biHeight: -height,
+                biWidth: drawn_width,
+                biHeight: -drawn_height,
                 biPlanes: 1,
                 biBitCount: 32,
                 biCompression: BI_RGB.0,
@@ -558,7 +582,7 @@ pub fn window(
             memory,
             bitmap,
             0,
-            height as u32,
+            drawn_height as u32,
             Some(pixels.as_mut_ptr().cast()),
             &mut info,
             DIB_RGB_COLORS,
@@ -569,7 +593,7 @@ pub fn window(
         let _ = DeleteDC(memory);
         ReleaseDC(None, screen);
 
-        (drew && rows != 0).then_some(pixels)
+        (drew && rows != 0).then(|| cut(&pixels, drawn_width, (inset_x, inset_y, width, height)))
     };
 
     match taken {
@@ -592,6 +616,96 @@ pub fn window(
     _fallback: (i32, i32, i32, i32),
 ) -> Result<Shot, String> {
     Err("window capture needs Windows".to_string())
+}
+
+/// Where the visible frame starts inside the whole window, both given as
+/// `(left, top, width, height)` in screen pixels.
+///
+/// `None` when the frame does not fit inside the window, which a window
+/// moving between the two reads can cause; the caller then draws the visible
+/// size from the corner, which is wrong by the border at worst.
+fn visible_within(
+    whole: (i32, i32, i32, i32),
+    visible: (i32, i32, i32, i32),
+) -> Option<(i32, i32)> {
+    let (x, y) = (visible.0 - whole.0, visible.1 - whole.1);
+    let fits = x >= 0 && y >= 0 && x + visible.2 <= whole.2 && y + visible.3 <= whole.3;
+
+    fits.then_some((x, y))
+}
+
+/// The `(left, top, width, height)` piece of a Bgra picture `width` wide.
+///
+/// Rows the picture does not have come back as zeros rather than a panic,
+/// though `visible_within` means none are ever asked for.
+fn cut(
+    pixels: &[u8],
+    width: i32,
+    (left, top, out_width, out_height): (i32, i32, i32, i32),
+) -> Vec<u8> {
+    let row = out_width as usize * 4;
+    let mut out = vec![0u8; row * out_height as usize];
+
+    for y in 0..out_height as usize {
+        let from = ((top as usize + y) * width as usize + left as usize) * 4;
+        if let Some(source) = pixels.get(from..from + row) {
+            out[y * row..(y + 1) * row].copy_from_slice(source);
+        }
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod cutting_to_the_frame {
+    use super::*;
+
+    /// The Notepad window this was found on, measured on 2026-10-03:
+    /// `GetWindowRect` against `DWMWA_EXTENDED_FRAME_BOUNDS`.
+    #[test]
+    fn an_ordinary_window_starts_past_its_left_border() {
+        let whole = (50, 230, 1298, 1007);
+        let visible = (55, 230, 1288, 1002);
+
+        assert_eq!(visible_within(whole, visible), Some((5, 0)));
+    }
+
+    /// A maximised window hangs over the screen edge on every side.
+    #[test]
+    fn a_maximised_window_is_inset_on_top_as_well() {
+        let whole = (-8, -8, 1936, 1048);
+        let visible = (0, 0, 1920, 1032);
+
+        assert_eq!(visible_within(whole, visible), Some((8, 8)));
+    }
+
+    #[test]
+    fn a_frame_outside_the_window_is_not_trusted() {
+        assert_eq!(visible_within((0, 0, 100, 100), (-1, 0, 100, 100)), None);
+        assert_eq!(visible_within((0, 0, 100, 100), (5, 0, 100, 100)), None);
+    }
+
+    /// The band the border leaves is what went into every window capture.
+    /// Here it is the first two columns, and the window's own right edge is
+    /// the last one; the cut must drop the first and keep the second.
+    #[test]
+    fn the_border_band_is_dropped_and_the_right_edge_kept() {
+        const BAND: [u8; 4] = [32, 32, 32, 255];
+        const BODY: [u8; 4] = [200, 200, 200, 255];
+        const EDGE: [u8; 4] = [0, 0, 255, 255];
+
+        // Six wide, two tall: band, band, body, body, edge, band.
+        let row = [BAND, BAND, BODY, BODY, EDGE, BAND];
+        let pixels: Vec<u8> = row.iter().chain(row.iter()).flatten().copied().collect();
+
+        let seen = cut(&pixels, 6, (2, 0, 3, 2));
+        let seen: Vec<[u8; 4]> = seen
+            .chunks_exact(4)
+            .map(|p| [p[0], p[1], p[2], p[3]])
+            .collect();
+
+        assert_eq!(seen, vec![BODY, BODY, EDGE, BODY, BODY, EDGE]);
+    }
 }
 
 /// Whether a picture is one flat colour, which is what a refusal looks like.
