@@ -46,6 +46,8 @@ struct ActiveRecording {
     /// may have been pasted, the target may have changed, and the answer
     /// would be about the wrong window.
     context: Option<String>,
+    /// The window the transcript is pasted into, read at the same moment.
+    target: crate::dictation::paste::Target,
     /// Set when this recording muted the machine, so only a recording that
     /// muted it unmutes it.
     muted: bool,
@@ -164,6 +166,7 @@ impl DictationService {
             .app_context
             .then(crate::dictation::context::foreground_app)
             .flatten();
+        let target = crate::dictation::paste::Target::now();
 
         let session = CaptureSession::start(microphone(&settings).as_deref())?;
 
@@ -182,6 +185,7 @@ impl DictationService {
             session,
             meter_running,
             context,
+            target,
             muted,
         });
         Ok(())
@@ -206,6 +210,7 @@ impl DictationService {
             crate::dictation::sound::play(app, sound::Cue::Stop);
         }
         let context = recording.context.clone();
+        let target = recording.target;
         let clip = recording.session.stop();
 
         // Nothing was said, or the microphone is blocked. Either way pasting
@@ -228,7 +233,7 @@ impl DictationService {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             crate::say!("transcription task started");
-            let outcome = transcribe_and_deliver(&app, clip, settings, context).await;
+            let outcome = transcribe_and_deliver(&app, clip, settings, context, target).await;
             let _ = panel::hide(&app);
             match &outcome {
                 Ok(()) => crate::say!("transcription task finished"),
@@ -483,15 +488,61 @@ async fn transcribe_and_deliver(
     clip: crate::dictation::capture::CapturedClip,
     settings: DictationSettings,
     context: Option<String>,
+    target: crate::dictation::paste::Target,
 ) -> Result<()> {
     // Measured before resampling, from the sample count rather than a wall
     // clock: the clock would include however long the panel took to appear.
     let spoken_ms = (clip.samples.len() as u64 * 1_000) / clip.sample_rate.max(1) as u64;
 
     let samples = resample::to_target_rate(&clip.samples, clip.sample_rate)?;
-    let bytes = wav::encode_mono_16bit(&samples, resample::TARGET_RATE);
 
-    let (provider, lease) = local_provider_config(app, &settings).await?;
+    // Parakeet runs inside Sill on the samples already in hand: no WAV, no
+    // server, no request. A typed base URL still means a whisper server
+    // elsewhere, so it wins here as it does for the whisper models.
+    let parakeet = settings.provider_id == "local"
+        && crate::dictation::assets::engine_of(&settings.model_id)
+            == crate::dictation::assets::Engine::Parakeet
+        && !has_base_url(&settings);
+    let started = std::time::Instant::now();
+    let transcript = if parakeet {
+        crate::say!("transcribing in-process with {}", settings.model_id);
+        app.state::<crate::dictation::parakeet::Parakeet>()
+            .transcribe(app, &settings.model_id, samples)
+            .await?
+    } else {
+        transcribe_remote(app, &settings, context.as_deref(), &samples).await?
+    };
+    let transcribe_ms = started.elapsed().as_millis() as u64;
+    crate::say!(
+        "transcript: {} chars in {transcribe_ms} ms",
+        transcript.len()
+    );
+
+    deliver(app, transcript, &settings, context, target, spoken_ms, transcribe_ms)
+}
+
+/// Whether a base URL was typed in, which points at a whisper server
+/// somewhere else.
+fn has_base_url(settings: &DictationSettings) -> bool {
+    settings
+        .provider
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|base| !base.is_empty())
+}
+
+/// Posts the clip to a whisper server, the bundled one or another, or to a
+/// cloud provider.
+async fn transcribe_remote(
+    app: &AppHandle,
+    settings: &DictationSettings,
+    context: Option<&str>,
+    samples: &[f32],
+) -> Result<String> {
+    let bytes = wav::encode_mono_16bit(samples, resample::TARGET_RATE);
+
+    let (provider, lease) = local_provider_config(app, settings).await?;
     let request = transcription_request(
         &settings.provider_id,
         &provider,
@@ -502,7 +553,7 @@ async fn transcribe_and_deliver(
             // application and a vocabulary list all useful here.
             prompt: crate::dictation::context::build_prompt(
                 &settings.custom_instructions,
-                context.as_deref(),
+                context,
                 &settings.vocabulary,
             ),
             ..Default::default()
@@ -510,17 +561,23 @@ async fn transcribe_and_deliver(
     )?;
 
     crate::say!("POST {}", request.url);
-    let started = std::time::Instant::now();
     let transcript = transcribe(&build_transcription_client(), &request, bytes).await?;
     // Finished with the server. Held through the paste, a switch would wait
     // on a clipboard for no reason.
     drop(lease);
-    let transcribe_ms = started.elapsed().as_millis() as u64;
-    crate::say!(
-        "transcript: {} chars in {transcribe_ms} ms",
-        transcript.len()
-    );
+    Ok(transcript)
+}
 
+/// Records the transcript and puts it where the settings say.
+fn deliver(
+    app: &AppHandle,
+    transcript: String,
+    settings: &DictationSettings,
+    context: Option<String>,
+    target: crate::dictation::paste::Target,
+    spoken_ms: u64,
+    transcribe_ms: u64,
+) -> Result<()> {
     if transcript.is_empty() {
         return Ok(());
     }
@@ -551,8 +608,17 @@ async fn transcribe_and_deliver(
 
     match settings.output_mode {
         OutputMode::Paste => {
-            paste(app, &transcript)?;
-            crate::say!("pasted");
+            if paste(app, &transcript, target)? {
+                crate::say!("pasted");
+            } else {
+                // The transcript is on the clipboard either way. Saying so is
+                // the difference between a paste that failed and one that
+                // looks like the dictation did.
+                crate::say!("the paste was refused; the transcript is on the clipboard");
+                let _ = panel::show(app, PanelStatus::Copied);
+                std::thread::sleep(COPIED_DWELL);
+                let _ = panel::hide(app);
+            }
         }
         OutputMode::Clipboard => {
             copy(app, &transcript)?;
@@ -609,11 +675,12 @@ fn copy(app: &AppHandle, text: &str) -> Result<()> {
         .map_err(|e| DictationError::Other(format!("Could not write the transcript: {e}")))
 }
 
-/// Copies `text` and synthesises the paste chord.
+/// Copies `text`, puts the dictation's target back in front, and synthesises
+/// the paste chord. Whether Windows took the keystrokes.
 ///
-/// The panel window is declared `focus: false` and `skipTaskbar`, so showing
-/// it never moves focus and whatever the user was typing into is still
-/// frontmost here.
+/// The panel is built `focusable(false)` so showing it should not move focus,
+/// and the target is put back in front regardless, because a person can
+/// click elsewhere during a long transcription (`paste::Target`).
 ///
 /// The history is told to expect the write. A pasted transcript is Sill
 /// typing on the person's behalf, not something they copied, and it used to
@@ -623,7 +690,7 @@ fn copy(app: &AppHandle, text: &str) -> Result<()> {
 /// belongs. `copy` above deliberately does not reserve: there the person
 /// asked for the transcript on the clipboard and may want it from the
 /// history later.
-fn paste(app: &AppHandle, text: &str) -> Result<()> {
+fn paste(app: &AppHandle, text: &str, target: crate::dictation::paste::Target) -> Result<bool> {
     use tauri::Manager;
 
     match app.try_state::<crate::clipboard::monitor::Clipboard>() {
@@ -633,8 +700,8 @@ fn paste(app: &AppHandle, text: &str) -> Result<()> {
         None => copy(app, text)?,
     }
     std::thread::sleep(PASTE_SETTLE);
-    crate::dictation::paste::chord();
-    Ok(())
+    crate::say!("paste: {}", target.bring_back());
+    Ok(crate::dictation::paste::chord())
 }
 
 #[cfg(test)]

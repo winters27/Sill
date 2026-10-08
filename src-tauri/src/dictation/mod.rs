@@ -20,6 +20,7 @@ pub mod history;
 pub mod hotkey;
 pub mod models;
 pub mod panel;
+pub mod parakeet;
 pub mod paste;
 pub mod provider;
 pub mod providers;

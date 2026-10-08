@@ -127,3 +127,22 @@ feature exists to read a picture out of a file, and Sill already has the
 pixels in hand from a screen capture or from the clipboard, so the default
 would have pulled in a whole image-decoding crate to do work that is already
 done.
+
+--------------------------------------------------------------------------
+
+Parakeet TDT 0.6B v3 (downloaded on demand to the dictation models folder)
+
+nvidia/parakeet-tdt-0.6b-v3, by NVIDIA, licensed under the Creative Commons
+Attribution 4.0 International licence (CC-BY-4.0):
+https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+https://creativecommons.org/licenses/by/4.0/
+
+Sill fetches the int8 ONNX export published as
+istupakov/parakeet-tdt-0.6b-v3-onnx, pinned to one commit and checked against
+the SHA-256 of each file, when somebody chooses it in Settings. The model is
+not in this repository or in an installer. It is used unmodified.
+
+It runs through transcribe-rs (MIT, https://github.com/cjpais/transcribe-rs)
+on ONNX Runtime (MIT, Copyright (c) Microsoft Corporation), which the `ort`
+crate links into the executable. ONNX Runtime's own third-party notices are
+at https://github.com/microsoft/onnxruntime/blob/main/ThirdPartyNotices.txt.

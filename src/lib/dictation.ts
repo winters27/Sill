@@ -82,11 +82,15 @@ export interface AudioInputDevice {
   isDefault: boolean;
 }
 
+/** What runs a local model: whisper.cpp's server, or Parakeet inside Sill. */
+export type LocalEngine = "whisper" | "parakeet";
+
 export interface WhisperModel {
   id: string;
   label: string;
   sizeBytes: number;
   installed: boolean;
+  engine: LocalEngine;
 }
 
 /** What a running server is doing right now. */
@@ -137,6 +141,9 @@ export interface LocalSetupStatus {
   modelLabel: string;
   /** Roughly what the selected model holds once resident. */
   modelMemoryBytes: number;
+  runsOn: LocalEngine;
+  /** Parakeet only: loaded into Sill right now. */
+  loaded: boolean;
 }
 
 /** Whether there is a newer engine to point somebody at. A build that already

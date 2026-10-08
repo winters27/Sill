@@ -716,6 +716,9 @@ pub(crate) fn apply_dictation(
         if let Some(whisper) = app.try_state::<dictation::server::WhisperServer>() {
             whisper.stop();
         }
+        if let Some(parakeet) = app.try_state::<dictation::parakeet::Parakeet>() {
+            parakeet.unload();
+        }
         return;
     }
 
@@ -2092,6 +2095,8 @@ pub fn run() {
             // exactly as long as the app does.
             app.manage(dictation::service::DictationService::new());
             app.manage(dictation::server::WhisperServer::default());
+            // Empty until a dictation uses Parakeet, which then loads in-process.
+            app.manage(dictation::parakeet::Parakeet::default());
             app.manage(dictation::engine_update::EngineUpdates::default());
             app.manage(dictation::panel::PanelState::default());
 

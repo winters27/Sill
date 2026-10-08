@@ -536,7 +536,7 @@
 
 <Section
   label="Engine"
-  description="Local runs whisper.cpp on this machine and nothing leaves it. The others need an API key and are faster."
+  description="Local runs on this machine, with whisper.cpp or Parakeet, and nothing leaves it. The others need an API key."
 >
   <Row title="Backend">
     {#snippet control()}
@@ -692,8 +692,10 @@
 
 {#if isLocal && !prefs.dictation.provider.baseUrl}
   <Section
-    label="Local server"
-    description="whisper.cpp runs as a resident server, so the model loads once instead of on every dictation. Inference cost is flat with clip length: a twenty second dictation costs the same as a two second one."
+    label={status?.runsOn === "parakeet" ? "Local model" : "Local server"}
+    description={status?.runsOn === "parakeet"
+      ? "Parakeet runs inside Sill, with no server. It keeps up with pauses and punctuates as it goes, but it takes no prompt, so Vocabulary has no effect on it."
+      : "whisper.cpp runs as a resident server, so the model loads once instead of on every dictation. Inference cost is flat with clip length: a twenty second dictation costs the same as a two second one."}
     bare
   >
     <ServerStatus

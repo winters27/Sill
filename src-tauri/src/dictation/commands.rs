@@ -152,13 +152,17 @@ pub fn get_local_dictation_status(
     whisper: State<'_, WhisperServer>,
     state: State<'_, DictationService>,
     engines: State<'_, EngineUpdates>,
+    parakeet: State<'_, crate::dictation::parakeet::Parakeet>,
 ) -> LocalSetupStatus {
     let model_id = state.settings().model_id;
+    let runs_on = assets::engine_of(&model_id);
+    let in_process = runs_on == assets::Engine::Parakeet;
     let engine = engines.standing(&app);
-    let engine_installed = engine.active.is_some();
+    // Parakeet runs inside Sill, so there is no whisper.cpp for it to need.
+    let engine_installed = in_process || engine.active.is_some();
     // Asked once and reused: `snapshot` reaps a dead child, so calling it
     // twice could report a server that the first call just cleared.
-    let snapshot = whisper.snapshot();
+    let snapshot = if in_process { None } else { whisper.snapshot() };
     let model_installed = assets::is_installed(&app, &model_id);
 
     LocalSetupStatus {
@@ -173,8 +177,11 @@ pub fn get_local_dictation_status(
         } else {
             engines.first_download_bytes(&app)
         },
-        engine_version: engine.active.clone(),
+        // Not offered for Parakeet: the update card is about whisper.cpp.
+        engine_version: if in_process { None } else { engine.active.clone() },
         engine,
+        runs_on,
+        loaded: in_process && parakeet.loaded().as_deref() == Some(model_id.as_str()),
         model_label: assets::label_of(&model_id).unwrap_or(&model_id).to_string(),
         model_memory_bytes: assets::memory_of(&model_id).unwrap_or(0),
         model_id,
@@ -231,11 +238,16 @@ fn report(app: &AppHandle, outcome: &crate::dictation::error::Result<()>) {
 pub fn remove_whisper_model(
     app: AppHandle,
     whisper: State<'_, WhisperServer>,
+    parakeet: State<'_, crate::dictation::parakeet::Parakeet>,
     state: State<'_, DictationService>,
     model_id: String,
 ) -> Result<bool, String> {
     if state.settings().model_id == model_id {
         whisper.stop();
+    }
+    // Its files are open while it is loaded, and Windows will not delete them.
+    if parakeet.loaded().as_deref() == Some(model_id.as_str()) {
+        parakeet.unload();
     }
     assets::remove(&app, &model_id).map_err(String::from)
 }

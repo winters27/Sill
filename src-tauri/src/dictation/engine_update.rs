@@ -245,7 +245,9 @@ fn runs_locally(app: &AppHandle) -> bool {
         .as_deref()
         .map(str::trim)
         .is_some_and(|base| !base.is_empty());
-    settings.provider_id == "local" && !pointed_elsewhere
+    // Parakeet runs inside Sill, so whisper.cpp is not what dictation uses.
+    let whisper = assets::engine_of(&settings.model_id) == assets::Engine::Whisper;
+    settings.provider_id == "local" && !pointed_elsewhere && whisper
 }
 
 /// The token the store uses, when there is one, which lifts GitHub's limit
@@ -430,6 +432,17 @@ async fn prove(app: &AppHandle, new: &engine::Engine) -> std::result::Result<(),
 /// here. So setup ends with dictation working even when upstream has
 /// published something broken.
 pub async fn setup(app: &AppHandle, model_id: &str) -> Result<()> {
+    // Parakeet needs neither whisper.cpp nor its server: the model, then a
+    // load into Sill so the first dictation does not wait for it.
+    if assets::engine_of(model_id) == assets::Engine::Parakeet {
+        assets::ensure(app, model_id).await?;
+        SetupProgress::Starting.emit(app);
+        return app
+            .state::<crate::dictation::parakeet::Parakeet>()
+            .preload(app, model_id)
+            .await;
+    }
+
     let updates = app.state::<EngineUpdates>();
     let server = app.state::<WhisperServer>();
 

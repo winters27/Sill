@@ -249,4 +249,9 @@ pub struct LocalSetupStatus {
     /// allocates compute buffers well beyond the weights, so a 465 MB file
     /// sits at about 649 MB resident.
     pub model_memory_bytes: u64,
+    /// What runs the selected model: whisper.cpp's server, or Parakeet
+    /// inside Sill.
+    pub runs_on: crate::dictation::assets::Engine,
+    /// Parakeet only: the model is loaded into Sill right now.
+    pub loaded: bool,
 }

@@ -110,6 +110,11 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
             // `--elevation-pill` reaches 17px below it, so 84 cut the shadow
             // off flat. Mirrored by `PANEL_HEIGHT` in dictation/panel.rs.
             .inner_size(240.0, 96.0)
+            // Never the foreground, however it is shown. `focused(false)`
+            // only covers the first show: tao clears that marker after one
+            // use and shows with SW_SHOW from then on, which can take the
+            // foreground from the window the transcript is headed for.
+            .focusable(false)
             .resizable(false)
             .transparent(true)
             .always_on_top(true)

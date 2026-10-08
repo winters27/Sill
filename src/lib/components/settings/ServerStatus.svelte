@@ -23,9 +23,12 @@
 
   type State = "missing" | "ready" | "running" | "working";
 
+  /** Parakeet runs inside Sill: no server, so no address, uptime or Stop. */
+  const inProcess = $derived(status?.runsOn === "parakeet");
+
   const state = $derived.by((): State => {
     if (installing) return "working";
-    if (status?.server) return "running";
+    if (status?.server || (inProcess && status?.loaded)) return "running";
     if (status?.engineInstalled && status?.modelInstalled) return "ready";
     return "missing";
   });
@@ -42,6 +45,13 @@
     ready: "The server starts on the first dictation, then stays warm.",
     working: "This runs once. Nothing leaves the machine afterwards.",
     missing: "Dictation runs whisper.cpp locally, so audio never leaves the machine.",
+  };
+
+  const IN_PROCESS_DETAIL: Record<State, string> = {
+    running: "Loaded inside Sill. It lets go after half an hour unused.",
+    ready: "Loads inside Sill on the first dictation, then stays loaded.",
+    working: "This runs once. Nothing leaves the machine afterwards.",
+    missing: "Parakeet runs inside Sill, so audio never leaves the machine.",
   };
 
   /** "4m", "2h 11m". Seconds only while it is genuinely seconds old. */
@@ -100,11 +110,13 @@
 
     <div class="titles">
       <span class="headline">{HEADLINE[state]}</span>
-      <span class="detail">{stage || DETAIL[state]}</span>
+      <span class="detail">{stage || (inProcess ? IN_PROCESS_DETAIL : DETAIL)[state]}</span>
     </div>
 
     <div class="actions">
-      {#if state === "running"}
+      {#if state === "running" && inProcess}
+        <!-- Nothing to stop: it is part of Sill, and lets itself go. -->
+      {:else if state === "running"}
         <Button label="Stop" tone="danger" onclick={onstop} />
       {:else if state === "ready"}
         <Button label="Start now" busy={installing} onclick={oninstall} />

@@ -64,6 +64,10 @@ png = "0.18.1"
 # already has as pixels: the greyscale entry point takes a closure over them.
 # Licensed `(MIT OR Apache-2.0) AND ISC`; the ISC half is in resources/NOTICE.
 rqrr = { version = "0.11", default-features = false }
+# Parakeet TDT 0.6B v3, run in-process on the CPU through ONNX Runtime (the
+# `ort` crate links it statically, about 23 MB of the exe). MIT. The model it
+# loads is CC-BY-4.0 and credited in resources/NOTICE.
+transcribe-rs = { version = "0.3.12", features = ["onnx"] }
 base64 = "0.23.1"
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-dialog = "2.7.2"

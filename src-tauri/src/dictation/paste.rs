@@ -2,17 +2,22 @@
 //!
 //! Dictation ends by putting the transcript on the clipboard and pressing
 //! Ctrl+V for the user, in whatever application they were already typing in.
-//! Nothing here moves focus: the panel window is declared `focus: false` and
-//! `skipTaskbar`, so the target application is still frontmost by the time
-//! this runs.
+//! That application is recorded when dictation starts (`Target`) and put back
+//! in front before the chord, rather than trusted to still be there.
 
 /// Presses Ctrl+V in whatever has focus.
 ///
 /// The machinery moved to `crate::input` once replacing a selection needed
 /// Ctrl+C as well; this is the name dictation has always called it by.
-pub fn chord() {
+///
+/// Whether Windows took the keystrokes. It refuses synthetic input to an
+/// elevated window when Sill is not elevated, and says nothing else.
+pub fn chord() -> bool {
     #[cfg(windows)]
-    crate::input::ctrl(crate::input::VK_V);
+    return crate::input::ctrl(crate::input::VK_V);
+
+    #[cfg(not(windows))]
+    false
 }
 
 /// How long to wait between writing the clipboard and pressing Ctrl+V.
@@ -42,4 +47,80 @@ pub fn deliver(app: &tauri::AppHandle) {
 
     std::thread::sleep(SETTLE);
     chord();
+}
+
+/// The window a dictation pastes into: whatever was in front when it began.
+///
+/// The paste used to go to whatever was in front when the transcript came
+/// back, on the word of the module header that nothing moves focus. Something
+/// can: the panel is shown with a plain `show()` on every dictation but the
+/// first (tao clears its don't-focus marker after one use), and a long
+/// transcription is plenty of time for the person to click somewhere. When
+/// the paste landed elsewhere the transcript was still on the clipboard, which
+/// is why a Ctrl+V by hand always worked.
+///
+/// Empty when the front window was one of Sill's own (the Dictate row in the
+/// launcher, which is hiding as dictation starts), or there was none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Target(isize);
+
+impl Target {
+    #[cfg(windows)]
+    pub fn now() -> Self {
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+
+        // SAFETY: no arguments, and a null answer is handled below.
+        let front = unsafe { GetForegroundWindow() };
+        if front.is_invalid() {
+            return Self::default();
+        }
+
+        let mut owner = 0u32;
+        // SAFETY: `front` was just returned by Windows and `owner` is a live u32.
+        unsafe { GetWindowThreadProcessId(front, Some(&mut owner)) };
+        if owner == std::process::id() {
+            return Self::default();
+        }
+
+        Self(front.0 as isize)
+    }
+
+    #[cfg(not(windows))]
+    pub fn now() -> Self {
+        Self::default()
+    }
+
+    /// Puts the target back in front if something else is. Says what it found
+    /// and did, for the log.
+    #[cfg(windows)]
+    pub fn bring_back(self) -> &'static str {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsWindow};
+
+        if self.0 == 0 {
+            return "no target recorded";
+        }
+
+        let target = HWND(self.0 as *mut core::ffi::c_void);
+        // SAFETY: both only read; a stale handle answers false.
+        let (front, alive) = unsafe { (GetForegroundWindow(), IsWindow(Some(target)).as_bool()) };
+        if front == target {
+            return "target still in front";
+        }
+        if !alive {
+            return "target window has closed";
+        }
+
+        if crate::summon::force_foreground(target) {
+            std::thread::sleep(SETTLE);
+            "target was not in front, brought it back"
+        } else {
+            "target was not in front, and Windows refused to bring it back"
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn bring_back(self) -> &'static str {
+        "no target recorded"
+    }
 }
