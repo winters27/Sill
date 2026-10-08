@@ -19,6 +19,21 @@ IPC surface, the dependencies added, and every commit body in full. Use the
 relevant subset under recognizable feature labels, with measured results where
 available.
 
+## 0.4.8
+
+- **Screenshots:** The screen freezes the moment you press the capture key,
+  so whatever you were hovering, a tooltip or an open menu, is still there
+  to select. An area capture takes its picture from that frozen screen, which
+  also ends the faint outline of the selection box that could show up in it.
+- **Dictation:** Parakeet is a new local model, listed between small.en and
+  medium.en. It runs inside Sill with no separate server, loads the first
+  time you dictate and lets go after 30 idle minutes. In tests with long
+  pauses it kept every sentence where Whisper dropped some. Vocabulary has no
+  effect on it. It makes sill.exe about 22 MB larger.
+- **Dictation:** Pasted text goes to the window you were in when you started
+  dictating. If Windows refuses the paste, the text is on the clipboard and
+  the pill says Copied.
+
 ## 0.4.7
 
 - **Screenshots:** Clicking a window to capture it takes exactly the window
