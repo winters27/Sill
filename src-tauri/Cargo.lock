@@ -4894,7 +4894,7 @@ dependencies = [
 
 [[package]]
 name = "sill"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "arboard",
  "arc-swap",
