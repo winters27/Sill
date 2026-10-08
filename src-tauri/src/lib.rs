@@ -1871,6 +1871,18 @@ pub fn run() {
         .manage(commands::system::Marking::default())
         .manage(commands::system::Pinning::default())
         .manage(commands::system::Choosing::default())
+        // Empty except while the capture overlay is up.
+        .manage(commands::system::Frozen::default())
+        // The frozen screen the capture overlay shows behind the selection,
+        // as `http://frozen.localhost/`. Off the main thread: the answer is a
+        // copy of the whole virtual screen.
+        .register_asynchronous_uri_scheme_protocol("frozen", |ctx, _request, responder| {
+            let app = ctx.app_handle().clone();
+            let asker = ctx.webview_label().to_string();
+            std::thread::spawn(move || {
+                responder.respond(commands::system::serve_frozen(&app, &asker));
+            });
+        })
         .manage(sums::Sums::default())
         // Nothing is asked at rest: a lock around a `None` until somebody
         // presses Enter on a row that would end the session.

@@ -12,8 +12,14 @@
    * whole screen every frame, four panels are laid around the selection. The
    * area being picked has nothing over it at all, so it stays exactly the
    * colour it will be in the picture.
+   *
+   * What is behind all of it is not the live screen but the screen as it was
+   * when the key was pressed, which Rust took before this window appeared.
+   * Whatever was hovered went away when this window took the foreground; in
+   * that picture it is still there, and an area is cut from it rather than
+   * read again.
    */
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import "$lib/theme/theme.css";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import {
@@ -23,6 +29,7 @@
     captureTargets,
     captureWindow,
     choseArea,
+    frozenScreen,
     type CaptureTarget,
     type Purpose,
   } from "$lib/capture";
@@ -36,6 +43,14 @@
   /** Set once the pointer has actually moved, so a click is not a capture. */
   let dragging = $state(false);
   let status = $state("");
+
+  /** The frozen screen's address for this opening, or nothing while closed. */
+  let frozen = $state<string | null>(null);
+  /**
+   * Whether the frozen screen has arrived. Nothing is drawn until it has, or
+   * the dimming would land on the live screen and then jump to the picture.
+   */
+  let arrived = $state(false);
 
   /** The windows a click could take, topmost first. */
   let targets = $state<CaptureTarget[]>([]);
@@ -147,6 +162,7 @@
       // take the window; anywhere else it means somebody changed their mind.
       const under = hovering?.target;
       if (under) {
+        await leave();
         try {
           status = await captureWindow(under.id);
         } catch (err) {
@@ -171,6 +187,7 @@
     const scale = await getCurrentWindow().scaleFactor();
     const position = await getCurrentWindow().outerPosition();
 
+    await leave();
     try {
       status = await captureArea(
         position.x + Math.round(area.left * scale),
@@ -202,6 +219,7 @@
     if (!area || area.width < ENOUGH || area.height < ENOUGH) {
       if (purpose === "colour" && start) {
         const point = physical(start.x, start.y);
+        await leave();
         try {
           await choseArea(point.x, point.y, 1, 1);
         } catch (err) {
@@ -215,6 +233,7 @@
     }
 
     const origin = physical(area.left, area.top);
+    await leave();
     try {
       await choseArea(
         origin.x,
@@ -227,10 +246,26 @@
     }
   }
 
+  /**
+   * Draws nothing, and waits until that has been painted.
+   *
+   * The window is shown again next time with whatever it last painted, so a
+   * frozen screen left up here would flash the previous one before the new
+   * one arrives. Painted while the window is still up, because a hidden
+   * window does not paint.
+   */
+  async function leave() {
+    frozen = null;
+    arrived = false;
+    await tick();
+    await new Promise((painted) => requestAnimationFrame(() => requestAnimationFrame(painted)));
+  }
+
   async function cancel() {
     from = null;
     to = null;
     dragging = false;
+    await leave();
     await cancelCapture();
   }
 
@@ -260,6 +295,10 @@
 
     /** Everything the overlay needs to know, read fresh each time it opens. */
     async function ready() {
+      // First, so it is loading while everything below is asked for.
+      arrived = false;
+      frozen = frozenScreen();
+
       // Forgotten before the reads below, so a failure that has since been
       // fixed is not still being reported. Scoped to this window, because a
       // flat group would mean taking a screenshot erased what the launcher
@@ -305,7 +344,20 @@
   onpointermove={move}
   onpointerup={up}
 >
-  {#if picked}
+  {#if frozen}
+    <img
+      class="frozen"
+      src={frozen}
+      alt=""
+      draggable="false"
+      onload={() => (arrived = true)}
+      onerror={() => (arrived = true)}
+    />
+  {/if}
+
+  {#if !arrived}
+    <!-- Nothing until the frozen screen is here. -->
+  {:else if picked}
     <!-- Around the selection, never over it: the area being picked has to
          stay the colour it will actually be in the picture. -->
     <div class="dim" style:inset="0 0 auto 0" style:height="{picked.top}px"></div>
@@ -413,6 +465,16 @@
        selection fights the drag that picks the area. */
     user-select: none;
     -webkit-user-select: none;
+  }
+
+  /* The screen as it was, at one image pixel to one screen pixel: the window
+     is exactly the virtual screen, so filling it is that scale. */
+  .frozen {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
   }
 
   .dim {

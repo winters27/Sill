@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { orElse, silently } from "$lib/status";
 
 /**
@@ -11,6 +11,18 @@ import { orElse, silently } from "$lib/status";
 /** Puts the picking overlay up. The launcher gets out of the way first. */
 export function beginCapture(): Promise<void> {
   return invoke("begin_capture");
+}
+
+/**
+ * Where the overlay loads the screen as it was when the key was pressed.
+ *
+ * Rust serves it to the capture window only. The count makes each opening a
+ * new address, so nothing can hand back the previous opening's screen.
+ */
+let openings = 0;
+export function frozenScreen(): string {
+  openings += 1;
+  return `${convertFileSrc("screen", "frozen")}?n=${openings}`;
 }
 
 /** Takes the overlay away without capturing. */

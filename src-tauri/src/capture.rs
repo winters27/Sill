@@ -41,6 +41,10 @@ impl Shot {
     /// Bgra to Rgba on the way out, the same swap the recogniser needs in the
     /// other direction.
     pub fn to_png(&self) -> Result<Vec<u8>, String> {
+        self.encode_png(png::Compression::default())
+    }
+
+    fn encode_png(&self, compression: png::Compression) -> Result<Vec<u8>, String> {
         let mut rgba = self.pixels.clone();
         for pixel in rgba.chunks_exact_mut(4) {
             pixel.swap(0, 2);
@@ -55,6 +59,7 @@ impl Shot {
             let mut encoder = png::Encoder::new(&mut out, self.width as u32, self.height as u32);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
+            encoder.set_compression(compression);
             let mut writer = encoder
                 .write_header()
                 .map_err(|err| format!("could not write that picture: {err}"))?;
@@ -64,6 +69,35 @@ impl Shot {
         }
 
         Ok(out)
+    }
+
+    /// The picture for showing rather than keeping: the fastest PNG there is.
+    ///
+    /// The capture overlay shows the frozen screen as its background, and that
+    /// is the whole virtual screen on every press. It reaches the page through
+    /// WebView2's custom-scheme stream, which is slow with large bodies.
+    /// Measured on 3640x2241 across two displays: a raw BMP is 32.6 MB and
+    /// took the overlay about 400 ms to show; this is 2.3 MB and 22 ms to
+    /// encode.
+    pub fn to_png_for_showing(&self) -> Result<Vec<u8>, String> {
+        self.encode_png(png::Compression::Fastest)
+    }
+
+    /// The `(left, top, width, height)` piece of this picture, or `None` when
+    /// any of it falls outside.
+    pub fn crop(&self, left: i32, top: i32, width: i32, height: i32) -> Option<Shot> {
+        let inside = left >= 0
+            && top >= 0
+            && width > 0
+            && height > 0
+            && left + width <= self.width
+            && top + height <= self.height;
+
+        inside.then(|| Shot {
+            pixels: cut(&self.pixels, self.width, (left, top, width, height)),
+            width,
+            height,
+        })
     }
 }
 
@@ -468,6 +502,39 @@ mod tests {
         assert_eq!((width, height), (4, 3));
     }
 
+    /// The frozen screen the overlay shows: the same pixels, opaque, smaller.
+    #[test]
+    fn the_frozen_screen_survives_the_fast_png() {
+        let two_by_one = shot(2, 1, vec![1, 2, 3, 0, 4, 5, 6, 0]);
+        let png = two_by_one.to_png_for_showing().expect("encodes");
+
+        let (bgra, width, height) = crate::ocr::bgra_from_png(&png).expect("decodes");
+        assert_eq!((width, height), (2, 1));
+        assert_eq!(bgra, vec![1, 2, 3, 255, 4, 5, 6, 255]);
+    }
+
+    /// The selection is cut out of the frozen screen rather than read again.
+    #[test]
+    fn a_selection_is_cut_from_the_frozen_screen() {
+        // Three by two: each pixel's first byte is its index.
+        let pixels = (0..6u8).flat_map(|i| [i, 0, 0, 255]).collect();
+        let screen = shot(3, 2, pixels);
+
+        let piece = screen.crop(1, 1, 2, 1).expect("inside");
+        assert_eq!((piece.width, piece.height), (2, 1));
+        assert_eq!(piece.pixels, vec![4, 0, 0, 255, 5, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_selection_past_the_frozen_screen_is_refused() {
+        let screen = flat(10, 10, [0, 0, 0, 255]);
+
+        assert!(screen.crop(5, 5, 6, 1).is_none());
+        assert!(screen.crop(-1, 0, 2, 2).is_none());
+        assert!(screen.crop(0, 0, 0, 5).is_none());
+        assert!(screen.crop(0, 0, 10, 10).is_some());
+    }
+
     #[test]
     fn an_empty_area_is_refused_rather_than_captured() {
         let anyway = crate::privacy::allowed_regardless();
@@ -617,6 +684,71 @@ pub fn window(
 ) -> Result<Shot, String> {
     Err("window capture needs Windows".to_string())
 }
+
+/// Turns off the fade Windows plays when a window is shown or hidden.
+///
+/// For the capture overlay. Hidden with the fade on, it stays on screen for
+/// most of a tenth of a second at falling strength, and anything that reads
+/// the screen in that time photographs it.
+#[cfg(windows)]
+pub fn without_fade(handle: isize) {
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
+
+    let off = BOOL(1);
+    // SAFETY: the attribute id and the size match the DWM contract, and the
+    // value outlives the call.
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            HWND(handle as *mut core::ffi::c_void),
+            DWMWA_TRANSITIONS_FORCEDISABLED,
+            &off as *const _ as *const core::ffi::c_void,
+            std::mem::size_of_val(&off) as u32,
+        )
+    };
+
+    if let Err(err) = result {
+        crate::say!("the capture overlay will fade when hidden: {err}");
+    }
+}
+
+#[cfg(not(windows))]
+pub fn without_fade(_handle: isize) {}
+
+/// Returns once a window that has just been hidden is off the screen.
+///
+/// Two things have to be true, and neither is by the time `hide` returns.
+/// Windows has to have hidden it, which Tauri does on the event loop's
+/// thread, so this waits for `IsWindowVisible` to say so, bounded in case it
+/// never does. Then the compositor has to have drawn a frame without it:
+/// `DwmFlush` returns after the next composition pass, and the second call is
+/// for a pass that was already under way when the window went.
+#[cfg(windows)]
+pub fn off_screen(handle: isize) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::DwmFlush;
+    use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+
+    const PATIENCE: std::time::Duration = std::time::Duration::from_millis(250);
+
+    let hwnd = HWND(handle as *mut core::ffi::c_void);
+    let started = std::time::Instant::now();
+    // SAFETY: a stale handle answers false rather than faulting.
+    while unsafe { IsWindowVisible(hwnd) }.as_bool() && started.elapsed() < PATIENCE {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+
+    // SAFETY: no arguments; it fails rather than blocks when composition is
+    // off, and either way the screen is as settled as it is going to get.
+    unsafe {
+        let _ = DwmFlush();
+        let _ = DwmFlush();
+    }
+}
+
+#[cfg(not(windows))]
+pub fn off_screen(_handle: isize) {}
 
 /// Where the visible frame starts inside the whole window, both given as
 /// `(left, top, width, height)` in screen pixels.

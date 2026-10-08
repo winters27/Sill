@@ -104,16 +104,40 @@ pub(crate) async fn begin_capture(app: AppHandle) -> Result<(), String> {
     // twice. The overlay is a full-screen thing somebody drags a rectangle
     // across, and putting it up in order to say no at the end of it would be
     // a worse way of saying the same word.
-    crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
-
-    // Built on the first capture rather than declared, so an overlay nobody
-    // uses this session costs nothing.
-    let window = crate::lazy_windows::ensure(&app, "capture")?;
+    let allowed = crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
 
     let (left, top, width, height) = crate::capture::virtual_screen();
     if width <= 0 || height <= 0 {
         return Err("no screens were found".to_string());
     }
+
+    /*
+     * The screen as it is at the press, before anything of Sill's appears.
+     *
+     * Showing the overlay takes the foreground, and whatever was hovered
+     * (a tooltip, a hover state, an open menu) goes away when its window
+     * loses it. Taken first, the picture still has it. The overlay shows
+     * this picture rather than the live screen, and an area is cut from it
+     * rather than read again, so what is dragged over is what is copied and
+     * nothing of the overlay can be in it.
+     */
+    let shot = tokio::task::spawn_blocking(move || {
+        crate::capture::region(&allowed, left, top, width, height)
+    })
+    .await
+    .map_err(|err| format!("the capture failed: {err}"))??;
+    *app.state::<Frozen>()
+        .0
+        .lock()
+        .map_err(|_| "frozen screen slot poisoned".to_string())? = Some(FrozenScreen {
+        shot,
+        left,
+        top,
+    });
+
+    // Built on the first capture rather than declared, so an overlay nobody
+    // uses this session costs nothing.
+    let window = crate::lazy_windows::ensure(&app, "capture")?;
 
     // The launcher stays where it is, and in the picture if that is what
     // somebody is after; a screenshot of Sill is a screenshot like any other.
@@ -209,12 +233,95 @@ pub(crate) struct CaptureTarget {
     pub height: i32,
 }
 
+/// The whole screen as it was when the capture key was pressed.
+///
+/// Held only while the overlay is up: 33 MB across two displays is fine for
+/// the seconds somebody spends choosing and not fine at rest, so every way
+/// the overlay comes down drops it (`take_overlay_down`, `cancel_capture`).
+pub(crate) struct FrozenScreen {
+    pub shot: crate::capture::Shot,
+    /// Where the picture's first pixel is on the screen. The virtual screen
+    /// can start at a negative x and y.
+    pub left: i32,
+    pub top: i32,
+}
+
+#[derive(Default)]
+pub(crate) struct Frozen(pub std::sync::Mutex<Option<FrozenScreen>>);
+
+fn forget_frozen(app: &AppHandle) -> Option<FrozenScreen> {
+    app.try_state::<Frozen>()
+        .and_then(|frozen| frozen.0.lock().ok().and_then(|mut held| held.take()))
+}
+
+/// The frozen screen, for the overlay to show behind the selection.
+///
+/// Served on its own scheme to the capture window and nobody else: the
+/// launcher, settings and every other page have no business reading the
+/// screen, and the label is the one thing here a page cannot choose.
+pub(crate) fn serve_frozen(app: &AppHandle, asker: &str) -> tauri::http::Response<Vec<u8>> {
+    let refuse = |status: u16| {
+        tauri::http::Response::builder()
+            .status(status)
+            .body(Vec::new())
+            .expect("a bodiless response builds")
+    };
+
+    if asker != "capture" {
+        return refuse(403);
+    }
+
+    let png = app
+        .try_state::<Frozen>()
+        .and_then(|frozen| {
+            frozen
+                .0
+                .lock()
+                .ok()
+                .and_then(|held| held.as_ref().map(|it| it.shot.to_png_for_showing()))
+        });
+
+    match png {
+        Some(Ok(png)) => tauri::http::Response::builder()
+            .header("Content-Type", "image/png")
+            .header("Cache-Control", "no-store")
+            .body(png)
+            .expect("a response with a body builds"),
+        Some(Err(_)) => refuse(500),
+        None => refuse(404),
+    }
+}
+
+/// Takes the overlay down and returns once the screen no longer shows it.
+///
+/// Every capture that reads the screen comes after this, and the overlay is a
+/// window like any other: still on screen, it is in its own picture. A fixed
+/// 120 ms wait used to stand here, and Windows' fade-out on hiding a window
+/// runs past it. Measured: the selection box and its size readout still on
+/// screen 140 ms after the mouse came up, gone by 200 ms, so a picture taken
+/// at 120 ms carried the box's 1px edge and a fifth-strength dimming.
+/// The overlay is built with that fade turned off (`capture::without_fade`),
+/// and the wait is for the compositor rather than for a guess.
+async fn take_overlay_down(app: &AppHandle) {
+    forget_frozen(app);
+    crate::lazy_windows::hide(app, "capture");
+    crate::capture_over(app);
+
+    let Some(handle) = app
+        .get_webview_window("capture")
+        .and_then(|window| window.hwnd().ok())
+        .map(|handle| handle.0 as isize)
+    else {
+        return;
+    };
+
+    let _ = tokio::task::spawn_blocking(move || crate::capture::off_screen(handle)).await;
+}
+
 /// Copies one window, whole, even where something is sitting on top of it.
 #[tauri::command]
 pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, String> {
-    crate::lazy_windows::hide(&app, "capture");
-    crate::capture_over(&app);
-    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    take_overlay_down(&app).await;
 
     // Read again rather than trusting what the overlay was told: a handle can
     // be reused by a different window after the first one closes, and the one
@@ -251,9 +358,7 @@ pub(crate) async fn capture_window(app: AppHandle, id: isize) -> Result<String, 
 /// Copies one whole display.
 #[tauri::command]
 pub(crate) async fn capture_display(app: AppHandle, index: usize) -> Result<String, String> {
-    crate::lazy_windows::hide(&app, "capture");
-    crate::capture_over(&app);
-    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    take_overlay_down(&app).await;
 
     let screen = crate::windowing::monitors()
         .into_iter()
@@ -280,6 +385,7 @@ pub(crate) async fn cancel_capture(app: AppHandle) -> Result<(), String> {
     // Whoever was waiting for a choice hears that there will not be one:
     // dropping their sender is what their receiver reads as cancelled.
     forget_choice(&app);
+    forget_frozen(&app);
     crate::lazy_windows::hide(&app, "capture");
     crate::capture_over(&app);
 
@@ -358,9 +464,7 @@ pub(crate) async fn chose_area(
     width: i32,
     height: i32,
 ) -> Result<(), String> {
-    crate::lazy_windows::hide(&app, "capture");
-    crate::capture_over(&app);
-    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    take_overlay_down(&app).await;
 
     let waiting = {
         let choosing = app.state::<Choosing>();
@@ -410,6 +514,7 @@ pub(crate) async fn choose_region(app: &AppHandle, purpose: Purpose) -> Result<R
         Ok(Err(_)) => Err("nothing was chosen".to_string()),
         Err(_) => {
             forget_choice(app);
+            forget_frozen(app);
             crate::lazy_windows::hide(app, "capture");
             Err("nothing was chosen within a minute".to_string())
         }
@@ -465,9 +570,9 @@ mod choosing {
 
 /// Copies a rectangle of the screen, in the screen's own physical pixels.
 ///
-/// The overlay is hidden before anything is read, and the read waits a moment
-/// for that to actually happen: the overlay is a window like any other and
-/// would otherwise be in its own picture, dimming included.
+/// The overlay is off the screen before anything is read
+/// (`take_overlay_down`): it is a window like any other and would otherwise
+/// be in its own picture, dimming included.
 #[tauri::command]
 pub(crate) async fn capture_area(
     app: AppHandle,
@@ -476,20 +581,24 @@ pub(crate) async fn capture_area(
     width: i32,
     height: i32,
 ) -> Result<String, String> {
-    crate::lazy_windows::hide(&app, "capture");
-    crate::capture_over(&app);
+    let frozen = forget_frozen(&app);
+    take_overlay_down(&app).await;
 
-    // Hiding is a request to the compositor, not something that has happened
-    // by the time the call returns. Without this the overlay's dimming is in
-    // the picture, which looks like the capture darkened it.
-    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-
+    // Asked again at the picture, as every capture does: privacy can have
+    // been turned on while somebody was choosing.
     let allowed = crate::privacy::allow(&app.state::<crate::privacy::Privacy>())?;
-    let shot = tokio::task::spawn_blocking(move || {
-        crate::capture::region(&allowed, left, top, width, height)
-    })
-    .await
-    .map_err(|err| format!("the capture failed: {err}"))??;
+
+    // From the frozen screen, which is what was on show. Reading the screen
+    // is only for an overlay that somehow came up without one.
+    let cut = frozen.and_then(|it| it.shot.crop(left - it.left, top - it.top, width, height));
+    let shot = match cut {
+        Some(shot) => shot,
+        None => tokio::task::spawn_blocking(move || {
+            crate::capture::region(&allowed, left, top, width, height)
+        })
+        .await
+        .map_err(|err| format!("the capture failed: {err}"))??,
+    };
 
     let size = format!("{}x{}", shot.width, shot.height);
     after_capture(&app, shot).await?;

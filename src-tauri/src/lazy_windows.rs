@@ -93,7 +93,16 @@ pub fn ensure(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
             .shadow(false)
             .maximizable(false)
             .minimizable(false)
-            .build(),
+            .build()
+            .map(|window| {
+                // Off the screen the moment it is hidden, or the fade is in
+                // the picture taken after it (`capture::without_fade`).
+                #[cfg(windows)]
+                if let Ok(handle) = window.hwnd() {
+                    crate::capture::without_fade(handle.0 as isize);
+                }
+                window
+            }),
 
         "dictation" => builder("dictation")
             .title("Dictation")
