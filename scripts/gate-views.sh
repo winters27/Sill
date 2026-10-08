@@ -63,12 +63,15 @@ pokedex_counts() {
   if answering "$POKEAPI"; then
     POKEDEX_ROWS="--expect-icons 20 --expect-accessories 40"
     POKEDEX_DETAIL="--expect-detail"
+    # "All Types" plus every type fetchTypes returns.
+    POKEDEX_TYPES="--expect-dropdown 15"
   else
     echo "note: $POKEAPI is not answering."
     echo "      Pokedex draws its rows out of it, so this run checks the view"
     echo "      and the API surface rather than what is in the rows."
     POKEDEX_ROWS=""
     POKEDEX_DETAIL=""
+    POKEDEX_TYPES=""
   fi
 }
 
@@ -165,7 +168,7 @@ pokedex_counts
 node scripts/run-extension.mjs extensions/build/pokedex/weakness.js pokedex \
   --grant fileRead,fileWrite,network,processLaunch \
   --assets extensions/raycast-src/extensions/pokedex/assets \
-  --expect-root List $POKEDEX_DETAIL --expect-dropdown 15
+  --expect-root List $POKEDEX_DETAIL $POKEDEX_TYPES
 
 # A Grid, an EmptyView and a dropdown, on a real extension. Every other Grid
 # check here is a fixture, and this one is a store extension drawing tiles: it
